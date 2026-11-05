@@ -9,6 +9,7 @@ from typing import Sequence
 from sau_commands import (
     article, douyin, kuaishou, xiaohongshu, bilibili, tencent, alipay, weibo,
     hupu, facebook, facebook_page, instagram, youtube, baijiahao, dayu, xueqiu, zhihu,
+    tiktok,
 )
 from sau_commands.arguments import resolve_account_file
 from utils.errors import LoginRequiredError, UsageError
@@ -32,6 +33,7 @@ PLATFORMS = {
     "dayu": dayu,
     "xueqiu": xueqiu,
     "zhihu": zhihu,
+    "tiktok": tiktok,
 }
 
 
