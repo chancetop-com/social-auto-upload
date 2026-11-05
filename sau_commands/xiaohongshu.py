@@ -4,12 +4,17 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from patchright.async_api import async_playwright
 from uploader.xiaohongshu_uploader.main import (
+    XHS_CONTEXT_KWARGS,
+    XHS_INIT_SCRIPT,
+    XHS_LAUNCH_KWARGS,
     XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
     XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
     XiaoHongShuNote,
     XiaoHongShuVideo,
     cookie_auth as xiaohongshu_cookie_auth,
+    is_logged_in,
     xiaohongshu_setup,
 )
 from sau_commands.arguments import (
@@ -28,6 +33,8 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -105,50 +112,99 @@ async def check_xiaohongshu_account(account_name: str) -> bool:
     return await xiaohongshu_cookie_auth(str(account_file))
 
 
-async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest) -> Path:
-    account_file = resolve_account_file("xiaohongshu", request.account_name)
-    is_ready = await xiaohongshu_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
-        )
-
-    app = XiaoHongShuVideo(
+def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) -> XiaoHongShuVideo:
+    return XiaoHongShuVideo(
         title=request.title,
         file_path=str(request.video_file),
         desc=request.description,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=str(account_file),
+        account_file=account_file,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
     )
-    await app.main()
-    return account_file
 
 
-async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> Path:
-    account_file = resolve_account_file("xiaohongshu", request.account_name)
-    is_ready = await xiaohongshu_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
-        )
-
-    app = XiaoHongShuNote(
+def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) -> XiaoHongShuNote:
+    return XiaoHongShuNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
         desc=request.note,
         note=request.note,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=str(account_file),
+        account_file=account_file,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
     )
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"小红书登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_video_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=XHS_LAUNCH_KWARGS,
+                context_kwargs=XHS_CONTEXT_KWARGS,
+                init_script=XHS_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.xiaohongshu_upload_video(session=session)
+        return None
+
+    account_file = resolve_account_file("xiaohongshu", request.account_name)
+    is_ready = await xiaohongshu_setup(str(account_file), handle=False)
+    if not is_ready:
+        raise RuntimeError(
+            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
+        )
+
+    app = _build_video_uploader(request, str(account_file))
+    await app.main()
+    return account_file
+
+
+async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_note_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=XHS_LAUNCH_KWARGS,
+                context_kwargs=XHS_CONTEXT_KWARGS,
+                init_script=XHS_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.xiaohongshu_upload_note(session=session)
+        return None
+
+    account_file = resolve_account_file("xiaohongshu", request.account_name)
+    is_ready = await xiaohongshu_setup(str(account_file), handle=False)
+    if not is_ready:
+        raise RuntimeError(
+            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
+        )
+
+    app = _build_note_uploader(request, str(account_file))
     await app.main()
     return account_file
 
@@ -169,6 +225,19 @@ async def run(args):
     account_label = resolve_account_label(args)
 
     if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
         is_valid = await check_xiaohongshu_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
@@ -194,7 +263,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_xiaohongshu_video(request)
+        await upload_xiaohongshu_video(request, target=target)
         print(f"Xiaohongshu video upload submitted: {request.video_file}")
         return 0
 
@@ -214,7 +283,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_xiaohongshu_note(request)
+        await upload_xiaohongshu_note(request, target=target)
         print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")
         return 0
 

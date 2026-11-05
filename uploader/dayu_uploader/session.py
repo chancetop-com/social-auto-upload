@@ -3,14 +3,101 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from pathlib import Path
 
 from patchright.async_api import Page, async_playwright, expect
 
 from conf import LOCAL_CHROME_PATH
+from utils.errors import LoginRequiredError
 
 DAYU_HOME_URL = "https://mp.dayu.com/dashboard/index"
 DAYU_VIDEO_URL = "https://mp.dayu.com/dashboard/video/write"
+
+# Golden local-mode options.  ``sau_commands/dayu.py`` passes the same values to
+# ``browser_session`` in Multilogin mode, which ignores them (Profile decides).
+DAYU_TIMEZONE = "Asia/Shanghai"
+DAYU_LAUNCH_KWARGS = {"executable_path": LOCAL_CHROME_PATH or None, "channel": "chrome"}
+DAYU_CONTEXT_KWARGS = {"timezone_id": DAYU_TIMEZONE}
+DAYU_INIT_SCRIPT = False
+
+# MLX 登录检测只打开一个页面；总预算 20s 导航 + 2.5s 稳定。
+DAYU_LOGIN_CHECK_TIMEOUT_MS = 20_000
+DAYU_LOGIN_CHECK_SETTLE_MS = 2_500
+_LOGIN_URL_MARKERS = ("uop.dayu.com/cas", "/login", "captcha", "verify", "two-factor", "2fa")
+_LOGIN_IFRAME = 'iframe[src*="uop.dayu.com/cas/"]'
+
+# 没有本地账号文件时（MLX）结果文件落到临时目录，不触碰 cookies 目录。
+def dayu_results_dir(account_file: str | Path | None) -> Path:
+    base = Path(account_file).parent if account_file else Path(tempfile.gettempdir())
+    return base / "dayu_results"
+
+
+def _login_required_message() -> str:
+    return "大鱼号上传过程中需要重新登录（登录页/验证码/二次验证）：请在 Multilogin 应用中登录 Profile 后重试。"
+
+
+async def raise_if_login_required(page: Page | None) -> None:
+    """Map a mid-upload login/captcha/2FA page to ``LoginRequiredError``."""
+    url = str(getattr(page, "url", "") or "").lower()
+    if any(marker in url for marker in _LOGIN_URL_MARKERS):
+        raise LoginRequiredError(_login_required_message())
+    try:
+        if await page.locator(_LOGIN_IFRAME).count():
+            raise LoginRequiredError(_login_required_message())
+    except LoginRequiredError:
+        raise
+    except Exception:
+        # Locator failures must not hide the real upload error.
+        return
+
+
+async def is_logged_in(context) -> bool:
+    """Return whether the Multilogin Profile is logged in to Dayu.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  The login CAS
+    iframe or a login URL means False; a positive header account signal means
+    True.  Network failures, 5xx responses and unexpected hosts raise.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            DAYU_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=DAYU_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"大鱼号登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(DAYU_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "mp.dayu.com" not in current_url:
+            raise RuntimeError(
+                "大鱼号登录状态检查失败：页面未停留在大鱼号后台"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if any(marker in current_url.lower() for marker in _LOGIN_URL_MARKERS):
+            return False
+        if await page.locator(_LOGIN_IFRAME).count():
+            return False
+
+        # 正向信号：后台页头账号名称存在且有内容。只判断已登录，不比较 wmid。
+        name = page.locator(".header-info .name")
+        if await name.count():
+            try:
+                text = (await name.first.inner_text()).strip()
+            except Exception:
+                text = ""
+            if text:
+                return True
+        return False
+    finally:
+        await page.close()
+
 
 
 async def read_dayu_identity(page: Page) -> dict:
