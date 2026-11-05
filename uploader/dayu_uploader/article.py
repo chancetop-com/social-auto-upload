@@ -13,14 +13,22 @@ from uuid import uuid4
 
 from patchright.async_api import Locator, Page, async_playwright, expect
 
-from conf import LOCAL_CHROME_PATH
 from uploader.dayu_uploader.article_content import load_dayu_article
 from uploader.dayu_uploader.article_style import render_dayu_compatible_html
 from uploader.dayu_uploader.constants import DAYU_SOURCE_REPRINT, DAYU_SOURCE_TYPES
 from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.schedule import fill_dayu_schedule, validate_dayu_schedule
-from uploader.dayu_uploader.session import load_dayu_identity, read_dayu_identity
+from uploader.dayu_uploader.session import (
+    DAYU_CONTEXT_KWARGS,
+    DAYU_INIT_SCRIPT,
+    DAYU_LAUNCH_KWARGS,
+    dayu_results_dir,
+    load_dayu_identity,
+    raise_if_login_required,
+    read_dayu_identity,
+)
 from uploader.dayu_uploader.verification import check_dayu_article_content
+from utils.browser_session import BrowserSession, browser_session
 from utils.log import dayu_logger
 
 DAYU_ARTICLE_URL = "https://mp.dayu.com/dashboard/article/write"
@@ -52,7 +60,7 @@ class DayuArticle:
                  upload_timeout=600, theme=None, schedule=None):
         self.title = title
         self.content_file = Path(content_file).expanduser().resolve()
-        self.account_file = Path(account_file).resolve()
+        self.account_file = Path(account_file).resolve() if account_file else None
         self.source = source
         self.source_url = source_url
         self.author = author
@@ -64,16 +72,17 @@ class DayuArticle:
         self.theme = theme
         self.schedule = schedule
 
-    def validate_upload_args(self):
+    def validate_upload_args(self, *, check_identity: bool = True):
         """在接触远端素材之前，检查正文格式、封面序号及来源的条件必填项。"""
         self.schedule = validate_dayu_schedule(self.schedule)
         self.document = load_dayu_article(self.content_file, self.theme)
         title_length = math.ceil(sum(.5 if ord(char) <= 255 else 1 for char in self.title.strip()))
         if not 5 <= title_length <= 50:
             raise ValueError("大鱼号图文标题需要 5–50 字（英文字符按半字计数并向上取整）")
-        if not self.account_file.is_file():
-            raise FileNotFoundError("请先执行 sau dayu login 保存账号")
-        load_dayu_identity(self.account_file)
+        if check_identity:
+            if self.account_file is None or not self.account_file.is_file():
+                raise FileNotFoundError("请先执行 sau dayu login 保存账号")
+            load_dayu_identity(self.account_file)
         if self.source not in DAYU_SOURCE_TYPES:
             raise ValueError(f"信息来源必须为: {', '.join(DAYU_SOURCE_TYPES)}")
         if self.source == DAYU_SOURCE_REPRINT:
@@ -96,7 +105,7 @@ class DayuArticle:
         if self.upload_timeout <= 0:
             raise ValueError("上传期限必须大于 0 秒")
 
-    async def fill_article_body(self, page: Page):
+    async def fill_article_body(self, page: Page, *, multilogin: bool = False):
         """经原生粘贴导入格式，再在各图片位置使用平台上传器插图，保留编辑器元数据。"""
         document = self.document
         insertions = []
@@ -111,7 +120,11 @@ class DayuArticle:
         # 平台把 section 改成 span、把 figure 放进 p，导致图片回调无法定位图片说明。
         # 这两种元素在主题中是布局容器；仅改为 div，保留主题内联样式和正文顺序。
         html = re.sub(r"<(\/?)(?:section|figure)(?=[\s>])", r"<\1div", "".join(parts), flags=re.I)
-        await page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin="https://mp.dayu.com")
+        # MLX 禁止 grant_permissions；Profile 自己负责剪贴板权限。
+        if not multilogin:
+            await page.context.grant_permissions(
+                ["clipboard-read", "clipboard-write"], origin="https://mp.dayu.com"
+            )
         await page.evaluate("""async html => navigator.clipboard.write([
             new ClipboardItem({'text/html': new Blob([html], {type: 'text/html'})})
         ])""", html)
@@ -196,9 +209,9 @@ class DayuArticle:
             if await body.locator("img").nth(index).evaluate("e => e.naturalWidth") <= 0:
                 raise RuntimeError(f"正文第 {index + 1} 张图片无法加载")
 
-    async def fill_article_form(self, page: Page):
+    async def fill_article_form(self, page: Page, *, multilogin: bool = False):
         """正文、标题、作者及来源填写后逐项读回；作者缺省时沿用页面值。"""
-        await self.fill_article_body(page)
+        await self.fill_article_body(page, multilogin=multilogin)
         # title、author 是表单字段的语义 ID，避免把正文中的标题和作者文字当成输入控件。
         await page.locator("#title").fill(self.title)
         await expect(page.locator("#title")).to_have_value(self.title)
@@ -245,11 +258,29 @@ class DayuArticle:
                 await expect(preview).to_have_attribute("src", re.compile(r"^https?://image\.uc\.cn/"))
         await fill_dayu_schedule(page, self.schedule)
 
-    async def main(self) -> dict:
+    async def main(self, *, session: BrowserSession | None = None) -> dict:
         """核对编辑器内容并提交发表，平台确认本次作品 ID 后即成功。"""
+        if session is not None:
+            self.validate_upload_args(check_identity=False)
+            return await self.upload_in(session)
+
         self.validate_upload_args()
-        expected = load_dayu_identity(self.account_file)
-        results_dir = self.account_file.parent / "dayu_results"
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=self.headless,
+                account_file=str(self.account_file),
+                launch_kwargs=DAYU_LAUNCH_KWARGS,
+                context_kwargs=DAYU_CONTEXT_KWARGS,
+                init_script=DAYU_INIT_SCRIPT,
+            ) as local_session:
+                return await self.upload_in(local_session)
+
+    async def upload_in(self, session: BrowserSession) -> dict:
+        """Publish on the injected session; Multilogin never touches identity files."""
+        multilogin = session.mode == "multilogin"
+        expected = None if multilogin else load_dayu_identity(self.account_file)
+        results_dir = dayu_results_dir(self.account_file)
         results_dir.mkdir(exist_ok=True)
         result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {"success": False, "status": "preparing", "type": "article", "title": self.title,
@@ -258,39 +289,40 @@ class DayuArticle:
         if self.schedule:
             result["schedule"] = self.schedule.isoformat()
         result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=self.headless,
-            )
-            page = None
-            try:
-                context = await browser.new_context(storage_state=str(self.account_file), timezone_id="Asia/Shanghai")
-                page = await context.new_page()
-                await page.goto(DAYU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
+        page = None
+        try:
+            page = await session.context.new_page()
+            await page.goto(DAYU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
+            if multilogin:
+                await raise_if_login_required(page)
+            else:
                 identity = await read_dayu_identity(page)
                 if identity["wmid"] != expected["wmid"]:
                     raise RuntimeError("大鱼号主体不匹配，图文上传已中止")
                 result["identity"] = identity
-                await self.fill_article_form(page)
-                result.update(source_format=self.document.source_format, theme=self.document.theme,
-                              style_check=self.style_result)
+            await self.fill_article_form(page, multilogin=multilogin)
+            result.update(source_format=self.document.source_format, theme=self.document.theme,
+                          style_check=self.style_result)
+            if multilogin:
+                await raise_if_login_required(page)
+            else:
                 if (await read_dayu_identity(page))["wmid"] != identity["wmid"]:
                     raise RuntimeError("填表期间大鱼号主体发生变化，拒绝发表")
-                if self.prepare_only:
-                    await page.screenshot(path=str(result_file.with_suffix(".png")), full_page=True)
-                    result.update(success=True, status="prepared")
-                    return result
-                await submit_dayu_publication(page, result, result_file, article_html=self.publication_html)
-                await context.storage_state(path=str(self.account_file))
-                action = "定时发布已安排" if self.schedule else "发表成功"
-                dayu_logger.success(f"大鱼号图文{action}: {result['content_id']}")
+            if self.prepare_only:
+                await page.screenshot(path=str(result_file.with_suffix(".png")), full_page=True)
+                result.update(success=True, status="prepared")
                 return result
-            except Exception as exc:
-                result["error"] = str(exc)
-                dayu_logger.error(f"大鱼号图文阶段={result['status']}，结果文件={result_file}: {exc}")
-                if self.debug and page is not None:
-                    await page.screenshot(path=str(result_file.with_suffix(".png")))
-                raise
-            finally:
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                await browser.close()
+            if multilogin:
+                await raise_if_login_required(page)
+            await submit_dayu_publication(page, result, result_file, article_html=self.publication_html)
+            action = "定时发布已安排" if self.schedule else "发表成功"
+            dayu_logger.success(f"大鱼号图文{action}: {result['content_id']}")
+            return result
+        except Exception as exc:
+            result["error"] = str(exc)
+            dayu_logger.error(f"大鱼号图文阶段={result['status']}，结果文件={result_file}: {exc}")
+            if self.debug and page is not None:
+                await page.screenshot(path=str(result_file.with_suffix(".png")))
+            raise
+        finally:
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

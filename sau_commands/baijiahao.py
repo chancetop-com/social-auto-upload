@@ -2,10 +2,15 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
+from patchright.async_api import async_playwright
 from uploader.baijiahao_uploader.main import (
+    BAIJIAHAO_CONTEXT_KWARGS,
+    BAIJIAHAO_INIT_SCRIPT,
+    BAIJIAHAO_LAUNCH_KWARGS,
     BaiJiaHaoVideo,
     baijiahao_setup,
     cookie_auth as baijiahao_cookie_auth,
+    is_logged_in,
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
@@ -21,6 +26,8 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -74,7 +81,37 @@ async def check_baijiahao_account(account_name: str) -> bool:
     return await baijiahao_cookie_auth(str(account_file))
 
 
-async def upload_baijiahao_video(request: BaijiahaoVideoUploadRequest) -> Path:
+async def upload_baijiahao_video(request: BaijiahaoVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = BaiJiaHaoVideo(
+            title=request.title,
+            file_path=str(request.video_file),
+            tags=request.tags,
+            account_file=None,
+            desc=request.description,
+            thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
+            collection_name=request.collection_name,
+            debug=request.debug,
+            headless=request.headless,
+        )
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=BAIJIAHAO_LAUNCH_KWARGS,
+                context_kwargs=BAIJIAHAO_CONTEXT_KWARGS,
+                init_script=BAIJIAHAO_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    raise LoginRequiredError(
+                        f"百家号登录态无效：profile_id={target.profile_id}。"
+                        "请在 Multilogin 应用中登录 Profile 后重试。"
+                    )
+                await app.main(session=session)
+        return None
+
     account_file = resolve_account_file("baijiahao", request.account_name)
     is_ready = await baijiahao_setup(str(account_file), handle=False)
     if not is_ready:
@@ -113,6 +150,22 @@ async def run(args):
     account_label = resolve_account_label(args)
 
     if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                raise LoginRequiredError(
+                    f"百家号登录态无效：profile_id={target.profile_id}。"
+                    "请在 Multilogin 应用中登录 Profile 后重试。"
+                )
+            print("valid")
+            return 0
+
         is_valid = await check_baijiahao_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
@@ -129,7 +182,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_baijiahao_video(request)
+        await upload_baijiahao_video(request, target=target)
         print(f"Baijiahao video upload submitted: {request.video_file}")
         return 0
 

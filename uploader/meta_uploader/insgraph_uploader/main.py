@@ -9,7 +9,18 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from patchright.async_api import Locator, Page, Playwright, TimeoutError as BrowserTimeoutError, async_playwright, expect
+from patchright.async_api import (
+    BrowserContext,
+    Locator,
+    Page,
+    Playwright,
+    TimeoutError as BrowserTimeoutError,
+    async_playwright,
+    expect,
+)
+
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 
 INSTAGRAM_HOME_URL = "https://www.instagram.com/"
 # 未配置环境变量或 --proxy 时使用系统直连。
@@ -18,6 +29,38 @@ INSTAGRAM_PROXY = os.environ.get("SAU_INSTAGRAM_PROXY")
 INSTAGRAM_MEDIA_INPUT = 'input[type="file"][accept*="video/mp4"]'
 # _ac76 是已观察中/英文裁剪、编辑、配文页共用的向导标题栏组件；主动作不含 SVG，返回按钮含 SVG。
 INSTAGRAM_PRIMARY_ACTION = '._ac76 [role="button"]:not(:has(svg))'
+
+INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS = 20_000
+INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS = 8_000
+
+# Golden local-mode browser options.  Multilogin mode reuses the same values
+# only so the call sites stay symmetric; ``browser_session`` ignores them.
+INSTAGRAM_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
+INSTAGRAM_CONTEXT_KWARGS: dict[str, object] = {}
+INSTAGRAM_INIT_SCRIPT = False
+
+_INSTAGRAM_LOGIN_URL_MARKERS = (
+    "/accounts/login",
+    "/emailsignup",
+    "/challenge",
+    "/checkpoint",
+    "/two_step",
+)
+
+
+def instagram_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
+    """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
+    return {**INSTAGRAM_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
+
+
+def _raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload login/challenge/2FA redirect to ``LoginRequiredError``."""
+    current_url = str(getattr(page, "url", "") or "").lower()
+    if any(marker in current_url for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "Instagram 上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
 
 
 async def _dismiss_optional_prompt(guide: Locator, dismiss_button: Locator) -> bool:
@@ -41,7 +84,9 @@ def _proxy_options(proxy: str | None) -> dict[str, str] | None:
 
 async def _open_instagram_page(playwright: Playwright, account_file: Path, *, proxy: str | None, headless: bool):
     """使用工程 Chrome 和指定存储状态，导航失败保留原异常。"""
-    browser = await playwright.chromium.launch(channel="chrome", headless=headless, proxy=_proxy_options(proxy))
+    browser = await playwright.chromium.launch(
+        headless=headless, **instagram_launch_kwargs(proxy)
+    )
     try:
         context = await browser.new_context(storage_state=str(account_file))
         page = await context.new_page()
@@ -53,12 +98,70 @@ async def _open_instagram_page(playwright: Playwright, account_file: Path, *, pr
         raise
 
 
-async def _is_instagram_logged_out(page: Page) -> bool:
+async def _is_instagram_logged_out(page: Page, *, timeout_ms: int = 60_000) -> bool:
     """等待明确登录/未登录业务区域；网络或未知页面超时不能解释为 Cookie 失效。"""
     # 消息入口是登录后的导航，href 前缀允许站点附加 hl 参数；登录表单字段不依赖翻译。
     outcomes = page.locator('a[href^="/direct/inbox/"], input[name="username"], a[href^="/accounts/login/"]')
-    await expect(outcomes).not_to_have_count(0, timeout=60_000)
+    await expect(outcomes).not_to_have_count(0, timeout=timeout_ms)
     return not await page.locator('a[href^="/direct/inbox/"]').count()
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Instagram.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Explicit login,
+    challenge and 2FA pages return ``False``; network failures, 5xx responses,
+    timeouts and unexpected redirects raise.
+
+    No ``.identity.json`` read or account-id comparison happens here: in
+    Multilogin mode the Profile is the identity.
+
+    Worst-case budget: 20s navigation + 8s outcome wait, inside 15-30s.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            INSTAGRAM_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"Instagram 登录状态检查失败：HTTP {status}")
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "instagram.com" not in current_url.lower():
+            raise RuntimeError(
+                "Instagram 登录状态检查失败：页面未停留在 instagram.com"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if any(marker in current_url.lower() for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
+            return False
+        return not await _is_instagram_logged_out(
+            page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS
+        )
+    finally:
+        await page.close()
+
+
+async def _multilogin_identity(page: Page, context: BrowserContext) -> dict:
+    """Read the live session's own user; never reads ``.identity.json``.
+
+    Multilogin mode treats the Profile as the identity, so there is no account
+    file to compare against.  The live user id is still needed to verify that
+    the creation response belongs to the session that submitted it.
+    """
+    cookies = await context.cookies(INSTAGRAM_HOME_URL)
+    user_ids = {c["value"] for c in cookies if c.get("name") == "ds_user_id"}
+    if len(user_ids) != 1:
+        raise RuntimeError("Instagram 当前会话缺少唯一用户 ID")
+    own_profile = page.locator('a[href]').filter(has=page.locator('[aria-selected] img'))
+    await expect(own_profile).to_have_count(1)
+    href = await own_profile.get_attribute('href')
+    username = urlparse(href).path.strip('/')
+    if not username or '/' in username:
+        raise RuntimeError("Instagram 当前用户主页链接结构不符")
+    return {"user_id": next(iter(user_ids)), "username": username}
 
 
 async def instagram_identity(page: Page, account_file: Path) -> dict:
@@ -153,11 +256,11 @@ def instagram_created_media(payload: dict, *, owner_id: str, caption: str) -> di
 class InstagramUploader:
     """独立网页立即发布；最终创建响应确认成功后返回作品链接。"""
 
-    def __init__(self, account_file: str | Path, *, title: str, description: str = '', tags: list[str] | None = None,
+    def __init__(self, account_file: str | Path | None, *, title: str, description: str = '', tags: list[str] | None = None,
                  video_file: str | Path | None = None, image_files: list[str | Path] | None = None,
                  thumbnail: str | Path | None = None,
                  proxy: str | None = None, headless: bool = False, result_file: str | Path | None = None):
-        self.account_file = Path(account_file)
+        self.account_file = Path(account_file) if account_file is not None else None
         self.title, self.description = title.strip(), description.strip()
         self.tags = [t.strip().lstrip('#') for t in (tags or []) if t.strip().lstrip('#')]
         self.video_file = Path(video_file) if video_file else None
@@ -302,8 +405,7 @@ class InstagramUploader:
                            media_count=len(media.get('carousel_media') or [media]))
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
 
-    async def upload(self) -> dict:
-        """在同一会话核验身份、上传并发表；失败保存阶段与本地证据。"""
+    def _validate_media(self) -> None:
         if self.thumbnail:
             if not self.thumbnail.is_file():
                 raise FileNotFoundError(f'Instagram 封面不存在: {self.thumbnail}')
@@ -316,28 +418,67 @@ class InstagramUploader:
             allowed = {'.mp4', '.mov'} if self.video_file else {'.jpg', '.jpeg', '.png', '.avif', '.heic', '.heif'}
             if path.suffix.lower() not in allowed:
                 raise ValueError(f'Instagram 不支持的素材类型: {path.suffix}')
+
+    async def _upload_steps(self, page: Page, identity: dict) -> dict:
+        self.stage = 'upload'
+        await self._upload_files(page)
+        self.stage = 'edit'
+        await self._advance_media_editor(page)
+        self.stage = 'publish'
+        await self._publish(page, identity)
+        return self.result
+
+    async def _capture_failure(self, page: Page, error: Exception) -> RuntimeError:
+        folder = Path('.local/instagram-errors') / uuid4().hex
+        folder.mkdir(parents=True)
+        self.result.update(stage=self.stage, error=str(error), evidence_dir=str(folder))
+        self.result_file.parent.mkdir(parents=True, exist_ok=True)
+        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        await page.screenshot(path=str(folder/'page.png'))
+        (folder/'page.html').write_text(await page.content(), encoding='utf-8')
+        return RuntimeError(f'Instagram {self.stage} 未完成；结果记录: {self.result_file}；原因: {error}')
+
+    async def upload_in(self, session: BrowserSession) -> dict:
+        """Multilogin body: no cookie read/write, no identity-file comparison."""
+        page = await session.context.new_page()
+        page.set_default_timeout(30_000)
+        await page.goto(INSTAGRAM_HOME_URL, wait_until='domcontentloaded', timeout=120_000)
+        if session.mode == 'multilogin':
+            _raise_if_login_required(page)
+            if await _is_instagram_logged_out(
+                page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS
+            ):
+                raise LoginRequiredError(
+                    'Instagram 登录态无效：请在 Multilogin 应用中登录 Profile 后重试。'
+                )
+        try:
+            self.stage = 'identity'
+            if session.mode == 'multilogin':
+                identity = await _multilogin_identity(page, session.context)
+            else:
+                identity = await instagram_identity(page, self.account_file)
+            return await self._upload_steps(page, identity)
+        except LoginRequiredError:
+            raise
+        except Exception as error:
+            raise await self._capture_failure(page, error) from error
+
+    async def upload(self, *, session: BrowserSession | None = None) -> dict:
+        """在同一会话核验身份、上传并发表；失败保存阶段与本地证据。"""
+        self._validate_media()
+        if session is not None:
+            return await self.upload_in(session)
+
         async with async_playwright() as p:
             browser, context, page = await _open_instagram_page(p, self.account_file, proxy=self.proxy, headless=self.headless)
             try:
                 self.stage = 'identity'
                 identity = await instagram_identity(page, self.account_file)
-                self.stage = 'upload'
-                await self._upload_files(page)
-                self.stage = 'edit'
-                await self._advance_media_editor(page)
-                self.stage = 'publish'
-                await self._publish(page, identity)
+                result = await self._upload_steps(page, identity)
                 self.stage = 'save_session'
                 await context.storage_state(path=str(self.account_file))
-                return self.result
+                return result
             except Exception as error:
-                folder = Path('.local/instagram-errors') / uuid4().hex
-                folder.mkdir(parents=True)
-                self.result.update(stage=self.stage, error=str(error), evidence_dir=str(folder))
-                self.result_file.parent.mkdir(parents=True, exist_ok=True)
-                self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
-                await page.screenshot(path=str(folder/'page.png'))
-                (folder/'page.html').write_text(await page.content(), encoding='utf-8')
-                raise RuntimeError(f'Instagram {self.stage} 未完成；结果记录: {self.result_file}；原因: {error}') from error
+                raise await self._capture_failure(page, error) from error
             finally:
                 await browser.close()
