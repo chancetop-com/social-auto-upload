@@ -6,6 +6,10 @@
 
 会话为 `cookies/zhihu_<alias>.json`，账号绑定为相邻 `.identity.json`。`session.py::PROFILE_IMAGE` 从页头当前用户入口读取昵称和头像路径；它们并非永久用户 ID，改名或换头像会导致绑定不一致。不要将登录超时或网络错误直接判为会话失效。
 
+### Multilogin X 模式
+
+设置 `MLX_API_TOKEN` 后，`check`、`upload-article`、`upload-video` 通过 `--folder-id/--profile-id` 使用 Multilogin Profile。此时不读写 `cookies/*.json` 或 `.identity.json`，不比对用户 ID，也不注入本地 `channel="chrome"` / `executable_path` / `timezone_id="Asia/Shanghai"`；身份与浏览器指纹完全由 Profile 决定。请把 Profile 的时区设为 `Asia/Shanghai`，否则定时发布按 Profile 时区解释。`check` 只回答“是否已登录”，不校验账号一致性；调度侧需确保 `profile_id` 与目标账号匹配。验证码/二次验证或上传中被踢回登录页返回退出码 10。
+
 ## 文章
 
 `utils.article_render.load_article` 解析 HTML/Markdown/TXT。`article.py::fill_article_form` 通过 HTML 粘贴和图片位置标记导入正文；`check_article_body` 核对全文、图片交错顺序、格式和链接。恢复非空草稿时停止，不覆盖原文。

@@ -5,19 +5,36 @@ import base64
 import json
 import re
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 from patchright.async_api import Page, async_playwright, expect
 
-from conf import LOCAL_CHROME_PATH
 from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
+from utils.browser_session import BrowserSession
 from uploader.zhihu_uploader.constants import (
-    ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL, ZHIHU_IMAGE_EXTENSIONS, ZHIHU_TIMEZONE,
+    ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL, ZHIHU_CONTEXT_KWARGS,
+    ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS, ZHIHU_TIMEZONE,
 )
 from uploader.zhihu_uploader.schedule import fill_zhihu_article_schedule, validate_zhihu_schedule
-from uploader.zhihu_uploader.session import load_zhihu_identity, read_zhihu_identity
+from uploader.zhihu_uploader.session import (
+    load_zhihu_identity, raise_if_login_required, read_zhihu_identity,
+)
+
+
+async def grant_clipboard_permission(page: Page, *, multilogin: bool) -> None:
+    """Grant clipboard access locally; Multilogin mode must not call the API.
+
+    The Profile owns its permissions.  Paragraph/image insertion still runs via
+    the same clipboard operations in both modes.
+    """
+    if multilogin:
+        return
+    await page.context.grant_permissions(
+        ["clipboard-read", "clipboard-write"], origin="https://zhuanlan.zhihu.com",
+    )
 
 
 class ZhihuArticle:
@@ -27,15 +44,19 @@ class ZhihuArticle:
                  headless=True, debug=False, prepare_only=False, upload_timeout=600):
         self.title = title
         self.content_file = Path(content_file).expanduser().resolve()
-        self.account_file = Path(account_file).resolve()
+        self.account_file = Path(account_file).resolve() if account_file is not None else None
         self.schedule = schedule
         self.headless = headless
         self.debug = debug
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
 
-    def validate_upload_args(self) -> None:
-        """在启动浏览器前检查标题、正文、图片及定时时间。"""
+    def validate_upload_args(self, *, check_cookie: bool = True) -> None:
+        """在启动浏览器前检查标题、正文、图片及定时时间。
+
+        Cookie/identity binding is local-only; Multilogin mode passes
+        ``check_cookie=False`` because the Profile is the identity.
+        """
         if not self.title.strip() or len(self.title) > ZHIHU_ARTICLE_TITLE_MAX:
             raise ValueError(f"知乎文章标题需为 1–{ZHIHU_ARTICLE_TITLE_MAX} 字")
         self.document = load_article(
@@ -44,9 +65,12 @@ class ZhihuArticle:
         self.images = self.document.images
         if not "".join(self.document.text).strip():
             raise ValueError("知乎文章正文不能为空")
-        if not self.account_file.is_file():
-            raise FileNotFoundError("请先执行 sau zhihu login 保存账号")
-        self.identity = load_zhihu_identity(self.account_file)
+        if check_cookie:
+            if self.account_file is None or not self.account_file.is_file():
+                raise FileNotFoundError("请先执行 sau zhihu login 保存账号")
+            self.identity = load_zhihu_identity(self.account_file)
+        else:
+            self.identity = None
         self.schedule = validate_zhihu_schedule(self.schedule)
         if self.upload_timeout <= 0:
             raise ValueError("上传期限必须大于 0 秒")
@@ -56,7 +80,7 @@ class ZhihuArticle:
             if image.suffix.lower() not in ZHIHU_IMAGE_EXTENSIONS:
                 raise ValueError(f"知乎文章图片格式不支持: {image.suffix}")
 
-    async def fill_article_form(self, page: Page) -> None:
+    async def fill_article_form(self, page: Page, *, multilogin: bool = False) -> None:
         """通过原生粘贴导入富文本；按原稿位置上传图片并核对交错顺序。"""
         # 标题 placeholder 来自文章表单的实际 textarea，避免误填正文和搜索框。
         title = page.locator('textarea[placeholder="请输入标题（最多 100 个字）"]')
@@ -79,7 +103,7 @@ class ZhihuArticle:
                 insertions.append((marker, part))
             else:
                 parts.append(part)
-        await page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin="https://zhuanlan.zhihu.com")
+        await grant_clipboard_permission(page, multilogin=multilogin)
         await page.evaluate("""async html => navigator.clipboard.write([
             new ClipboardItem({'text/html': new Blob([html], {type: 'text/html'})})
         ])""", "".join(parts))
@@ -172,11 +196,46 @@ class ZhihuArticle:
         if [[normalize(text), href] for text, href in actual["links"]] != [[normalize(text), href] for text, href in expected_links]:
             raise RuntimeError("知乎文章链接文字或目标与原稿不一致")
 
-    async def main(self) -> dict:
-        """仅以作品详情 URL 作为已发表证据；提交响应未知时禁止自动重试。"""
+    def results_dir(self) -> Path:
+        """Result manifests sit next to the local account; MLX uses a temp dir."""
+        base = (
+            self.account_file.parent
+            if self.account_file is not None
+            else Path(tempfile.gettempdir()) / "sau-mlx"
+        )
+        return base / "zhihu_results"
+
+    async def main(self, *, session: BrowserSession | None = None) -> dict:
+        """仅以作品详情 URL 作为已发表证据；提交响应未知时禁止自动重试。
+
+        ``session`` is the Multilogin seam: it runs only the page/publish body and
+        never launches, creates a context, injects scripts, writes cookies, or
+        closes anything it does not own.  ``session is None`` keeps the historical
+        local browser lifecycle.
+        """
+        if session is not None:
+            self.validate_upload_args(check_cookie=False)
+            return await self.upload_in(session)
+
         self.validate_upload_args()
-        results_dir = self.account_file.parent / "zhihu_results"
-        results_dir.mkdir(exist_ok=True)
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=self.headless, **ZHIHU_LAUNCH_KWARGS,
+            )
+            try:
+                context = await browser.new_context(
+                    storage_state=str(self.account_file), **ZHIHU_CONTEXT_KWARGS,
+                )
+                return await self.upload_in(
+                    BrowserSession(browser=browser, context=context, mode="local")
+                )
+            finally:
+                await browser.close()
+
+    async def upload_in(self, session: BrowserSession) -> dict:
+        """Business body: editor page operations plus a single publish click."""
+        results_dir = self.results_dir()
+        results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now(ZHIHU_TIMEZONE):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {
             "success": False, "status": "preparing", "type": "article", "title": self.title,
@@ -187,54 +246,51 @@ class ZhihuArticle:
             result["schedule"] = self.schedule.isoformat()
         result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=self.headless,
-            )
-            page = None
-            submitted = False
-            try:
-                context = await browser.new_context(
-                    storage_state=str(self.account_file), timezone_id="Asia/Shanghai",
-                )
-                page = await context.new_page()
-                response = await page.goto(ZHIHU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
-                if response is not None and response.status >= 400:
-                    raise RuntimeError(f"知乎文章编辑器访问失败，HTTP {response.status}")
-                if await read_zhihu_identity(page) != self.identity:
-                    raise RuntimeError("知乎文章编辑器页头与本地账号绑定不一致")
-                await self.fill_article_form(page)
-                result.update(images=self.uploaded_images, manifest=self.document.manifest)
-                result["status"] = "prepared"
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                if self.prepare_only:
-                    return result
-
-                # 发布按钮只有标题和正文满足编辑器要求后才可用；提交只触发一次。
-                publish = page.get_by_role("button", name="发布", exact=True)
-                await expect(publish).to_be_enabled()
-                submitted = True
-                result["status"] = "submission_unknown"
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                await publish.click()
-                # 草稿也有 /p/<id>/edit 地址；必须到正式详情页并读到作品标题才算发表。
-                await page.wait_for_url(re.compile(r"^https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?$"), timeout=60000)
-                await expect(page.get_by_role("article").get_by_role("heading", name=self.title, exact=True)).to_be_visible()
-                result.update(success=True, status="published", url=page.url)
+        multilogin = session.mode == "multilogin"
+        page = None
+        submitted = False
+        try:
+            page = await session.context.new_page()
+            response = await page.goto(ZHIHU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
+            if response is not None and response.status >= 400:
+                raise RuntimeError(f"知乎文章编辑器访问失败，HTTP {response.status}")
+            if multilogin:
+                raise_if_login_required(page)
+            elif await read_zhihu_identity(page) != self.identity:
+                raise RuntimeError("知乎文章编辑器页头与本地账号绑定不一致")
+            await self.fill_article_form(page, multilogin=multilogin)
+            result.update(images=self.uploaded_images, manifest=self.document.manifest)
+            result["status"] = "prepared"
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            if self.prepare_only:
                 return result
-            except Exception as exc:
-                result["error"] = str(exc)
-                if submitted:
-                    result["status"] = "submission_unknown"
-                    if page is not None and re.fullmatch(r"https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?", page.url):
-                        result["url"] = page.url
-                else:
-                    result["status"] = "failed_before_submit"
-                if self.debug and page is not None:
-                    screenshot = result_file.with_suffix(".png")
-                    await page.screenshot(path=str(screenshot))
-                    result["screenshot"] = str(screenshot)
-                raise RuntimeError(f"知乎文章阶段={result['status']}，结果文件={result_file}: {exc}") from exc
-            finally:
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                await browser.close()
+
+            # 发布按钮只有标题和正文满足编辑器要求后才可用；提交只触发一次。
+            publish = page.get_by_role("button", name="发布", exact=True)
+            await expect(publish).to_be_enabled()
+            submitted = True
+            result["status"] = "submission_unknown"
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            await publish.click()
+            # 草稿也有 /p/<id>/edit 地址；必须到正式详情页并读到作品标题才算发表。
+            await page.wait_for_url(re.compile(r"^https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?$"), timeout=60000)
+            await expect(page.get_by_role("article").get_by_role("heading", name=self.title, exact=True)).to_be_visible()
+            result.update(success=True, status="published", url=page.url)
+            return result
+        except Exception as exc:
+            if multilogin and page is not None:
+                raise_if_login_required(page)
+            result["error"] = str(exc)
+            if submitted:
+                result["status"] = "submission_unknown"
+                if page is not None and re.fullmatch(r"https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?", page.url):
+                    result["url"] = page.url
+            else:
+                result["status"] = "failed_before_submit"
+            if self.debug and page is not None:
+                screenshot = result_file.with_suffix(".png")
+                await page.screenshot(path=str(screenshot))
+                result["screenshot"] = str(screenshot)
+            raise RuntimeError(f"知乎文章阶段={result['status']}，结果文件={result_file}: {exc}") from exc
+        finally:
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

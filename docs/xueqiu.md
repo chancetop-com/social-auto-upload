@@ -28,6 +28,10 @@ sau xueqiu check --account creator
 
 默认使用可见 Chrome；本机无头访问曾被平台拦截，可显式传 `--headless`，但不能把访问拦截当作登录失效。
 
+### Multilogin X 模式
+
+设置 `MLX_API_TOKEN` 后，`check` 与 `upload-article` 通过 `--folder-id/--profile-id` 使用 Multilogin Profile，不再读写 `cookies/*.json` 或 `.identity.json`，也不注入本地 Chrome 路径和时区；身份与浏览器指纹由 Profile 决定。请把 Profile 时区设为 `Asia/Shanghai`。`check` 只判断是否已登录，不校验账号一致性；调度侧需确保 `profile_id` 与目标账号匹配。登录页/验证码/二次验证返回退出码 10。
+
 ## 原稿与配图
 
 Markdown 示例，图片路径相对于**原稿文件所在目录**：

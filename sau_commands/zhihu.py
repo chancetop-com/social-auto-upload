@@ -1,15 +1,23 @@
 """zhihu 的命令参数与执行逻辑。"""
 from __future__ import annotations
 import json
+
+from loguru import logger
+from patchright.async_api import async_playwright
+
 from uploader.zhihu_uploader.article import ZhihuArticle
 from uploader.zhihu_uploader.constants import (
+    ZHIHU_CONTEXT_KWARGS,
+    ZHIHU_LAUNCH_KWARGS,
     ZHIHU_SCHEDULE_MAX_HOURS,
     ZHIHU_SCHEDULE_MINUTES,
     ZHIHU_ORIGINALITY,
     ZHIHU_VIDEO_CATEGORIES,
     ZHIHU_VIDEO_MARKS,
 )
-from uploader.zhihu_uploader.session import check_zhihu_account, login_zhihu_account
+from uploader.zhihu_uploader.session import (
+    check_zhihu_account, is_logged_in, login_zhihu_account,
+)
 from uploader.zhihu_uploader.verification import verify_zhihu_result
 from uploader.zhihu_uploader.video import ZhihuVideo
 from sau_commands.arguments import (
@@ -26,6 +34,24 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
+
+IDENTITY_UNVERIFIED_MESSAGE = (
+    "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}），"
+    "请调度侧确保 profile_id 与目标账号匹配。"
+)
+
+
+def _log_identity_unverified(target) -> None:
+    logger.info(IDENTITY_UNVERIFIED_MESSAGE, target.profile_id)
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"知乎登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
 
 
 def register(platform_parsers):
@@ -78,6 +104,59 @@ def register(platform_parsers):
     zhihu_video.set_defaults(headless=False)
 
 
+async def _run_multilogin(args, target):
+    """Multilogin path: Profile owns identity; no cookies/identity files are read."""
+    headless = getattr(args, "headless", True)
+
+    if args.action == "check":
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=headless,
+                account_file=None,
+                multilogin=target,
+            ) as session:
+                _log_identity_unverified(target)
+                is_valid = await is_logged_in(session.context)
+        if not is_valid:
+            _raise_login_required(target)
+        print("valid")
+        return 0
+
+    if args.action == "upload-article":
+        app = ZhihuArticle(
+            title=args.title, content_file=args.content_file, account_file=None,
+            schedule=args.schedule, prepare_only=args.prepare_only,
+            upload_timeout=args.upload_timeout, headless=headless, debug=args.debug,
+        )
+    else:
+        app = ZhihuVideo(
+            title=args.title, file_path=args.file, account_file=None,
+            description=args.desc, category=args.category,
+            topics=[], video_mark=args.video_mark, show_options=args.show_options,
+            originality=args.originality, schedule=args.schedule,
+            prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
+            headless=headless, debug=args.debug,
+        )
+
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=headless,
+            account_file=None,
+            multilogin=target,
+            launch_kwargs=ZHIHU_LAUNCH_KWARGS,
+            context_kwargs=ZHIHU_CONTEXT_KWARGS,
+        ) as session:
+            _log_identity_unverified(target)
+            if not await is_logged_in(session.context):
+                _raise_login_required(target)
+            result = await app.main(session=session)
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
@@ -85,9 +164,11 @@ async def run(args):
         require_local_account(args)
         account = args.account
     elif args.action in {"check", "upload-article", "upload-video"}:
-        resolve_multilogin_target(args)
+        target = resolve_multilogin_target(args)
         require_local_account(args)
         account = resolve_account_label(args)
+        if target is not None:
+            return await _run_multilogin(args, target)
     else:
         require_local_account(args)
         account = args.account
