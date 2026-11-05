@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from patchright.async_api import BrowserContext
 from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
@@ -14,6 +15,8 @@ from patchright.async_api import async_playwright
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
@@ -29,6 +32,35 @@ XHS_LOGIN_SWITCH_SELECTOR = "img.css-wemwzq"
 XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
+XHS_LOGIN_CHECK_TIMEOUT_MS = 20_000
+XHS_LOGIN_CHECK_SETTLE_MS = 3_000
+
+# Golden local-mode browser options.  ``sau_commands/xiaohongshu.py`` passes the
+# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
+# drift.  Geolocation is a local-only context option: the Multilogin branch must
+# never call ``grant_permissions`` (spec §8).
+XHS_LAUNCH_KWARGS = {"channel": "chromium"}
+XHS_CONTEXT_KWARGS = {"permissions": ["geolocation"]}
+XHS_INIT_SCRIPT = True
+
+_LOGIN_URL_MARKERS = ("login", "captcha", "verify", "two-factor", "2fa")
+
+
+def _raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its historical
+    retry-until-timeout behaviour untouched.
+    """
+    url = str(getattr(page, "url", "") or "").lower()
+    if not url:
+        return
+    if any(marker in url for marker in _LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "小红书上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+
 
 def _build_xhs_creator_url(path: str) -> str:
     base_url = os.getenv(
@@ -38,6 +70,11 @@ def _build_xhs_creator_url(path: str) -> str:
     if not base_url:
         base_url = XHS_DEFAULT_CREATOR_BASE_URL
     return f"{base_url}/{path.lstrip('/')}"
+
+
+XHS_LOGIN_CHECK_URL = _build_xhs_creator_url(
+    "/publish/publish?from=homepage&target=video"
+)
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -172,6 +209,44 @@ async def _is_xhs_login_completed(page: Page) -> bool:
         return not await login_box.is_visible()
     except Exception:
         return True
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Xiaohongshu.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A clear login
+    page or visible login form returns ``False``; network failures, 5xx
+    responses, timeouts and unexpected redirects raise so the CLI can exit 1
+    instead of silently treating an outage as "logged out".
+
+    Worst-case budget: 20s navigation + 3s settle, inside the 15-30s spec.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            XHS_LOGIN_CHECK_URL,
+            wait_until="domcontentloaded",
+            timeout=XHS_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"小红书登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(XHS_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        creator_base = _build_xhs_creator_url("/")
+        if not current_url.startswith(creator_base):
+            raise RuntimeError(
+                "小红书登录状态检查失败：页面未停留在小红书创作者中心"
+                f"（url={current_url or '<empty>'}）"
+            )
+
+        return await _is_xhs_login_completed(page)
+    finally:
+        await page.close()
 
 
 async def cookie_auth(account_file):
@@ -316,18 +391,19 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         headless: bool = LOCAL_CHROME_HEADLESS,
     ):
         self.publish_date = publish_date
-        self.account_file = str(account_file)
+        self.account_file = None if account_file is None else str(account_file)
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.date_format = "%Y年%m月%d日 %H:%M"
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
 
-    async def validate_base_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成小红书登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成小红书登录: {self.account_file}")
+    async def validate_base_args(self, *, check_cookie: bool = True):
+        if check_cookie:
+            if not os.path.exists(self.account_file):
+                raise RuntimeError(f"cookie文件不存在，请先完成小红书登录: {self.account_file}")
+            if not await cookie_auth(self.account_file):
+                raise RuntimeError(f"cookie文件已失效，请先完成小红书登录: {self.account_file}")
 
         if self.publish_strategy not in {
             XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
@@ -548,8 +624,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         self.thumbnail_path = thumbnail_path
         self.desc = desc or ""
 
-    async def validate_upload_args(self):
-        await self.validate_base_args()
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        await self.validate_base_args(check_cookie=check_cookie)
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
 
@@ -620,13 +696,15 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             except Exception:
                 pass
 
-    async def upload_video_content(self, page: Page) -> None:
+    async def upload_video_content(self, page: Page, *, multilogin: bool = False) -> None:
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往视频发布页"))
         publish_url = _build_xhs_creator_url(
             "/publish/publish?from=homepage&target=video"
         )
         await page.goto(publish_url)
+        if multilogin:
+            _raise_if_login_required(page)
         await page.wait_for_url(publish_url)
         await page.locator("div[class^='upload-content'] input[class='upload-input']").set_input_files(self.file_path)
 
@@ -693,32 +771,52 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                 break
             except Exception:
+                if multilogin:
+                    _raise_if_login_required(page)
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, channel="chromium")
+        browser = await playwright.chromium.launch(headless=self.headless, **XHS_LAUNCH_KWARGS)
         context = await browser.new_context(
-            permissions=["geolocation"],
             storage_state=self.account_file,
+            **XHS_CONTEXT_KWARGS,
         )
         context = await set_init_script(context)
 
         try:
-            page = await context.new_page()
-            await self.upload_video_content(page)
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
             await context.storage_state(path=self.account_file)
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
             await browser.close()
 
-    async def xiaohongshu_upload_video(self):
+    async def upload_in(self, session: BrowserSession) -> None:
+        page = await session.context.new_page()
+        await self.upload_video_content(
+            page, multilogin=session.mode == "multilogin"
+        )
+
+    async def xiaohongshu_upload_video(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
 
@@ -753,8 +851,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         self.desc = desc if desc is not None else self.note
         self.title = title or ((self.desc or self.note)[:20] if (self.desc or self.note) else "")
 
-    async def validate_upload_args(self):
-        await self.validate_base_args()
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        await self.validate_base_args(check_cookie=check_cookie)
         if not self.image_paths:
             raise ValueError("图文模式下，图片是必须的")
         if not self.title or not str(self.title).strip():
@@ -768,13 +866,15 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             normalized_image_paths.append(str(self.validate_image_file(image_path)))
         self.image_paths = normalized_image_paths
 
-    async def upload_note_content(self, page: Page) -> None:
+    async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
         publish_url = _build_xhs_creator_url(
             "/publish/publish?from=homepage&target=image"
         )
         await page.goto(publish_url)
+        if multilogin:
+            _raise_if_login_required(page)
         await page.wait_for_url(publish_url)
 
         upload_input = page.locator('input[type="file"][accept*="image"]').first
@@ -816,32 +916,52 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                 break
             except Exception:
+                if multilogin:
+                    _raise_if_login_required(page)
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 if self.debug:
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(0.5)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "图文上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, channel="chromium")
+        browser = await playwright.chromium.launch(headless=self.headless, **XHS_LAUNCH_KWARGS)
         context = await browser.new_context(
-            permissions=["geolocation"],
             storage_state=self.account_file,
+            **XHS_CONTEXT_KWARGS,
         )
         context = await set_init_script(context)
 
         try:
-            page = await context.new_page()
-            await self.upload_note_content(page)
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
             await context.storage_state(path=self.account_file)
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
             await browser.close()
 
-    async def xiaohongshu_upload_note(self):
+    async def upload_in(self, session: BrowserSession) -> None:
+        page = await session.context.new_page()
+        await self.upload_note_content(
+            page, multilogin=session.mode == "multilogin"
+        )
+
+    async def xiaohongshu_upload_note(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
 

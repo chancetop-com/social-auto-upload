@@ -3,7 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from uploader.youtube_uploader.main import YouTubeVideo, cookie_auth as youtube_cookie_auth, youtube_setup
+from patchright.async_api import async_playwright
+from uploader.youtube_uploader.main import (
+    YOUTUBE_CONTEXT_KWARGS,
+    YOUTUBE_INIT_SCRIPT,
+    YOUTUBE_LAUNCH_KWARGS,
+    YouTubeVideo,
+    cookie_auth as youtube_cookie_auth,
+    is_logged_in,
+    youtube_setup,
+)
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
     add_runtime_flags,
@@ -19,6 +28,8 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -77,19 +88,12 @@ async def check_youtube_account(account_name: str) -> bool:
     return await youtube_cookie_auth(str(account_file))
 
 
-async def upload_youtube_video(request: YouTubeVideoUploadRequest) -> Path:
-    account_file = resolve_account_file("youtube", request.account_name)
-    is_ready = await youtube_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"YouTube cookie is missing or expired: {account_file}. Run `sau youtube login --account {request.account_name}` first."
-        )
-
-    app = YouTubeVideo(
+def _build_youtube_uploader(request: YouTubeVideoUploadRequest, account_file) -> YouTubeVideo:
+    return YouTubeVideo(
         request.title,
         str(request.video_file),
         request.tags,
-        str(account_file),
+        account_file,
         description=request.description,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         playlist=request.playlist,
@@ -97,6 +101,42 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest) -> Path:
         debug=request.debug,
         headless=request.headless,
     )
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"YouTube 登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_youtube_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=YOUTUBE_LAUNCH_KWARGS,
+                context_kwargs=YOUTUBE_CONTEXT_KWARGS,
+                init_script=YOUTUBE_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                app.set_publish_date(request.schedule)
+                await app.main(session=session)
+        return None
+
+    account_file = resolve_account_file("youtube", request.account_name)
+    is_ready = await youtube_setup(str(account_file), handle=False)
+    if not is_ready:
+        raise RuntimeError(
+            f"YouTube cookie is missing or expired: {account_file}. Run `sau youtube login --account {request.account_name}` first."
+        )
+
+    app = _build_youtube_uploader(request, str(account_file))
     app.set_publish_date(request.schedule)
     await app.main()
     return account_file
@@ -118,6 +158,19 @@ async def run(args):
     account_label = resolve_account_label(args)
 
     if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
         is_valid = await check_youtube_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
@@ -136,7 +189,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_youtube_video(request)
+        await upload_youtube_video(request, target=target)
         print(f"YouTube video upload submitted: {request.video_file}")
         return 0
 
