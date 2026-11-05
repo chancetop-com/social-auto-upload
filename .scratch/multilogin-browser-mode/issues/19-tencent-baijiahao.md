@@ -6,6 +6,8 @@
 
 **Status:** resolved
 
+> 注：TencentNote 已获得 `session` seam，但腾讯目前没有 `upload-note` CLI action；百家号没有图文（note）发布路径。本节不新增 CLI action。
+
 - [x] 两个平台的上传入口支持 keyword-only `session`，MLX 分支只执行 `upload_in(session)`。
 - [x] 腾讯的 `is_logged_in` 在现有页面判断基础上补齐正向信号；百家号新写 `is_logged_in`；两者都能区分“未登录”与“网络/结构异常”。
 - [x] 腾讯 MLX 分支静默忽略 `AutomationControlled` 相关 args 与 `LOCAL_CHROME_PATH`；`init_script` 不在 MLX 下使用。

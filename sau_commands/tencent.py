@@ -43,9 +43,8 @@ def register(platform_parsers):
     for action_name in ("login", "check"):
         action_parser = tencent_actions.add_parser(action_name, help=f"Tencent/WeChat Channels {action_name}")
         action_parser.add_argument("--account", required=False, help="Tencent user-defined account_name")
-        if action_name == "login":
-            add_runtime_flags(action_parser)
-        else:
+        add_runtime_flags(action_parser)
+        if action_name == "check":
             add_multilogin_flags(action_parser)
 
     tencent_upload_video_parser = tencent_actions.add_parser("upload-video", help="Upload one video to WeChat Channels")
@@ -194,7 +193,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     multilogin=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)

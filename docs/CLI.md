@@ -91,8 +91,9 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 - 本地模式会**静默忽略** `--folder-id` / `--profile-id`，旧命令的解析与行为不变。
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下可选，只是日志/结果标签；缺省值为 `profile_id`。它不参与登录或身份校验，也不决定 cookie 文件。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；`--debug` 语义不变。所有平台的 `check` 都接受这组参数（包括文档中的 `sau xiaohongshu check ... --headed` 示例）。
 - 所有可在 MLX 运行的 `check` / `upload-*` 都接受上述参数；`login` 不接受。
+- `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 
 ### 退出码

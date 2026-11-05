@@ -328,14 +328,19 @@ class _ProbePage:
 
 
 class _ProbeContext:
-    def __init__(self, pages: list[_ProbePage] | None = None) -> None:
+    def __init__(
+        self,
+        pages: list[_ProbePage] | None = None,
+        next_page: _ProbePage | None = None,
+    ) -> None:
         self.pages = list(pages or [])
+        self.next_page = next_page
         self.new_page_calls = 0
         self.created: list[_ProbePage] = []
 
     async def new_page(self) -> _ProbePage:
         self.new_page_calls += 1
-        page = _ProbePage()
+        page = self.next_page if self.next_page is not None else _ProbePage()
         self.pages.append(page)
         self.created.append(page)
         return page
@@ -357,13 +362,13 @@ class IsLoggedInTests(unittest.TestCase):
 
     def test_login_url_returns_false(self):
         context = _ProbeContext(
-            [_ProbePage(final_url="https://www.tiktok.com/login?lang=en")]
+            next_page=_ProbePage(final_url="https://www.tiktok.com/login?lang=en")
         )
         self.assertFalse(asyncio.run(is_logged_in(context)))
 
     def test_login_form_returns_false_even_on_upload_url(self):
         context = _ProbeContext(
-            [_ProbePage(final_url=TIKTOK_LOGIN_CHECK_URL, login_form=True)]
+            next_page=_ProbePage(final_url=TIKTOK_LOGIN_CHECK_URL, login_form=True)
         )
         self.assertFalse(asyncio.run(is_logged_in(context)))
 
@@ -384,30 +389,37 @@ class IsLoggedInTests(unittest.TestCase):
         self.assertEqual(page.close_calls, 1)
 
     def test_server_error_propagates(self):
-        context = _ProbeContext([_ProbePage(status=503)])
+        context = _ProbeContext(next_page=_ProbePage(status=503))
         with self.assertRaises(RuntimeError):
             asyncio.run(is_logged_in(context))
 
     def test_unexpected_structure_propagates(self):
         context = _ProbeContext(
-            [_ProbePage(final_url=TIKTOK_LOGIN_CHECK_URL, upload_entry=False)]
+            next_page=_ProbePage(
+                final_url=TIKTOK_LOGIN_CHECK_URL, upload_entry=False
+            )
         )
         with self.assertRaises(RuntimeError):
             asyncio.run(is_logged_in(context))
 
-    def test_reuses_matching_existing_page_without_closing_it(self):
-        page = _ProbePage(url=TIKTOK_LOGIN_CHECK_URL)
-        context = _ProbeContext([page])
+    def test_existing_matching_page_is_never_navigated_or_closed(self):
+        existing = _ProbePage(url=TIKTOK_LOGIN_CHECK_URL)
+        context = _ProbeContext([existing])
         self.assertTrue(asyncio.run(is_logged_in(context)))
-        self.assertEqual(context.new_page_calls, 0)
-        self.assertEqual(page.close_calls, 0)
+        self.assertEqual(context.new_page_calls, 1)
+        self.assertEqual(existing.goto_calls, [])
+        self.assertEqual(existing.close_calls, 0)
+        self.assertEqual(len(context.created), 1)
+        self.assertTrue(context.created[0].closed)
 
-    def test_uses_first_existing_page_when_no_url_match(self):
-        page = _ProbePage()
-        context = _ProbeContext([page])
+    def test_any_existing_page_is_left_untouched(self):
+        existing = _ProbePage()
+        context = _ProbeContext([existing])
         self.assertTrue(asyncio.run(is_logged_in(context)))
-        self.assertEqual(context.new_page_calls, 0)
-        self.assertEqual(page.close_calls, 0)
+        self.assertEqual(context.new_page_calls, 1)
+        self.assertEqual(existing.goto_calls, [])
+        self.assertEqual(existing.close_calls, 0)
+        self.assertTrue(context.created[0].closed)
 
     def test_budget_constant_is_20_seconds(self):
         self.assertEqual(TIKTOK_LOGIN_CHECK_TIMEOUT_MS, 20_000)

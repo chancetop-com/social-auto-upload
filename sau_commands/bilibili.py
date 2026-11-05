@@ -13,7 +13,6 @@ from sau_commands.arguments import (
     schedule_value,
 )
 from sau_commands.multilogin import (
-    add_multilogin_flags,
     reject_multilogin_login,
     reject_multilogin_platform,
     require_local_account,
@@ -30,8 +29,6 @@ def register(platform_parsers):
     for action_name in ("login", "check"):
         action_parser = bilibili_actions.add_parser(action_name, help=f"Bilibili {action_name}")
         action_parser.add_argument("--account", required=False, help="Bilibili user-defined account_name")
-        if action_name == "check":
-            add_multilogin_flags(action_parser)
 
     bilibili_upload_video_parser = bilibili_actions.add_parser("upload-video", help="Upload one video to Bilibili")
     bilibili_upload_video_parser.add_argument("--account", required=False, help="Bilibili user-defined account_name")
@@ -42,7 +39,6 @@ def register(platform_parsers):
     bilibili_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     bilibili_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional Bilibili cover image path")
     bilibili_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
-    add_multilogin_flags(bilibili_upload_video_parser)
 
 
 @dataclass(slots=True)

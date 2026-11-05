@@ -101,6 +101,7 @@ class _UploadPage:
         status: int = 200,
         goto_error: BaseException | None = None,
         xhs_login_visible: bool = False,
+        xhs_upload_anchor: bool = False,
         ks_login_anchor: bool = False,
         ks_upload_button: bool = False,
         ks_upload_wait_error: BaseException | None = None,
@@ -112,6 +113,7 @@ class _UploadPage:
         self.status = status
         self.goto_error = goto_error
         self.xhs_login_visible = xhs_login_visible
+        self.xhs_upload_anchor = xhs_upload_anchor
         self.ks_login_anchor = ks_login_anchor
         self.ks_upload_button = ks_upload_button
         self.ks_upload_wait_error = ks_upload_wait_error
@@ -140,6 +142,8 @@ class _UploadPage:
         self.wait_timeouts.append(ms)
 
     def locator(self, selector: str) -> _Locator:
+        if selector in xhs_main.XHS_LOGIN_POSITIVE_SELECTORS:
+            return _Locator(count=1 if self.xhs_upload_anchor else 0)
         if "login-box" in selector:
             return _Locator(count=1 if self.xhs_login_visible else 0, visible=self.xhs_login_visible)
         if "_upload-btn" in selector:
@@ -651,8 +655,8 @@ class LoginProbeTests(unittest.TestCase):
             self.assertEqual(page.close_calls, 1)
         return result
 
-    def test_xhs_logged_in_returns_true(self):
-        page = _UploadPage(final_url=XHS_VIDEO_URL)
+    def test_xhs_logged_in_returns_true_with_positive_upload_anchor(self):
+        page = _UploadPage(final_url=XHS_VIDEO_URL, xhs_upload_anchor=True)
         self.assertTrue(self._xhs_probe(page))
         self.assertEqual(page.goto_calls[0][0], XHS_LOGIN_CHECK_URL)
         timeout = page.goto_calls[0][1]["timeout"]
@@ -669,6 +673,14 @@ class LoginProbeTests(unittest.TestCase):
         for label, page in cases.items():
             with self.subTest(label):
                 self.assertFalse(self._xhs_probe(page))
+
+    def test_xhs_missing_positive_anchor_raises(self):
+        page = _UploadPage(final_url=XHS_VIDEO_URL)
+        context = _UploadContext(page)
+        with self.assertRaisesRegex(RuntimeError, "页面结构异常"):
+            asyncio.run(xhs_main.is_logged_in(context))
+        self.assertEqual(context.new_page_calls, 1)
+        self.assertEqual(page.close_calls, 1)
 
     def test_xhs_network_error_server_error_and_unexpected_domain_raise(self):
         cases = {

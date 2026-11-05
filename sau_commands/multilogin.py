@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from utils.errors import UsageError
+from utils.errors import LoginRequiredError, UsageError
 from utils.multilogin import MultiloginTarget
 
 LOGIN_REJECTED_TEMPLATE = (
@@ -75,9 +75,27 @@ def require_local_account(args: argparse.Namespace) -> None:
     """Raise :class:`UsageError` when local mode is missing ``--account``."""
     if multilogin_enabled():
         return
+    require_account(args)
+
+
+def require_account(args: argparse.Namespace) -> None:
+    """Raise :class:`UsageError` unless ``--account`` is non-empty.
+
+    Local-only actions (``verify`` / ``delete``) keep running in local mode even
+    when ``MLX_API_TOKEN`` is set, so they must still resolve a cookie file and
+    therefore always need ``--account``.
+    """
     account = getattr(args, "account", None)
     if account is None or not str(account).strip():
         raise UsageError(MISSING_ACCOUNT_MESSAGE)
+
+
+def login_required_error(platform_label: str, profile_id: str) -> LoginRequiredError:
+    """Build the command-level login-required error for a platform."""
+    return LoginRequiredError(
+        f"{platform_label}登录态无效：profile_id={profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
 
 
 def reject_multilogin_login(platform: str, args: argparse.Namespace) -> None:
@@ -98,9 +116,11 @@ def reject_multilogin_platform(platform: str, args: argparse.Namespace) -> None:
 
 __all__ = [
     "add_multilogin_flags",
+    "login_required_error",
     "multilogin_enabled",
     "reject_multilogin_login",
     "reject_multilogin_platform",
+    "require_account",
     "require_local_account",
     "resolve_account_label",
     "resolve_multilogin_target",

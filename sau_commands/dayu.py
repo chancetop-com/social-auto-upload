@@ -5,7 +5,6 @@ from patchright.async_api import async_playwright
 from conf import LOCAL_CHROME_PATH
 from utils.article_render import ARTICLE_THEMES
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 from utils.log import dayu_logger
 from uploader.dayu_uploader.article import DayuArticle
 from uploader.dayu_uploader.constants import (
@@ -38,7 +37,9 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     reject_multilogin_login,
+    require_account,
     require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
@@ -56,6 +57,7 @@ def register(platform_parsers):
     dayu_login.add_argument("--timeout", type=int, default=600, help="Login timeout in seconds")
     dayu_check = dayu_actions.add_parser("check", help="Check login and bound Dayu identity")
     dayu_check.add_argument("--account", required=False)
+    add_runtime_flags(dayu_check)
     add_multilogin_flags(dayu_check)
     dayu_upload = dayu_actions.add_parser("upload-video", help="Publish a video; succeed when Dayu confirms submission")
     dayu_upload.add_argument("--account", required=False)
@@ -101,17 +103,18 @@ def register(platform_parsers):
 
 
 def _raise_login_required(target) -> None:
-    raise LoginRequiredError(
-        f"大鱼号登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error("大鱼号", target.profile_id)
 
 
-def _log_profile_identity(target) -> None:
+def _log_identity_unverified(target) -> None:
     dayu_logger.info(
         "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
         target.profile_id,
     )
+
+
+def _log_profile_identity(target) -> None:
+    _log_identity_unverified(target)
     # MLX 不写 timezone_id；发布时区由 Profile 决定。
     dayu_logger.info(
         "Multilogin 模式不写入时区；建议在 Profile 设置中将时区设为 Asia/Shanghai"
@@ -148,7 +151,7 @@ async def run(args):
         account = resolve_account_label(args)
     else:
         target = None
-        require_local_account(args)
+        require_account(args)
         account = args.account
 
     if args.action == "check":
@@ -156,10 +159,11 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     account_file=None,
                     multilogin=target,
                 ) as session:
+                    _log_identity_unverified(target)
                     valid = await is_logged_in(session.context)
             if not valid:
                 _raise_login_required(target)

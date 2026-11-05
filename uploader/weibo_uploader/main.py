@@ -84,8 +84,8 @@ WEIBO_LAUNCH_KWARGS = _build_launch_kwargs()
 WEIBO_CONTEXT_KWARGS = {"viewport": {"width": 1280, "height": 2000}}
 WEIBO_INIT_SCRIPT = False
 
-WEIBO_LOGIN_CHECK_TIMEOUT_MS = 30_000
-WEIBO_LOGIN_CHECK_SETTLE_MS = 5_000
+WEIBO_LOGIN_CHECK_TIMEOUT_MS = 25_000
+WEIBO_LOGIN_CHECK_SETTLE_MS = 4_000
 WEIBO_LOGIN_POSITIVE_SELECTORS = (
     '[class*="Nav_avatar"]',
     '[class*="woo-avatar"]',
@@ -119,12 +119,12 @@ def _raise_if_login_required(page) -> None:
 async def is_logged_in(context: BrowserContext) -> bool:
     """Return whether the Multilogin Profile is logged in to Weibo.
 
-    Requires a positive signal: the page avatar/feed marker or (secondary) a
-    ``SUB`` cookie readable from the injected context.  Explicit login URLs and
-    a visible「登录」button mean logged out; network errors, timeouts, 5xx,
-    unexpected domains and a page with no positive signal raise (exit 1).
+    Requires a page-level positive signal: the avatar/feed marker.  Explicit
+    login URLs and a visible「登录」button mean logged out; network errors,
+    timeouts, 5xx, unexpected domains and a page with no positive signal raise
+    (exit 1).
 
-    Only ``context.new_page()`` / ``goto`` / ``close`` / ``cookies`` are used.
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.
     """
     page = await context.new_page()
     try:
@@ -161,10 +161,6 @@ async def is_logged_in(context: BrowserContext) -> bool:
                     return True
             except Exception:
                 continue
-
-        cookies = await context.cookies()
-        if any(c.get("name") == "SUB" and c.get("value") for c in cookies):
-            return True
 
         login_btn = page.get_by_text("登录", exact=True).first
         if await login_btn.count() and await login_btn.is_visible():

@@ -26,13 +26,14 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     reject_multilogin_login,
+    require_account,
     require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -70,6 +71,7 @@ def register(platform_parsers):
             # Facebook 登录必须在可见 Chrome 中完成，避免无头模式下用户看不到登录挑战。
             action_parser.set_defaults(headless=False)
         else:
+            add_runtime_flags(action_parser)
             add_multilogin_flags(action_parser)
 
     facebook_upload_video_parser = facebook_actions.add_parser(
@@ -135,10 +137,7 @@ async def check_facebook_account(
 
 
 def _raise_login_required(target) -> None:
-    raise LoginRequiredError(
-        f"Facebook 登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error("Facebook", target.profile_id)
 
 
 async def _upload_facebook_mlx(
@@ -226,7 +225,7 @@ async def run(args):
         return 0
 
     if args.action in {"verify", "delete"}:
-        require_local_account(args)
+        require_account(args)
         result = await facebook_post_action(
             resolve_account_file("facebook", args.account), post_url=args.post_url,
             owner_id=args.owner_id, expected_text=args.expected_text,
@@ -249,7 +248,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     multilogin=target,
                     launch_kwargs=FACEBOOK_LAUNCH_KWARGS,
                     context_kwargs=FACEBOOK_CONTEXT_KWARGS,

@@ -20,6 +20,7 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     multilogin_enabled,
     reject_multilogin_login,
     resolve_account_label,
@@ -33,7 +34,6 @@ from uploader.tk_uploader.main_chrome import (
     is_logged_in,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 # Ticket 13 §5: local mode is rejected at the run() entry so no browser code
 # (and no cookie path) is ever reached.
@@ -120,10 +120,7 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
 
 
 def _raise_login_required(target) -> None:
-    raise LoginRequiredError(
-        f"TikTok 登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error("TikTok", target.profile_id)
 
 
 async def run(args):
@@ -142,7 +139,7 @@ async def run(args):
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=getattr(args, "headless", True),
+                headless=args.headless,
                 multilogin=target,
             ) as session:
                 is_valid = await is_logged_in(session.context)

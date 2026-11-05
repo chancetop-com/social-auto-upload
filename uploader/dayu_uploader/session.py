@@ -57,7 +57,8 @@ async def is_logged_in(context) -> bool:
 
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  The login CAS
     iframe or a login URL means False; a positive header account signal means
-    True.  Network failures, 5xx responses and unexpected hosts raise.
+    True.  Network failures, 5xx responses, unexpected hosts and a page with no
+    positive signal raise.
     """
     page = await context.new_page()
     try:
@@ -94,7 +95,9 @@ async def is_logged_in(context) -> bool:
                 text = ""
             if text:
                 return True
-        return False
+        raise RuntimeError(
+            "大鱼号登录状态检查失败：未找到后台页头账号名称（页面结构异常）"
+        )
     finally:
         await page.close()
 

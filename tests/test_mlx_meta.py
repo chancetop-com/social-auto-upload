@@ -1269,7 +1269,10 @@ class InstagramCliTests(_CliBase):
         playwright_cm, session_cm, factory, probe, patches = self._session_patches(
             instagram_command, probe_result
         )
-        with patches[0], patches[1], patches[2]:
+        logger = MagicMock()
+        with patches[0], patches[1], patches[2], patch.object(
+            instagram_command, "logger", new=logger
+        ):
             code, out, err = self._run(
                 [
                     "instagram",
@@ -1280,10 +1283,10 @@ class InstagramCliTests(_CliBase):
                     PROFILE,
                 ]
             )
-        return code, out, err, playwright_cm, session_cm, factory, probe
+        return code, out, err, playwright_cm, session_cm, factory, probe, logger
 
     def test_check_mlx_returns_0_10_1(self):
-        code, out, _, p_cm, s_cm, factory, probe = self._check(True)
+        code, out, _, p_cm, s_cm, factory, probe, logger = self._check(True)
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
         kwargs = factory.call_args.kwargs
@@ -1292,19 +1295,24 @@ class InstagramCliTests(_CliBase):
         self.assertEqual(kwargs["context_kwargs"], INSTAGRAM_CONTEXT_KWARGS)
         self.assertFalse(kwargs["init_script"])
         probe.assert_awaited_once()
+        logger.info.assert_called_once()
+        self.assertIn("账号一致性未校验", logger.info.call_args.args[0])
+        self.assertIn(PROFILE, logger.info.call_args.args)
         self._assert_session_once(p_cm, s_cm)
 
-        code, out, err, p_cm, s_cm, _, _ = self._check(False)
+        code, out, err, p_cm, s_cm, _, _, logger = self._check(False)
         self.assertEqual(code, 10)
         self.assertIn("profile_id=profile-23", err)
         self.assertEqual(out.strip(), "")
+        logger.info.assert_called_once()
         self._assert_session_once(p_cm, s_cm)
 
-        code, _, err, p_cm, s_cm, _, _ = self._check(
+        code, _, err, p_cm, s_cm, _, _, logger = self._check(
             AsyncMock(side_effect=RuntimeError("profile busy"))
         )
         self.assertEqual(code, 1)
         self.assertIn("profile busy", err)
+        logger.info.assert_called_once()
         self._assert_session_once(p_cm, s_cm)
 
     def _upload(self, action, probe_result, *, publish_error=None):

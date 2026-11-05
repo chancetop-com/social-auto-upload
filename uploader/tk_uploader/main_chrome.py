@@ -127,10 +127,12 @@ async def is_logged_in(context) -> bool:
 
     A login page/form means ``False``; network errors, 5xx, timeouts and
     unrecognised page structures raise so the CLI can exit 1 instead of
-    misreporting "logged out".  Exactly one page is opened and owned pages are
-    closed in ``finally``.
+    misreporting "logged out".  Exactly one fresh page is opened and always
+    closed in ``finally``; existing context pages are left untouched.
     """
-    page, owned = await _select_probe_page(context)
+    # Always probe on a fresh page: never navigate an injected context's
+    # existing page away from whatever the caller is doing.
+    page = await context.new_page()
     deadline = time.monotonic() + TIKTOK_LOGIN_CHECK_TIMEOUT_MS / 1000
     try:
         response = await page.goto(
@@ -163,8 +165,7 @@ async def is_logged_in(context) -> bool:
             "无法识别 TikTok Studio 上传页结构（既无上传入口，也无登录表单）。"
         )
     finally:
-        if owned:
-            await page.close()
+        await page.close()
 
 
 async def cookie_auth(account_file):

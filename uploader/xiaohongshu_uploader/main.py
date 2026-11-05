@@ -29,6 +29,12 @@ XHS_CREATOR_BASE_URL_ENV = "SAU_XHS_CREATOR_BASE_URL"
 XHS_PUBLISH_SUCCESS_URL_PATTERN = "**/publish/success?**"
 XHS_LOGIN_BOX_SELECTOR = "div[class*='login-box']"
 XHS_LOGIN_SWITCH_SELECTOR = "img.css-wemwzq"
+XHS_LOGIN_POSITIVE_SELECTORS = (
+    "input.upload-input",
+    'div.progress-div [class^="upload-btn-input"]',
+    "div[class*='upload-content'] input",
+    'button:has-text("发布")',
+)
 XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
@@ -215,9 +221,11 @@ async def is_logged_in(context: BrowserContext) -> bool:
     """Return whether the Multilogin Profile is logged in to Xiaohongshu.
 
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A clear login
-    page or visible login form returns ``False``; network failures, 5xx
-    responses, timeouts and unexpected redirects raise so the CLI can exit 1
-    instead of silently treating an outage as "logged out".
+    page or visible login form returns ``False``; a missing login form alone is
+    not positive proof, so the publish-page upload anchor must also exist.
+    Network failures, 5xx responses, timeouts, unexpected redirects and an
+    ambiguous page structure raise so the CLI can exit 1 instead of silently
+    treating an outage as "logged out".
 
     Worst-case budget: 20s navigation + 3s settle, inside the 15-30s spec.
     """
@@ -244,7 +252,16 @@ async def is_logged_in(context: BrowserContext) -> bool:
                 f"（url={current_url or '<empty>'}）"
             )
 
-        return await _is_xhs_login_completed(page)
+        if not await _is_xhs_login_completed(page):
+            return False
+
+        for selector in XHS_LOGIN_POSITIVE_SELECTORS:
+            if await page.locator(selector).count():
+                return True
+
+        raise RuntimeError(
+            "小红书登录状态检查失败：未找到发布页上传入口（页面结构异常）"
+        )
     finally:
         await page.close()
 
