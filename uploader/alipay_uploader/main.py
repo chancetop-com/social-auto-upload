@@ -9,11 +9,19 @@ import re
 import time
 from pathlib import Path
 
-from patchright.async_api import Page, Playwright, TimeoutError as PWTimeoutError, async_playwright
+from patchright.async_api import (
+    BrowserContext,
+    Page,
+    Playwright,
+    TimeoutError as PWTimeoutError,
+    async_playwright,
+)
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.log import alipay_logger
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -50,11 +58,110 @@ async def _emit_qrcode_callback(qrcode_callback, payload: dict):
         await callback_result
 
 
-def _build_launch_kwargs(headless: bool) -> dict:
-    launch_kwargs = {"headless": headless}
+def _build_launch_kwargs(headless: bool | None = None) -> dict:
+    launch_kwargs = {}
     if LOCAL_CHROME_PATH:
         launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+    if headless is not None:
+        launch_kwargs["headless"] = headless
     return launch_kwargs
+
+
+# Golden local-mode browser options (ticket 20).  ``sau_commands/alipay.py``
+# passes the same values to ``browser_session`` in Multilogin mode, so the two
+# paths cannot drift.  Alipay deliberately does NOT inject the stealth init
+# script (it breaks the qiankun micro-app), and Multilogin never grants
+# geolocation permissions.
+ALIPAY_LAUNCH_KWARGS = _build_launch_kwargs()
+ALIPAY_CONTEXT_KWARGS = {"permissions": ["geolocation"]}
+ALIPAY_INIT_SCRIPT = False
+
+ALIPAY_LOGIN_CHECK_URL = ALIPAY_LIFE_ACCOUNT_URL
+ALIPAY_LOGIN_CHECK_TIMEOUT_MS = 25_000
+ALIPAY_LOGIN_CHECK_SETTLE_MS = 4_000
+ALIPAY_LOGIN_URL_MARKERS = (
+    "auth.alipay.com",
+    "login",
+    "signup",
+    "captcha",
+    "verify",
+    "two-factor",
+    "2fa",
+)
+ALIPAY_LOGIN_POSITIVE_SELECTORS = (
+    'a:has-text("发布视频推荐分辨率720p及以上，建议1080p")',
+    'a:has-text("发布视频")',
+    "text=发布视频",
+)
+
+
+def _raise_if_login_required(page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its historical
+    retry/timeout behaviour untouched.
+    """
+    url = str(getattr(page, "url", "") or "").lower()
+    if not url:
+        return
+    if any(marker in url for marker in ALIPAY_LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "支付宝上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Alipay.
+
+    The page-level behaviour mirrors the historical ``cookie_auth`` check (login
+    URL / login iframe means logged out) and adds a positive anchor: the
+    content-creation portal must expose the「发布视频」entry.  Network errors,
+    timeouts, 5xx responses and pages without the anchor (including unexpected
+    domains) raise, so an outage is never reported as exit code 10.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            ALIPAY_LOGIN_CHECK_URL,
+            wait_until="domcontentloaded",
+            timeout=ALIPAY_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"支付宝登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(ALIPAY_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        lowered = current_url.lower()
+        if any(marker in lowered for marker in ALIPAY_LOGIN_URL_MARKERS):
+            return False
+
+        login_iframe = page.locator('iframe[title="login"]')
+        if await login_iframe.count():
+            return False
+
+        if "c.alipay.com" not in lowered:
+            raise RuntimeError(
+                "支付宝登录状态检查失败：页面未停留在支付宝内容创作平台"
+                f"（url={current_url or '<empty>'}）"
+            )
+
+        for selector in ALIPAY_LOGIN_POSITIVE_SELECTORS:
+            locator = page.locator(selector)
+            if await locator.count():
+                return True
+
+        raise RuntimeError(
+            "支付宝登录状态检查失败：未找到内容创作入口（页面结构异常）"
+        )
+    finally:
+        await page.close()
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -281,7 +388,9 @@ class AlipayVideo(BaseVideoUploader):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
-        self.account_file = _resolve_account_file(account_file)
+        self.account_file = (
+            _resolve_account_file(account_file) if account_file is not None else None
+        )
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
         self.collection_name = collection_name
@@ -290,20 +399,23 @@ class AlipayVideo(BaseVideoUploader):
         self.local_executable_path = LOCAL_CHROME_PATH
         self.max_title_length = 30
 
-    async def validate_upload_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成支付宝生活号登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成支付宝生活号登录: {self.account_file}")
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        if check_cookie:
+            if not self.account_file or not os.path.exists(self.account_file):
+                raise RuntimeError(f"cookie文件不存在，请先完成支付宝生活号登录: {self.account_file}")
+            if not await cookie_auth(self.account_file):
+                raise RuntimeError(f"cookie文件已失效，请先完成支付宝生活号登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         self.file_path = str(self.validate_video_file(self.file_path))
         if self.thumbnail_path:
             self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
 
-    async def open_upload_page(self, page: Page) -> None:
+    async def open_upload_page(self, page: Page, *, multilogin: bool = False) -> None:
         # 进内容创作平台首页，点"发布视频"卡片（JS 跳转）进入短视频发布表单
         await page.goto(ALIPAY_LIFE_ACCOUNT_URL, timeout=120000, wait_until="domcontentloaded")
+        if multilogin:
+            _raise_if_login_required(page)
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
@@ -447,7 +559,7 @@ class AlipayVideo(BaseVideoUploader):
                 alipay_logger.info(_msg("🏃", "正在上传/转码视频中..."))
                 await asyncio.sleep(2)
 
-    async def submit_publish(self, page: Page) -> None:
+    async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         publish_btn = page.get_by_role("button", name="确认发布").first
         await publish_btn.wait_for(state="visible", timeout=30000)
         # 某些账号下点击后不会立即跳 posts，需同时观察成功提示文案
@@ -595,6 +707,8 @@ class AlipayVideo(BaseVideoUploader):
         last_click_ts = start
         try:
             while time.monotonic() - start <= timeout:
+                if multilogin:
+                    _raise_if_login_required(page)
                 if "/content-creation/posts" in page.url:
                     alipay_logger.success(_msg("🥳", "视频发布成功"))
                     return
@@ -669,29 +783,32 @@ class AlipayVideo(BaseVideoUploader):
                 for m, u, s, b in net_events[-10:]:
                     alipay_logger.info(_msg("🧾", f"{m} {s} {u} | {b}"))
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         alipay_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
         await self.validate_upload_args()
         alipay_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        await context.grant_permissions(["geolocation"])
+        browser = await playwright.chromium.launch(
+            headless=self.headless, **ALIPAY_LAUNCH_KWARGS
+        )
+        context = await browser.new_context(
+            storage_state=self.account_file,
+            **ALIPAY_CONTEXT_KWARGS,
+        )
         # 注意：不能用 set_init_script(stealth) —— 会阻止支付宝内容创作平台(qiankun 微应用)渲染
 
         try:
-            page = await context.new_page()
-            await self.open_upload_page(page)
-            alipay_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
-
-            await self.upload_video_file(page, self.file_path)
-            await self.fill_title_and_tags(page)
-            await self.fill_description(page)
-            await self.upload_thumbnail(page)
-            await self.apply_collection(page)
-            await self.check_ai_label(page)
-            await self.wait_for_upload_complete(page)
-            await self.submit_publish(page)
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
 
             await context.storage_state(path=self.account_file)
             alipay_logger.success(_msg("🥳", "cookie 更新完毕"))
@@ -699,9 +816,27 @@ class AlipayVideo(BaseVideoUploader):
             await context.close()
             await browser.close()
 
-    async def alipay_upload_video(self):
+    async def upload_in(self, session: BrowserSession) -> None:
+        multilogin = session.mode == "multilogin"
+        page = await session.context.new_page()
+        await self.open_upload_page(page, multilogin=multilogin)
+        alipay_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
+
+        await self.upload_video_file(page, self.file_path)
+        await self.fill_title_and_tags(page)
+        await self.fill_description(page)
+        await self.upload_thumbnail(page)
+        await self.apply_collection(page)
+        await self.check_ai_label(page)
+        await self.wait_for_upload_complete(page)
+        await self.submit_publish(page, multilogin=multilogin)
+
+    async def alipay_upload_video(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
 
-    async def main(self):
-        await self.alipay_upload_video()
+    async def main(self, *, session: BrowserSession | None = None):
+        await self.alipay_upload_video(session=session)

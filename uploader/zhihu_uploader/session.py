@@ -5,21 +5,48 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from patchright.async_api import Page, async_playwright, expect
+from patchright.async_api import BrowserContext, Page, async_playwright, expect
 
 from conf import LOCAL_CHROME_PATH
 from uploader.zhihu_uploader.constants import ZHIHU_CREATOR_URL
+from utils.errors import LoginRequiredError
 
 
 PROFILE_IMAGE = "button.AppHeader-profileEntry img[alt^='点击打开'][alt$='的主页']"
 
+ZHIHU_LOGIN_CHECK_TIMEOUT_MS = 20_000
+ZHIHU_IDENTITY_PROBE_TIMEOUT_MS = 10_000
+_ZHIHU_LOGIN_PATH_PREFIXES = ("/signin", "/account/unlogin", "/login")
+_ZHIHU_LOGIN_URL_MARKERS = ("signin", "login", "captcha", "two-factor", "2fa")
 
-async def read_zhihu_identity(page: Page) -> dict:
+
+def is_zhihu_login_url(url: str) -> bool:
+    """Return ``True`` for the known Zhihu sign-in/captcha/2FA URL shapes."""
+    path = urlsplit(url).path.lower()
+    return path.startswith(_ZHIHU_LOGIN_PATH_PREFIXES) or any(
+        marker in path for marker in _ZHIHU_LOGIN_URL_MARKERS
+    )
+
+
+def raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload Zhihu sign-in redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its historical
+    behaviour untouched.
+    """
+    if is_zhihu_login_url(str(getattr(page, "url", "") or "")):
+        raise LoginRequiredError(
+            "知乎上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+
+
+async def read_zhihu_identity(page: Page, *, timeout: int = 30000) -> dict:
     """从知乎页头已登录头像读取展示名与头像地址，作为本地会话绑定信息。"""
     # AppHeader-profileEntry 是创作中心与视频页实际共用的当前用户入口。
     profile = page.locator(PROFILE_IMAGE)
-    await expect(profile).to_have_count(1, timeout=30000)
-    await expect(profile).to_be_visible()
+    await expect(profile).to_have_count(1, timeout=timeout)
+    await expect(profile).to_be_visible(timeout=timeout)
     label = (await profile.get_attribute("alt") or "").strip()
     name = label.removeprefix("点击打开").removesuffix("的主页").strip()
     avatar = profile.get_attribute("src")
@@ -66,6 +93,46 @@ async def login_zhihu_account(account_file: str | Path, timeout: int = 600) -> d
             return {"success": True, "account_file": str(account_file), "identity": identity}
         finally:
             await browser.close()
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Zhihu.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A clear
+    sign-in/unlogin URL returns ``False``; network failures, 5xx responses,
+    timeouts and unexpected page structures raise so the CLI exits 1 instead of
+    misreporting an outage as "logged out".
+
+    The profile header identity is reused only as a positive login signal; no
+    ``.identity.json`` binding is read or compared in this path.
+
+    Worst-case budget: 20s navigation + 10s identity probe, inside 15-30s.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            ZHIHU_CREATOR_URL,
+            wait_until="domcontentloaded",
+            timeout=ZHIHU_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"知乎登录状态检查失败：HTTP {status}")
+
+        current_url = str(getattr(page, "url", "") or "")
+        target = urlsplit(current_url)
+        if target.hostname not in {"www.zhihu.com", "zhihu.com"}:
+            raise RuntimeError(
+                "知乎登录状态检查失败：页面未停留在知乎"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if is_zhihu_login_url(current_url):
+            return False
+
+        await read_zhihu_identity(page, timeout=ZHIHU_IDENTITY_PROBE_TIMEOUT_MS)
+        return True
+    finally:
+        await page.close()
 
 
 async def check_zhihu_account(account_file: str | Path, headless: bool = True) -> bool:

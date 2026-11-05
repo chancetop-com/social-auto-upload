@@ -11,15 +11,55 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from patchright.async_api import Page, Playwright, async_playwright, expect, TimeoutError as BrowserTimeoutError
+from patchright.async_api import (
+    BrowserContext,
+    Page,
+    Playwright,
+    async_playwright,
+    expect,
+    TimeoutError as BrowserTimeoutError,
+)
 
 from uploader.base_video import BaseVideoUploader
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 
 
 META_BUSINESS_URL = "https://business.facebook.com/latest/composer/"
 META_PLATFORMS = {"facebook-page"}
 # 未配置环境变量或 --proxy 时使用系统直连。
 FACEBOOK_PAGE_PROXY = os.environ.get("SAU_FACEBOOK_PAGE_PROXY")
+
+META_BUSINESS_LOGIN_CHECK_TIMEOUT_MS = 25_000
+META_BUSINESS_LOGIN_CHECK_SETTLE_MS = 2_500
+
+# Golden local-mode browser options.  Multilogin mode reuses the same values
+# only so the call sites stay symmetric; ``browser_session`` ignores them.
+FACEBOOK_PAGE_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
+FACEBOOK_PAGE_CONTEXT_KWARGS: dict[str, object] = {}
+FACEBOOK_PAGE_INIT_SCRIPT = False
+
+_META_LOGIN_URL_MARKERS = (
+    "/login",
+    "checkpoint",
+    "two_step_verification",
+    "/authentication/",
+)
+
+
+def facebook_page_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
+    """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
+    return {**FACEBOOK_PAGE_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
+
+
+def _raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``."""
+    current_url = str(getattr(page, "url", "") or "").lower()
+    if any(marker in current_url for marker in _META_LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "Facebook Page 上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
 
 
 def meta_account_file(platform: str, account_name: str) -> Path:
@@ -42,7 +82,7 @@ async def _open_business_page(
     headless: bool,
 ):
     browser = await playwright.chromium.launch(
-        channel="chrome", headless=headless, proxy=_proxy_options(proxy)
+        headless=headless, **facebook_page_launch_kwargs(proxy)
     )
     try:
         context = await browser.new_context(storage_state=str(account_file))
@@ -78,6 +118,45 @@ async def _is_business_logged_out(page: Page) -> bool:
 
 
 
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Meta Business Suite.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Explicit login,
+    checkpoint and 2FA pages return ``False``; network failures, 5xx responses,
+    timeouts and unexpected redirects raise.
+
+    Worst-case budget: 25s navigation + 2.5s settle, inside the 15-30s spec.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            META_BUSINESS_URL,
+            wait_until="domcontentloaded",
+            timeout=META_BUSINESS_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(
+                f"Facebook Page 登录状态检查失败：HTTP {status}"
+            )
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "business.facebook.com" not in current_url.lower():
+            raise RuntimeError(
+                "Facebook Page 登录状态检查失败：页面未停留在 business.facebook.com"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if any(marker in current_url.lower() for marker in _META_LOGIN_URL_MARKERS):
+            return False
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(META_BUSINESS_LOGIN_CHECK_SETTLE_MS)
+        return not await _is_business_logged_out(page)
+    finally:
+        await page.close()
+
+
 async def meta_cookie_auth(account_file: str | Path, *, proxy: str | None = None) -> bool:
     account_file = Path(account_file)
     if not account_file.is_file():
@@ -111,7 +190,7 @@ async def meta_setup(
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            channel="chrome", headless=headless, proxy=_proxy_options(proxy)
+            headless=headless, **facebook_page_launch_kwargs(proxy)
         )
         try:
             # 已有 Facebook 登录态可作为 Business Suite 的初始 Cookie，避免重复登录。
@@ -164,7 +243,7 @@ class MetaBusinessUploader(BaseVideoUploader):
         if bool(video_file) == bool(image_files):
             raise ValueError("必须且只能传入视频或图片文件")
         self.platform = platform
-        self.account_file = Path(account_file)
+        self.account_file = Path(account_file) if account_file is not None else None
         self.title = title.strip()
         self.description = description.strip()
         self.tags = [tag.strip().lstrip("#") for tag in (tags or []) if tag.strip().lstrip("#")]
@@ -417,11 +496,50 @@ class MetaBusinessUploader(BaseVideoUploader):
         self.result['schedule'] = self.schedule.isoformat() if self.schedule else None
         self.result['timezone'] = 'Asia/Shanghai'
 
-    async def upload(self) -> dict:
+    def _validate_media(self) -> None:
         if self.video_file:
             self.validate_video_file(self.video_file)
         for path in self.image_files:
             self.validate_image_file(path)
+
+    def _write_result(self) -> None:
+        self.result_file.parent.mkdir(parents=True, exist_ok=True)
+        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    async def _publish_on_page(self, page: Page) -> None:
+        await dismiss_guidance_cards(page)
+        await self._select_publish_location(page)
+        await self._upload_files(page)
+        await self._fill_caption(page)
+        await self._advance_reels(page)
+        await self._fill_schedule(page)
+        await self._publish(page)
+
+    async def upload_in(self, session: BrowserSession) -> dict:
+        """Multilogin body: consume the injected context, touch no cookies."""
+        page = await session.context.new_page()
+        page.set_default_timeout(30_000)
+        await page.goto(META_BUSINESS_URL, wait_until="domcontentloaded", timeout=120_000)
+        if session.mode == "multilogin":
+            _raise_if_login_required(page)
+            if await _is_business_logged_out(page):
+                raise LoginRequiredError(
+                    "Facebook Page 登录态无效：请在 Multilogin 应用中登录 Profile 后重试。"
+                )
+        try:
+            await self._publish_on_page(page)
+            if session.mode == "multilogin":
+                _raise_if_login_required(page)
+            return self.result
+        finally:
+            self._write_result()
+
+    async def upload(self, *, session: BrowserSession | None = None) -> dict:
+        # Media validation is shared; cookie handling stays local-only.
+        self._validate_media()
+        if session is not None:
+            return await self.upload_in(session)
+
         async with async_playwright() as playwright:
             browser, context, page = await _open_business_page(
                 playwright, self.account_file, proxy=self.proxy, headless=self.headless
@@ -429,16 +547,9 @@ class MetaBusinessUploader(BaseVideoUploader):
             try:
                 if await _is_business_logged_out(page):
                     raise RuntimeError("Business Suite 登录态失效，请先执行对应平台 login")
-                await dismiss_guidance_cards(page)
-                await self._select_publish_location(page)
-                await self._upload_files(page)
-                await self._fill_caption(page)
-                await self._advance_reels(page)
-                await self._fill_schedule(page)
-                await self._publish(page)
+                await self._publish_on_page(page)
                 await context.storage_state(path=str(self.account_file))
                 return self.result
             finally:
-                self.result_file.parent.mkdir(parents=True, exist_ok=True)
-                self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+                self._write_result()
                 await browser.close()

@@ -16,10 +16,12 @@ import os
 import time
 from pathlib import Path
 
-from patchright.async_api import Page, Playwright, TimeoutError as PWTimeoutError, async_playwright
+from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError as PWTimeoutError, async_playwright
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.log import baijiahao_logger
 from utils.login_qrcode import build_login_qrcode_path, decode_qrcode_from_path, print_terminal_qrcode, remove_qrcode_file
 
@@ -32,6 +34,47 @@ BAIJIAHAO_SUCCESS_URL_PREFIX = "https://baijiahao.baidu.com/builder/rc/clue"
 
 # 百度 passport 二维码图片选择器
 QR_SELECTOR = 'img[src^="https://passport.baidu.com/v2/api/qrcode"]'
+
+BAIJIAHAO_LOGIN_CHECK_TIMEOUT_MS = 20_000
+BAIJIAHAO_LOGIN_CHECK_SETTLE_MS = 5_000
+BAIJIAHAO_LOGIN_TEXT = "注册/登录百家号"
+BAIJIAHAO_LOGIN_URL_MARKERS = ("login", "passport.baidu.com")
+
+# Authenticated backend anchors.  A URL under ``/builder/rc/`` alone is not
+# enough: an empty/error shell also lives there, so require at least one visible
+# business control before declaring the profile logged in.
+BAIJIAHAO_BUSINESS_ANCHOR_SELECTORS = (
+    'a[href*="/builder/rc/edit"]',
+    '[data-testid="publish-btn"]',
+    '.cheetah-layout-sider',
+    '[class*="user-info"]',
+    '[class*="avatar"]',
+)
+
+_BAIJIAHAO_LOGIN_HINTS = (
+    "login",
+    "passport.baidu.com",
+    "captcha",
+    "verify",
+    "two-factor",
+    "2fa",
+)
+
+
+def _raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its historical
+    retry-until-timeout behaviour.
+    """
+    url = str(getattr(page, "url", "") or "").lower()
+    if not url:
+        return
+    if any(marker in url for marker in _BAIJIAHAO_LOGIN_HINTS):
+        raise LoginRequiredError(
+            "百家号上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -62,6 +105,22 @@ def _build_launch_kwargs(headless: bool) -> dict:
     if LOCAL_CHROME_PATH:
         launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
     return launch_kwargs
+
+
+# Golden local-mode browser options.  ``sau_commands/baijiahao.py`` passes the
+# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
+# drift.  ``launch_kwargs`` never contains ``headless`` (it is injected by the
+# session seam).  Multilogin ignores all three values.
+BAIJIAHAO_LAUNCH_KWARGS = {
+    key: value
+    for key, value in _build_launch_kwargs(headless=False).items()
+    if key != "headless"
+}
+BAIJIAHAO_CONTEXT_KWARGS = {"permissions": ["geolocation"]}
+BAIJIAHAO_INIT_SCRIPT = False
+# Multilogin ignores ``context_kwargs`` (no ``grant_permissions``).  The publish
+# flow never calls ``navigator.geolocation``, so v1 does not depend on the
+# permission; ticket 08 acceptance should still confirm this on a real profile.
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -183,6 +242,86 @@ async def baijiahao_cookie_gen(account_file, qrcode_callback=None, poll_interval
     return result
 
 
+async def _is_locator_visible(locator) -> bool:
+    try:
+        if not await locator.count():
+            return False
+        return bool(await locator.is_visible())
+    except Exception:
+        return False
+
+
+async def _has_baijiahao_login_marker(page: Page) -> bool:
+    try:
+        if await _is_locator_visible(page.get_by_text(BAIJIAHAO_LOGIN_TEXT).first):
+            return True
+    except Exception:
+        pass
+    try:
+        if await _is_locator_visible(page.locator(QR_SELECTOR).first):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def _has_baijiahao_business_anchor(page: Page) -> bool:
+    for selector in BAIJIAHAO_BUSINESS_ANCHOR_SELECTORS:
+        try:
+            if await _is_locator_visible(page.locator(selector).first):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Baijiahao.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Explicit login
+    URLs, the "注册/登录百家号" entry and the Baidu passport QR return ``False``;
+    network failures, 5xx responses, timeouts, unexpected domains and an
+    authenticated shell without any business anchor raise so the CLI exits 1.
+
+    Worst-case budget: 20s navigation + 5s settle, inside the 15-30s spec.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            BAIJIAHAO_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=BAIJIAHAO_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"百家号登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(BAIJIAHAO_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        lowered_url = current_url.lower()
+        if any(marker in lowered_url for marker in BAIJIAHAO_LOGIN_URL_MARKERS):
+            return False
+        if await _has_baijiahao_login_marker(page):
+            return False
+        if await _has_baijiahao_business_anchor(page):
+            return True
+
+        if "baijiahao.baidu.com" not in current_url:
+            raise RuntimeError(
+                "百家号登录状态检查失败：页面未停留在百家号后台"
+                f"（url={current_url or '<empty>'}）"
+            )
+        raise RuntimeError(
+            "百家号登录状态检查失败：未找到账号/发布控件等已登录标记"
+            "（页面结构异常）"
+        )
+    finally:
+        await page.close()
+
+
 async def cookie_auth(account_file):
     """验证百家号 cookie 是否有效。访问后台首页，检测是否出现登录提示。"""
     account_file = _resolve_account_file(account_file)
@@ -244,7 +383,9 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
-        self.account_file = _resolve_account_file(account_file)
+        self.account_file = (
+            _resolve_account_file(account_file) if account_file is not None else None
+        )
         self.publish_date = publish_date
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
@@ -254,11 +395,12 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         self.local_executable_path = LOCAL_CHROME_PATH
         self.max_title_length = 30
 
-    async def validate_upload_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成百家号登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成百家号登录: {self.account_file}")
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        if check_cookie:
+            if not self.account_file or not os.path.exists(self.account_file):
+                raise RuntimeError(f"cookie文件不存在，请先完成百家号登录: {self.account_file}")
+            if not await cookie_auth(self.account_file):
+                raise RuntimeError(f"cookie文件已失效，请先完成百家号登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频标题不能为空")
         if not self.thumbnail_path:
@@ -266,62 +408,80 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         self.file_path = str(self.validate_video_file(self.file_path))
         self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         baijiahao_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
         await self.validate_upload_args()
         baijiahao_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        await context.grant_permissions(["geolocation"])
+        browser = await playwright.chromium.launch(
+            headless=self.headless, **BAIJIAHAO_LAUNCH_KWARGS
+        )
+        context = await browser.new_context(
+            storage_state=self.account_file,
+            **BAIJIAHAO_CONTEXT_KWARGS,
+        )
 
         try:
-            page = await context.new_page()
-            await page.goto(BAIJIAHAO_PUBLISH_URL, timeout=120000, wait_until="domcontentloaded")
-            baijiahao_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
-
-            # 等待发布页加载
-            await page.wait_for_timeout(3000)
-
-            # 1) 上传视频文件
-            file_input = page.locator('input[type="file"][accept*="video"], input[type="file"][accept*="mp4"]').first
-            if not await file_input.count():
-                file_input = page.locator("div[class^='video-main-container'] input[type='file']").first
-            if not await file_input.count():
-                file_input = page.locator('input[type="file"]').first
-            await file_input.wait_for(state="attached", timeout=30000)
-            await file_input.set_input_files(self.file_path)
-            baijiahao_logger.info(_msg("🏃", f"已选择视频文件: {self.file_path}"))
-
-            # 2) 等待进入表单页面（contenteditable 标题区出现即表单渲染完毕）
-            title_editor = page.locator('div[class*="contentEditable"]').first
-            await title_editor.wait_for(state="visible", timeout=180000)
-            await page.wait_for_timeout(1000)
-
-            # 3) 填写标题
-            await self._fill_title(page)
-
-            # 4) 等待视频上传完成
-            await self._wait_upload_complete(page)
-
-            # 5) 上传横版封面（必填）
-            await self._upload_thumbnail(page)
-
-            # 6) 勾选「含AI生成内容」
-            await self._check_ai_declaration(page)
-
-            # 7) 选择合集（如有配置）
-            await self._apply_collection(page)
-
-            # 8) 点击发布
-            await self._submit_publish(page)
-
-            # 保存 cookie
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
             await context.storage_state(path=self.account_file)
             baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
             await browser.close()
+
+    async def upload_in(self, session: BrowserSession) -> None:
+        multilogin = session.mode == "multilogin"
+        page = await session.context.new_page()
+        await page.goto(BAIJIAHAO_PUBLISH_URL, timeout=120000, wait_until="domcontentloaded")
+        if multilogin:
+            _raise_if_login_required(page)
+        baijiahao_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
+
+        # 等待发布页加载
+        await page.wait_for_timeout(3000)
+
+        # 1) 上传视频文件
+        file_input = page.locator('input[type="file"][accept*="video"], input[type="file"][accept*="mp4"]').first
+        if not await file_input.count():
+            file_input = page.locator("div[class^='video-main-container'] input[type='file']").first
+        if not await file_input.count():
+            file_input = page.locator('input[type="file"]').first
+        await file_input.wait_for(state="attached", timeout=30000)
+        await file_input.set_input_files(self.file_path)
+        baijiahao_logger.info(_msg("🏃", f"已选择视频文件: {self.file_path}"))
+
+        # 2) 等待进入表单页面（contenteditable 标题区出现即表单渲染完毕）
+        title_editor = page.locator('div[class*="contentEditable"]').first
+        await title_editor.wait_for(state="visible", timeout=180000)
+        await page.wait_for_timeout(1000)
+
+        # 3) 填写标题
+        await self._fill_title(page)
+
+        # 4) 等待视频上传完成
+        await self._wait_upload_complete(page, multilogin=multilogin)
+
+        # 5) 上传横版封面（必填）
+        await self._upload_thumbnail(page)
+
+        # 6) 勾选「含AI生成内容」
+        await self._check_ai_declaration(page)
+
+        # 7) 选择合集（如有配置）
+        await self._apply_collection(page)
+
+        # 8) 点击发布
+        await self._submit_publish(page, multilogin=multilogin)
 
     async def _fill_title(self, page: Page) -> None:
         title_field = page.locator('div[class*="contentEditable"]').first
@@ -338,7 +498,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         await title_field.fill(title)
         baijiahao_logger.info(_msg("🏷️", f"标题已填写: {title}"))
 
-    async def _wait_upload_complete(self, page: Page, timeout: int = 600) -> None:
+    async def _wait_upload_complete(self, page: Page, timeout: int = 600, *, multilogin: bool = False) -> None:
         """等待视频真正上传完成。
 
         百度真实上传进度是一段百分比文字（9%…99%，上传完成后消失，本文件实测约 35s）。
@@ -355,6 +515,8 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             if time.monotonic() - start > timeout:
                 baijiahao_logger.warning(_msg("⚠️", f"等待上传超时（>{timeout}s），继续后续步骤"))
                 return
+            if multilogin:
+                _raise_if_login_required(page)
 
             body = ""
             try:
@@ -550,7 +712,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             baijiahao_logger.info(_msg("🏃", "等待封面生成..."))
             await asyncio.sleep(3)
 
-    async def _submit_publish(self, page: Page) -> None:
+    async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         """点击发布按钮并确认成功。"""
         # 确保没有残留弹窗遮挡
         modal = page.locator('.cheetah-modal-wrap:visible').first
@@ -571,6 +733,8 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         # 等待跳转或成功提示（最多30s）
         start = time.monotonic()
         while time.monotonic() - start < 30:
+            if multilogin:
+                _raise_if_login_required(page)
             url = page.url
             # 发布成功跳转
             if BAIJIAHAO_SUCCESS_URL_PREFIX in url or "/rc/content" in url or "/rc/home" in url:
@@ -578,6 +742,11 @@ class BaiJiaHaoVideo(BaseVideoUploader):
                 return
             # 检查是否出现百度安全验证
             if await page.locator('text="百度安全验证"').count():
+                if multilogin:
+                    raise LoginRequiredError(
+                        "百家号上传过程中需要人工完成百度安全验证："
+                        "请在 Multilogin 应用中登录 Profile 后重试。"
+                    )
                 raise RuntimeError("出现百度安全验证，需人工处理")
             # 检查是否有错误提示阻止发布
             error_toast = page.locator('.cheetah-message-error, .cheetah-message-warning').first
@@ -592,6 +761,9 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         else:
             raise RuntimeError(f"发布后未跳转到成功页面（30s），当前 URL: {page.url}")
 
-    async def main(self):
+    async def main(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)

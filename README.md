@@ -88,7 +88,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | 支付宝生活号 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频发布 |
 | 微博 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题最多 30 字 |
 | 虎扑 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题 4–40 字 |
-| TikTok | ✅ | ✅ | - | - | ✅ | - | ✅ | Chrome 版实现；没有 `sau` CLI |
+| TikTok | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 仅 Multilogin 模式；Profile 界面需 English (US) |
 | 雪球 | ✅ | - | ✅ | - | - | ✅ | ✅ | [长文与配图](./docs/xueqiu.md)：支持 HTML/Markdown/TXT、正文图片和封面 |
 | YouTube | ✅ | ✅ | - | - | 开发中 | ✅ | ✅ | 视频发布 |
 | 知乎 | ✅ | ✅ | ✅ | - | 实验性 | ✅ | ✅ | [文章与视频发布](./skills/zhihu-upload/SKILL.md)，文章支持正文位置配图 |
@@ -166,6 +166,32 @@ sau douyin login --account creator
 sau douyin check --account creator
 # 换成 dayu、xueqiu、zhihu 等平台名称即可；具体登录要求见对应文档。
 ```
+
+#### Multilogin X 模式（可选）
+
+除 Bilibili 外，浏览器平台可以改由 Multilogin X（MLX）Profile 提供浏览器与登录态。设置环境变量 `MLX_API_TOKEN` 后，CLI 不再读写 `cookies/*.json`，而是通过本机 Multilogin Launcher 启动指定 Profile，并在结束时停止由本次调用启动的 Profile。
+
+```bash
+export MLX_API_TOKEN="<token>"
+
+# check：0=已登录，10=需要人工登录
+sau douyin check --folder-id <folder_id> --profile-id <profile_id>
+
+# 上传：--account 可省略，缺省用 profile_id 作日志标签
+sau douyin upload-video --folder-id <folder_id> --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
+```
+
+- `--folder-id` / `--profile-id` 在 MLX 模式必填，本地模式忽略。
+- MLX 下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验。
+- MLX 下 `login` 一律拒绝；请先在 Multilogin 应用中登录 Profile，并处理验证码/2FA。
+- 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`10` 需要登录、`130` 用户中断。
+- v1 部署前提：CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器；Profile 使用 Mimic 内核；Profile 已人工登录且无待处理验证码/2FA；TikTok 的 Profile 界面须为 English (US)。
+- 不支持：Docker launcher、跨机 launcher、Linux 无桌面、Bilibili、TikTok 本地模式、通过 CLI 在 MLX 中登录。
+- 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 launcher。
+- MLX 只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号和 Instagram 的本地 `.identity.json` / 用户 ID 比对在 MLX 下不执行，账号错配风险由调度侧承担。
+
+完整参数、平台支持范围与实现差异见 [CLI 使用说明的 Multilogin X 模式](./docs/CLI.md#multilogin-x-模式)。
 
 #### 视频
 

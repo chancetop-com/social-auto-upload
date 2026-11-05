@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from patchright.async_api import async_playwright
 from uploader.base_video import BaseVideoUploader
 from uploader.meta_uploader.facebook_uploader.main import (
+    FACEBOOK_CONTEXT_KWARGS,
+    FACEBOOK_INIT_SCRIPT,
+    FACEBOOK_LAUNCH_KWARGS,
     FACEBOOK_PROXY,
     FacebookVideo,
     FacebookPost,
     facebook_cookie_auth,
     facebook_setup,
+    is_logged_in,
 )
 from uploader.meta_uploader.facebook_uploader.posts import facebook_post_action
 from sau_commands.arguments import (
@@ -19,6 +24,16 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    login_required_error,
+    reject_multilogin_login,
+    require_account,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
+from utils.browser_session import browser_session
 
 
 def register(platform_parsers):
@@ -29,7 +44,7 @@ def register(platform_parsers):
 
     for action in ("verify", "delete"):
         post_parser = facebook_actions.add_parser(action, help="核对原作品" if action == "verify" else "核对原作品后移至垃圾箱（30 天后平台删除）")
-        post_parser.add_argument("--account", required=True)
+        post_parser.add_argument("--account", required=False)
         post_parser.add_argument("--post-url", required=True, help="原作品的 Facebook 链接")
         post_parser.add_argument("--owner-id", required=True, help="原作品所属个人主页的数字 ID")
         post_parser.add_argument("--expected-text", required=True, help="原作品中用于交叉核验的正文")
@@ -45,7 +60,7 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = facebook_actions.add_parser(action_name, help=f"Facebook {action_name}")
-        action_parser.add_argument("--account", required=True, help="Facebook user-defined account_name")
+        action_parser.add_argument("--account", required=False, help="Facebook user-defined account_name")
         action_parser.add_argument(
             "--proxy",
             default=FACEBOOK_PROXY,
@@ -55,11 +70,14 @@ def register(platform_parsers):
             add_runtime_flags(action_parser)
             # Facebook 登录必须在可见 Chrome 中完成，避免无头模式下用户看不到登录挑战。
             action_parser.set_defaults(headless=False)
+        else:
+            add_runtime_flags(action_parser)
+            add_multilogin_flags(action_parser)
 
     facebook_upload_video_parser = facebook_actions.add_parser(
         "upload-video", help="Upload one video to a Facebook personal post"
     )
-    facebook_upload_video_parser.add_argument("--account", required=True, help="Facebook user-defined account_name")
+    facebook_upload_video_parser.add_argument("--account", required=False, help="Facebook user-defined account_name")
     facebook_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     facebook_upload_video_parser.add_argument("--title", required=True, help="Post title, merged into Facebook caption")
     facebook_upload_video_parser.add_argument("--desc", default="", help="Optional post description")
@@ -70,15 +88,17 @@ def register(platform_parsers):
         help="浏览器代理地址；不传时直连，传空字符串可覆盖环境变量并直连",
     )
     add_runtime_flags(facebook_upload_video_parser)
+    add_multilogin_flags(facebook_upload_video_parser)
 
     facebook_note = facebook_actions.add_parser("upload-note", help="向个人主页发布图片及正文")
-    facebook_note.add_argument("--account", required=True)
+    facebook_note.add_argument("--account", required=False)
     facebook_note.add_argument("--images", required=True, nargs="+", type=existing_file_path)
     facebook_note.add_argument("--title", required=True)
     facebook_note.add_argument("--note", default="")
     facebook_note.add_argument("--tags", default="")
     facebook_note.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
     add_runtime_flags(facebook_note)
+    add_multilogin_flags(facebook_note)
     facebook_note.set_defaults(headless=False)
 
 
@@ -116,7 +136,56 @@ async def check_facebook_account(
     return await facebook_cookie_auth(account_file, proxy=proxy)
 
 
-async def upload_facebook_video(request: FacebookVideoUploadRequest) -> Path:
+def _raise_login_required(target) -> None:
+    raise login_required_error("Facebook", target.profile_id)
+
+
+async def _upload_facebook_mlx(
+    target, *, title: str, files, description: str, tags: list[str], headless: bool
+) -> None:
+    """Run one Facebook post through the Multilogin Profile session.
+
+    ``--proxy``/``SAU_FACEBOOK_PROXY`` are not forwarded: the Profile owns the
+    egress IP.  No cookie file is resolved or read.
+    """
+    app = FacebookPost(
+        title=title,
+        file_path=files,
+        description=description,
+        tags=tags,
+        account_file=None,
+        proxy=None,
+        headless=headless,
+    )
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=headless,
+            account_file=None,
+            multilogin=target,
+            launch_kwargs=FACEBOOK_LAUNCH_KWARGS,
+            context_kwargs=FACEBOOK_CONTEXT_KWARGS,
+            init_script=FACEBOOK_INIT_SCRIPT,
+        ) as session:
+            if not await is_logged_in(session.context):
+                _raise_login_required(target)
+            await app.main(session=session)
+
+
+async def upload_facebook_video(
+    request: FacebookVideoUploadRequest, *, target=None
+) -> Path | None:
+    if target is not None:
+        await _upload_facebook_mlx(
+            target,
+            title=request.title,
+            files=[request.video_file],
+            description=request.description,
+            tags=request.tags,
+            headless=request.headless,
+        )
+        return None
+
     account_file = resolve_account_file("facebook", request.account_name)
     is_ready = await facebook_setup(
         account_file,
@@ -144,15 +213,19 @@ async def upload_facebook_video(request: FacebookVideoUploadRequest) -> Path:
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
-    if args.action == "upload-note":
-        for image in args.images:
-            BaseVideoUploader.validate_image_file(image)
-        app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
-                           resolve_account_file("facebook", args.account), proxy=args.proxy, headless=args.headless)
-        await app.main()
-        print("Facebook image post submitted")
+    if args.action == "login":
+        reject_multilogin_login("facebook", args)
+        require_local_account(args)
+        result = await login_facebook_account(
+            args.account, headless=args.headless, proxy=args.proxy
+        )
+        if not result["success"]:
+            raise RuntimeError(result["message"])
+        print(f"Facebook login flow completed: {result['account_file']}")
         return 0
+
     if args.action in {"verify", "delete"}:
+        require_account(args)
         result = await facebook_post_action(
             resolve_account_file("facebook", args.account), post_url=args.post_url,
             owner_id=args.owner_id, expected_text=args.expected_text,
@@ -166,23 +239,55 @@ async def run(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    if args.action == "login":
-        result = await login_facebook_account(
-            args.account, headless=args.headless, proxy=args.proxy
-        )
-        if not result["success"]:
-            raise RuntimeError(result["message"])
-        print(f"Facebook login flow completed: {result['account_file']}")
-        return 0
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
 
     if args.action == "check":
-        is_valid = await check_facebook_account(args.account, proxy=args.proxy)
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=args.headless,
+                    multilogin=target,
+                    launch_kwargs=FACEBOOK_LAUNCH_KWARGS,
+                    context_kwargs=FACEBOOK_CONTEXT_KWARGS,
+                    init_script=FACEBOOK_INIT_SCRIPT,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
+        is_valid = await check_facebook_account(account_label, proxy=args.proxy)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
+    if args.action == "upload-note":
+        for image in args.images:
+            BaseVideoUploader.validate_image_file(image)
+        if target is not None:
+            await _upload_facebook_mlx(
+                target,
+                title=args.title,
+                files=args.images,
+                description=args.note,
+                tags=parse_tags(args.tags),
+                headless=args.headless,
+            )
+            print("Facebook image post submitted")
+            return 0
+
+        app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
+                           resolve_account_file("facebook", account_label), proxy=args.proxy, headless=args.headless)
+        await app.main()
+        print("Facebook image post submitted")
+        return 0
+
     if args.action == "upload-video":
         request = FacebookVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
@@ -191,7 +296,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_facebook_video(request)
+        await upload_facebook_video(request, target=target)
         print(f"Facebook video upload submitted: {request.video_file}")
         return 0
 

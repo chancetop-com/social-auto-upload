@@ -1,6 +1,8 @@
 """知乎创作中心页面与上传限制。"""
 from datetime import timedelta, timezone
 
+from conf import LOCAL_CHROME_PATH
+
 
 ZHIHU_CREATOR_URL = "https://www.zhihu.com/creator"
 ZHIHU_ARTICLE_URL = "https://zhuanlan.zhihu.com/write"
@@ -8,6 +10,12 @@ ZHIHU_VIDEO_URL = "https://www.zhihu.com/upload-video"
 ZHIHU_MANAGE_URL = "https://www.zhihu.com/creator/manage/creation"
 
 ZHIHU_TIMEZONE = timezone(timedelta(hours=8), "Asia/Shanghai")
+
+# Golden local-mode browser options.  Multilogin mode silently ignores these;
+# the Profile owns its timezone/fingerprint (deployment docs recommend
+# Asia/Shanghai so scheduled posts keep the same wall clock).
+ZHIHU_LAUNCH_KWARGS = {"executable_path": LOCAL_CHROME_PATH or None, "channel": "chrome"}
+ZHIHU_CONTEXT_KWARGS = {"timezone_id": "Asia/Shanghai"}
 ZHIHU_SCHEDULE_MINUTES = 30
 ZHIHU_SCHEDULE_MAX_HOURS = 48
 

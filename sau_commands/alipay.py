@@ -2,7 +2,17 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from uploader.alipay_uploader.main import AlipayVideo, alipay_setup, cookie_auth as alipay_cookie_auth
+
+from patchright.async_api import async_playwright
+
+from uploader.alipay_uploader.main import (
+    ALIPAY_INIT_SCRIPT,
+    ALIPAY_LAUNCH_KWARGS,
+    AlipayVideo,
+    alipay_setup,
+    cookie_auth as alipay_cookie_auth,
+    is_logged_in,
+)
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
     add_runtime_flags,
@@ -10,6 +20,15 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    login_required_error,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
+from utils.browser_session import browser_session
 
 
 def register(platform_parsers):
@@ -20,12 +39,13 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = alipay_actions.add_parser(action_name, help=f"Alipay {action_name}")
-        action_parser.add_argument("--account", required=True, help="Alipay user-defined account_name")
-        if action_name == "login":
-            add_runtime_flags(action_parser)
+        action_parser.add_argument("--account", required=False, help="Alipay user-defined account_name")
+        add_runtime_flags(action_parser)
+        if action_name == "check":
+            add_multilogin_flags(action_parser)
 
     alipay_upload_video_parser = alipay_actions.add_parser("upload-video", help="Upload one video to Alipay")
-    alipay_upload_video_parser.add_argument("--account", required=True, help="Alipay user-defined account_name")
+    alipay_upload_video_parser.add_argument("--account", required=False, help="Alipay user-defined account_name")
     alipay_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     alipay_upload_video_parser.add_argument("--title", required=True, help="Video title")
     alipay_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
@@ -33,6 +53,7 @@ def register(platform_parsers):
     alipay_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path")
     alipay_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(alipay_upload_video_parser)
+    add_multilogin_flags(alipay_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -60,7 +81,48 @@ async def check_alipay_account(account_name: str) -> bool:
     return await alipay_cookie_auth(str(account_file))
 
 
-async def upload_alipay_video(request: AlipayVideoUploadRequest) -> Path:
+def _build_alipay_uploader(
+    request: AlipayVideoUploadRequest, account_file: str | None
+) -> AlipayVideo:
+    return AlipayVideo(
+        title=request.title,
+        file_path=str(request.video_file),
+        tags=request.tags,
+        account_file=account_file,
+        desc=request.description,
+        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
+        collection_name=request.collection_name,
+        debug=request.debug,
+        headless=request.headless,
+    )
+
+
+def _raise_login_required(target) -> None:
+    raise login_required_error("支付宝", target.profile_id)
+
+
+async def upload_alipay_video(
+    request: AlipayVideoUploadRequest, *, target=None
+) -> Path | None:
+    if target is not None:
+        app = _build_alipay_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=ALIPAY_LAUNCH_KWARGS,
+                # Alipay deliberately does not grant geolocation in MLX mode and
+                # never injects the stealth init script.
+                context_kwargs=None,
+                init_script=ALIPAY_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.alipay_upload_video(session=session)
+        return None
+
     account_file = resolve_account_file("alipay", request.account_name)
     is_ready = await alipay_setup(str(account_file), handle=False)
     if not is_ready:
@@ -68,17 +130,7 @@ async def upload_alipay_video(request: AlipayVideoUploadRequest) -> Path:
             f"Alipay cookie is missing or expired: {account_file}. Run `sau alipay login --account {request.account_name}` first."
         )
 
-    app = AlipayVideo(
-        title=request.title,
-        file_path=str(request.video_file),
-        tags=request.tags,
-        account_file=str(account_file),
-        desc=request.description,
-        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
-        collection_name=request.collection_name,
-        debug=request.debug,
-        headless=request.headless,
-    )
+    app = _build_alipay_uploader(request, str(account_file))
     await app.main()
     return account_file
 
@@ -86,20 +138,39 @@ async def upload_alipay_video(request: AlipayVideoUploadRequest) -> Path:
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
+        reject_multilogin_login("alipay", args)
+        require_local_account(args)
         result = await login_alipay_account(args.account, headless=args.headless)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Alipay login flow completed: {result['account_file']}")
         return 0
 
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
     if args.action == "check":
-        is_valid = await check_alipay_account(args.account)
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=args.headless,
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
+        is_valid = await check_alipay_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
     if args.action == "upload-video":
         request = AlipayVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
@@ -109,7 +180,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_alipay_video(request)
+        await upload_alipay_video(request, target=target)
         print(f"Alipay video upload submitted: {request.video_file}")
         return 0
 

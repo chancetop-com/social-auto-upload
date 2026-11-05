@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin
 
+from patchright.async_api import BrowserContext
 from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
@@ -17,6 +18,8 @@ from patchright.async_api import async_playwright
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
@@ -76,6 +79,44 @@ def _build_launch_kwargs(headless: bool) -> dict:
     else:
         launch_kwargs["channel"] = "chrome"
     return launch_kwargs
+
+
+# Golden local-mode browser options.  ``sau_commands/tencent.py`` passes the
+# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
+# drift.  ``launch_kwargs`` never contains ``headless`` (it is injected by the
+# session seam).
+TENCENT_LAUNCH_KWARGS = {
+    key: value
+    for key, value in _build_launch_kwargs(headless=False).items()
+    if key != "headless"
+}
+TENCENT_CONTEXT_KWARGS: dict = {}
+# The video path never injected the stealth script; the note path did.  Keep both
+# behaviours byte-for-byte in local mode.  Multilogin ignores both values.
+TENCENT_INIT_SCRIPT = False
+TENCENT_NOTE_INIT_SCRIPT = True
+
+TENCENT_LOGIN_CHECK_URL = TENCENT_UPLOAD_URL
+TENCENT_LOGIN_CHECK_TIMEOUT_MS = 20_000
+TENCENT_LOGIN_CHECK_SETTLE_MS = 3_000
+
+_TENCENT_LOGIN_HINTS = ("login", "captcha", "verify", "two-factor", "2fa")
+
+
+def _raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its historical
+    retry-until-timeout behaviour.
+    """
+    url = str(getattr(page, "url", "") or "").lower()
+    if not url:
+        return
+    if any(marker in url for marker in _TENCENT_LOGIN_HINTS):
+        raise LoginRequiredError(
+            "视频号上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
 
 
 def _get_qrcode_utils():
@@ -251,6 +292,13 @@ async def _is_tencent_login_completed(page: Page) -> bool:
     if not (page.url.startswith(TENCENT_UPLOAD_URL) or page.url.startswith(TENCENT_MANAGE_URL)):
         return False
 
+    if await _has_tencent_login_marker(page):
+        return False
+
+    return True
+
+
+async def _has_tencent_login_marker(page: Page) -> bool:
     login_markers = [
         page.locator("div.login-qrcode-wrap").first,
         page.locator("div.qrcode-wrap").first,
@@ -260,11 +308,75 @@ async def _is_tencent_login_completed(page: Page) -> bool:
     for marker in login_markers:
         try:
             if await marker.count() and await marker.is_visible():
-                return False
+                return True
         except Exception:
             continue
+    return False
 
-    return True
+
+async def _has_tencent_login_page(page: Page) -> bool:
+    """Return True when the page/frames show WeChat's login surface."""
+    current_url = str(getattr(page, "url", "") or "").lower()
+    if "login.html" in current_url:
+        return True
+    for frame in getattr(page, "frames", None) or []:
+        frame_url = str(getattr(frame, "url", "") or "").lower()
+        if "open.weixin.qq.com/connect/qrconnect" in frame_url:
+            return True
+    return False
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to WeChat Channels.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A login page,
+    QR-login iframe or expired-session redirect returns ``False``; network
+    failures, 5xx responses, timeouts and unexpected page structures raise so
+    the CLI exits 1 instead of treating an outage as "logged out".
+
+    The positive signal is the existing ``_is_tencent_login_completed`` check
+    (发表视频 / 保存草稿 / authenticated upload URLs), which avoids the legacy
+    "no redirect within 8s means valid" false positive.
+
+    Worst-case budget: 20s navigation + 3s settle, inside the 15-30s spec.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            TENCENT_LOGIN_CHECK_URL,
+            wait_until="domcontentloaded",
+            timeout=TENCENT_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"视频号登录状态检查失败：HTTP {status}")
+
+        if await _has_tencent_login_page(page):
+            return False
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(TENCENT_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "channels.weixin.qq.com" not in current_url:
+            raise RuntimeError(
+                "视频号登录状态检查失败：页面未停留在视频号助手"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if await _has_tencent_login_page(page):
+            return False
+        if await _is_tencent_login_completed(page):
+            return True
+        if await _has_tencent_login_marker(page):
+            return False
+
+        raise RuntimeError(
+            "视频号登录状态检查失败：未找到发表视频/保存草稿等已登录标记"
+            "（页面结构异常）"
+        )
+    finally:
+        await page.close()
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:
@@ -501,18 +613,21 @@ class TencentBaseUploader(BaseVideoUploader):
         collection_name: str | None = None,
     ):
         self.publish_date = publish_date
-        self.account_file = _resolve_account_file(account_file)
+        self.account_file = (
+            _resolve_account_file(account_file) if account_file is not None else None
+        )
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.headless = headless
         self.collection_name = collection_name
         self.local_executable_path = LOCAL_CHROME_PATH
 
-    async def validate_base_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成视频号登录: {self.account_file}")
+    async def validate_base_args(self, *, check_cookie: bool = True):
+        if check_cookie:
+            if not self.account_file or not os.path.exists(self.account_file):
+                raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
+            if not await cookie_auth(self.account_file):
+                raise RuntimeError(f"cookie文件已失效，请先完成视频号登录: {self.account_file}")
         if self.publish_strategy not in {TENCENT_PUBLISH_STRATEGY_IMMEDIATE, TENCENT_PUBLISH_STRATEGY_SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -578,7 +693,7 @@ class TencentBaseUploader(BaseVideoUploader):
         except Exception:
             await page.keyboard.press("Escape")
 
-    async def open_upload_page(self, page: Page) -> None:
+    async def open_upload_page(self, page: Page, *, multilogin: bool = False) -> None:
         # 视频号已改版：直接全页加载 /platform/post/create 会被跳回 /platform 首页，
         # 发布表单 iframe 只加载空壳（Vue 不挂载），页面上没有任何 input[type=file]。
         # 正确入口：先进首页，再点可见的「发表视频」按钮做客户端跳转，表单才会真正挂载。
@@ -586,14 +701,24 @@ class TencentBaseUploader(BaseVideoUploader):
         # cookie 失效时前端 JS 会跳转到登录页, 提前发现并报明确的错误
         try:
             await page.wait_for_url("**/login.html**", timeout=8000)
+            if multilogin:
+                _raise_if_login_required(page)
             raise RuntimeError("视频号 cookie 已失效（被跳转到登录页），请重新扫码登录后再发布")
         except TimeoutError:
             pass  # 8 秒内未跳转, 正常
+        except LoginRequiredError:
+            raise
         except RuntimeError:
             raise
         except Exception:
             pass
         if any("open.weixin.qq.com/connect/qrconnect" in fr.url for fr in page.frames):
+            if multilogin:
+                _raise_if_login_required(page)
+                raise LoginRequiredError(
+                    "视频号上传过程中需要重新登录（登录二维码）："
+                    "请在 Multilogin 应用中登录 Profile 后重试。"
+                )
             raise RuntimeError("视频号 cookie 已失效（被跳转到登录页），请重新扫码登录后再发布")
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
@@ -808,7 +933,12 @@ class TencentBaseUploader(BaseVideoUploader):
             tencent_logger.warning(_msg("😵", f"设置视频标注「{label_text}」失败，跳过继续发布：{exc}"))
 
     async def wait_for_upload_complete(
-        self, page: Page, timeout_seconds: int = 3600, max_retries: int = 3
+        self,
+        page: Page,
+        timeout_seconds: int = 3600,
+        max_retries: int = 3,
+        *,
+        multilogin: bool = False,
     ) -> None:
         """等上传完成。
 
@@ -837,6 +967,8 @@ class TencentBaseUploader(BaseVideoUploader):
                 raise RuntimeError(
                     f"视频号上传超过 {timeout_seconds} 秒仍未完成（「发表」按钮一直不可用）"
                 )
+            if multilogin:
+                _raise_if_login_required(page)
             try:
                 publish_button = page.locator('div.form-btns button:has-text("发表"):visible').first
                 if await publish_button.count():
@@ -879,10 +1011,12 @@ class TencentBaseUploader(BaseVideoUploader):
             except Exception:
                 await asyncio.sleep(2)
 
-    async def submit_publish(self, page: Page) -> None:
+    async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         is_draft = getattr(self, "is_draft", False)
         # 先等待并清理遮罩/弹窗,再等发表按钮出现
         for wait_round in range(60):
+            if multilogin:
+                _raise_if_login_required(page)
             await self._dismiss_switch_account_dialog(page)
             try:
                 await page.evaluate("""() => document.querySelectorAll('.mask, .changeAccount-dialog, .common-dialog').forEach(e => e.remove())""")
@@ -899,6 +1033,8 @@ class TencentBaseUploader(BaseVideoUploader):
             tencent_logger.warning(_msg("😵", "60s 内未找到可见的发表/草稿按钮，尝试强制继续"))
         # 点发表/草稿
         for attempt in range(20):
+            if multilogin:
+                _raise_if_login_required(page)
             try:
                 if await publish_btn.count():
                     try:
@@ -976,8 +1112,8 @@ class TencentVideo(TencentBaseUploader):
         self.thumbnail_portrait_path = thumbnail_portrait_path or thumbnail_path
         self.short_title = short_title
 
-    async def validate_upload_args(self):
-        await self.validate_base_args()
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        await self.validate_base_args(check_cookie=check_cookie)
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         self.file_path = str(self.validate_video_file(self.file_path))
@@ -1103,40 +1239,65 @@ class TencentVideo(TencentBaseUploader):
         # 上传中选的合集会被重置/不绑定（"日志说选了、后台没加"的根因）。
         # 改到 wait_for_upload_complete 之后再选，见 upload()。
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         tencent_logger.info(_msg("🧍", "小人先检查 cookie、视频文件和发布时间"))
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
+        browser = await playwright.chromium.launch(
+            headless=self.headless, **TENCENT_LAUNCH_KWARGS
+        )
+        context = await browser.new_context(
+            storage_state=self.account_file,
+            **TENCENT_CONTEXT_KWARGS,
+        )
 
         try:
-            page = await context.new_page()
-            await self.open_upload_page(page)
-            tencent_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}"))
-
-            await self.upload_video_file(page, self.file_path)
-            await self.prepare_video_for_publish(page)
-            await self.wait_for_upload_complete(page)
-            # 上传完成、表单稳定后再选合集（否则上传中选的会被重置）
-            await self.apply_collection(page)
-            await self.apply_original_statement(page)
-            await self.set_thumbnail(page)
-
-            if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-                await self.set_schedule_time_tencent(page, self.publish_date)
-
-            await self.set_short_title(page, self.title, self.short_title)
-            await self.submit_publish(page)
-
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
             await context.storage_state(path=self.account_file)
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
             await browser.close()
 
-    async def tencent_upload_video(self):
+    async def upload_in(self, session: BrowserSession) -> None:
+        multilogin = session.mode == "multilogin"
+        page = await session.context.new_page()
+        await self.open_upload_page(page, multilogin=multilogin)
+        if multilogin:
+            _raise_if_login_required(page)
+        tencent_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}"))
+
+        await self.upload_video_file(page, self.file_path)
+        if multilogin:
+            _raise_if_login_required(page)
+        await self.prepare_video_for_publish(page)
+        await self.wait_for_upload_complete(page, multilogin=multilogin)
+        # 上传完成、表单稳定后再选合集（否则上传中选的会被重置）
+        await self.apply_collection(page)
+        await self.apply_original_statement(page)
+        await self.set_thumbnail(page)
+
+        if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+            await self.set_schedule_time_tencent(page, self.publish_date)
+
+        await self.set_short_title(page, self.title, self.short_title)
+        await self.submit_publish(page, multilogin=multilogin)
+
+    async def tencent_upload_video(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
 
@@ -1171,8 +1332,8 @@ class TencentNote(TencentBaseUploader):
         self.tags = tags or []
         self.is_draft = is_draft
 
-    async def validate_upload_args(self):
-        await self.validate_base_args()
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        await self.validate_base_args(check_cookie=check_cookie)
         if not self.title or not str(self.title).strip():
             raise ValueError("图文模式下，title 是必须的")
         if not self.image_paths:
@@ -1209,34 +1370,58 @@ class TencentNote(TencentBaseUploader):
         await self.upload_note_images(page)
         await self.prepare_note_for_publish(page)
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         tencent_logger.info(_msg("🧍", "小人先检查 cookie、图文图片和发布时间"))
         await self.validate_upload_args()
         tencent_logger.info(_msg("🥳", "图文上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await browser.new_context(storage_state=self.account_file)
-        context = await set_init_script(context)
+        browser = await playwright.chromium.launch(
+            headless=self.headless, **TENCENT_LAUNCH_KWARGS
+        )
+        context = await browser.new_context(
+            storage_state=self.account_file,
+            **TENCENT_CONTEXT_KWARGS,
+        )
+        if TENCENT_NOTE_INIT_SCRIPT:
+            context = await set_init_script(context)
 
         try:
-            page = await context.new_page()
-            await self.open_upload_page(page)
-            tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
-
-            await self.upload_note_content(page)
-
-            if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-                await self.set_schedule_time_tencent(page, self.publish_date)
-
-            await self.submit_publish(page)
-
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
             await context.storage_state(path=self.account_file)
             tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
             await browser.close()
 
-    async def tencent_upload_note(self):
+    async def upload_in(self, session: BrowserSession) -> None:
+        multilogin = session.mode == "multilogin"
+        page = await session.context.new_page()
+        await self.open_upload_page(page, multilogin=multilogin)
+        if multilogin:
+            _raise_if_login_required(page)
+        tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
+
+        await self.upload_note_content(page)
+
+        if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+            await self.set_schedule_time_tencent(page, self.publish_date)
+
+        await self.submit_publish(page, multilogin=multilogin)
+
+    async def tencent_upload_note(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
 

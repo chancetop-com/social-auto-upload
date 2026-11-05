@@ -26,12 +26,19 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.log import hupu_logger
 
 
 HUPU_HOME_URL = "https://www.hupu.com/"
 HUPU_LOGIN_URL = "https://passport.hupu.com/v2/login?pcPhone=1&jumpurl=https://www.hupu.com&from=https://www.hupu.com"
 HUPU_PUBLISH_URL = "https://bbs.hupu.com/newpost?tabkey=2"
+
+# MLX 登录检测只打开一个页面；总预算 20s 导航 + 2.5s 稳定，落在 15-30s 规范内。
+HUPU_LOGIN_CHECK_URL = HUPU_PUBLISH_URL
+HUPU_LOGIN_CHECK_TIMEOUT_MS = 20_000
+HUPU_LOGIN_CHECK_SETTLE_MS = 2_500
 
 # 虎扑发布成功后跳转的帖子 URL 模式
 HUPU_POST_URL_PATTERN = re.compile(r"bbs\.hupu\.com/\d+\.html")
@@ -43,6 +50,8 @@ _CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 _STEALTH_SCRIPT = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 """
+
+_LOGIN_URL_MARKERS = ("passport.hupu.com", "/login", "login?", "captcha", "verify", "two-factor", "2fa")
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -86,6 +95,17 @@ def _resolve_account_file(account_file: str | Path) -> str:
     return str(path.resolve())
 
 
+# Golden local-mode options.  ``sau_commands/hupu.py`` passes the same values to
+# ``browser_session`` so the legacy and session-based local paths cannot drift.
+HUPU_LAUNCH_KWARGS = {
+    key: value
+    for key, value in _build_launch_kwargs(headless=False).items()
+    if key != "headless"
+}
+HUPU_CONTEXT_KWARGS: dict = {}
+HUPU_INIT_SCRIPT = False
+
+
 async def _create_stealth_context(browser, account_file: str | None = None) -> BrowserContext:
     """创建带反检测的 context。"""
     kwargs = {
@@ -103,6 +123,94 @@ async def _new_stealth_page(context: BrowserContext) -> Page:
     page = await context.new_page()
     await page.add_init_script(_STEALTH_SCRIPT)
     return page
+
+
+async def prepare_local_context(context: BrowserContext) -> BrowserContext:
+    """Re-create the local hupu context with the historical stealth settings.
+
+    ``browser_session`` creates the storage-state context first; this hook swaps
+    it for one configured with the hupu UA, 1920x1080 viewport and the stealth
+    init script.  It is only wired into local mode — the Multilogin branch
+    ignores ``context_setup`` entirely.
+    """
+    browser = getattr(context, "browser", None)
+    if browser is None:  # pragma: no cover - real Playwright always exposes it
+        await context.add_init_script(_STEALTH_SCRIPT)
+        return context
+
+    storage_state = await context.storage_state()
+    await context.close()
+    prepared = await browser.new_context(
+        user_agent=_CHROME_UA,
+        viewport={"width": 1920, "height": 1080},
+        storage_state=storage_state,
+    )
+    await prepared.add_init_script(_STEALTH_SCRIPT)
+    return prepared
+
+
+def _raise_if_login_required(page: Page | None) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; local retries stay untouched.
+    """
+    url = str(getattr(page, "url", "") or "").lower()
+    if not url:
+        return
+    if any(marker in url for marker in _LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "虎扑上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Hupu.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Positive
+    signals (publish-page upload button or a logged-in user menu) decide True;
+    an explicit login page/redirect returns False; network failures, 5xx
+    responses, unexpected hosts and a page with no positive signal raise so the
+    CLI can exit 1.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            HUPU_LOGIN_CHECK_URL,
+            timeout=HUPU_LOGIN_CHECK_TIMEOUT_MS,
+            wait_until="domcontentloaded",
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"虎扑登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(HUPU_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "hupu.com" not in current_url:
+            raise RuntimeError(
+                "虎扑登录状态检查失败：页面未停留在虎扑"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if "passport" in current_url.lower() or "login" in current_url.lower():
+            return False
+
+        upload_button = page.get_by_role("button", name="上传视频")
+        if await upload_button.count():
+            return True
+
+        # 发布页布局变化时只允许改这里的正向选择器，不通过修改 Profile 规避。
+        for selector in (".user-info", ".userInfo", ".avatar", "a[href*='/user/']"):
+            if await page.locator(selector).count():
+                return True
+
+        raise RuntimeError(
+            "虎扑登录状态检查失败：未找到上传按钮或已登录用户菜单（页面结构异常）"
+        )
+    finally:
+        await page.close()
 
 
 async def hupu_cookie_gen(account_file, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 120, headless: bool = False):
@@ -314,7 +422,7 @@ class HuPuVideo(BaseVideoUploader):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
-        self.account_file = _resolve_account_file(account_file)
+        self.account_file = _resolve_account_file(account_file) if account_file else None
         self.publish_date = publish_date
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
@@ -324,11 +432,12 @@ class HuPuVideo(BaseVideoUploader):
         self.max_title_length = 40
         self.min_title_length = 4
 
-    async def validate_upload_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成虎扑登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成虎扑登录: {self.account_file}")
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        if check_cookie:
+            if not self.account_file or not os.path.exists(self.account_file):
+                raise RuntimeError(f"cookie文件不存在，请先完成虎扑登录: {self.account_file}")
+            if not await cookie_auth(self.account_file):
+                raise RuntimeError(f"cookie文件已失效，请先完成虎扑登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频标题不能为空")
         if len(self.title) < self.min_title_length:
@@ -337,7 +446,15 @@ class HuPuVideo(BaseVideoUploader):
         if self.thumbnail_path:
             self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         hupu_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
         await self.validate_upload_args()
         hupu_logger.info(_msg("🥳", "上传前检查通过"))
@@ -347,39 +464,50 @@ class HuPuVideo(BaseVideoUploader):
 
         try:
             page = await _new_stealth_page(context)
-            # 直接跳转到视频发布页（绕过首页点击）
-            await page.goto(HUPU_PUBLISH_URL, timeout=60000, wait_until="load")
-            await page.wait_for_timeout(5000)
-            hupu_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
-
-            # 1) 上传视频文件
-            await self._upload_video_file(page)
-
-            # 2) 填写标题
-            await self._fill_title(page)
-
-            # 3) 填写简介
-            await self._fill_description(page)
-
-            # 4) 上传封面（如有）
-            if self.thumbnail_path:
-                await self._upload_thumbnail(page)
-
-            # 5) 选择专区（步行街 → 步行街主干道）
-            await self._select_zone(page)
-
-            # 6) 选择原创/二创 + AI 声明
-            await self._check_declarations(page)
-
-            # 7) 点击发布
-            await self._submit_publish(page)
-
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local"),
+                page=page,
+            )
             # 保存 cookie
             await context.storage_state(path=self.account_file)
             hupu_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
             await browser.close()
+
+    async def upload_in(self, session: BrowserSession, *, page: Page | None = None) -> None:
+        """Run the publish flow on the provided session's context only."""
+        multilogin = session.mode == "multilogin"
+        if page is None:
+            page = await session.context.new_page()
+        # 直接跳转到视频发布页（绕过首页点击）
+        await page.goto(HUPU_PUBLISH_URL, timeout=60000, wait_until="load")
+        if multilogin:
+            _raise_if_login_required(page)
+        await page.wait_for_timeout(5000)
+        hupu_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
+
+        # 1) 上传视频文件
+        await self._upload_video_file(page)
+
+        # 2) 填写标题
+        await self._fill_title(page)
+
+        # 3) 填写简介
+        await self._fill_description(page)
+
+        # 4) 上传封面（如有）
+        if self.thumbnail_path:
+            await self._upload_thumbnail(page)
+
+        # 5) 选择专区（步行街 → 步行街主干道）
+        await self._select_zone(page)
+
+        # 6) 选择原创/二创 + AI 声明
+        await self._check_declarations(page)
+
+        # 7) 点击发布
+        await self._submit_publish(page, multilogin=multilogin)
 
     async def _upload_video_file(self, page: Page) -> None:
         """点击「上传视频」按钮并设置文件。"""
@@ -497,7 +625,7 @@ class HuPuVideo(BaseVideoUploader):
         except Exception as exc:
             hupu_logger.warning(_msg("⚠️", f"选择 AI 声明失败: {exc}"))
 
-    async def _submit_publish(self, page: Page) -> None:
+    async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         """点击「确定发布」并等待跳转到帖子页面。"""
         # 录制脚本：page.get_by_label("发视频").get_by_text("确定发布").click()
         publish_btn = page.get_by_label("发视频").get_by_text("确定发布")
@@ -508,6 +636,8 @@ class HuPuVideo(BaseVideoUploader):
         # 等待跳转到帖子详情页（URL 匹配 bbs.hupu.com/{数字}.html）
         start = time.monotonic()
         while time.monotonic() - start < 60:
+            if multilogin:
+                _raise_if_login_required(page)
             current_url = page.url
             if HUPU_POST_URL_PATTERN.search(current_url):
                 hupu_logger.success(_msg("🥳", f"视频发布成功: {current_url}"))

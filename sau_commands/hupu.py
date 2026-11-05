@@ -2,7 +2,17 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from uploader.hupu_uploader.main import HuPuVideo, hupu_setup, cookie_auth as hupu_cookie_auth
+from patchright.async_api import async_playwright
+from uploader.hupu_uploader.main import (
+    HUPU_CONTEXT_KWARGS,
+    HUPU_INIT_SCRIPT,
+    HUPU_LAUNCH_KWARGS,
+    HuPuVideo,
+    cookie_auth as hupu_cookie_auth,
+    hupu_setup,
+    is_logged_in,
+    prepare_local_context,
+)
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
     add_runtime_flags,
@@ -10,6 +20,15 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    login_required_error,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
+from utils.browser_session import browser_session
 
 
 def register(platform_parsers):
@@ -20,18 +39,20 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = hupu_actions.add_parser(action_name, help=f"Hupu {action_name}")
-        action_parser.add_argument("--account", required=True, help="Hupu user-defined account_name")
-        if action_name == "login":
-            add_runtime_flags(action_parser)
+        action_parser.add_argument("--account", required=False, help="Hupu user-defined account_name")
+        add_runtime_flags(action_parser)
+        if action_name == "check":
+            add_multilogin_flags(action_parser)
 
     hupu_upload_video_parser = hupu_actions.add_parser("upload-video", help="Upload one video to Hupu")
-    hupu_upload_video_parser.add_argument("--account", required=True, help="Hupu user-defined account_name")
+    hupu_upload_video_parser.add_argument("--account", required=False, help="Hupu user-defined account_name")
     hupu_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     hupu_upload_video_parser.add_argument("--title", required=True, help="Video title (4-40 chars)")
     hupu_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     hupu_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     hupu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path")
     add_runtime_flags(hupu_upload_video_parser)
+    add_multilogin_flags(hupu_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -58,7 +79,42 @@ async def check_hupu_account(account_name: str) -> bool:
     return await hupu_cookie_auth(str(account_file))
 
 
-async def upload_hupu_video(request: HupuVideoUploadRequest) -> Path:
+def _build_uploader(request: HupuVideoUploadRequest, account_file) -> HuPuVideo:
+    return HuPuVideo(
+        title=request.title,
+        file_path=str(request.video_file),
+        tags=request.tags,
+        account_file=account_file,
+        desc=request.description,
+        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
+        debug=request.debug,
+        headless=request.headless,
+    )
+
+
+def _raise_login_required(target) -> None:
+    raise login_required_error("虎扑", target.profile_id)
+
+
+async def upload_hupu_video(request: HupuVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=HUPU_LAUNCH_KWARGS,
+                context_kwargs=HUPU_CONTEXT_KWARGS,
+                init_script=HUPU_INIT_SCRIPT,
+                context_setup=prepare_local_context,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.upload(session=session)
+        return None
+
     account_file = resolve_account_file("hupu", request.account_name)
     is_ready = await hupu_setup(str(account_file), handle=False)
     if not is_ready:
@@ -66,37 +122,57 @@ async def upload_hupu_video(request: HupuVideoUploadRequest) -> Path:
             f"Hupu cookie is missing or expired: {account_file}. Run `sau hupu login --account {request.account_name}` first."
         )
 
-    app = HuPuVideo(
-        title=request.title,
-        file_path=str(request.video_file),
-        tags=request.tags,
-        account_file=str(account_file),
-        desc=request.description,
-        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
-        debug=request.debug,
-        headless=request.headless,
-    )
-    await app.main()
+    app = _build_uploader(request, str(account_file))
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=request.headless,
+            account_file=str(account_file),
+            launch_kwargs=HUPU_LAUNCH_KWARGS,
+            context_kwargs=HUPU_CONTEXT_KWARGS,
+            init_script=HUPU_INIT_SCRIPT,
+            context_setup=prepare_local_context,
+        ) as session:
+            await app.upload(session=session)
     return account_file
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
+        reject_multilogin_login("hupu", args)
+        require_local_account(args)
         result = await login_hupu_account(args.account, headless=args.headless)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Hupu login flow completed: {result['account_file']}")
         return 0
 
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
     if args.action == "check":
-        is_valid = await check_hupu_account(args.account)
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=args.headless,
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
+        is_valid = await check_hupu_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
     if args.action == "upload-video":
         request = HupuVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
@@ -105,7 +181,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_hupu_video(request)
+        await upload_hupu_video(request, target=target)
         print(f"Hupu video upload submitted: {request.video_file}")
         return 0
 
