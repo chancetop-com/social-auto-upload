@@ -11,6 +11,7 @@
 - `alipay`
 - `weibo`
 - `hupu`
+- `tiktok`：仅 Multilogin X 模式
 - `youtube`
 - `facebook`：Facebook 个人主页视频/图文立即发布、查询和删除
 - `facebook-page`：Meta Business Suite 的 Facebook Page 视频/图文立即或定时发布
@@ -20,7 +21,7 @@
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
-面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用仓库现有 Chrome 上传器，没有 `sau tiktok` 命令；见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
+面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，但仅支持 [Multilogin X 模式](#multilogin-x-模式)；见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
 
 实现说明：
 
@@ -48,6 +49,7 @@ sau baijiahao --help
 sau alipay --help
 sau weibo --help
 sau hupu --help
+sau tiktok --help
 sau youtube --help
 sau facebook --help
 sau facebook-page --help
@@ -63,6 +65,101 @@ Windows 下推荐先指定镜像，再安装 Chromium：
 ```powershell
 $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
 ```
+
+## Multilogin X 模式
+
+设置非空环境变量 `MLX_API_TOKEN` 后，`sau` 进入 Multilogin X（MLX）模式。CLI 通过本机 Multilogin Launcher（`https://launcher.mlx.yt:45001`）启动指定 Profile，经 CDP 接管该 Profile 的浏览器，并复用其中的登录态；不再读写 `cookies/*.json`。
+
+```bash
+export MLX_API_TOKEN="<token>"
+
+# check：0=已登录，10=需要人工登录
+sau douyin check --folder-id <folder_id> --profile-id <profile_id>
+
+# 上传：--account 可省略，缺省用 profile_id 作为日志标签
+sau douyin upload-video \
+  --folder-id <folder_id> --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
+
+# 有头运行，便于人工处理验证码
+sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
+```
+
+### 激活与参数
+
+- 仅当 `MLX_API_TOKEN` 非空（去除首尾空白后）时激活；未设置、空串或纯空白都保持本地模式。
+- 本地模式会**静默忽略** `--folder-id` / `--profile-id`，旧命令的解析与行为不变。
+- MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
+- `--account` 在 MLX 下可选，只是日志/结果标签；缺省值为 `profile_id`。它不参与登录或身份校验，也不决定 cookie 文件。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；`--debug` 语义不变。
+- 所有可在 MLX 运行的 `check` / `upload-*` 都接受上述参数；`login` 不接受。
+- token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
+
+### 退出码
+
+| 码 | 含义 | 典型场景 |
+| --- | --- | --- |
+| `0` | 成功 | 上传已提交；check 已登录；Stop 失败但上传成功（仅 warning） |
+| `1` | 运行失败 | Launcher 不可达、token 无效、Profile 被占用、CDP 连不上、上传失败、网络错误 |
+| `2` | 用法错误 | 未知子命令、缺必填参数、MLX 缺 `--folder-id/--profile-id`、本地缺 `--account` |
+| `10` | 需要登录 | 登录页、登录表单、验证码、2FA |
+| `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 |
+
+MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 也退出 `1`。
+
+### 平台支持范围
+
+| 平台 | MLX 可用的 action | 说明 |
+| --- | --- | --- |
+| 抖音、快手、小红书 | `check`、`upload-video`、`upload-note` | |
+| 视频号、百家号、支付宝生活号、微博、虎扑、YouTube | `check`、`upload-video` | |
+| Facebook、Facebook Page、Instagram | `check`、`upload-video`、`upload-note` | `verify` / `delete` 仍为本地模式 |
+| 大鱼号 | `check`、`upload-video`、`upload-article` | |
+| 知乎 | `check`、`upload-article`、`upload-video` | |
+| 雪球 | `check`、`upload-article` | |
+| TikTok | `check`、`upload-video` | 仅 MLX，没有本地模式 |
+| Bilibili | 不支持 | `biliup` 没有浏览器上下文；MLX 下退出 `1` |
+
+`sau article` 是本地文件处理命令，不使用 MLX Profile。
+
+### 部署前提（v1）
+
+1. CLI 与 Multilogin 桌面应用在**同一台 macOS/Windows 机器**上，桌面应用已启动，45001/45003 未被占用。
+2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
+3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
+4. TikTok 额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。
+
+**明确不支持：**
+
+- Docker launcher（CDP 端口默认未映射到宿主机）
+- 跨机 launcher（官方只支持 `127.0.0.1`，不引导 SSH 隧道）
+- Linux 无桌面部署
+- Bilibili
+- TikTok 本地模式
+- 通过 CLI 在 MLX 中登录（登录必须在 Multilogin 应用中完成）
+
+启动前 CLI 会探活 `GET /api/v1/version`；失败退出 `1`，并提示确认桌面应用、同机部署和 45001 端口。Start 成功但 CDP 连接连续 3 次失败时，错误信息会附带 Docker launcher 提示，并在退出前停止本次启动的 Profile。
+
+### 调度侧责任
+
+- 保证同一 Profile **不并发**；CLI 不加锁。
+- 传错 `profile_id` 会直接操作另一个账号；CLI 只校验“已登录”，不校验账号是否匹配，调度侧承担该风险。
+- 收到退出码 `10` 时安排人工登录，再重试。
+- Stop 失败但上传仍返回 `0` 时，调度侧负责清理残留 Profile。
+- 跨机调度应在“MLX 那台机器”上远程执行 CLI，而不是把 CLI 指向远程 launcher。
+- 429 限流不在 CLI 内等待，由调度侧重试。
+
+### 账号一致性风险
+
+MLX 模式只验证平台页面“已登录”，**Profile 即身份**。知乎、雪球、大鱼号和 Instagram 在本地模式下会比对 `.identity.json` / 用户 ID；MLX 下这些比对会跳过，CLI 仅打印一条 INFO 说明。请确保 `profile_id` 与目标账号匹配。
+
+### 与设计规格的差异
+
+设计规格中的部分历史决策与最终实现不同，**实现以 uploader 的 golden 常量和对应测试为准**：
+
+- 视频号：视频上传的 `init_script` 实际为 `False`，图文上传仍为 `True`（`TENCENT_INIT_SCRIPT=False`、`TENCENT_NOTE_INIT_SCRIPT=True`）。
+- TikTok：legacy 本地路径的 `set_init_script` 原本就未启用，`TIKTOK_INIT_SCRIPT=False`；MLX 分支同样不注入。
+- MLX 分支会静默忽略 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
 
 ## 大鱼号 CLI 子命令
 
@@ -302,6 +399,26 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 虎扑当前支持登录、账号检查和视频上传；标题长度要求为 4–40 个字，暂不支持图文上传和 `--schedule`。虎扑登录可能需要在浏览器中完成 QQ 或手机号登录，需要人工查看页面时可以加 `--headed`。
 
+## TikTok CLI 子命令（仅 Multilogin X 模式）
+
+TikTok 没有本地浏览器路径，只支持 [Multilogin X 模式](#multilogin-x-模式)。未设置 `MLX_API_TOKEN` 时，任何 `sau tiktok` 命令都以 `1` 退出。
+
+```bash
+export MLX_API_TOKEN="<token>"
+
+sau tiktok check --folder-id <folder_id> --profile-id <profile_id>
+
+sau tiktok upload-video \
+  --folder-id <folder_id> --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
+  --schedule "2026-10-21 10:30" --thumbnail covers/demo.png
+```
+
+- 仅支持 `check` 和 `upload-video`；`login` 退出 `1`，请先在 Multilogin 应用中登录 Profile。
+- MLX 分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**。
+- 不读写 `cookies/tk_uploader/*.json`；登录页、验证码或 2FA 会退出 `10`，上传发布循环总超时为 15 分钟。
+- 本地模式调用任何 TikTok action 都退出 `1`；未注册的子命令仍由 argparse 退出 `2`。
+
 ## 登录二维码说明
 
 - 抖音、快手、小红书、视频号、百家号、支付宝生活号、微博和虎扑登录过程中，CLI / uploader 可能会生成临时二维码图片
@@ -309,6 +426,7 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 - 对可操作本地文件的 agent 来说，不要只把图片路径告诉用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户
 - Bilibili 和 YouTube 当前不走这套本地二维码图片托管链路，登录按上面的平台说明处理即可
+- MLX 模式不提供 CLI 登录链路，也不会生成登录二维码；请在 Multilogin 应用中登录 Profile，收到退出码 `10` 时转人工处理
 
 ## 定时发布
 
