@@ -6,18 +6,50 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from patchright.async_api import Page, async_playwright, expect
+from patchright.async_api import BrowserContext, Page, async_playwright, expect
 
 from conf import LOCAL_CHROME_PATH
 from uploader.xueqiu_uploader.constants import XUEQIU_HOME_URL
+from utils.errors import LoginRequiredError
 
 
-async def read_xueqiu_identity(page: Page) -> dict:
+XUEQIU_LOGIN_CHECK_TIMEOUT_MS = 20_000
+XUEQIU_IDENTITY_PROBE_TIMEOUT_MS = 10_000
+_XUEQIU_LOGIN_PATH_PREFIXES = ("/account/login", "/login", "/signin")
+_XUEQIU_LOGIN_URL_MARKERS = ("login", "signin", "captcha", "two-factor", "2fa")
+
+
+def is_xueqiu_login_url(url: str) -> bool:
+    """Return ``True`` for the known Xueqiu sign-in/captcha/2FA URL shapes."""
+    target = urlsplit(url)
+    path = target.path.lower()
+    if (target.hostname in {"xueqiu.com", "www.xueqiu.com"}
+            and path.startswith("/account/login")):
+        return True
+    return path.startswith(_XUEQIU_LOGIN_PATH_PREFIXES) or any(
+        marker in path for marker in _XUEQIU_LOGIN_URL_MARKERS
+    )
+
+
+def raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload Xueqiu sign-in redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its historical
+    behaviour untouched.
+    """
+    if is_xueqiu_login_url(str(getattr(page, "url", "") or "")):
+        raise LoginRequiredError(
+            "雪球上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+
+
+async def read_xueqiu_identity(page: Page, *, timeout: int = 30000) -> dict:
     """页头 data-id 是当前用户 ID；昵称用于展示，不代替身份比较。"""
     # header-user 是已登录页头固定账号区，data-id 在首页及长文编辑器均可读取。
     user = page.locator("nav .header-user[data-id]")
-    await expect(user).to_have_count(1, timeout=30000)
-    await expect(user).to_be_visible()
+    await expect(user).to_have_count(1, timeout=timeout)
+    await expect(user).to_be_visible(timeout=timeout)
     uid = await user.get_attribute("data-id")
     # 用户区内 span 承载昵称，排除侧栏和正文中可能出现的相同名字。
     name = (await user.locator("span").inner_text()).strip()
@@ -63,6 +95,45 @@ async def login_xueqiu_account(account_file: str | Path, expected_name=None, tim
             return {"success": True, "account_file": str(account_file), "identity": identity}
         finally:
             await browser.close()
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Xueqiu.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  An explicit
+    login URL returns ``False``; network failures, 5xx responses, timeouts and
+    unexpected page structures raise (CLI exits 1).
+
+    The profile header identity is reused only as a positive login signal; no
+    ``.identity.json`` binding is read or compared in this path.
+
+    Worst-case budget: 20s navigation + 10s identity probe, inside 15-30s.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            XUEQIU_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=XUEQIU_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"雪球登录状态检查失败：HTTP {status}")
+
+        current_url = str(getattr(page, "url", "") or "")
+        target = urlsplit(current_url)
+        if target.hostname not in {"mp.xueqiu.com", "xueqiu.com", "www.xueqiu.com"}:
+            raise RuntimeError(
+                "雪球登录状态检查失败：页面未停留在雪球"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if is_xueqiu_login_url(current_url):
+            return False
+
+        await read_xueqiu_identity(page, timeout=XUEQIU_IDENTITY_PROBE_TIMEOUT_MS)
+        return True
+    finally:
+        await page.close()
 
 
 async def check_xueqiu_account(account_file: str | Path, headless=False) -> bool:
