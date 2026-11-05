@@ -1,9 +1,20 @@
 """xueqiu 的命令参数与执行逻辑。"""
 from __future__ import annotations
 import json
+
+from loguru import logger
+from patchright.async_api import async_playwright
+
 from uploader.xueqiu_uploader.article import XueqiuArticle
-from uploader.xueqiu_uploader.constants import XUEQIU_DECLARATIONS, XUEQIU_VISIBILITY
-from uploader.xueqiu_uploader.session import check_xueqiu_account, login_xueqiu_account
+from uploader.xueqiu_uploader.constants import (
+    XUEQIU_CONTEXT_KWARGS,
+    XUEQIU_DECLARATIONS,
+    XUEQIU_LAUNCH_KWARGS,
+    XUEQIU_VISIBILITY,
+)
+from uploader.xueqiu_uploader.session import (
+    check_xueqiu_account, is_logged_in, login_xueqiu_account,
+)
 from uploader.xueqiu_uploader.verification import verify_xueqiu_result
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
@@ -18,6 +29,67 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
+
+IDENTITY_UNVERIFIED_MESSAGE = (
+    "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}），"
+    "请调度侧确保 profile_id 与目标账号匹配。"
+)
+
+
+def _log_identity_unverified(target) -> None:
+    logger.info(IDENTITY_UNVERIFIED_MESSAGE, target.profile_id)
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"雪球登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def _run_multilogin(args, target):
+    """Multilogin path: Profile owns identity; no cookies/identity files are read."""
+    headless = getattr(args, "headless", True)
+
+    if args.action == "check":
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=headless,
+                account_file=None,
+                multilogin=target,
+            ) as session:
+                _log_identity_unverified(target)
+                is_valid = await is_logged_in(session.context)
+        if not is_valid:
+            _raise_login_required(target)
+        print("valid")
+        return 0
+
+    app = XueqiuArticle(
+        title=args.title, content_file=args.content_file, account_file=None,
+        visibility=args.visibility, declaration=args.declaration,
+        prepare_only=args.prepare_only, headless=headless, debug=args.debug,
+        cover=args.cover,
+    )
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=headless,
+            account_file=None,
+            multilogin=target,
+            launch_kwargs=XUEQIU_LAUNCH_KWARGS,
+            context_kwargs=XUEQIU_CONTEXT_KWARGS,
+        ) as session:
+            _log_identity_unverified(target)
+            if not await is_logged_in(session.context):
+                _raise_login_required(target)
+            result = await app.main(session=session)
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def register(platform_parsers):
@@ -60,9 +132,11 @@ async def run(args):
         require_local_account(args)
         account = args.account
     elif args.action in {"check", "upload-article"}:
-        resolve_multilogin_target(args)
+        target = resolve_multilogin_target(args)
         require_local_account(args)
         account = resolve_account_label(args)
+        if target is not None:
+            return await _run_multilogin(args, target)
     else:
         require_local_account(args)
         account = args.account

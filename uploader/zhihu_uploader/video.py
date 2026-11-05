@@ -6,6 +6,7 @@ import json
 import sys
 import math
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -13,14 +14,17 @@ from uuid import uuid4
 import cv2
 from patchright.async_api import Page, async_playwright, expect
 
-from conf import LOCAL_CHROME_PATH
+from utils.browser_session import BrowserSession
 from uploader.zhihu_uploader.constants import (
-    ZHIHU_ORIGINALITY, ZHIHU_TIMEZONE, ZHIHU_VIDEO_DESCRIPTION_MAX, ZHIHU_VIDEO_EXTENSIONS,
-    ZHIHU_VIDEO_MAX_BYTES, ZHIHU_VIDEO_MIN_BYTES, ZHIHU_VIDEO_MAX_SECONDS, ZHIHU_VIDEO_TITLE_MAX,
+    ZHIHU_CONTEXT_KWARGS, ZHIHU_LAUNCH_KWARGS, ZHIHU_ORIGINALITY, ZHIHU_TIMEZONE,
+    ZHIHU_VIDEO_DESCRIPTION_MAX, ZHIHU_VIDEO_EXTENSIONS, ZHIHU_VIDEO_MAX_BYTES,
+    ZHIHU_VIDEO_MIN_BYTES, ZHIHU_VIDEO_MAX_SECONDS, ZHIHU_VIDEO_TITLE_MAX,
     ZHIHU_VIDEO_TITLE_MIN, ZHIHU_VIDEO_URL, ZHIHU_VIDEO_TOPICS_MAX,
 )
 from uploader.zhihu_uploader.schedule import fill_zhihu_video_schedule, validate_zhihu_schedule
-from uploader.zhihu_uploader.session import load_zhihu_identity, read_zhihu_identity
+from uploader.zhihu_uploader.session import (
+    load_zhihu_identity, raise_if_login_required, read_zhihu_identity,
+)
 
 
 class ZhihuVideo:
@@ -31,7 +35,7 @@ class ZhihuVideo:
                  headless=True, debug=False, prepare_only=False, upload_timeout=1200):
         self.title = title
         self.file_path = Path(file_path).expanduser().resolve()
-        self.account_file = Path(account_file).resolve()
+        self.account_file = Path(account_file).resolve() if account_file is not None else None
         self.description = description
         self.category = category
         self.show_options = show_options
@@ -44,8 +48,12 @@ class ZhihuVideo:
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
 
-    def validate_upload_args(self) -> None:
-        """依据页面提示检查视频、标题、简介和当前上传所需的分类参数。"""
+    def validate_upload_args(self, *, check_cookie: bool = True) -> None:
+        """依据页面提示检查视频、标题、简介和当前上传所需的分类参数。
+
+        Cookie/identity binding is local-only; Multilogin mode passes
+        ``check_cookie=False`` because the Profile is the identity.
+        """
         if not self.file_path.is_file():
             raise FileNotFoundError(f"知乎视频不存在: {self.file_path}")
         if self.file_path.suffix.lower() not in ZHIHU_VIDEO_EXTENSIONS:
@@ -77,9 +85,12 @@ class ZhihuVideo:
         if self.originality not in ZHIHU_ORIGINALITY:
             raise ValueError("原创标记必须为 original 或 reprint")
         self.schedule = validate_zhihu_schedule(self.schedule)
-        if not self.account_file.is_file():
-            raise FileNotFoundError("请先执行 sau zhihu login 保存账号")
-        self.identity = load_zhihu_identity(self.account_file)
+        if check_cookie:
+            if self.account_file is None or not self.account_file.is_file():
+                raise FileNotFoundError("请先执行 sau zhihu login 保存账号")
+            self.identity = load_zhihu_identity(self.account_file)
+        else:
+            self.identity = None
         if self.upload_timeout <= 0:
             raise ValueError("上传期限必须大于 0 秒")
 
@@ -180,11 +191,45 @@ class ZhihuVideo:
 
         await fill_zhihu_video_schedule(page, self.schedule)
 
-    async def main(self) -> dict:
-        """只提交一次；页面没有确认本次作品 URL 时记录为 submission_unknown。"""
+    def results_dir(self) -> Path:
+        """Result manifests sit next to the local account; MLX uses a temp dir."""
+        base = (
+            self.account_file.parent
+            if self.account_file is not None
+            else Path(tempfile.gettempdir()) / "sau-mlx"
+        )
+        return base / "zhihu_results"
+
+    async def main(self, *, session: BrowserSession | None = None) -> dict:
+        """只提交一次；页面没有确认本次作品 URL 时记录为 submission_unknown。
+
+        ``session`` is the Multilogin seam: it runs only the page/publish body and
+        never launches, creates a context, injects scripts, writes cookies, or
+        closes anything it does not own.
+        """
+        if session is not None:
+            self.validate_upload_args(check_cookie=False)
+            return await self.upload_in(session)
+
         self.validate_upload_args()
-        results_dir = self.account_file.parent / "zhihu_results"
-        results_dir.mkdir(exist_ok=True)
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=self.headless, **ZHIHU_LAUNCH_KWARGS,
+            )
+            try:
+                context = await browser.new_context(
+                    storage_state=str(self.account_file), **ZHIHU_CONTEXT_KWARGS,
+                )
+                return await self.upload_in(
+                    BrowserSession(browser=browser, context=context, mode="local")
+                )
+            finally:
+                await browser.close()
+
+    async def upload_in(self, session: BrowserSession) -> dict:
+        """Business body: upload page operations plus a single publish click."""
+        results_dir = self.results_dir()
+        results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now(ZHIHU_TIMEZONE):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {
             "success": False, "status": "preparing", "type": "video", "title": self.title,
@@ -197,77 +242,74 @@ class ZhihuVideo:
             result["schedule"] = self.schedule.isoformat()
         result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=self.headless,
-            )
-            page = None
-            submitted = False
-            try:
-                context = await browser.new_context(
-                    storage_state=str(self.account_file), timezone_id="Asia/Shanghai",
-                )
-                page = await context.new_page()
-                response = await page.goto(ZHIHU_VIDEO_URL, wait_until="domcontentloaded", timeout=45000)
-                if response is not None and response.status >= 400:
-                    raise RuntimeError(f"知乎视频上传页访问失败，HTTP {response.status}")
-                if await read_zhihu_identity(page) != self.identity:
-                    raise RuntimeError("知乎视频页头与本地账号绑定不一致")
-                # 该 input 的 class 和 accept 来自上传首页实际 DOM；不与封面/正文图片 input 混用。
-                video_input = page.locator("input.VideoUploadButton-fileInput[type=file]")
-                await expect(video_input).to_have_count(1)
-                await video_input.set_input_files(str(self.file_path))
-                result["status"] = "uploading"
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                # 表单在素材选择后才出现；候选来自该账号、该素材的实际页面。
-                await expect(page.get_by_text("上传成功", exact=True)).to_be_visible(timeout=self.upload_timeout * 1000)
-                choices = await self.video_options(page)
-                result["options"] = choices
-                if self.show_options:
-                    result["status"] = "options_listed"
-                    return result
-                self.category = await self.select_option("所属领域", self.category, choices["category"])
-                self.video_mark = await self.select_option("视频标记", self.video_mark, choices["video_mark"])
-                result.update(category=self.category, video_mark=self.video_mark)
-                await self.fill_video_form(page)
-                if await read_zhihu_identity(page) != self.identity:
-                    raise RuntimeError("知乎视频填写期间当前账号发生变化")
-                result["status"] = "prepared"
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                if self.prepare_only:
-                    return result
-
-                # 当前视频入口在原页显示成功弹层，“查看详情”另开 /pin/<id>。
-                # 不能等待原页跳转到旧版 /zvideo/，否则已发表也会被误判为未知。
-                publish = page.get_by_role("button", name="发布视频", exact=True)
-                await expect(publish).to_be_enabled()
-                submitted = True
-                result["status"] = "submission_unknown"
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                await publish.click()
-                await expect(page.get_by_text("发布成功", exact=True)).to_be_visible(timeout=60000)
-                result.update(success=True, status="published")
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                async with page.expect_popup() as detail_info:
-                    await page.get_by_text("查看详情", exact=True).click()
-                detail = await detail_info.value
-                await detail.wait_for_url(re.compile(r"^https://www\.zhihu\.com/(?:pin|zvideo|video)/\d+"), timeout=60000)
-                result["url"] = detail.url
+        multilogin = session.mode == "multilogin"
+        page = None
+        submitted = False
+        try:
+            page = await session.context.new_page()
+            response = await page.goto(ZHIHU_VIDEO_URL, wait_until="domcontentloaded", timeout=45000)
+            if response is not None and response.status >= 400:
+                raise RuntimeError(f"知乎视频上传页访问失败，HTTP {response.status}")
+            if multilogin:
+                raise_if_login_required(page)
+            elif await read_zhihu_identity(page) != self.identity:
+                raise RuntimeError("知乎视频页头与本地账号绑定不一致")
+            # 该 input 的 class 和 accept 来自上传首页实际 DOM；不与封面/正文图片 input 混用。
+            video_input = page.locator("input.VideoUploadButton-fileInput[type=file]")
+            await expect(video_input).to_have_count(1)
+            await video_input.set_input_files(str(self.file_path))
+            result["status"] = "uploading"
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 表单在素材选择后才出现；候选来自该账号、该素材的实际页面。
+            await expect(page.get_by_text("上传成功", exact=True)).to_be_visible(timeout=self.upload_timeout * 1000)
+            choices = await self.video_options(page)
+            result["options"] = choices
+            if self.show_options:
+                result["status"] = "options_listed"
                 return result
-            except Exception as exc:
-                result["error"] = str(exc)
-                if result["status"] != "published":
-                    result["status"] = "submission_unknown" if submitted else "failed_before_submit"
-                if submitted and page is not None and re.match(r"^https://www\.zhihu\.com/(?:pin|zvideo|video)/\d+", page.url):
-                    result["url"] = page.url
-                if self.debug and page is not None:
-                    screenshot = result_file.with_suffix(".png")
-                    await page.screenshot(path=str(screenshot))
-                    result["screenshot"] = str(screenshot)
-                if result["status"] == "published":
-                    # 平台已经确认发表；保留详情读取错误供原作品查询，不返回可重试的发表失败。
-                    return result
-                raise RuntimeError(f"知乎视频阶段={result['status']}，结果文件={result_file}: {exc}") from exc
-            finally:
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                await browser.close()
+            self.category = await self.select_option("所属领域", self.category, choices["category"])
+            self.video_mark = await self.select_option("视频标记", self.video_mark, choices["video_mark"])
+            result.update(category=self.category, video_mark=self.video_mark)
+            await self.fill_video_form(page)
+            if not multilogin and await read_zhihu_identity(page) != self.identity:
+                raise RuntimeError("知乎视频填写期间当前账号发生变化")
+            result["status"] = "prepared"
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            if self.prepare_only:
+                return result
+
+            # 当前视频入口在原页显示成功弹层，“查看详情”另开 /pin/<id>。
+            # 不能等待原页跳转到旧版 /zvideo/，否则已发表也会被误判为未知。
+            publish = page.get_by_role("button", name="发布视频", exact=True)
+            await expect(publish).to_be_enabled()
+            submitted = True
+            result["status"] = "submission_unknown"
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            await publish.click()
+            await expect(page.get_by_text("发布成功", exact=True)).to_be_visible(timeout=60000)
+            result.update(success=True, status="published")
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            async with page.expect_popup() as detail_info:
+                await page.get_by_text("查看详情", exact=True).click()
+            detail = await detail_info.value
+            await detail.wait_for_url(re.compile(r"^https://www\.zhihu\.com/(?:pin|zvideo|video)/\d+"), timeout=60000)
+            result["url"] = detail.url
+            return result
+        except Exception as exc:
+            if multilogin and page is not None:
+                raise_if_login_required(page)
+            result["error"] = str(exc)
+            if result["status"] != "published":
+                result["status"] = "submission_unknown" if submitted else "failed_before_submit"
+            if submitted and page is not None and re.match(r"^https://www\.zhihu\.com/(?:pin|zvideo|video)/\d+", page.url):
+                result["url"] = page.url
+            if self.debug and page is not None:
+                screenshot = result_file.with_suffix(".png")
+                await page.screenshot(path=str(screenshot))
+                result["screenshot"] = str(screenshot)
+            if result["status"] == "published":
+                # 平台已经确认发表；保留详情读取错误供原作品查询，不返回可重试的发表失败。
+                return result
+            raise RuntimeError(f"知乎视频阶段={result['status']}，结果文件={result_file}: {exc}") from exc
+        finally:
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
