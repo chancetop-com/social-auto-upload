@@ -11,8 +11,10 @@ import os
 import re
 from pathlib import Path
 
-from patchright.async_api import Page, Playwright, async_playwright, expect
+from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
 
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.log import facebook_logger
 
 
@@ -22,6 +24,42 @@ FACEBOOK_PROXY = os.environ.get("SAU_FACEBOOK_PROXY")
 FACEBOOK_LOGIN_INPUT = 'input[name="email"]'
 # 首页发帖附件同时接受图片与视频，头像/封面控件不具备这组 MIME 类型。
 FACEBOOK_MEDIA_INPUT = 'input[type="file"][accept*="image/"][accept*="video/"]'
+
+FACEBOOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
+FACEBOOK_LOGIN_CHECK_SETTLE_MS = 2_500
+
+# Golden local-mode browser options.  ``sau_commands/facebook.py`` reuses the
+# same values for ``browser_session`` in Multilogin mode, where they are
+# silently ignored (the Profile supplies channel/fingerprint/proxy).
+FACEBOOK_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
+FACEBOOK_CONTEXT_KWARGS: dict[str, object] = {}
+FACEBOOK_INIT_SCRIPT = False
+
+_FACEBOOK_LOGIN_URL_MARKERS = (
+    "/login",
+    "checkpoint",
+    "two_step_verification",
+    "/authentication/",
+)
+
+
+def facebook_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
+    """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
+    return {**FACEBOOK_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
+
+
+def _raise_if_login_required(page: Page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this; the local branch keeps its legacy
+    cookie-invalid error.
+    """
+    current_url = str(getattr(page, "url", "") or "").lower()
+    if any(marker in current_url for marker in _FACEBOOK_LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "Facebook 上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
 
 
 def _proxy_options(proxy: str | None) -> dict[str, str] | None:
@@ -49,12 +87,9 @@ async def _is_logged_out(page: Page) -> bool:
 
 async def _open_facebook_page(playwright: Playwright, account_file: Path, *, proxy: str | None, headless: bool):
     """使用 storage state 打开 Facebook，并保留代理配置到浏览器进程。"""
-    launch_options = {
-        "channel": "chrome",
-        "headless": headless,
-        "proxy": _proxy_options(proxy),
-    }
-    browser = await playwright.chromium.launch(**launch_options)
+    browser = await playwright.chromium.launch(
+        headless=headless, **facebook_launch_kwargs(proxy)
+    )
     try:
         context = await browser.new_context(storage_state=str(account_file))
         page = await context.new_page()
@@ -66,6 +101,44 @@ async def _open_facebook_page(playwright: Playwright, account_file: Path, *, pro
         # 导航或 storage state 失败时，浏览器已经属于本函数，必须在抛错前释放。
         await browser.close()
         raise
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Facebook.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Explicit login,
+    checkpoint and 2FA pages return ``False``; network failures, 5xx responses,
+    timeouts and unexpected redirects raise so the CLI can exit 1 instead of
+    treating an outage as "logged out".
+
+    Worst-case budget: 20s navigation + 2.5s settle, inside the 15-30s spec.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            FACEBOOK_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=FACEBOOK_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"Facebook 登录状态检查失败：HTTP {status}")
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "facebook.com" not in current_url.lower():
+            raise RuntimeError(
+                "Facebook 登录状态检查失败：页面未停留在 facebook.com"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if any(marker in current_url.lower() for marker in _FACEBOOK_LOGIN_URL_MARKERS):
+            return False
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(FACEBOOK_LOGIN_CHECK_SETTLE_MS)
+        return not await _is_logged_out(page)
+    finally:
+        await page.close()
 
 
 async def facebook_cookie_auth(account_file: str | Path, *, proxy: str | None = None) -> bool:
@@ -115,7 +188,7 @@ async def facebook_setup(
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            channel="chrome", headless=headless, proxy=_proxy_options(proxy)
+            headless=headless, **facebook_launch_kwargs(proxy)
         )
         try:
             context = await browser.new_context(
@@ -168,7 +241,7 @@ class FacebookPost:
         self.file_path = self.files[0] if self.files else Path()
         self.description = description.strip()
         self.tags = [tag.strip().lstrip("#") for tag in tags if tag.strip().lstrip("#")]
-        self.account_file = Path(account_file)
+        self.account_file = Path(account_file) if account_file is not None else None
         self.proxy = proxy
         self.headless = headless
 
@@ -232,7 +305,7 @@ class FacebookPost:
             await page.wait_for_timeout(1000)
         raise TimeoutError("已点击 Facebook 发布，但未观察到明确的发布成功状态")
 
-    async def upload(self, playwright: Playwright) -> None:
+    def _validate_media(self) -> None:
         if not self.files:
             raise ValueError("Facebook 发布素材不能为空")
         for file in self.files:
@@ -240,7 +313,49 @@ class FacebookPost:
                 raise FileNotFoundError(f"Facebook 素材文件不存在: {file}")
         if not self.title:
             raise ValueError("Facebook 视频标题不能为空")
-        if not self.account_file.is_file():
+
+    async def _publish_on_page(self, page: Page) -> None:
+        # 已实测首页的唯一混合影音 input；按 accept 同时支持图片和视频限定，排除头像等控件。
+        file_input = page.locator(FACEBOOK_MEDIA_INPUT)
+        if await file_input.count() != 1:
+            raise RuntimeError("首页发帖影音上传控件不唯一，未上传")
+        await file_input.set_input_files([str(file) for file in self.files])
+
+        # 选择素材后 composer 异步挂载；不能在同一轮立即检查 count 就判输入框不存在。
+        await page.locator('[role="dialog"] [contenteditable="true"][role="textbox"]:visible').wait_for(timeout=30000)
+        editor = await self._find_caption_editor(page)
+        caption = self._caption()
+        await editor.click()
+        await editor.fill(caption)
+        if (await editor.inner_text()).strip() != caption:
+            raise RuntimeError("Facebook 正文输入框未读回预期内容")
+
+        await self._wait_until_publishable(page)
+        await self._publish_and_verify(page)
+
+    async def upload_in(self, session: BrowserSession) -> None:
+        """Multilogin body: consume the injected context, touch no cookies."""
+        page = await session.context.new_page()
+        page.set_default_timeout(30_000)
+        await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded", timeout=90_000)
+        if session.mode == "multilogin":
+            _raise_if_login_required(page)
+        await self._publish_on_page(page)
+        if session.mode == "multilogin":
+            _raise_if_login_required(page)
+
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            # Multilogin: no cookie validation/read/write, no launch, no close.
+            self._validate_media()
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
+        self._validate_media()
+        if self.account_file is None or not self.account_file.is_file():
             raise RuntimeError(f"Facebook 登录态文件不存在: {self.account_file}")
 
         browser, context, page = await _open_facebook_page(
@@ -249,29 +364,15 @@ class FacebookPost:
         try:
             if await _is_logged_out(page):
                 raise RuntimeError("Facebook 登录态失效，请先执行 sau facebook login")
-
-            # 已实测首页的唯一混合影音 input；按 accept 同时支持图片和视频限定，排除头像等控件。
-            file_input = page.locator(FACEBOOK_MEDIA_INPUT)
-            if await file_input.count() != 1:
-                raise RuntimeError("首页发帖影音上传控件不唯一，未上传")
-            await file_input.set_input_files([str(file) for file in self.files])
-
-            # 选择素材后 composer 异步挂载；不能在同一轮立即检查 count 就判输入框不存在。
-            await page.locator('[role="dialog"] [contenteditable="true"][role="textbox"]:visible').wait_for(timeout=30000)
-            editor = await self._find_caption_editor(page)
-            caption = self._caption()
-            await editor.click()
-            await editor.fill(caption)
-            if (await editor.inner_text()).strip() != caption:
-                raise RuntimeError("Facebook 正文输入框未读回预期内容")
-
-            await self._wait_until_publishable(page)
-            await self._publish_and_verify(page)
+            await self._publish_on_page(page)
             await context.storage_state(path=str(self.account_file))
         finally:
             await browser.close()
 
-    async def main(self) -> None:
+    async def main(self, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
 

@@ -4,9 +4,14 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from patchright.async_api import async_playwright
 from uploader.meta_uploader.facebook_page_uploader.main import (
+    FACEBOOK_PAGE_CONTEXT_KWARGS,
+    FACEBOOK_PAGE_INIT_SCRIPT,
+    FACEBOOK_PAGE_LAUNCH_KWARGS,
     FACEBOOK_PAGE_PROXY,
     MetaBusinessUploader,
+    is_logged_in,
     meta_cookie_auth,
     meta_setup,
 )
@@ -27,6 +32,8 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -122,14 +129,8 @@ async def check_meta_account(platform: str, account_name: str, *, proxy: str | N
     return await meta_cookie_auth(account_file, proxy=proxy)
 
 
-async def upload_meta_content(request: MetaUploadRequest) -> dict:
-    account_file = resolve_account_file(request.platform, request.account_name)
-    if not await meta_cookie_auth(account_file, proxy=request.proxy):
-        raise RuntimeError(
-            f"{request.platform} Business Suite 登录态不存在或已失效: {account_file}. "
-            f"请先执行 `sau {request.platform} login --account {request.account_name}`。"
-        )
-    app = MetaBusinessUploader(
+def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUploader:
+    return MetaBusinessUploader(
         request.platform,
         account_file,
         title=request.title,
@@ -143,6 +144,40 @@ async def upload_meta_content(request: MetaUploadRequest) -> dict:
         headless=request.headless,
         result_file=request.result_file,
     )
+
+
+def _raise_login_required(platform: str, target) -> None:
+    raise LoginRequiredError(
+        f"{platform} 登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dict:
+    if target is not None:
+        # Profile owns channel/proxy/fingerprint; no cookie file is resolved.
+        app = _build_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
+                context_kwargs=FACEBOOK_PAGE_CONTEXT_KWARGS,
+                init_script=FACEBOOK_PAGE_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(request.platform, target)
+                return await app.upload(session=session)
+
+    account_file = resolve_account_file(request.platform, request.account_name)
+    if not await meta_cookie_auth(account_file, proxy=request.proxy):
+        raise RuntimeError(
+            f"{request.platform} Business Suite 登录态不存在或已失效: {account_file}. "
+            f"请先执行 `sau {request.platform} login --account {request.account_name}`。"
+        )
+    app = _build_uploader(request, account_file)
     return await app.upload()
 
 
@@ -151,18 +186,16 @@ async def run(args):
     if args.action == "login":
         reject_multilogin_login(args.platform, args)
         require_local_account(args)
-        account_label = args.account
-    elif args.action in {"check", "upload-video", "upload-note"}:
-        resolve_multilogin_target(args)
-        require_local_account(args)
-        account_label = resolve_account_label(args)
-    else:
-        require_local_account(args)
-        account_label = args.account
+        result = await login_meta_account(args.platform, args.account, headless=args.headless, proxy=args.proxy)
+        if not result["success"]:
+            raise RuntimeError(result.get("message", f"{args.platform} login failed"))
+        print(f"{args.platform} login flow completed: {result['account_file']}")
+        return 0
 
     if args.platform == "facebook-page" and args.action in {"verify", "delete"}:
+        require_local_account(args)
         result = await meta_post_action(
-            resolve_account_file(args.platform, account_label), page_id=args.page_id, page_name=args.page,
+            resolve_account_file(args.platform, args.account), page_id=args.page_id, page_name=args.page,
             content_id=args.content_id, expected_text=args.expected_text, scheduled=args.scheduled,
             delete=args.action == "delete", proxy=args.proxy, headless=args.headless,
         )
@@ -172,14 +205,27 @@ async def run(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    if args.action == "login":
-        result = await login_meta_account(args.platform, account_label, headless=args.headless, proxy=args.proxy)
-        if not result["success"]:
-            raise RuntimeError(result.get("message", f"{args.platform} login failed"))
-        print(f"{args.platform} login flow completed: {result['account_file']}")
-        return 0
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
 
     if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                    launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
+                    context_kwargs=FACEBOOK_PAGE_CONTEXT_KWARGS,
+                    init_script=FACEBOOK_PAGE_INIT_SCRIPT,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(args.platform, target)
+            print("valid")
+            return 0
+
         is_valid = await check_meta_account(args.platform, account_label, proxy=args.proxy)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
@@ -200,7 +246,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        result = await upload_meta_content(request)
+        result = await upload_meta_content(request, target=target)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
