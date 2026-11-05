@@ -6,6 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from patchright.async_api import async_playwright
 from uploader.douyin_uploader.main import (
+    DOUYIN_CONTEXT_KWARGS,
+    DOUYIN_INIT_SCRIPT,
+    DOUYIN_LAUNCH_KWARGS,
     DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
     DOUYIN_PUBLISH_STRATEGY_SCHEDULED,
     DouYinNote,
@@ -127,20 +130,13 @@ async def check_douyin_account(account_name: str) -> bool:
     return await douyin_cookie_auth(str(account_file))
 
 
-async def upload_video(request: DouyinVideoUploadRequest) -> Path:
-    account_file = resolve_account_file("douyin", request.account_name)
-    is_ready = await douyin_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
-        )
-
-    app = DouYinVideo(
+def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> DouYinVideo:
+    return DouYinVideo(
         request.title,
         str(request.video_file),
         request.tags,
         request.publish_date,
-        str(account_file),
+        account_file,
         desc=request.description,
         thumbnail_landscape_path=(
             str(request.thumbnail_landscape_file) if request.thumbnail_landscape_file else None
@@ -156,11 +152,48 @@ async def upload_video(request: DouyinVideoUploadRequest) -> Path:
         headless=request.headless,
         collection_name=request.collection_name,
     )
-    await app.douyin_upload_video()
-    return account_file
 
 
-async def upload_note(request: DouyinNoteUploadRequest) -> Path:
+def _build_note_uploader(request: DouyinNoteUploadRequest, account_file) -> DouYinNote:
+    return DouYinNote(
+        image_paths=[str(path) for path in request.image_files],
+        title=request.title,
+        note=request.note,
+        tags=request.tags,
+        publish_date=request.publish_date,
+        account_file=account_file,
+        publish_strategy=request.publish_strategy,
+        debug=request.debug,
+        headless=request.headless,
+        bgm=request.bgm,
+    )
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"抖音登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_video_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=DOUYIN_LAUNCH_KWARGS,
+                context_kwargs=DOUYIN_CONTEXT_KWARGS,
+                init_script=DOUYIN_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.douyin_upload_video(session=session)
+        return None
+
     account_file = resolve_account_file("douyin", request.account_name)
     is_ready = await douyin_setup(str(account_file), handle=False)
     if not is_ready:
@@ -168,18 +201,37 @@ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
             f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
         )
 
-    app = DouYinNote(
-        image_paths=[str(path) for path in request.image_files],
-        title=request.title,
-        note=request.note,
-        tags=request.tags,
-        publish_date=request.publish_date,
-        account_file=str(account_file),
-        publish_strategy=request.publish_strategy,
-        debug=request.debug,
-        headless=request.headless,
-        bgm=request.bgm,
-    )
+    app = _build_video_uploader(request, str(account_file))
+    await app.douyin_upload_video()
+    return account_file
+
+
+async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_note_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=DOUYIN_LAUNCH_KWARGS,
+                context_kwargs=DOUYIN_CONTEXT_KWARGS,
+                init_script=DOUYIN_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.douyin_upload_note(session=session)
+        return None
+
+    account_file = resolve_account_file("douyin", request.account_name)
+    is_ready = await douyin_setup(str(account_file), handle=False)
+    if not is_ready:
+        raise RuntimeError(
+            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
+        )
+
+    app = _build_note_uploader(request, str(account_file))
     await app.douyin_upload_note()
     return account_file
 
@@ -241,7 +293,7 @@ async def run(args):
             headless=args.headless,
             collection_name=args.collection,
         )
-        await upload_video(request)
+        await upload_video(request, target=target)
         print(f"Douyin video upload submitted: {request.video_file}")
         return 0
 
@@ -267,7 +319,7 @@ async def run(args):
             headless=args.headless,
             bgm=args.bgm or "",
         )
-        await upload_note(request)
+        await upload_note(request, target=target)
         print(f"Douyin note upload submitted: {len(request.image_files)} images")
         return 0
 
