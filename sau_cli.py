@@ -11,6 +11,7 @@ from sau_commands import (
     hupu, facebook, facebook_page, instagram, youtube, baijiahao, dayu, xueqiu, zhihu,
 )
 from sau_commands.arguments import resolve_account_file
+from utils.errors import LoginRequiredError, UsageError
 
 
 PLATFORMS = {
@@ -45,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def dispatch(args: argparse.Namespace) -> int:
     """只按平台分发，不在入口重复平台的业务判断。"""
+    # Existing tests build Namespace objects by hand without the new optional
+    # attributes; normalise them here so platform ``run`` functions can read
+    # them unconditionally.
+    if not hasattr(args, "folder_id"):
+        args.folder_id = None
+    if not hasattr(args, "profile_id"):
+        args.profile_id = None
+    if not hasattr(args, "account"):
+        args.account = None
+
     if args.platform not in PLATFORMS:
         raise RuntimeError(f"Unsupported platform: {args.platform}")
     return await PLATFORMS[args.platform].run(args)
@@ -55,6 +66,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
         return asyncio.run(dispatch(args))
+    except LoginRequiredError as exc:
+        print(str(exc), file=sys.stderr)
+        return 10
+    except UsageError as exc:
+        parser.print_usage(sys.stderr)
+        print(str(exc), file=sys.stderr)
+        return 2
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 1

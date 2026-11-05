@@ -10,6 +10,13 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
 
 
 def register(platform_parsers):
@@ -20,12 +27,14 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = weibo_actions.add_parser(action_name, help=f"Weibo {action_name}")
-        action_parser.add_argument("--account", required=True, help="Weibo user-defined account_name")
+        action_parser.add_argument("--account", required=False, help="Weibo user-defined account_name")
         if action_name == "login":
             add_runtime_flags(action_parser)
+        else:
+            add_multilogin_flags(action_parser)
 
     weibo_upload_video_parser = weibo_actions.add_parser("upload-video", help="Upload one video to Weibo")
-    weibo_upload_video_parser.add_argument("--account", required=True, help="Weibo user-defined account_name")
+    weibo_upload_video_parser.add_argument("--account", required=False, help="Weibo user-defined account_name")
     weibo_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     weibo_upload_video_parser.add_argument("--title", required=True, help="Video title (max 30 chars)")
     weibo_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
@@ -33,6 +42,7 @@ def register(platform_parsers):
     weibo_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path (<5MB)")
     weibo_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name")
     add_runtime_flags(weibo_upload_video_parser)
+    add_multilogin_flags(weibo_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -86,20 +96,26 @@ async def upload_weibo_video(request: WeiboVideoUploadRequest) -> Path:
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
+        reject_multilogin_login("weibo", args)
+        require_local_account(args)
         result = await login_weibo_account(args.account, headless=args.headless)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Weibo login flow completed: {result['account_file']}")
         return 0
 
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
     if args.action == "check":
-        is_valid = await check_weibo_account(args.account)
+        is_valid = await check_weibo_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
     if args.action == "upload-video":
         request = WeiboVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,

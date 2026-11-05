@@ -21,6 +21,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
 
 
 def register(platform_parsers):
@@ -31,12 +38,14 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = xiaohongshu_actions.add_parser(action_name, help=f"Xiaohongshu {action_name}")
-        action_parser.add_argument("--account", required=True, help="Xiaohongshu user-defined account_name")
+        action_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
         if action_name == "login":
             add_runtime_flags(action_parser)
+        else:
+            add_multilogin_flags(action_parser)
 
     xiaohongshu_upload_video_parser = xiaohongshu_actions.add_parser("upload-video", help="Upload one video to Xiaohongshu")
-    xiaohongshu_upload_video_parser.add_argument("--account", required=True, help="Xiaohongshu user-defined account_name")
+    xiaohongshu_upload_video_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
     xiaohongshu_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     xiaohongshu_upload_video_parser.add_argument("--title", required=True, help="Video title")
     xiaohongshu_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
@@ -44,15 +53,17 @@ def register(platform_parsers):
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     add_runtime_flags(xiaohongshu_upload_video_parser)
+    add_multilogin_flags(xiaohongshu_upload_video_parser)
 
     xiaohongshu_upload_note_parser = xiaohongshu_actions.add_parser("upload-note", help="Upload one note to Xiaohongshu")
-    xiaohongshu_upload_note_parser.add_argument("--account", required=True, help="Xiaohongshu user-defined account_name")
+    xiaohongshu_upload_note_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
     xiaohongshu_upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path, help="Image file paths")
     xiaohongshu_upload_note_parser.add_argument("--title", required=True, help="Note title")
     xiaohongshu_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(xiaohongshu_upload_note_parser)
+    add_multilogin_flags(xiaohongshu_upload_note_parser)
 
 
 @dataclass(slots=True)
@@ -145,14 +156,20 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest) -> Path
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
+        reject_multilogin_login("xiaohongshu", args)
+        require_local_account(args)
         result = await login_xiaohongshu_account(args.account, headless=args.headless)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Xiaohongshu login flow completed: {result['account_file']}")
         return 0
 
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
     if args.action == "check":
-        is_valid = await check_xiaohongshu_account(args.account)
+        is_valid = await check_xiaohongshu_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -166,7 +183,7 @@ async def run(args):
             print(f"错误：小红书标签最多 10 个，当前提供了 {len(parsed_tags)} 个: {parsed_tags}", file=sys.stderr)
             return 1
         request = XiaohongshuVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
@@ -187,7 +204,7 @@ async def run(args):
             print(f"错误：小红书标签最多 10 个，当前提供了 {len(parsed_tags)} 个: {parsed_tags}", file=sys.stderr)
             return 1
         request = XiaohongshuNoteUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             image_files=parse_image_files(args.images),
             title=args.title,
             note=args.note,

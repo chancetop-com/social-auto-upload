@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from patchright.async_api import BrowserContext
 from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
@@ -23,6 +24,10 @@ from utils.log import douyin_logger
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+
+DOUYIN_LOGIN_CHECK_URL = "https://creator.douyin.com/creator-micro/content/upload"
+DOUYIN_LOGIN_CHECK_TIMEOUT_MS = 20_000
+DOUYIN_LOGIN_CHECK_SETTLE_MS = 2_500
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -229,6 +234,46 @@ async def _is_douyin_login_completed(page: Page) -> bool:
             continue
 
     return True
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Douyin.
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A clear login
+    page or login form returns ``False``; network failures, 5xx responses,
+    timeouts and unexpected redirects raise so the CLI can exit 1 instead of
+    silently treating an outage as "logged out".
+
+    Worst-case budget: 20s navigation + 2.5s settle, inside the 15-30s spec.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            DOUYIN_LOGIN_CHECK_URL,
+            wait_until="domcontentloaded",
+            timeout=DOUYIN_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"抖音登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(DOUYIN_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        if "creator.douyin.com" not in current_url:
+            raise RuntimeError(
+                "抖音登录状态检查失败：页面未停留在抖音创作者中心"
+                f"（url={current_url or '<empty>'}）"
+            )
+        if "creator-micro" not in current_url:
+            # Explicit login page (creator.douyin.com root).
+            return False
+
+        return await _is_douyin_login_completed(page)
+    finally:
+        await page.close()
 
 
 async def _wait_for_douyin_login(page: Page, account_file: str, qrcode_info: dict, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 100) -> dict:

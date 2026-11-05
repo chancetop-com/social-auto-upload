@@ -12,6 +12,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    reject_multilogin_platform,
+    require_local_account,
+    resolve_account_label,
+)
 
 
 def register(platform_parsers):
@@ -22,10 +29,12 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = bilibili_actions.add_parser(action_name, help=f"Bilibili {action_name}")
-        action_parser.add_argument("--account", required=True, help="Bilibili user-defined account_name")
+        action_parser.add_argument("--account", required=False, help="Bilibili user-defined account_name")
+        if action_name == "check":
+            add_multilogin_flags(action_parser)
 
     bilibili_upload_video_parser = bilibili_actions.add_parser("upload-video", help="Upload one video to Bilibili")
-    bilibili_upload_video_parser.add_argument("--account", required=True, help="Bilibili user-defined account_name")
+    bilibili_upload_video_parser.add_argument("--account", required=False, help="Bilibili user-defined account_name")
     bilibili_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     bilibili_upload_video_parser.add_argument("--title", required=True, help="Video title")
     bilibili_upload_video_parser.add_argument("--desc", required=True, help="Video description")
@@ -33,6 +42,7 @@ def register(platform_parsers):
     bilibili_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     bilibili_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional Bilibili cover image path")
     bilibili_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_multilogin_flags(bilibili_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -112,20 +122,28 @@ async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        result = await login_bilibili_account(args.account)
+        reject_multilogin_login("bilibili", args)
+    else:
+        reject_multilogin_platform("bilibili", args)
+
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
+    if args.action == "login":
+        result = await login_bilibili_account(account_label)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Bilibili login flow completed: {result['account_file']}")
         return 0
 
     if args.action == "check":
-        is_valid = await check_bilibili_account(args.account)
+        is_valid = await check_bilibili_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
     if args.action == "upload-video":
         request = BilibiliVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,

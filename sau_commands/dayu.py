@@ -29,6 +29,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
 
 
 def register(platform_parsers):
@@ -37,13 +44,14 @@ def register(platform_parsers):
     dayu_parser = platform_parsers.add_parser("dayu", help="Dayu (大鱼号) video publishing and verification")
     dayu_actions = dayu_parser.add_subparsers(dest="action", required=True)
     dayu_login = dayu_actions.add_parser("login", help="Log in manually with visible Chrome")
-    dayu_login.add_argument("--account", required=True, help="Local account alias")
+    dayu_login.add_argument("--account", required=False, help="Local account alias")
     dayu_login.add_argument("--expected-name", help="Expected name displayed by Dayu")
     dayu_login.add_argument("--timeout", type=int, default=600, help="Login timeout in seconds")
     dayu_check = dayu_actions.add_parser("check", help="Check login and bound Dayu identity")
-    dayu_check.add_argument("--account", required=True)
+    dayu_check.add_argument("--account", required=False)
+    add_multilogin_flags(dayu_check)
     dayu_upload = dayu_actions.add_parser("upload-video", help="Publish a video; succeed when Dayu confirms submission")
-    dayu_upload.add_argument("--account", required=True)
+    dayu_upload.add_argument("--account", required=False)
     dayu_upload.add_argument("--file", required=True, type=existing_file_path)
     dayu_upload.add_argument("--title", required=True, help="Title, 5-60 Chinese character units")
     dayu_upload.add_argument("--desc", default="")
@@ -57,8 +65,9 @@ def register(platform_parsers):
     dayu_upload.add_argument("--prepare-only", action="store_true", help="Upload and fill only; do not click publish")
     dayu_upload.add_argument("--upload-timeout", type=int, default=600, help="Upload/processing timeout in seconds")
     add_runtime_flags(dayu_upload)
+    add_multilogin_flags(dayu_upload)
     dayu_article = dayu_actions.add_parser("upload-article", help="从正文文件发表图文，平台确认发表后返回成功")
-    dayu_article.add_argument("--account", required=True, help="已登录的本地账号名称")
+    dayu_article.add_argument("--account", required=False, help="已登录的本地账号名称")
     dayu_article.add_argument("--title", required=True, help="图文标题，5–50字")
     dayu_article.add_argument("--content-file", required=True, type=existing_file_path, help="UTF-8 HTML、Markdown 或 TXT 正文文件")
     dayu_article.add_argument("--theme", choices=ARTICLE_THEMES, help="Markdown 渲染主题，默认 default；按大鱼号兼容排版发表")
@@ -71,8 +80,9 @@ def register(platform_parsers):
     dayu_article.add_argument("--prepare-only", action="store_true", help="上传和填写后结束，不发表")
     dayu_article.add_argument("--upload-timeout", type=int, default=600, help="每张图片上传等待秒数")
     add_runtime_flags(dayu_article)
+    add_multilogin_flags(dayu_article)
     dayu_verify = dayu_actions.add_parser("verify", help="Check an existing publication without uploading again")
-    dayu_verify.add_argument("--account", required=True)
+    dayu_verify.add_argument("--account", required=False)
     dayu_verify.add_argument("--type", choices=("video", "article"), help="作品类型；使用结果文件时自动识别，其余情况默认为video")
     dayu_target = dayu_verify.add_mutually_exclusive_group(required=True)
     dayu_target.add_argument("--content-id", help="Published content_id returned by Dayu")
@@ -85,7 +95,19 @@ def register(platform_parsers):
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
-    account_file = resolve_account_file("dayu", args.account)
+    if args.action == "login":
+        reject_multilogin_login("dayu", args)
+        require_local_account(args)
+        account = args.account
+    elif args.action in {"check", "upload-video", "upload-article"}:
+        resolve_multilogin_target(args)
+        require_local_account(args)
+        account = resolve_account_label(args)
+    else:
+        require_local_account(args)
+        account = args.account
+
+    account_file = resolve_account_file("dayu", account)
     if args.action == "login":
         if args.timeout <= 0:
             raise ValueError("登录期限必须大于 0 秒")

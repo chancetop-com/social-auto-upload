@@ -12,6 +12,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
 
 
 def register(platform_parsers):
@@ -22,12 +29,14 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = youtube_actions.add_parser(action_name, help=f"YouTube {action_name}")
-        action_parser.add_argument("--account", required=True, help="YouTube user-defined account_name")
+        action_parser.add_argument("--account", required=False, help="YouTube user-defined account_name")
         if action_name == "login":
             add_runtime_flags(action_parser)
+        else:
+            add_multilogin_flags(action_parser)
 
     youtube_upload_video_parser = youtube_actions.add_parser("upload-video", help="Upload one video to YouTube")
-    youtube_upload_video_parser.add_argument("--account", required=True, help="YouTube user-defined account_name")
+    youtube_upload_video_parser.add_argument("--account", required=False, help="YouTube user-defined account_name")
     youtube_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     youtube_upload_video_parser.add_argument("--title", required=True, help="Video title (<=100 chars)")
     youtube_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
@@ -38,6 +47,7 @@ def register(platform_parsers):
         "--visibility", default="public", choices=["public", "unlisted", "private"], help="Video visibility")
     youtube_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(youtube_upload_video_parser)
+    add_multilogin_flags(youtube_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -95,20 +105,26 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest) -> Path:
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
+        reject_multilogin_login("youtube", args)
+        require_local_account(args)
         result = await login_youtube_account(args.account, headless=args.headless)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"YouTube login flow completed: {result['account_file']}")
         return 0
 
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
     if args.action == "check":
-        is_valid = await check_youtube_account(args.account)
+        is_valid = await check_youtube_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
     if args.action == "upload-video":
         request = YouTubeVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
