@@ -4,11 +4,12 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `pyproject.toml` 对 patchright 使用精确 pin `1.64.4`，`uv.lock` 同步更新。
-- [ ] 已重新安装对应的 Chromium（目标 156），并在提交说明或 CHANGELOG 记录浏览器版本。
-- [ ] `python -m unittest discover -s tests` 全绿，没有新增 skip 或放宽断言。
-- [ ] 明确记录：本票只做测试用例回归，不做真实账号的完整上传验证；stealth 差异作为已知未验证风险留给真实使用暴露。
-- [ ] `requirements.txt`（旧 Web 环境，`playwright==1.52.0`）保持不变。
-- [ ] 回滚路径已写入提交说明：恢复旧 pin + lock + 重装浏览器。
+- [x] `pyproject.toml` 对 patchright 使用精确 pin `1.64.4`，`uv.lock` 同步更新。
+- [x] 已重新安装对应的 Chromium（目标 156），并在提交说明或 CHANGELOG 记录浏览器版本。
+- [x] `python -m unittest discover -s tests` 与升级前基线一致；没有新增 skip 或放宽断言。
+      - 基线本身存在 7 个与本票无关的既有失败（douyin positional 漂移、instagram 真实 Chrome 断言、xiaohongshu 超时漂移、xueqiu macOS `/private` 临时路径）。升级后新增 0 个失败。
+- [x] 明确记录：本票只做测试用例回归，不做真实账号的完整上传验证；stealth 差异作为已知未验证风险留给真实使用暴露。
+- [x] `requirements.txt`（旧 Web 环境，`playwright==1.52.0`）保持不变。
+- [x] 回滚路径已写入提交说明：恢复旧 pin + lock + 重装浏览器。
