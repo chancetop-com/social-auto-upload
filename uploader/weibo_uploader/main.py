@@ -20,10 +20,18 @@ import re
 import time
 from pathlib import Path
 
-from patchright.async_api import Page, Playwright, TimeoutError as PWTimeoutError, async_playwright
+from patchright.async_api import (
+    BrowserContext,
+    Page,
+    Playwright,
+    TimeoutError as PWTimeoutError,
+    async_playwright,
+)
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.browser_session import BrowserSession
+from utils.errors import LoginRequiredError
 from utils.log import weibo_logger
 from utils.login_qrcode import build_login_qrcode_path, remove_qrcode_file
 
@@ -60,11 +68,113 @@ async def _emit_qrcode_callback(qrcode_callback, payload: dict):
         await callback_result
 
 
-def _build_launch_kwargs(headless: bool) -> dict:
-    launch_kwargs = {"headless": headless}
+def _build_launch_kwargs(headless: bool | None = None) -> dict:
+    launch_kwargs = {}
     if LOCAL_CHROME_PATH:
         launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+    if headless is not None:
+        launch_kwargs["headless"] = headless
     return launch_kwargs
+
+
+# Golden local-mode browser options (ticket 20).  The tall viewport only helps
+# the local flow keep the publish button on screen; Multilogin must not assume
+# it (the publish button is scrolled into view instead).
+WEIBO_LAUNCH_KWARGS = _build_launch_kwargs()
+WEIBO_CONTEXT_KWARGS = {"viewport": {"width": 1280, "height": 2000}}
+WEIBO_INIT_SCRIPT = False
+
+WEIBO_LOGIN_CHECK_TIMEOUT_MS = 30_000
+WEIBO_LOGIN_CHECK_SETTLE_MS = 5_000
+WEIBO_LOGIN_POSITIVE_SELECTORS = (
+    '[class*="Nav_avatar"]',
+    '[class*="woo-avatar"]',
+    '[class*="Feed_content"]',
+    '[class*="Feed_main"]',
+)
+WEIBO_LOGIN_URL_MARKERS = ("newlogin", "passport", "signin")
+
+
+def _raise_if_login_required(page) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    Only the Multilogin branch calls this.  Local mode keeps its historical
+    retry/timeout behaviour.
+    """
+    url = str(getattr(page, "url", "") or "").lower()
+    if not url:
+        return
+    if any(marker in url for marker in WEIBO_LOGIN_URL_MARKERS):
+        raise LoginRequiredError(
+            "微博上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+    if any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa")):
+        raise LoginRequiredError(
+            "微博上传过程中需要重新登录（登录页/验证码/二次验证）："
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+
+
+async def is_logged_in(context: BrowserContext) -> bool:
+    """Return whether the Multilogin Profile is logged in to Weibo.
+
+    Requires a positive signal: the page avatar/feed marker or (secondary) a
+    ``SUB`` cookie readable from the injected context.  Explicit login URLs and
+    a visible「登录」button mean logged out; network errors, timeouts, 5xx,
+    unexpected domains and a page with no positive signal raise (exit 1).
+
+    Only ``context.new_page()`` / ``goto`` / ``close`` / ``cookies`` are used.
+    """
+    page = await context.new_page()
+    try:
+        response = await page.goto(
+            WEIBO_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=WEIBO_LOGIN_CHECK_TIMEOUT_MS,
+        )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 500:
+            raise RuntimeError(f"微博登录状态检查失败：HTTP {status}")
+
+        wait_for_timeout = getattr(page, "wait_for_timeout", None)
+        if wait_for_timeout is not None:
+            await wait_for_timeout(WEIBO_LOGIN_CHECK_SETTLE_MS)
+
+        current_url = str(getattr(page, "url", "") or "")
+        lowered = current_url.lower()
+        if any(marker in lowered for marker in WEIBO_LOGIN_URL_MARKERS):
+            return False
+
+        if "weibo.com" not in lowered:
+            raise RuntimeError(
+                "微博登录状态检查失败：页面未停留在微博"
+                f"（url={current_url or '<empty>'}）"
+            )
+
+        for selector in WEIBO_LOGIN_POSITIVE_SELECTORS:
+            locator = page.locator(selector).first
+            if not await locator.count():
+                continue
+            try:
+                if await locator.is_visible():
+                    return True
+            except Exception:
+                continue
+
+        cookies = await context.cookies()
+        if any(c.get("name") == "SUB" and c.get("value") for c in cookies):
+            return True
+
+        login_btn = page.get_by_text("登录", exact=True).first
+        if await login_btn.count() and await login_btn.is_visible():
+            return False
+
+        raise RuntimeError(
+            "微博登录状态检查失败：未找到头像/feed 等已登录信号（页面结构异常）"
+        )
+    finally:
+        await page.close()
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -289,7 +399,9 @@ class WeiBoVideo(BaseVideoUploader):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
-        self.account_file = _resolve_account_file(account_file)
+        self.account_file = (
+            _resolve_account_file(account_file) if account_file is not None else None
+        )
         self.publish_date = publish_date
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
@@ -299,11 +411,12 @@ class WeiBoVideo(BaseVideoUploader):
         self.local_executable_path = LOCAL_CHROME_PATH
         self.max_title_length = 30
 
-    async def validate_upload_args(self):
-        if not os.path.exists(self.account_file):
-            raise RuntimeError(f"cookie文件不存在，请先完成微博登录: {self.account_file}")
-        if not await cookie_auth(self.account_file):
-            raise RuntimeError(f"cookie文件已失效，请先完成微博登录: {self.account_file}")
+    async def validate_upload_args(self, *, check_cookie: bool = True):
+        if check_cookie:
+            if not self.account_file or not os.path.exists(self.account_file):
+                raise RuntimeError(f"cookie文件不存在，请先完成微博登录: {self.account_file}")
+            if not await cookie_auth(self.account_file):
+                raise RuntimeError(f"cookie文件已失效，请先完成微博登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频标题不能为空")
         if not self.thumbnail_path:
@@ -315,53 +428,31 @@ class WeiBoVideo(BaseVideoUploader):
         if thumb_size > 5 * 1024 * 1024:
             raise ValueError(f"封面文件过大（{thumb_size / 1024 / 1024:.1f}MB），微博要求 < 5MB")
 
-    async def upload(self, playwright: Playwright) -> None:
+    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        if session is not None:
+            await self.validate_upload_args(check_cookie=False)
+            await self.upload_in(session)
+            return
+
+        if playwright is None:
+            raise ValueError("本地模式需要 Playwright 实例")
+
         weibo_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
         await self.validate_upload_args()
         weibo_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
+        browser = await playwright.chromium.launch(
+            headless=self.headless, **WEIBO_LAUNCH_KWARGS
+        )
         context = await browser.new_context(
             storage_state=self.account_file,
-            viewport={"width": 1280, "height": 2000},  # 高视口，确保发布按钮等在可视区
+            **WEIBO_CONTEXT_KWARGS,
         )
 
         try:
-            page = await context.new_page()
-            await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
-            weibo_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
-
-            # 1) 点击首页「视频」入口，弹出发布窗口（popup）
-            publish_page = await self._open_video_publish_page(page)
-
-            # 2) 上传视频文件
-            await self._upload_video_file(publish_page)
-
-            # 3) 等待视频真正上传完成（"上传完成"块可见）
-            await self._wait_upload_complete(publish_page)
-
-            # 4) 类型 = 二创（必选）
-            await self._select_type(publish_page)
-
-            # 5) 内容声明 = 含AI生成内容（必选）
-            await self._select_declaration(publish_page)
-
-            # 6) 填写标题（必填）
-            await self._fill_title(publish_page)
-
-            # 7) 上传封面（必填）
-            await self._upload_thumbnail(publish_page)
-
-            # 8) 合集：选已有，没有则新建（配置了 collection_name 时）
-            if self.collection_name:
-                await self._apply_collection(publish_page)
-
-            # 9) 填写描述（包含标签）
-            await self._fill_description(publish_page)
-
-            # 10) 点击发布并校验真成功
-            await self._submit_publish(publish_page)
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
 
             # 保存 cookie
             await context.storage_state(path=self.account_file)
@@ -370,7 +461,47 @@ class WeiBoVideo(BaseVideoUploader):
             await context.close()
             await browser.close()
 
-    async def _open_video_publish_page(self, page: Page) -> Page:
+    async def upload_in(self, session: BrowserSession) -> None:
+        multilogin = session.mode == "multilogin"
+        page = await session.context.new_page()
+        await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(3000)
+        if multilogin:
+            _raise_if_login_required(page)
+        weibo_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
+
+        # 1) 点击首页「视频」入口，弹出发布窗口（popup）
+        publish_page = await self._open_video_publish_page(page, multilogin=multilogin)
+
+        # 2) 上传视频文件
+        await self._upload_video_file(publish_page)
+
+        # 3) 等待视频真正上传完成（"上传完成"块可见）
+        await self._wait_upload_complete(publish_page)
+
+        # 4) 类型 = 二创（必选）
+        await self._select_type(publish_page)
+
+        # 5) 内容声明 = 含AI生成内容（必选）
+        await self._select_declaration(publish_page)
+
+        # 6) 填写标题（必填）
+        await self._fill_title(publish_page)
+
+        # 7) 上传封面（必填）
+        await self._upload_thumbnail(publish_page)
+
+        # 8) 合集：选已有，没有则新建（配置了 collection_name 时）
+        if self.collection_name:
+            await self._apply_collection(publish_page)
+
+        # 9) 填写描述（包含标签）
+        await self._fill_description(publish_page)
+
+        # 10) 点击发布并校验真成功
+        await self._submit_publish(publish_page, multilogin=multilogin)
+
+    async def _open_video_publish_page(self, page: Page, *, multilogin: bool = False) -> Page:
         """点击首页「视频」入口，等待 popup 视频发布页。"""
         async with page.expect_popup(timeout=30000) as popup_info:
             # 录制脚本：page.locator("span").filter(has_text="视频").click()
@@ -379,6 +510,8 @@ class WeiBoVideo(BaseVideoUploader):
             await video_btn.click()
         publish_page = await popup_info.value
         await publish_page.wait_for_timeout(3000)
+        if multilogin:
+            _raise_if_login_required(publish_page)
         weibo_logger.info(_msg("🏃", "已打开视频发布页"))
         return publish_page
 
@@ -741,7 +874,7 @@ class WeiBoVideo(BaseVideoUploader):
                 weibo_logger.warning(_msg("⚠️", f"新建合集失败，跳过合集继续发布：{exc}"))
                 return
 
-    async def _submit_publish(self, page: Page) -> None:
+    async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         """点击发布并校验真成功。
 
         真实 DOM：
@@ -763,6 +896,8 @@ class WeiBoVideo(BaseVideoUploader):
         if not await publish_btn.count():
             publish_btn = page.get_by_role("button", name="发布").first
         await publish_btn.wait_for(state="visible", timeout=15000)
+        # 不依赖本地模式的高视口；滚动到可视区后再触发点击（本地模式同样无害）。
+        await publish_btn.scroll_into_view_if_needed()
         await publish_btn.evaluate("el => el.click()")
         weibo_logger.info(_msg("🏃", "已点击发布按钮(JS)"))
 
@@ -770,6 +905,8 @@ class WeiBoVideo(BaseVideoUploader):
         again_btn = page.locator('button:has(span:text-is("再发一条视频"))').first
         start = time.monotonic()
         while time.monotonic() - start < 60:
+            if multilogin:
+                _raise_if_login_required(page)
             try:
                 if await again_btn.is_visible():
                     weibo_logger.success(_msg("🥳", "视频发布成功（出现「再发一条视频」）"))
@@ -798,6 +935,9 @@ class WeiBoVideo(BaseVideoUploader):
 
         raise RuntimeError("发布后 60s 未见成功层/「再发一条视频」，判定发布未成功（未入库）")
 
-    async def main(self):
+    async def main(self, *, session: BrowserSession | None = None):
+        if session is not None:
+            await self.upload(None, session=session)
+            return
         async with async_playwright() as playwright:
             await self.upload(playwright)
