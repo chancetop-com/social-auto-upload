@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 依赖
+
+- patchright 精确升级到 `1.64.4`，对应 Chromium 156（与 Multilogin Mimic 156 对齐）；`uv.lock` 同步更新。
+  - 本次只做离线测试用例回归，未做真实账号的完整上传验证；stealth 行为差异属于已知未验证风险。
+  - 回滚：把 `pyproject.toml` 恢复为 `patchright==1.58.2`，重新 `uv lock` / `uv sync`，再执行 `patchright install chromium`。
+
 ### 结构与 CLI
 
 - 将 `sau_cli.py` 从单体入口拆为 `sau_commands/` 下的按平台命令模块，入口只负责注册和分发。
