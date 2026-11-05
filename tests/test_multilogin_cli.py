@@ -194,6 +194,10 @@ class UsageAndExitCodeTests(unittest.TestCase):
 
     def test_local_missing_account_exits_2_for_every_login_and_check(self):
         for platform in sau_cli.PLATFORMS:
+            # Ticket 25: TikTok has no local mode at all, so every action exits
+            # 1 before --account is ever considered (covered by test_mlx_tiktok).
+            if platform == "tiktok":
+                continue
             for action in ("check", "login"):
                 if action not in _action_names(platform):
                     continue
