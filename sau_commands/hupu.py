@@ -2,7 +2,17 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from uploader.hupu_uploader.main import HuPuVideo, hupu_setup, cookie_auth as hupu_cookie_auth
+from patchright.async_api import async_playwright
+from uploader.hupu_uploader.main import (
+    HUPU_CONTEXT_KWARGS,
+    HUPU_INIT_SCRIPT,
+    HUPU_LAUNCH_KWARGS,
+    HuPuVideo,
+    cookie_auth as hupu_cookie_auth,
+    hupu_setup,
+    is_logged_in,
+    prepare_local_context,
+)
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
     add_runtime_flags,
@@ -17,6 +27,8 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -68,7 +80,45 @@ async def check_hupu_account(account_name: str) -> bool:
     return await hupu_cookie_auth(str(account_file))
 
 
-async def upload_hupu_video(request: HupuVideoUploadRequest) -> Path:
+def _build_uploader(request: HupuVideoUploadRequest, account_file) -> HuPuVideo:
+    return HuPuVideo(
+        title=request.title,
+        file_path=str(request.video_file),
+        tags=request.tags,
+        account_file=account_file,
+        desc=request.description,
+        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
+        debug=request.debug,
+        headless=request.headless,
+    )
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"虎扑登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def upload_hupu_video(request: HupuVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=HUPU_LAUNCH_KWARGS,
+                context_kwargs=HUPU_CONTEXT_KWARGS,
+                init_script=HUPU_INIT_SCRIPT,
+                context_setup=prepare_local_context,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.upload(session=session)
+        return None
+
     account_file = resolve_account_file("hupu", request.account_name)
     is_ready = await hupu_setup(str(account_file), handle=False)
     if not is_ready:
@@ -76,17 +126,18 @@ async def upload_hupu_video(request: HupuVideoUploadRequest) -> Path:
             f"Hupu cookie is missing or expired: {account_file}. Run `sau hupu login --account {request.account_name}` first."
         )
 
-    app = HuPuVideo(
-        title=request.title,
-        file_path=str(request.video_file),
-        tags=request.tags,
-        account_file=str(account_file),
-        desc=request.description,
-        thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
-        debug=request.debug,
-        headless=request.headless,
-    )
-    await app.main()
+    app = _build_uploader(request, str(account_file))
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=request.headless,
+            account_file=str(account_file),
+            launch_kwargs=HUPU_LAUNCH_KWARGS,
+            context_kwargs=HUPU_CONTEXT_KWARGS,
+            init_script=HUPU_INIT_SCRIPT,
+            context_setup=prepare_local_context,
+        ) as session:
+            await app.upload(session=session)
     return account_file
 
 
@@ -106,6 +157,19 @@ async def run(args):
     account_label = resolve_account_label(args)
 
     if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
         is_valid = await check_hupu_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
@@ -121,7 +185,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_hupu_video(request)
+        await upload_hupu_video(request, target=target)
         print(f"Hupu video upload submitted: {request.video_file}")
         return 0
 
