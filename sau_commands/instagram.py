@@ -26,13 +26,14 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     reject_multilogin_login,
+    require_account,
     require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -48,6 +49,7 @@ def register(platform_parsers):
             add_runtime_flags(action_parser)
             action_parser.set_defaults(headless=False)
         else:
+            add_runtime_flags(action_parser)
             add_multilogin_flags(action_parser)
     instagram_video = instagram_actions.add_parser("upload-video", help="向 Instagram 发布视频/Reel")
     instagram_video.add_argument("--account", required=False)
@@ -123,10 +125,7 @@ def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramU
 
 
 def _raise_login_required(target) -> None:
-    raise LoginRequiredError(
-        f"Instagram 登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error("Instagram", target.profile_id)
 
 
 async def upload_instagram_content(
@@ -171,7 +170,7 @@ async def run(args):
         return 0
 
     if args.action in {"verify", "delete"}:
-        require_local_account(args)
+        require_account(args)
         result = await instagram_post_action(
             resolve_account_file("instagram", args.account),
             post_url=args.post_url,
@@ -193,12 +192,16 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     multilogin=target,
                     launch_kwargs=INSTAGRAM_LAUNCH_KWARGS,
                     context_kwargs=INSTAGRAM_CONTEXT_KWARGS,
                     init_script=INSTAGRAM_INIT_SCRIPT,
                 ) as session:
+                    logger.info(
+                        "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
+                        target.profile_id,
+                    )
                     is_valid = await is_logged_in(session.context)
             if not is_valid:
                 _raise_login_required(target)

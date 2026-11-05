@@ -7,14 +7,21 @@ import argparse
 import asyncio
 import io
 import os
+import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
+from sau_commands import dayu as dayu_command
 from sau_commands import douyin as douyin_command
+from sau_commands import facebook as facebook_command
+from sau_commands import facebook_page as facebook_page_command
+from sau_commands import instagram as instagram_command
 from sau_commands import multilogin
+from sau_commands import xueqiu as xueqiu_command
+from sau_commands import zhihu as zhihu_command
 from utils.errors import LoginRequiredError, UsageError
 from utils.multilogin import MultiloginTarget
 
@@ -69,6 +76,10 @@ class ParserContractTests(unittest.TestCase):
     def test_check_and_upload_actions_accept_multilogin_flags(self):
         parser = sau_cli.build_parser()
         for platform in sau_cli.PLATFORMS:
+            # Bilibili is rejected in MLX mode (no browser context), so it must
+            # not advertise Profile flags.
+            if platform == "bilibili":
+                continue
             for action in _action_names(platform):
                 if not (action == "check" or action.startswith("upload-")):
                     continue
@@ -76,6 +87,26 @@ class ParserContractTests(unittest.TestCase):
                     options = _option_strings(_subparser(parser, platform, action))
                     self.assertIn("--folder-id", options)
                     self.assertIn("--profile-id", options)
+
+    def test_every_check_accepts_runtime_flags(self):
+        parser = sau_cli.build_parser()
+        for platform in sau_cli.PLATFORMS:
+            if platform == "bilibili":
+                continue
+            if "check" not in _action_names(platform):
+                continue
+            with self.subTest(platform=platform):
+                options = _option_strings(_subparser(parser, platform, "check"))
+                self.assertIn("--headed", options)
+                self.assertIn("--headless", options)
+
+    def test_bilibili_actions_do_not_accept_multilogin_flags(self):
+        parser = sau_cli.build_parser()
+        for action in ("check", "upload-video"):
+            with self.subTest(action=action):
+                options = _option_strings(_subparser(parser, "bilibili", action))
+                self.assertNotIn("--folder-id", options)
+                self.assertNotIn("--profile-id", options)
 
     def test_login_actions_do_not_accept_multilogin_flags(self):
         parser = sau_cli.build_parser()
@@ -105,6 +136,21 @@ class ParserContractTests(unittest.TestCase):
         self.assertIsNone(args.account)
         self.assertEqual(args.folder_id, "folder")
         self.assertEqual(args.profile_id, "profile")
+        self.assertTrue(args.headless)
+
+    def test_documented_check_headed_example_parses(self):
+        args = sau_cli.build_parser().parse_args(
+            [
+                "xiaohongshu",
+                "check",
+                "--folder-id",
+                "folder",
+                "--profile-id",
+                "profile",
+                "--headed",
+            ]
+        )
+        self.assertFalse(args.headless)
 
 
 class HelperTests(unittest.TestCase):
@@ -158,6 +204,20 @@ class HelperTests(unittest.TestCase):
     def test_mlx_missing_account_is_not_a_usage_error(self):
         with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
             multilogin.require_local_account(Namespace(account=None))
+
+    def test_require_account_is_strict_even_in_mlx_mode(self):
+        with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
+            multilogin.require_account(Namespace(account="creator"))
+            for account in (None, "", "   "):
+                with self.subTest(account=account):
+                    with self.assertRaises(UsageError):
+                        multilogin.require_account(Namespace(account=account))
+
+    def test_login_required_error_message(self):
+        error = multilogin.login_required_error("抖音", "profile-1")
+        self.assertIsInstance(error, LoginRequiredError)
+        self.assertIn("抖音登录态无效：profile_id=profile-1", str(error))
+        self.assertIn("Multilogin", str(error))
 
     def test_login_rejection_message_and_placeholder(self):
         with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
@@ -243,6 +303,73 @@ class UsageAndExitCodeTests(unittest.TestCase):
         code, err = self._run(["bilibili", "login", "--account", "creator"], SENTINEL_TOKEN)
         self.assertEqual(code, 1)
         self.assertIn("Multilogin 模式不支持 CLI 登录", err)
+
+    def test_local_only_actions_still_require_account_in_mlx_mode(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            result_file = os.path.join(tmp_dir, "result.json")
+            with open(result_file, "w", encoding="utf-8") as handle:
+                handle.write("{}")
+            cases = [
+                (
+                    facebook_command,
+                    ["facebook", "verify", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
+                ),
+                (
+                    facebook_command,
+                    ["facebook", "delete", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
+                ),
+                (
+                    facebook_page_command,
+                    [
+                        "facebook-page",
+                        "verify",
+                        "--page-id",
+                        "1",
+                        "--page",
+                        "Page",
+                        "--content-id",
+                        "c",
+                        "--expected-text",
+                        "t",
+                    ],
+                ),
+                (
+                    facebook_page_command,
+                    [
+                        "facebook-page",
+                        "delete",
+                        "--page-id",
+                        "1",
+                        "--page",
+                        "Page",
+                        "--content-id",
+                        "c",
+                        "--expected-text",
+                        "t",
+                    ],
+                ),
+                (
+                    instagram_command,
+                    ["instagram", "verify", "--post-url", "u", "--expected-text", "t"],
+                ),
+                (
+                    instagram_command,
+                    ["instagram", "delete", "--post-url", "u", "--expected-text", "t"],
+                ),
+                (zhihu_command, ["zhihu", "verify", "--result", result_file]),
+                (xueqiu_command, ["xueqiu", "verify", "--result", result_file]),
+                (dayu_command, ["dayu", "verify", "--content-id", "c"]),
+            ]
+            for module, argv in cases:
+                with self.subTest(argv=argv):
+                    resolve = MagicMock(
+                        side_effect=AssertionError("cookie path must not be built")
+                    )
+                    with patch.object(module, "resolve_account_file", new=resolve):
+                        code, err = self._run(argv, SENTINEL_TOKEN)
+                    self.assertEqual(code, 2)
+                    self.assertIn("--account", err)
+                    resolve.assert_not_called()
 
     def test_exit_code_mapping(self):
         cases = (

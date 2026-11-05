@@ -170,7 +170,8 @@ async def is_logged_in(context: BrowserContext) -> bool:
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Positive
     signals (publish-page upload button or a logged-in user menu) decide True;
     an explicit login page/redirect returns False; network failures, 5xx
-    responses and unexpected hosts raise so the CLI can exit 1.
+    responses, unexpected hosts and a page with no positive signal raise so the
+    CLI can exit 1.
     """
     page = await context.new_page()
     try:
@@ -205,7 +206,9 @@ async def is_logged_in(context: BrowserContext) -> bool:
             if await page.locator(selector).count():
                 return True
 
-        return False
+        raise RuntimeError(
+            "虎扑登录状态检查失败：未找到上传按钮或已登录用户菜单（页面结构异常）"
+        )
     finally:
         await page.close()
 

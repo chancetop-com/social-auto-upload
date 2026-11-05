@@ -516,6 +516,14 @@ class AlipayIsLoggedInTests(unittest.TestCase):
         with self.assertRaises(Exception):
             self._check(page)
 
+    def test_goto_and_settle_budget_is_within_30_seconds(self):
+        self.assertGreaterEqual(alipay_main.ALIPAY_LOGIN_CHECK_TIMEOUT_MS, 15_000)
+        self.assertLessEqual(
+            alipay_main.ALIPAY_LOGIN_CHECK_TIMEOUT_MS
+            + alipay_main.ALIPAY_LOGIN_CHECK_SETTLE_MS,
+            30_000,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Weibo — local golden path
@@ -726,11 +734,10 @@ class WeiboIsLoggedInTests(unittest.TestCase):
         )
         self.assertTrue(self._check(page))
 
-    def test_sub_cookie_is_secondary_positive_signal(self):
+    def test_sub_cookie_alone_is_not_a_positive_signal(self):
         page = _FakePage(final_url=WEIBO_HOME_URL)
-        self.assertTrue(
+        with self.assertRaises(RuntimeError):
             self._check(page, cookies=[{"name": "SUB", "value": "_2A25abc"}])
-        )
 
     def test_login_page_url_is_not_logged_in(self):
         page = _FakePage(final_url="https://weibo.com/newlogin?url=/")
@@ -763,6 +770,14 @@ class WeiboIsLoggedInTests(unittest.TestCase):
         page = _FakePage(goto_error=TimeoutError("navigation timeout"))
         with self.assertRaises(Exception):
             self._check(page)
+
+    def test_goto_and_settle_budget_is_within_30_seconds(self):
+        self.assertGreaterEqual(weibo_main.WEIBO_LOGIN_CHECK_TIMEOUT_MS, 15_000)
+        self.assertLessEqual(
+            weibo_main.WEIBO_LOGIN_CHECK_TIMEOUT_MS
+            + weibo_main.WEIBO_LOGIN_CHECK_SETTLE_MS,
+            30_000,
+        )
 
 
 # ---------------------------------------------------------------------------

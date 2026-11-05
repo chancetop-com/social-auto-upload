@@ -29,13 +29,14 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     reject_multilogin_login,
+    require_account,
     require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 IDENTITY_UNVERIFIED_MESSAGE = (
     "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}），"
@@ -48,10 +49,7 @@ def _log_identity_unverified(target) -> None:
 
 
 def _raise_login_required(target) -> None:
-    raise LoginRequiredError(
-        f"知乎登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error("知乎", target.profile_id)
 
 
 def register(platform_parsers):
@@ -106,7 +104,7 @@ def register(platform_parsers):
 
 async def _run_multilogin(args, target):
     """Multilogin path: Profile owns identity; no cookies/identity files are read."""
-    headless = getattr(args, "headless", True)
+    headless = args.headless
 
     if args.action == "check":
         async with async_playwright() as playwright:
@@ -170,7 +168,7 @@ async def run(args):
         if target is not None:
             return await _run_multilogin(args, target)
     else:
-        require_local_account(args)
+        require_account(args)
         account = args.account
 
     account_file = resolve_account_file("zhihu", account)

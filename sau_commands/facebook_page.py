@@ -27,13 +27,14 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     reject_multilogin_login,
+    require_account,
     require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -65,6 +66,7 @@ def register(platform_parsers):
                 add_runtime_flags(action_parser)
                 action_parser.set_defaults(headless=False)
             else:
+                add_runtime_flags(action_parser)
                 add_multilogin_flags(action_parser)
 
         upload_video_parser = meta_actions.add_parser("upload-video", help=f"Upload a video to {meta_platform}")
@@ -147,10 +149,7 @@ def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUpl
 
 
 def _raise_login_required(platform: str, target) -> None:
-    raise LoginRequiredError(
-        f"{platform} 登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error(f"{platform} ", target.profile_id)
 
 
 async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dict:
@@ -193,7 +192,7 @@ async def run(args):
         return 0
 
     if args.platform == "facebook-page" and args.action in {"verify", "delete"}:
-        require_local_account(args)
+        require_account(args)
         result = await meta_post_action(
             resolve_account_file(args.platform, args.account), page_id=args.page_id, page_name=args.page,
             content_id=args.content_id, expected_text=args.expected_text, scheduled=args.scheduled,
@@ -214,7 +213,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     multilogin=target,
                     launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
                     context_kwargs=FACEBOOK_PAGE_CONTEXT_KWARGS,

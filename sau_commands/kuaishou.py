@@ -27,13 +27,13 @@ from sau_commands.arguments import (
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
+    login_required_error,
     reject_multilogin_login,
     require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -45,9 +45,8 @@ def register(platform_parsers):
     for action_name in ("login", "check"):
         action_parser = kuaishou_actions.add_parser(action_name, help=f"Kuaishou {action_name}")
         action_parser.add_argument("--account", required=False, help="Kuaishou user-defined account_name")
-        if action_name == "login":
-            add_runtime_flags(action_parser)
-        else:
+        add_runtime_flags(action_parser)
+        if action_name == "check":
             add_multilogin_flags(action_parser)
 
     kuaishou_upload_video_parser = kuaishou_actions.add_parser("upload-video", help="Upload one video to Kuaishou")
@@ -144,10 +143,7 @@ def _build_note_uploader(request: KuaishouNoteUploadRequest, account_file) -> KS
 
 
 def _raise_login_required(target) -> None:
-    raise LoginRequiredError(
-        f"快手登录态无效：profile_id={target.profile_id}。"
-        "请在 Multilogin 应用中登录 Profile 后重试。"
-    )
+    raise login_required_error("快手", target.profile_id)
 
 
 async def upload_kuaishou_video(request: KuaishouVideoUploadRequest, *, target=None) -> Path | None:
@@ -230,7 +226,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     multilogin=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)

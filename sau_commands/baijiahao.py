@@ -39,9 +39,8 @@ def register(platform_parsers):
     for action_name in ("login", "check"):
         action_parser = baijiahao_actions.add_parser(action_name, help=f"Baijiahao {action_name}")
         action_parser.add_argument("--account", required=False, help="Baijiahao user-defined account_name")
-        if action_name == "login":
-            add_runtime_flags(action_parser)
-        else:
+        add_runtime_flags(action_parser)
+        if action_name == "check":
             add_multilogin_flags(action_parser)
 
     baijiahao_upload_video_parser = baijiahao_actions.add_parser("upload-video", help="Upload one video to Baijiahao")
@@ -154,7 +153,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=getattr(args, "headless", True),
+                    headless=args.headless,
                     multilogin=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)

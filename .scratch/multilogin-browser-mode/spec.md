@@ -374,7 +374,7 @@ Start 成功但 CDP 3 次重试失败时，追加：`若你使用 Docker launche
 
 | 层 | 替身 | 覆盖 |
 |---|---|---|
-| Client | 注入 `http_get`（不起 http.server） | Start/Stop URL、Bearer、`verify=False`、超时、错误码、Stop 幂等、token 卫生 |
+| Client | 注入 `http_get`（不起 http.server） | Start/Stop URL、Bearer、`verify=True`、超时、错误码、Stop 幂等、token 卫生（测试注入 `http_get`，不发真实 TLS 请求） |
 | Session | `tests/fakes.py` 手写 FakePlaywright/Browser/Context | 本地参数等价；MLX 生命周期；重试/退避；`contexts` 数量；finally Stop；shield；Stop 失败 warning |
 | CLI | `AsyncMock` + fake playwright | 模式判定、缺参 2、`--account` 可省略、10/1/2/0、login 拒绝、本地忽略 MLX 参数 |
 | 平台 | 表驱动 + 负向断言 | MLX 禁止 API；`is_logged_in` True/False/抛异常；`account_file=None` 不碰 cookie；身份 reader 未被调用 |
@@ -398,7 +398,7 @@ Start 成功但 CDP 3 次重试失败时，追加：`若你使用 Docker launche
 
 ## 15. 验收清单
 
-- [ ] 无 token 时，所有平台旧命令解析与行为不变；本地单测全绿。
+- [ ] 无 token 时，所有平台旧命令解析与行为不变；无新增失败；基线本身有 5F/1E（与本 feature 无关）。
 - [ ] MLX 下 check：已登录 0、未登录 10、Launcher 故障 1、缺参 2。
 - [ ] MLX 下 upload：成功 0、登录失效 10、上传失败 1；成功后 Stop 被调用一次。
 - [ ] Start 成功但 connect 失败：退出 1，且 Profile 被 Stop。

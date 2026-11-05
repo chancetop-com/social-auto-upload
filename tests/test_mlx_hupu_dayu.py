@@ -325,9 +325,11 @@ class HupuLoginDetectionTests(unittest.TestCase):
         self.assertFalse(asyncio.run(hupu_is_logged_in(_LoginContext(page))))
         self.assertTrue(page.closed)
 
-    def test_no_positive_signal_returns_false(self):
+    def test_no_positive_signal_raises(self):
         page = _LoginPage(final_url="https://bbs.hupu.com/newpost?tabkey=2")
-        self.assertFalse(asyncio.run(hupu_is_logged_in(_LoginContext(page))))
+        with self.assertRaisesRegex(RuntimeError, "页面结构异常"):
+            asyncio.run(hupu_is_logged_in(_LoginContext(page)))
+        self.assertTrue(page.closed)
 
     def test_http_5xx_raises(self):
         page = _LoginPage(
@@ -856,9 +858,11 @@ class DayuLoginDetectionTests(unittest.TestCase):
         page = _LoginPage(final_url="https://mp.dayu.com/login?redirect=x")
         self.assertFalse(asyncio.run(dayu_is_logged_in(_LoginContext(page))))
 
-    def test_no_positive_signal_returns_false(self):
+    def test_no_positive_signal_raises(self):
         page = _LoginPage(final_url="https://mp.dayu.com/dashboard/index")
-        self.assertFalse(asyncio.run(dayu_is_logged_in(_LoginContext(page))))
+        with self.assertRaisesRegex(RuntimeError, "页面结构异常"):
+            asyncio.run(dayu_is_logged_in(_LoginContext(page)))
+        self.assertTrue(page.closed)
 
     def test_http_5xx_raises(self):
         page = _LoginPage(
@@ -1089,12 +1093,14 @@ class DayuCliTests(unittest.TestCase):
         app.main = AsyncMock(return_value={"success": True, "content_id": "123"})
         return app
 
-    def test_check_mlx_returns_0_when_logged_in(self):
+    def test_check_mlx_returns_0_and_logs_identity_not_verified(self):
         factory = MagicMock(return_value=_AsyncCM(SimpleNamespace(context=object())))
+        logger = MagicMock()
         with (
             patch.object(dayu_command, "async_playwright", lambda: _AsyncCM(object())),
             patch.object(dayu_command, "browser_session", new=factory),
             patch.object(dayu_command, "is_logged_in", new=AsyncMock(return_value=True)),
+            patch.object(dayu_command, "dayu_logger", new=logger),
         ):
             code, out, _ = self._run(
                 ["dayu", "check", "--folder-id", FOLDER, "--profile-id", PROFILE]
@@ -1102,6 +1108,10 @@ class DayuCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
         self.assertIsNone(factory.call_args.kwargs["account_file"])
+        logger.info.assert_called_once_with(
+            "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
+            PROFILE,
+        )
 
     def test_check_mlx_returns_10_when_logged_out(self):
         with (
