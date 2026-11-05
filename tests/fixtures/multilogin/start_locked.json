@@ -1,0 +1,7 @@
+{
+  "status": {
+    "error_code": "INTERNAL_SERVER_ERROR",
+    "http_code": 500,
+    "message": "can't lock profile"
+  }
+}
