@@ -1,34 +1,43 @@
 ---
 name: tiktok-upload
-description: 使用仓库现有 Patchright/Playwright Chrome 上传器登录并发布 TikTok 视频。Use when 用户要发布 TikTok 视频，且当前环境可访问本仓库及其本地 Chrome 配置。
+description: 使用 `sau tiktok` 通过 Multilogin X Profile 检查登录并发布 TikTok 视频。Use when 用户要发布 TikTok 视频，且 CLI 与 Multilogin 桌面应用在同一台机器。
 license: MIT-0
 slug: social-auto-upload-tiktok-upload
 displayName: TikTok 视频发布
 version: 1.0.0
-summary: 使用仓库 Chrome 上传器登录并发布 TikTok 视频。
+summary: 使用 sau tiktok 和 Multilogin Profile 检查登录并发布视频。
 ---
 
 # TikTok 视频发布
 
-TikTok 当前没有 `sau tiktok` 命令。使用仓库的 `uploader/tk_uploader/main_chrome.py`，不能虚构 CLI 参数。运行前确认仓库依赖、`conf.py` 中的 Chrome 配置及用户提供的视频路径。
+TikTok 仅支持 Multilogin X（MLX）模式，使用 `sau tiktok` CLI；没有本地浏览器或 cookie 文件路径。未设置 `MLX_API_TOKEN` 时，任何 `sau tiktok` 命令都会退出 `1`。
 
-账号会话存放在 `cookies/tk_uploader/account.json`。首次登录可参考 `examples/get_tk_cookie.py`，在 TikTok 页面由用户本人完成登录。不要读取、复制或提交 cookie 文件。
+## 部署前提
 
-单条视频优先按下面的仓库 API 流程执行，先用 `publish_date=0` 表示立即发布：
+- CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器，桌面应用已启动。
+- Profile 使用 Mimic 内核，已人工登录 TikTok，且没有待处理验证码或 2FA。
+- Profile 界面语言必须为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。
 
-```python
-import asyncio
-from pathlib import Path
-from conf import BASE_DIR
-from uploader.tk_uploader.main_chrome import TiktokVideo, tiktok_setup
+## 命令
 
-account_file = Path(BASE_DIR) / "cookies" / "tk_uploader" / "account.json"
-video_file = Path(BASE_DIR) / "videos" / "demo.mp4"
-asyncio.run(tiktok_setup(str(account_file), handle=True))
-app = TiktokVideo("标题", str(video_file), ["标签"], 0, str(account_file))
-asyncio.run(app.main())
+```bash
+export MLX_API_TOKEN="<token>"
+
+# 0=已登录，10=需要人工登录
+sau tiktok check --folder-id <folder_id> --profile-id <profile_id>
+
+sau tiktok upload-video \
+  --folder-id <folder_id> --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
+  --schedule "2026-10-21 10:30" --thumbnail covers/demo.png
 ```
 
-`TiktokVideo` 没有独立简介参数。定时发布需传入明确的 `datetime`，不要自行推算时间。仓库中的 `examples/upload_video_to_tiktok.py` 会批量处理目录下的 MP4、自动从文件提取标题/标签，并安排次日 16:00 发布；除非用户明确要求这些行为，不要直接运行该脚本。
+- `--folder-id` / `--profile-id` 必填；`--account` 可选，仅作日志标签，缺省为 `profile_id`。
+- 仅支持 `check` 和 `upload-video`；`login` 退出 `1`，请先在 Multilogin 应用中登录 Profile。
+- TikTok 没有 `upload-note`，不要虚构该子命令。
+- 不读写 `cookies/tk_uploader/*.json`；登录页、验证码或 2FA 退出 `10`；发布循环总超时为 15 分钟。
+- 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`10` 需要人工登录、`130` 中断。
+
+`TiktokVideo` 没有独立简介参数。定时发布使用 `--schedule "YYYY-MM-DD HH:MM"`；只有用户明确给出时间才传。MLX 只验证“已登录”，Profile 即身份，调度侧需确保 `profile_id` 与目标账号匹配。
 
 每次发布前让用户确认账号、单条视频、标题、标签及立即/定时方式。页面布局或登录状态不符合预期时停止并报告；只有平台页面确认提交后才报告成功，未知结果先核查 TikTok Studio，不能直接重发。

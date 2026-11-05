@@ -60,6 +60,22 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
 - 二维码图片本身就是给用户扫码的，优先直接把本地图片展示/发送给用户
 
+## Multilogin X 模式（可选）
+
+设置 `MLX_API_TOKEN` 后，小红书的 `check`、`upload-video` 和 `upload-note` 可以改用 Multilogin Profile。`--folder-id` / `--profile-id` 必填；`--account` 仅作日志标签，缺省为 `profile_id`。此时 CLI 不读写 `cookies/*.json`，`login` 会被拒绝并退出 `1`。
+
+```bash
+export MLX_API_TOKEN="<token>"
+
+sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id>
+
+sau xiaohongshu upload-note \
+  --folder-id <folder_id> --profile-id <profile_id> \
+  --images videos/1.png videos/2.png --title "图文标题" --note "正文" --tags 图文,测试
+```
+
+退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`10` 需要人工登录、`130` 中断。Profile 必须已人工登录且无待处理验证码/2FA；MLX 不授予定位权限，发布若依赖定位请先确认 Profile 配置。部署前提、调度侧责任和账号一致性风险见仓库 `docs/CLI.md` 的 Multilogin X 模式。
+
 ## 参考文档
 
 - 运行前提：`references/runtime-requirements.md`
