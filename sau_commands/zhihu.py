@@ -19,6 +19,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
 
 
 def register(platform_parsers):
@@ -27,19 +34,20 @@ def register(platform_parsers):
     zhihu_parser = platform_parsers.add_parser("zhihu", help="知乎创作中心文章与视频发布")
     zhihu_actions = zhihu_parser.add_subparsers(dest="action", required=True)
     zhihu_login = zhihu_actions.add_parser("login", help="在可见 Chrome 中登录并保存本地会话")
-    zhihu_login.add_argument("--account", required=True, help="本地会话别名，可与知乎展示名不同")
+    zhihu_login.add_argument("--account", required=False, help="本地会话别名，可与知乎展示名不同")
     zhihu_login.add_argument("--timeout", type=int, default=600, help="登录等待秒数")
     zhihu_check = zhihu_actions.add_parser("check", help="检查知乎登录态和页头账号绑定")
-    zhihu_check.add_argument("--account", required=True, help="本地会话别名")
+    zhihu_check.add_argument("--account", required=False, help="本地会话别名")
+    add_multilogin_flags(zhihu_check)
     add_runtime_flags(zhihu_check)
     zhihu_check.set_defaults(headless=False)
     zhihu_verify = zhihu_actions.add_parser("verify", help="按已保存的作品 URL 只读核对提交结果")
-    zhihu_verify.add_argument("--account", required=True, help="本地会话别名")
+    zhihu_verify.add_argument("--account", required=False, help="本地会话别名")
     zhihu_verify.add_argument("--result", required=True, type=existing_file_path)
     add_runtime_flags(zhihu_verify)
     zhihu_verify.set_defaults(headless=False)
     zhihu_article = zhihu_actions.add_parser("upload-article", help="发布知乎文章；正文配图由原稿位置决定")
-    zhihu_article.add_argument("--account", required=True, help="本地会话别名")
+    zhihu_article.add_argument("--account", required=False, help="本地会话别名")
     zhihu_article.add_argument("--title", required=True, help="文章标题，最多 100 字")
     zhihu_article.add_argument("--content-file", required=True, type=existing_file_path, help="UTF-8 HTML/Markdown/TXT，图片路径写在原稿对应段落中")
     zhihu_article.add_argument("--schedule", type=schedule_value,
@@ -47,9 +55,10 @@ def register(platform_parsers):
     zhihu_article.add_argument("--prepare-only", action="store_true", help="填写并检查编辑器后结束，不点击发布")
     zhihu_article.add_argument("--upload-timeout", type=int, default=600, help="每张正文图片上传等待秒数")
     add_runtime_flags(zhihu_article)
+    add_multilogin_flags(zhihu_article)
     zhihu_article.set_defaults(headless=False)
     zhihu_video = zhihu_actions.add_parser("upload-video", help="上传并发布一个知乎视频")
-    zhihu_video.add_argument("--account", required=True, help="本地会话别名")
+    zhihu_video.add_argument("--account", required=False, help="本地会话别名")
     zhihu_video.add_argument("--file", required=True, type=existing_file_path, help="视频文件，大于 100KB、最大 20GB、最长 4 小时")
     zhihu_video.add_argument("--title", required=True, help="视频标题，5–50 字")
     zhihu_video.add_argument("--desc", default="", help="可选视频简介，最多 300 字")
@@ -65,12 +74,25 @@ def register(platform_parsers):
     zhihu_video.add_argument("--prepare-only", action="store_true", help="上传并填写后结束，不点击发布")
     zhihu_video.add_argument("--upload-timeout", type=int, default=1200, help="视频上传等待秒数")
     add_runtime_flags(zhihu_video)
+    add_multilogin_flags(zhihu_video)
     zhihu_video.set_defaults(headless=False)
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
-    account_file = resolve_account_file("zhihu", args.account)
+    if args.action == "login":
+        reject_multilogin_login("zhihu", args)
+        require_local_account(args)
+        account = args.account
+    elif args.action in {"check", "upload-article", "upload-video"}:
+        resolve_multilogin_target(args)
+        require_local_account(args)
+        account = resolve_account_label(args)
+    else:
+        require_local_account(args)
+        account = args.account
+
+    account_file = resolve_account_file("zhihu", account)
     if args.action == "login":
         result = await login_zhihu_account(account_file, args.timeout)
     elif args.action == "check":

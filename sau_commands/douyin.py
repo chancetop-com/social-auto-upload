@@ -4,6 +4,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from patchright.async_api import async_playwright
 from uploader.douyin_uploader.main import (
     DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
     DOUYIN_PUBLISH_STRATEGY_SCHEDULED,
@@ -11,6 +12,7 @@ from uploader.douyin_uploader.main import (
     DouYinVideo,
     cookie_auth as douyin_cookie_auth,
     douyin_setup,
+    is_logged_in,
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
@@ -21,6 +23,15 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -31,12 +42,14 @@ def register(platform_parsers):
 
     for action_name in ("login", "check"):
         action_parser = douyin_actions.add_parser(action_name, help=f"Douyin {action_name}")
-        action_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
+        action_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
         if action_name == "login":
             add_runtime_flags(action_parser)
+        else:
+            add_multilogin_flags(action_parser)
 
     upload_video_parser = douyin_actions.add_parser("upload-video", help="Upload one video to Douyin")
-    upload_video_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
+    upload_video_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
     upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
     upload_video_parser.add_argument("--title", required=True, help="Video title")
     upload_video_parser.add_argument("--desc", default="", help="Optional video description")
@@ -53,9 +66,10 @@ def register(platform_parsers):
     )
     upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(upload_video_parser)
+    add_multilogin_flags(upload_video_parser)
 
     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
-    upload_note_parser.add_argument("--account", required=True, help="Douyin user-defined account_name")
+    upload_note_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
     upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path, help="Image file paths")
     upload_note_parser.add_argument("--title", required=True, help="Note title")
     upload_note_parser.add_argument("--note", default="", help="Optional note content")
@@ -64,6 +78,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(upload_note_parser)
+    add_multilogin_flags(upload_note_parser)
 
 
 @dataclass(slots=True)
@@ -172,14 +187,36 @@ async def upload_note(request: DouyinNoteUploadRequest) -> Path:
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
+        reject_multilogin_login("douyin", args)
+        require_local_account(args)
         result = await login_douyin_account(args.account, headless=args.headless)
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Douyin login flow completed: {result['account_file']}")
         return 0
 
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
     if args.action == "check":
-        is_valid = await check_douyin_account(args.account)
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                raise LoginRequiredError(
+                    f"抖音登录态无效：profile_id={target.profile_id}。"
+                    "请在 Multilogin 应用中登录 Profile 后重试。"
+                )
+            print("valid")
+            return 0
+
+        is_valid = await check_douyin_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -187,7 +224,7 @@ async def run(args):
 
     if args.action == "upload-video":
         request = DouyinVideoUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
@@ -219,7 +256,7 @@ async def run(args):
             note_content = note_file.read_text(encoding="utf-8")
 
         request = DouyinNoteUploadRequest(
-            account_name=args.account,
+            account_name=account_label,
             image_files=parse_image_files(args.images),
             title=args.title,
             note=note_content,

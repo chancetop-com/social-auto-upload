@@ -20,6 +20,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
+from sau_commands.multilogin import (
+    add_multilogin_flags,
+    reject_multilogin_login,
+    require_local_account,
+    resolve_account_label,
+    resolve_multilogin_target,
+)
 
 
 def register(platform_parsers):
@@ -33,7 +40,7 @@ def register(platform_parsers):
         if meta_platform == "facebook-page":
             for action in ("verify", "delete"):
                 post_parser = meta_actions.add_parser(action, help="按编号核对原作品" if action == "verify" else "核对编号后删除：定时作品永久删除，已发布作品移至垃圾箱")
-                post_parser.add_argument("--account", required=True)
+                post_parser.add_argument("--account", required=False)
                 post_parser.add_argument("--page-id", required=True)
                 post_parser.add_argument("--page", required=True)
                 post_parser.add_argument("--content-id", required=True)
@@ -45,14 +52,16 @@ def register(platform_parsers):
                 post_parser.set_defaults(headless=False)
         for action_name in ("login", "check"):
             action_parser = meta_actions.add_parser(action_name, help=f"{meta_platform} {action_name}")
-            action_parser.add_argument("--account", required=True, help="Meta account name")
+            action_parser.add_argument("--account", required=False, help="Meta account name")
             action_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
             if action_name == "login":
                 add_runtime_flags(action_parser)
                 action_parser.set_defaults(headless=False)
+            else:
+                add_multilogin_flags(action_parser)
 
         upload_video_parser = meta_actions.add_parser("upload-video", help=f"Upload a video to {meta_platform}")
-        upload_video_parser.add_argument("--account", required=True)
+        upload_video_parser.add_argument("--account", required=False)
         upload_video_parser.add_argument("--file", required=True, type=existing_file_path)
         upload_video_parser.add_argument("--title", required=True)
         upload_video_parser.add_argument("--desc", default="")
@@ -62,10 +71,11 @@ def register(platform_parsers):
         upload_video_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_video_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_runtime_flags(upload_video_parser)
+        add_multilogin_flags(upload_video_parser)
         upload_video_parser.set_defaults(headless=False)
 
         upload_note_parser = meta_actions.add_parser("upload-note", help=f"Upload images to {meta_platform}")
-        upload_note_parser.add_argument("--account", required=True)
+        upload_note_parser.add_argument("--account", required=False)
         upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path)
         upload_note_parser.add_argument("--title", required=True)
         upload_note_parser.add_argument("--note", default="")
@@ -75,6 +85,7 @@ def register(platform_parsers):
         upload_note_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_note_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_runtime_flags(upload_note_parser)
+        add_multilogin_flags(upload_note_parser)
         upload_note_parser.set_defaults(headless=False)
 
 
@@ -137,9 +148,21 @@ async def upload_meta_content(request: MetaUploadRequest) -> dict:
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "login":
+        reject_multilogin_login(args.platform, args)
+        require_local_account(args)
+        account_label = args.account
+    elif args.action in {"check", "upload-video", "upload-note"}:
+        resolve_multilogin_target(args)
+        require_local_account(args)
+        account_label = resolve_account_label(args)
+    else:
+        require_local_account(args)
+        account_label = args.account
+
     if args.platform == "facebook-page" and args.action in {"verify", "delete"}:
         result = await meta_post_action(
-            resolve_account_file(args.platform, args.account), page_id=args.page_id, page_name=args.page,
+            resolve_account_file(args.platform, account_label), page_id=args.page_id, page_name=args.page,
             content_id=args.content_id, expected_text=args.expected_text, scheduled=args.scheduled,
             delete=args.action == "delete", proxy=args.proxy, headless=args.headless,
         )
@@ -150,21 +173,21 @@ async def run(args):
         return 0
 
     if args.action == "login":
-        result = await login_meta_account(args.platform, args.account, headless=args.headless, proxy=args.proxy)
+        result = await login_meta_account(args.platform, account_label, headless=args.headless, proxy=args.proxy)
         if not result["success"]:
             raise RuntimeError(result.get("message", f"{args.platform} login failed"))
         print(f"{args.platform} login flow completed: {result['account_file']}")
         return 0
 
     if args.action == "check":
-        is_valid = await check_meta_account(args.platform, args.account, proxy=args.proxy)
+        is_valid = await check_meta_account(args.platform, account_label, proxy=args.proxy)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
     if args.action in {"upload-video", "upload-note"}:
         request = MetaUploadRequest(
             platform=args.platform,
-            account_name=args.account,
+            account_name=account_label,
             title=args.title,
             description=args.desc if args.action == "upload-video" else args.note,
             tags=parse_tags(args.tags),
