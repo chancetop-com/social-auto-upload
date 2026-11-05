@@ -3,12 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from patchright.async_api import async_playwright
 from uploader.ks_uploader.main import (
+    KUAISHOU_CONTEXT_KWARGS,
+    KUAISHOU_INIT_SCRIPT,
+    KUAISHOU_LAUNCH_KWARGS,
     KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE,
     KUAISHOU_PUBLISH_STRATEGY_SCHEDULED,
     KSNote,
     KSVideo,
     cookie_auth as kuaishou_cookie_auth,
+    is_logged_in,
     ks_setup,
 )
 from sau_commands.arguments import (
@@ -27,6 +32,8 @@ from sau_commands.multilogin import (
     resolve_account_label,
     resolve_multilogin_target,
 )
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -106,32 +113,61 @@ async def check_kuaishou_account(account_name: str) -> bool:
     return await kuaishou_cookie_auth(str(account_file))
 
 
-async def upload_kuaishou_video(request: KuaishouVideoUploadRequest) -> Path:
-    account_file = resolve_account_file("kuaishou", request.account_name)
-    is_ready = await ks_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
-        )
-
-    app = KSVideo(
+def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> KSVideo:
+    return KSVideo(
         title=request.title,
         file_path=str(request.video_file),
         desc=request.description,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=str(account_file),
+        account_file=account_file,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
         collection_name=request.collection_name,
     )
-    await app.main()
-    return account_file
 
 
-async def upload_kuaishou_note(request: KuaishouNoteUploadRequest) -> Path:
+def _build_note_uploader(request: KuaishouNoteUploadRequest, account_file) -> KSNote:
+    return KSNote(
+        image_paths=[str(path) for path in request.image_files],
+        title=request.title,
+        note=request.note,
+        tags=request.tags,
+        publish_date=request.publish_date,
+        account_file=account_file,
+        publish_strategy=request.publish_strategy,
+        debug=request.debug,
+        headless=request.headless,
+    )
+
+
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"快手登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+async def upload_kuaishou_video(request: KuaishouVideoUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_video_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=KUAISHOU_LAUNCH_KWARGS,
+                context_kwargs=KUAISHOU_CONTEXT_KWARGS,
+                init_script=KUAISHOU_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.main(session=session)
+        return None
+
     account_file = resolve_account_file("kuaishou", request.account_name)
     is_ready = await ks_setup(str(account_file), handle=False)
     if not is_ready:
@@ -139,17 +175,37 @@ async def upload_kuaishou_note(request: KuaishouNoteUploadRequest) -> Path:
             f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
         )
 
-    app = KSNote(
-        image_paths=[str(path) for path in request.image_files],
-        title=request.title,
-        note=request.note,
-        tags=request.tags,
-        publish_date=request.publish_date,
-        account_file=str(account_file),
-        publish_strategy=request.publish_strategy,
-        debug=request.debug,
-        headless=request.headless,
-    )
+    app = _build_video_uploader(request, str(account_file))
+    await app.main()
+    return account_file
+
+
+async def upload_kuaishou_note(request: KuaishouNoteUploadRequest, *, target=None) -> Path | None:
+    if target is not None:
+        app = _build_note_uploader(request, None)
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=KUAISHOU_LAUNCH_KWARGS,
+                context_kwargs=KUAISHOU_CONTEXT_KWARGS,
+                init_script=KUAISHOU_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.main(session=session)
+        return None
+
+    account_file = resolve_account_file("kuaishou", request.account_name)
+    is_ready = await ks_setup(str(account_file), handle=False)
+    if not is_ready:
+        raise RuntimeError(
+            f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
+        )
+
+    app = _build_note_uploader(request, str(account_file))
     await app.main()
     return account_file
 
@@ -170,6 +226,19 @@ async def run(args):
     account_label = resolve_account_label(args)
 
     if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
         is_valid = await check_kuaishou_account(account_label)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
@@ -190,7 +259,7 @@ async def run(args):
             headless=args.headless,
             collection_name=args.collection,
         )
-        await upload_kuaishou_video(request)
+        await upload_kuaishou_video(request, target=target)
         print(f"Kuaishou video upload submitted: {request.video_file}")
         return 0
 
@@ -206,7 +275,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
         )
-        await upload_kuaishou_note(request)
+        await upload_kuaishou_note(request, target=target)
         print(f"Kuaishou note upload submitted: {len(request.image_files)} images")
         return 0
 
