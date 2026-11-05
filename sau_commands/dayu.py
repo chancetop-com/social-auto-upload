@@ -4,6 +4,9 @@ import json
 from patchright.async_api import async_playwright
 from conf import LOCAL_CHROME_PATH
 from utils.article_render import ARTICLE_THEMES
+from utils.browser_session import browser_session
+from utils.errors import LoginRequiredError
+from utils.log import dayu_logger
 from uploader.dayu_uploader.article import DayuArticle
 from uploader.dayu_uploader.constants import (
     DAYU_SOURCE_TYPES,
@@ -14,8 +17,12 @@ from uploader.dayu_uploader.constants import (
 )
 from uploader.dayu_uploader.main import DayuVideo
 from uploader.dayu_uploader.session import (
+    DAYU_CONTEXT_KWARGS,
     DAYU_HOME_URL,
+    DAYU_INIT_SCRIPT,
+    DAYU_LAUNCH_KWARGS,
     check_dayu_account,
+    is_logged_in,
     load_dayu_identity,
     login_dayu_account,
     read_dayu_identity,
@@ -93,29 +100,86 @@ def register(platform_parsers):
     add_runtime_flags(dayu_verify)
 
 
+def _raise_login_required(target) -> None:
+    raise LoginRequiredError(
+        f"大鱼号登录态无效：profile_id={target.profile_id}。"
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+
+
+def _log_profile_identity(target) -> None:
+    dayu_logger.info(
+        "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
+        target.profile_id,
+    )
+    # MLX 不写 timezone_id；发布时区由 Profile 决定。
+    dayu_logger.info(
+        "Multilogin 模式不写入时区；建议在 Profile 设置中将时区设为 Asia/Shanghai"
+    )
+
+
+async def _run_mlx_upload(app, *, target, headless: bool):
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=headless,
+            account_file=None,
+            multilogin=target,
+            launch_kwargs=DAYU_LAUNCH_KWARGS,
+            context_kwargs=DAYU_CONTEXT_KWARGS,
+            init_script=DAYU_INIT_SCRIPT,
+        ) as session:
+            if not await is_logged_in(session.context):
+                _raise_login_required(target)
+            _log_profile_identity(target)
+            return await app.main(session=session)
+
+
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
         reject_multilogin_login("dayu", args)
         require_local_account(args)
+        target = None
         account = args.account
     elif args.action in {"check", "upload-video", "upload-article"}:
-        resolve_multilogin_target(args)
+        target = resolve_multilogin_target(args)
         require_local_account(args)
         account = resolve_account_label(args)
     else:
+        target = None
         require_local_account(args)
         account = args.account
 
-    account_file = resolve_account_file("dayu", account)
+    if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=getattr(args, "headless", True),
+                    account_file=None,
+                    multilogin=target,
+                ) as session:
+                    valid = await is_logged_in(session.context)
+            if not valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
+        account_file = resolve_account_file("dayu", account)
+        valid = await check_dayu_account(account_file)
+        print("valid" if valid else "invalid")
+        return 0 if valid else 1
+
+    if args.action in {"upload-video", "upload-article"} and target is not None:
+        account_file = None
+    else:
+        account_file = resolve_account_file("dayu", account)
+
     if args.action == "login":
         if args.timeout <= 0:
             raise ValueError("登录期限必须大于 0 秒")
         result = await login_dayu_account(account_file, args.expected_name, args.timeout)
-    elif args.action == "check":
-        valid = await check_dayu_account(account_file)
-        print("valid" if valid else "invalid")
-        return 0 if valid else 1
     elif args.action == "upload-video":
         app = DayuVideo(
             title=args.title, file_path=args.file, tags=parse_tags(args.tags),
@@ -124,7 +188,10 @@ async def run(args):
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
             source_url=args.source_url, schedule=args.schedule,
         )
-        result = await app.main()
+        if target is not None:
+            result = await _run_mlx_upload(app, target=target, headless=args.headless)
+        else:
+            result = await app.main()
     elif args.action == "upload-article":
         app = DayuArticle(
             title=args.title, content_file=args.content_file, account_file=account_file,
@@ -133,7 +200,10 @@ async def run(args):
             cover_indices=args.cover_indices, headless=args.headless, debug=args.debug,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
         )
-        result = await app.main()
+        if target is not None:
+            result = await _run_mlx_upload(app, target=target, headless=args.headless)
+        else:
+            result = await app.main()
     elif args.action == "verify":
         if args.timeout <= 0:
             raise ValueError("核验期限必须大于 0 秒")
