@@ -1652,6 +1652,17 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         try:
             if await container.count() == 0:
+                # The photo composer has no advanced_settings_container; its
+                # comment/AIGC/brand controls live behind a global Show more.
+                show_more = self.locator_base.get_by_text(
+                    "Show more", exact=True
+                )
+                if await show_more.count():
+                    await show_more.first.click()
+                    await page.wait_for_timeout(300)
+                    tiktok_logger.info(
+                        "[+] expanded photo settings via Show more"
+                    )
                 return
             classes = ((await container.get_attribute("class")) or "").casefold()
         except Exception:

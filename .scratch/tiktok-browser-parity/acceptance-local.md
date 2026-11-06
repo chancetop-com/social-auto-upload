@@ -26,6 +26,10 @@
 
 | 用例 | 参数 | 退出码 | 帖子 ID / URL | 页面/帖子核对 |
 | --- | --- | --- | --- | --- |
+| 公开账号无新参数 | 无新 flag | `0` | `https://www.tiktok.com/@lukechen95/video/7704974050090683661` | Content 行 **Everyone**；真实触发 `Post now` 兜底 |
+| 公开账号 `--privacy public` | `--privacy public` | `0` | `https://www.tiktok.com/@lukechen95/video/7704974226096246029` | Content 行 **Everyone**；真实触发 `Post now` 兜底 |
+| 公开账号 `--privacy followers` | `--privacy followers` | `1` | — | 严格失败：requested `followers` / actual `Everyone`（公开账号无 Followers 选项） |
+| 公开账号图片帖选项 | `upload-note ... --privacy public --no-comments --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704976028485176590` | Content 行 **Everyone**；帖子页 **Promotional content** + **Creator labeled as AI-generated**；Description/tags 正确 |
 | only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `ControlOrMeta+A` 修复，v4 复验 |
 | only-me 基线 v4 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950472880229645` | 干净标题；read_result 返回 ID；only-me 隐私路径复验 |
 | 隐私 followers | `--privacy followers` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950885151018254` | CLI 回读 Followers；Scheduled 列表同账号 Followers 行确认；Web 帖子页不显示 Followers 标签 |
@@ -35,12 +39,14 @@
 | 自定义封面 | `--thumbnail videos/demo.png --privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704957967111638286` | `Edit cover` → `Upload cover` → 预览 → Save 全链路通过；帖子页 **Private**；截图 `.local/tiktok19/custom-cover-post.png` |
 | 定时发布 | `--schedule 2026-11-06 22:00 --privacy followers` | `0` | Scheduled 行：`TB19 scheduled followers 2200` | Content/Scheduled 列表显示 **10:00 PM (GMT+8) Shanghai**、**Followers**；未等待到点发布。only-me 下 Schedule 被 TikTok 禁用（已补明确报错） |
 | 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title "TB19 note multi v2" --note "TB19 note body" --tags tbtest,note --privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704966090018786574` | Content 行 **Only me** + `TB19 note body #tbtest #note`；帖子页 Description/tags 正确；Title 已填写但 Web 帖子页不展示；3 张图，第 1 张为封面；截图 `.local/tiktok19/note-multi-post.png` |
-| 图片帖设置项 | `upload-note ... --no-comments --aigc --your-brand` | `1` | — | `user_perm_container`/AIGC/品牌在 DOM 中存在但不可见，点击 Settings 也不展开；按 spec 记录“页面未渲染/条件未满足”，显式请求严格失败 |
+| 图片帖设置项（私有账号旧结果） | `upload-note ... --no-comments --aigc --your-brand` | `1` | — | 当时未找到正确的 Show more；已在公开账号复验并修复，见上一行 |
+| 图片帖选项展开修复 | `--privacy public --no-comments --aigc --your-brand` | `0` | 同上 `7704976028485176590` | 图片页没有 `advanced_settings_container`，全局 **Show more** 才展开评论/AIGC/品牌；修复后逐项回读并发布成功 |
 
 ## 结论
 
-- **已验证**：本地登录/check、`only-me`/`followers`/`friends` 隐私、`--no-comments`、`--disable-reuse`（账号不渲染时按目标 False 满足）、`--aigc`（帖子显示 AI 标签）、`--your-brand`（Promotional content）、`--branded-content` + friends（Paid partnership）、自定义封面、定时创建与时间/隐私回读、图文 3 图/Description/tags/首图封面。
-- **条件未满足/未等待**：公开账号专属的“无新参数公开发布/`--privacy public` 正向/公开账号首项文案”；定时帖未等到 22:00 到点；图文 Title 不在 Web 帖子页展示（已填写）；图片帖评论/AIGC/品牌控件页面不可见，按“页面不支持”记录。
+- **已验证**：本地登录/check、私有账号 `only-me`/`followers`/`friends`、公开账号无新参数发布、`--privacy public`（Everyone）与 `followers` 严格失败、`--no-comments`、`--disable-reuse`（账号不渲染时按目标 False 满足）、`--aigc`（帖子显示 AI 标签）、`--your-brand`（Promotional content）、`--branded-content` + friends（Paid partnership）、自定义封面、定时创建与时间/隐私回读、图文 3 图/Description/tags/首图封面、**公开账号图片帖选项**（评论/AIGC/品牌）。
+- **条件未满足/未等待**：定时帖到点发布未等待（且切换公开账号后旧 Followers 定时帖从 Scheduled 列表消失）；图文 Title 不在 Web 帖子页展示（已填写，未做编辑页复核）。
+- **公开账号首项文案**：Content 行显示 **Everyone**，与公开账号预期一致。
 - **发现并修复**：Content `read_result` 原取第一条，定时帖排在最前导致图文帖误取定时帖 ID；已改为按标题/正文/标签匹配，并在真实 Content 页验证图文 `7704966090018786574`、视频 `7704956309300382989` 均正确。
 
 ## 真实环境发现并修复
@@ -65,4 +71,6 @@
 18. 定时帖没有即时发布链接 → `read_result` 对定时帖返回 `None`，以 Scheduled 列表为验收依据。
 19. 图片页 Title/Description 在选图后才渲染，入口用 image file input；Title/Description 重试放宽到 20s。
 20. 图片页 Post 按钮没有 `data-e2e` → 用 `button:has-text("Post")` 候选；图片入口等待改为 attached。
-21. 图片页评论/AIGC/品牌控件在 DOM 中存在但不可见，点击 Settings 也不展开 → 显式请求严格失败，验收记为“页面不支持/条件未满足”，不误报为功能缺陷。
+21. 图片页没有 `advanced_settings_container`，评论/AIGC/品牌在全局 **Show more** 之后才可见；已加全局 Show more 兜底。公开账号 `--privacy public --no-comments --aigc --your-brand` 图片帖发布成功，帖子页显示 Promotional content + AI 标签。
+22. 公开账号的发布点击会出现 `Post now` 确认弹窗；已有兜底在真实发布中触发并成功。
+23. 切换到公开账号后，之前创建的 Followers 定时帖不再出现在 Scheduled 列表（账号类型变更可能导致取消）；定时创建/时间/隐私已在切换前核对，到点发布仍未等待。
