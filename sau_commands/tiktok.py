@@ -1,7 +1,8 @@
-"""tiktok 的命令参数与执行逻辑（仅 Multilogin 模式）。
+"""tiktok 的命令参数与执行逻辑（本地 cookie 模式 / Multilogin 模式）。
 
-TikTok 没有本地浏览器路径。MLX 分支跳过 ``change_language``，因此部署前提是
-Multilogin Profile 的界面语言必须为 English (US)。
+未设置 ``MLX_API_TOKEN`` 时使用本地 Chromium 与
+``cookies/tiktok_<account>.json``；设置后使用 Multilogin Profile。本地模式会
+自动切换页面语言，MLX Profile 仍需 English (US)。
 """
 from __future__ import annotations
 
@@ -17,13 +18,14 @@ from sau_commands.arguments import (
     add_runtime_flags,
     existing_file_path,
     parse_tags,
+    resolve_account_file,
     schedule_value,
 )
 from sau_commands.multilogin import (
     add_multilogin_flags,
     login_required_error,
-    multilogin_enabled,
     reject_multilogin_login,
+    require_local_account,
     resolve_account_label,
     resolve_multilogin_target,
 )
@@ -41,19 +43,14 @@ from uploader.tk_uploader.main_chrome import (
     TiktokPublishOptions,
     TiktokVideo,
     is_logged_in,
+    tiktok_setup,
 )
 from utils.browser_session import browser_session
 from utils.errors import UsageError
 
-# Ticket 13 §5: local mode is rejected at the run() entry so no browser code
-# (and no cookie path) is ever reached.
-TIKTOK_LOCAL_MODE_MESSAGE = (
-    "TikTok 仅支持 Multilogin 模式：请设置 MLX_API_TOKEN，"
-    "并提供 --folder-id / --profile-id。"
-)
-TIKTOK_LOGIN_REJECTED_MESSAGE = (
-    "Multilogin 模式不支持 CLI 登录；"
-    "请在 Multilogin 应用中登录 Profile 后重试。"
+TIKTOK_ACCOUNT_HELP = (
+    "TikTok account name; local mode uses cookies/tiktok_<account>.json, "
+    "MLX mode uses it as a log label"
 )
 
 
@@ -135,7 +132,7 @@ def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     tiktok_parser = platform_parsers.add_parser(
-        "tiktok", help="TikTok operations (Multilogin mode only)"
+        "tiktok", help="TikTok operations (local or Multilogin mode)"
     )
     tiktok_actions = tiktok_parser.add_subparsers(dest="action", required=True)
 
@@ -146,9 +143,11 @@ def register(platform_parsers):
         action_parser.add_argument(
             "--account",
             required=False,
-            help="TikTok user-defined account_name (log label only)",
+            help=TIKTOK_ACCOUNT_HELP,
         )
         add_runtime_flags(action_parser)
+        # Repo-wide contract: ``login`` never accepts Profile flags.  They are
+        # only meaningful for check/upload actions.
         if action_name == "check":
             add_multilogin_flags(action_parser)
 
@@ -158,7 +157,7 @@ def register(platform_parsers):
     upload_video_parser.add_argument(
         "--account",
         required=False,
-        help="TikTok user-defined account_name (log label only)",
+        help=TIKTOK_ACCOUNT_HELP,
     )
     upload_video_parser.add_argument(
         "--file", required=True, type=existing_file_path, help="Video file path"
@@ -183,7 +182,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument(
         "--account",
         required=False,
-        help="TikTok user-defined account_name (log label only)",
+        help=TIKTOK_ACCOUNT_HELP,
     )
     upload_note_parser.add_argument(
         "--images",
@@ -233,6 +232,7 @@ class TiktokVideoUploadRequest:
     debug: bool = True
     headless: bool = True
     options: TiktokPublishOptions | None = None
+    account_file: Path | None = None
 
 
 def _build_publish_options(args) -> TiktokPublishOptions | None:
@@ -284,17 +284,22 @@ def _validate_branded_content_privacy(args) -> None:
 
 
 def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
-    """Build the uploader with the legacy positional order and no cookie file."""
+    """Build the uploader with the legacy positional order.
+
+    ``request.account_file`` is ``None`` in Multilogin mode and the local cookie
+    path in local mode.
+    """
     return TiktokVideo(
         request.title,
         str(request.video_file),
         request.tags,
         request.publish_date,
-        None,
+        str(request.account_file) if request.account_file else None,
         thumbnail_path=(
             str(request.thumbnail_file) if request.thumbnail_file else None
         ),
         options=request.options,
+        headless=request.headless,
     )
 
 
@@ -309,6 +314,7 @@ class TiktokNoteUploadRequest:
     debug: bool = True
     headless: bool = True
     options: TiktokPublishOptions | None = None
+    account_file: Path | None = None
 
 
 def _note_text(args) -> str | None:
@@ -401,7 +407,7 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
         request.note,
         request.tags,
         request.publish_date,
-        None,
+        str(request.account_file) if request.account_file else None,
         title=request.title,
         options=request.options,
         debug=request.debug,
@@ -409,12 +415,62 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
     )
 
 
+async def _require_local_cookie(account_file, account_label: str, headless: bool) -> None:
+    """Fail with a human-actionable message when the local cookie is invalid."""
+    ready = await tiktok_setup(str(account_file), handle=False, headless=headless)
+    if not ready:
+        raise RuntimeError(
+            f"TikTok cookie 不存在或已失效：{account_file}。"
+            f"请先运行 `sau tiktok login --account {account_label}`。"
+        )
+
+
+async def _prepare_account_file(args, target, account_label):
+    """Resolve and validate the local cookie; ``None`` in MLX mode."""
+    if target is not None:
+        return None
+    account_file = resolve_account_file("tiktok", args.account)
+    await _require_local_cookie(account_file, account_label, args.headless)
+    return account_file
+
+
+async def _upload_media(request, target, builder) -> None:
+    """Run any TikTok upload in MLX (session) or local (own browser) mode."""
+    app = builder(request)
+    if target is not None:
+        async with async_playwright() as playwright:
+            async with browser_session(
+                playwright,
+                headless=request.headless,
+                account_file=None,
+                multilogin=target,
+                launch_kwargs=TIKTOK_LAUNCH_KWARGS,
+                context_kwargs=TIKTOK_CONTEXT_KWARGS,
+                init_script=TIKTOK_INIT_SCRIPT,
+            ) as session:
+                if not await is_logged_in(session.context):
+                    _raise_login_required(target)
+                await app.upload(None, session=session)
+        return
+
+    async with async_playwright() as playwright:
+        await app.upload(playwright)
+
+
+async def _upload_note(request: TiktokNoteUploadRequest, target) -> None:
+    await _upload_media(request, target, _build_note_uploader)
+
+
+async def _upload_video(request: TiktokVideoUploadRequest, target) -> None:
+    await _upload_media(request, target, _build_video_uploader)
+
+
 def _raise_login_required(target) -> None:
     raise login_required_error("TikTok", target.profile_id)
 
 
 async def run(args):
-    """执行本平台命令；TikTok 没有本地浏览器路径。"""
+    """执行本平台命令；本地 cookie 模式与 Multilogin 模式共用上传器。"""
     # Reject impossible option combinations before resolving the Profile or
     # touching any browser/session state (exit 2).
     _validate_branded_content_privacy(args)
@@ -431,17 +487,53 @@ async def run(args):
         _validate_note_metadata(title, note, tags)
         note_inputs = (image_files, title, note, tags)
 
-    if not multilogin_enabled():
-        raise RuntimeError(TIKTOK_LOCAL_MODE_MESSAGE)
-
     if args.action == "login":
+        # Multilogin profiles are logged in through the Multilogin app.
         reject_multilogin_login("tiktok", args)
-        raise RuntimeError(TIKTOK_LOGIN_REJECTED_MESSAGE)
+        require_local_account(args)
+        account_file = resolve_account_file("tiktok", args.account)
+        ready = await tiktok_setup(
+            str(account_file), handle=True, headless=False, force=True
+        )
+        if not ready:
+            raise RuntimeError(
+                f"TikTok 登录未完成或 cookie 仍无效：{account_file}。"
+            )
+        print(f"TikTok login flow completed: {account_file}")
+        return 0
+
+    target = resolve_multilogin_target(args)
+    require_local_account(args)
+    account_label = resolve_account_label(args)
+
+    if args.action == "check":
+        if target is not None:
+            async with async_playwright() as playwright:
+                async with browser_session(
+                    playwright,
+                    headless=args.headless,
+                    multilogin=target,
+                ) as session:
+                    is_valid = await is_logged_in(session.context)
+            if not is_valid:
+                _raise_login_required(target)
+            print("valid")
+            return 0
+
+        account_file = resolve_account_file("tiktok", args.account)
+        is_valid = await tiktok_setup(
+            str(account_file), handle=False, headless=args.headless
+        )
+        print("valid" if is_valid else "invalid")
+        return 0 if is_valid else 1
 
     if args.action == "upload-note":
         image_files, title, note, tags = note_inputs
+        account_file = await _prepare_account_file(
+            args, target, account_label
+        )
         request = TiktokNoteUploadRequest(
-            account_label=resolve_account_label(args),
+            account_label=account_label,
             image_files=image_files,
             note=note,
             tags=tags,
@@ -450,46 +542,18 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             options=_build_publish_options(args),
+            account_file=account_file,
         )
-        app = _build_note_uploader(request)
-        target = resolve_multilogin_target(args)
-
-        async with async_playwright() as playwright:
-            async with browser_session(
-                playwright,
-                headless=request.headless,
-                account_file=None,
-                multilogin=target,
-                launch_kwargs=TIKTOK_LAUNCH_KWARGS,
-                context_kwargs=TIKTOK_CONTEXT_KWARGS,
-                init_script=TIKTOK_INIT_SCRIPT,
-            ) as session:
-                if not await is_logged_in(session.context):
-                    _raise_login_required(target)
-                await app.upload(None, session=session)
-
+        await _upload_note(request, target)
         print(
             f"TikTok note upload submitted: {len(request.image_files)} images"
         )
         return 0
 
-    target = resolve_multilogin_target(args)
-    account_label = resolve_account_label(args)
-
-    if args.action == "check":
-        async with async_playwright() as playwright:
-            async with browser_session(
-                playwright,
-                headless=args.headless,
-                multilogin=target,
-            ) as session:
-                is_valid = await is_logged_in(session.context)
-        if not is_valid:
-            _raise_login_required(target)
-        print("valid")
-        return 0
-
     if args.action == "upload-video":
+        account_file = await _prepare_account_file(
+            args, target, account_label
+        )
         request = TiktokVideoUploadRequest(
             account_label=account_label,
             video_file=args.file,
@@ -500,23 +564,9 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             options=_build_publish_options(args),
+            account_file=account_file,
         )
-        app = _build_video_uploader(request)
-
-        async with async_playwright() as playwright:
-            async with browser_session(
-                playwright,
-                headless=request.headless,
-                account_file=None,
-                multilogin=target,
-                launch_kwargs=TIKTOK_LAUNCH_KWARGS,
-                context_kwargs=TIKTOK_CONTEXT_KWARGS,
-                init_script=TIKTOK_INIT_SCRIPT,
-            ) as session:
-                if not await is_logged_in(session.context):
-                    _raise_login_required(target)
-                await app.upload(None, session=session)
-
+        await _upload_video(request, target)
         print(f"TikTok video upload submitted: {request.video_file}")
         return 0
 

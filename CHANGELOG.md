@@ -22,9 +22,10 @@
 - `upload-video` 新增可选发布选项：`--privacy`（`public` / `friends` / `followers` / `only-me`）、`--no-comments`、`--disable-reuse`（同时影响 Duet、Stitch、Stickers、Story）、`--aigc` / `--no-aigc`、`--your-brand`、`--branded-content`。不传时保持页面默认；显式传参后设置并回读，不一致即失败且不发布。
 - 新增 `upload-note` 图文发布：1–35 张 JPG/JPEG/PNG/WEBP（单张 ≤50 MB）、Title ≤90 字符、Description ≤4000 字符（含 tags）、最多 50 个 hashtag；支持 `--note` / `--notef`、`--tags`、`--schedule` 及同一组发布选项（不含内容复用）。第 1 张图片即封面。
 - 新增退出码 `9`（发布结果未知）：发布点击已发出但未确认成功；禁止自动重发，需先到 TikTok Studio → Content/Posts 按标题与发布时间人工核对。
+- 新增本地 cookie 模式：未设置 `MLX_API_TOKEN` 时使用本地 Chromium 与 `cookies/tiktok_<account>.json`；支持 `login`（有头浏览器人工登录后回终端按 Enter）、`check`（`0`/`1`）、`upload-video`、`upload-note`。本地模式 `--account` 必填，`--folder-id` / `--profile-id` 忽略；Multilogin 模式行为不变。
 - 刷新视频自定义封面选择器：`Edit cover` → `Upload cover` → `Save`。
 - `upload-note` 增加 Photos tab 探测与回退：优先 `?tab=photo`，未进入图片表单时点击 `Photos`；账号不在灰度内时在选文件前退出 `1`。
-- 待验收：上述视频发布选项、`upload-note`、封面选择器刷新与 Photos tab 回退均未在真实账号上执行发布验收（真实账号验收 ticket 19 未执行）；发布前仍以页面回读为准，不视为已验证。
+- 待验收：上述视频发布选项、`upload-note`、封面选择器刷新、Photos tab 回退与本地模式登录/发布均未在真实账号上执行验收（真实账号验收 ticket 19 未执行）；发布前仍以页面回读为准，不视为已验证。
 
 ### 知乎文章
 

@@ -1,6 +1,7 @@
 # TikTok 浏览器能力对齐 — v1 实施规格
 
 - 状态：ticket 10–18 已实现并合入 `integration/tiktok-browser-parity`；真实账号冒烟与发布验收**尚未执行**（ticket 19，外部依赖缺失）。
+- 后续扩展：TikTok 本地 cookie 模式见 [`../tiktok-local-mode/spec.md`](../tiktok-local-mode/spec.md)。本规格中“仅 MLX / 不新增本地模式”的表述是该轮范围的历史记录。
 - 来源：ticket [01](./issues/01-photo-post-feasibility.md)、[02](./issues/02-aigc-brand-disclosure.md)、[03](./issues/03-privacy-interactions.md)、[04](./issues/04-covers.md)、[05](./issues/05-cli-parameter-contract.md)、[06](./issues/06-preflight-failure-semantics.md)、[07](./issues/07-test-strategy.md)、[09](./issues/09-shared-flow-extension-points.md)；研究细节见 [research/](./research/)。
 - 术语以仓库根目录 `GLOSSARY.md` 为准；本规格新增术语需回写 GLOSSARY。
 - 本 effort 只产出规格：**不改生产代码、不改选择器、不执行测试**。

@@ -18,13 +18,14 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import sau_cli
 from sau_commands import tiktok as tiktok_command
 from sau_commands.arguments import existing_file_path
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import (
+    TIKTOK_LAUNCH_KWARGS,
     TiktokBaseUploader,
     TiktokNote,
     TiktokPublishOptions,
@@ -970,35 +971,55 @@ class UploadNoteCliTests(unittest.TestCase):
         self.assertEqual(request.tags, [])
         self.assertIsNone(request.options)
 
-    def test_local_mode_exits_1_without_reaching_the_builder(self):
+    def test_local_mode_uses_cookie_and_local_upload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir)
-            playwright = MagicMock()
+            account_file = Path(tmp_dir) / "tiktok_creator.json"
+            playwright = object()
+            app = MagicMock()
+            app.upload = AsyncMock()
+            builder = MagicMock(return_value=app)
+            setup = AsyncMock(return_value=True)
             session = MagicMock()
-            builder = MagicMock()
             with (
-                patch.object(tiktok_command, "async_playwright", playwright),
-                patch.object(tiktok_command, "browser_session", session),
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(playwright),
+                ),
+                patch.object(
+                    tiktok_command,
+                    "resolve_account_file",
+                    return_value=account_file,
+                ),
+                patch.object(tiktok_command, "tiktok_setup", new=setup),
                 patch.object(
                     tiktok_command, "_build_note_uploader", new=builder
                 ),
+                patch.object(tiktok_command, "browser_session", new=session),
             ):
                 code, out, err = _run(
                     [
                         "tiktok",
                         "upload-note",
+                        "--account",
+                        "creator",
                         "--images",
                         *images,
                     ],
                     token="",
                 )
 
-        self.assertEqual(code, 1)
-        self.assertIn("TikTok 仅支持 Multilogin 模式", err)
-        self.assertNotIn("submitted", out)
-        playwright.assert_not_called()
+        self.assertEqual(code, 0, err)
+        self.assertIn(
+            f"TikTok note upload submitted: {len(images)} images", out
+        )
+        setup.assert_awaited_once_with(
+            str(account_file), handle=False, headless=True
+        )
+        self.assertEqual(builder.call_args.args[0].account_file, account_file)
+        app.upload.assert_awaited_once_with(playwright)
         session.assert_not_called()
-        builder.assert_not_called()
 
     def test_logged_out_exits_10(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1172,10 +1193,34 @@ class UploadNoteFlowTests(unittest.TestCase):
         self.assertIn("发布结果读取失败", message)
         self.assertIn("Content", message)
 
-    def test_photo_upload_rejects_local_mode(self):
-        note = self._note(["/tmp/cover.png"])
-        with self.assertRaises(RuntimeError):
-            asyncio.run(note.upload(None))
+    def test_photo_upload_local_branch_launches_and_closes(self):
+        from tests.fakes import FakePlaywright
+
+        note = TiktokNote(
+            ["/tmp/cover.png"], "", [], 0, "/tmp/cookie.json", title=None
+        )
+        note.change_language = AsyncMock()
+        note._upload_on_page = AsyncMock()
+        playwright = FakePlaywright()
+
+        with (
+            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
+            patch.object(tk_main.time, "monotonic", return_value=1000.0),
+        ):
+            asyncio.run(note.upload(playwright))
+
+        self.assertEqual(
+            playwright.chromium.launch_calls,
+            [{"headless": True, **TIKTOK_LAUNCH_KWARGS}],
+        )
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[0]
+        note._upload_on_page.assert_awaited_once_with(
+            ANY, multilogin=False, deadline=1900.0
+        )
+        self.assertEqual(context.storage_state_calls, ["/tmp/cookie.json"])
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
 
 
 # ---------------------------------------------------------------------------
