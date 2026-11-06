@@ -535,6 +535,9 @@ class FakePrivacyControl:
 class _OptionPage:
     url = "https://www.tiktok.com/tiktokstudio/upload"
 
+    async def wait_for_timeout(self, ms) -> None:
+        return None
+
 
 class FakeDialogButton:
     """Minimal locator for the AIGC ``Turn on`` button."""
@@ -714,6 +717,18 @@ class TiktokOptionStepTests(unittest.TestCase):
                 self.assertEqual(controls.branded_content.checked_reads, 0)
                 self.assertEqual(controls.branded_content.click_calls, 0)
 
+    def test_apply_options_expands_advanced_settings_first(self):
+        video = _uploader(TiktokPublishOptions(privacy="only-me"))
+        privacy = FakePrivacyControl(
+            "Followers", ["Followers", "Friends", "Only you"]
+        )
+        _install(video, _controls(privacy=privacy))
+        video._expand_advanced_settings = AsyncMock()
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        video._expand_advanced_settings.assert_awaited_once()
+
     def test_privacy_explicit_set_then_readback(self):
         privacy = FakePrivacyControl(
             "Everyone", ["Everyone", "Friends", "Only you"]
@@ -857,6 +872,21 @@ class TiktokOptionStepTests(unittest.TestCase):
 
         self.assertIn("allow_comments", str(ctx.exception))
         self.assertEqual(comments.click_calls, 0)
+
+    def test_missing_reuse_control_with_disable_reuse_is_satisfied(self):
+        video = _uploader(TiktokPublishOptions(allow_reuse=False))
+        _install(video, _controls())
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+    def test_resolve_tolerates_missing_reuse_when_disabling(self):
+        video = _uploader(TiktokPublishOptions(allow_reuse=False))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+
+        controls = asyncio.run(video.resolve_option_controls(_OptionPage()))
+
+        self.assertIsNone(controls.reuse)
 
     def test_disable_reuse_touches_only_the_single_reuse_switch(self):
         comments = FakeToggleControl(True)
@@ -1003,6 +1033,31 @@ class TiktokAigcOptionTests(unittest.TestCase):
         self.assertIn("Turn on", message)
         self.assertEqual(button.click_calls, 1)
 
+    def test_brand_checkboxes_are_resolved_after_master_switch(self):
+        master = FakeToggleControl(False)
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(True)
+        video = _uploader(TiktokPublishOptions(your_brand=True))
+        _install(video, _controls(brand_switch=master))
+
+        async def resolver(name):
+            return {
+                "your_brand": your_brand,
+                "branded_content": branded,
+            }[name]
+
+        video._resolve_single_control = AsyncMock(side_effect=resolver)
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertTrue(master.checked)
+        self.assertTrue(your_brand.checked)
+        self.assertFalse(branded.checked)
+        self.assertEqual(
+            [call.args[0] for call in video._resolve_single_control.await_args_list],
+            ["your_brand", "branded_content"],
+        )
+
     def test_toggle_read_error_is_wrapped_with_option_context(self):
         comments = _FailingReadControl()
         video = _uploader(TiktokPublishOptions(allow_comments=True))
@@ -1040,6 +1095,26 @@ class TiktokAigcOptionTests(unittest.TestCase):
         self.assertIn("stage=read", message)
         self.assertIn("read-error", message)
         self.assertIn("locator detached", message)
+
+    def test_label_control_does_not_treat_disabled_false_class_as_disabled(self):
+        class _Locator:
+            async def is_disabled(self):
+                return False
+
+            async def get_attribute(self, name):
+                if name == "class":
+                    return (
+                        "Checkbox__root Checkbox__root--labelPlacement-end "
+                        "Checkbox__root--disabled-false"
+                    )
+                return "false"
+
+            def locator(self, selector):
+                raise AssertionError("no nested checkbox")
+
+        control = tk_main._LocatorControl(_Locator())
+
+        self.assertFalse(asyncio.run(control.is_disabled()))
 
     def test_label_control_reads_nested_checkbox_state(self):
         control = tk_main._LocatorControl(

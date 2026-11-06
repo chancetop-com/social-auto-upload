@@ -20,17 +20,17 @@
 | 用例 | 期望 | 实际 | 证据 |
 | --- | --- | --- | --- |
 | 私有账号请求 `--privacy public` | 严格失败，退出 `1`，不发布 | 退出 `1`；请求 `public`，实际 `Followers`；浮层已关闭 | `.local/tiktok19/public-negative-v2.log` |
-| `--branded-content --privacy only-me` | 本地校验失败，退出 `2`，不启动浏览器 | 待跑 | — |
+| `--branded-content --privacy only-me` | 本地校验失败，退出 `2`，不启动浏览器 | 退出 `2`，argparse 前业务校验；未启动浏览器 | `.local/tiktok19/brand-onlyme-negative.log` |
 
 ## 正向发布（待填）
 
 | 用例 | 参数 | 退出码 | 帖子 ID / URL | 页面/帖子核对 |
 | --- | --- | --- | --- | --- |
 | only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `Meta+A` 修复，v4 复验 |
-| 隐私 followers | `--privacy followers` | 待跑 | — | — |
-| 隐私 friends | `--privacy friends` | 待跑 | — | — |
-| 互动/复用/AIGC/品牌组合 | `--privacy only-me --no-comments --disable-reuse --aigc --your-brand` | 待跑 | — | — |
-| branded-content + friends | `--branded-content --privacy friends` | 待跑 | — | 页面若禁用/缺失记录为“页面不支持” |
+| 隐私 followers | `--privacy followers` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950885151018254` | 待 Content 核对 |
+| 隐私 friends | `--privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704951141179641102` | 待 Content 核对 |
+| 互动/复用/AIGC/品牌组合 | `--privacy only-me --no-comments --disable-reuse --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956309300382989` | 评论关闭、复用控件未渲染（已禁用视为满足）、AIGC Turn on、Your brand 已勾选；待 Content/帖子核对 |
+| branded-content + friends | `--branded-content --privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956629594279182` | 私有账号支持该组合；待帖子/Content 核对 Paid partnership |
 | 自定义封面 | `--thumbnail videos/demo.png --privacy only-me` | 待跑 | — | — |
 | 定时发布 | `--schedule <近未来> --privacy only-me` | 待跑 | — | 到点/Content 核对 |
 | 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title ... --note ... --tags ... --privacy only-me` | 待跑 | — | 顺序/封面/文案 |
@@ -47,4 +47,9 @@
 7. 隐私下拉当前是 `div[role="option"]`，不是 `li[role="option"]` → 改为按 role 匹配。
 8. 隐私选项渲染在 portal 里，不在 `video_visibility_container` 内部 → 增加 `fallback_scope`（在 `locator_base`/页面根上找 `[role="option"]`）。
 9. Content 列表不再使用 `data-tt="components_PostTable_Container"` → `read_result` 改为等待/读取 `a[href*="/video/"]` 并提取 `/video/<id>`。
-10. macOS 上 `Control+A` 不能全选 caption（残留旧文案）→ 改用 `Meta+A`；其他平台仍用 `Control+A`。
+10. macOS 上 `Control+A` 不能全选 caption（残留旧文案）→ 使用 Playwright `ControlOrMeta+A`。
+11. 评论复选框的原生 input 被 SVG 覆盖，且 `Checkbox__root--disabled-false` 被误判为 disabled → 点击可见 label + 精确 disabled class 判断。
+12. AIGC/品牌开关藏在折叠的 `advanced_settings_container` 里；首个候选是隐藏 input → 先展开高级设置，开关优先 `.Switch__content`。
+13. 品牌复选框的 label 没有可访问名，文本在 label 外层兄弟节点 → 用 XPath 从文本 span 反查同级 label。
+14. Playwright 应用 storage_state 时偶发导航竞态 → 本地 context 创建重试 3 次。
+15. `change_language` / 上传页 `goto` 等 `load` 会超时 → 改 `domcontentloaded`，语言切换 best-effort。

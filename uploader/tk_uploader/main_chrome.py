@@ -334,14 +334,34 @@ class _LocatorControl(TiktokOptionControl):
                 return True
         except Exception:
             pass
+        # A label candidate wraps the native checkbox; read the input too.
+        try:
+            nested = self._locator.locator('input[type="checkbox"]')
+            if await nested.count():
+                if await nested.first.is_disabled():
+                    return True
+        except Exception:
+            pass
         aria = await self._locator.get_attribute("aria-disabled")
         if str(aria).lower() == "true":
             return True
-        classes = (await self._locator.get_attribute("class")) or ""
-        return "disabled" in classes.casefold()
+        classes = ((await self._locator.get_attribute("class")) or "").casefold()
+        tokens = classes.split()
+        # Do not treat ``...--disabled-false`` as disabled.
+        return any(
+            token == "disabled"
+            or token.endswith("--disabled")
+            or "disabled-true" in token
+            for token in tokens
+        )
 
     async def click(self) -> None:
-        await self._locator.click()
+        try:
+            await self._locator.click()
+        except Exception:
+            # Styled checkboxes cover the native input with an icon; force the
+            # click and let the readback decide whether it actually toggled.
+            await self._locator.click(force=True)
 
     async def get_attribute(self, name: str) -> str | None:
         return await self._locator.get_attribute(name)
@@ -764,6 +784,29 @@ async def is_logged_in(context) -> bool:
         await page.close()
 
 
+async def _new_local_context(browser, *, storage_state, attempts: int = 3):
+    """Create a local context, retrying Playwright's storage-state race.
+
+    ``new_context(storage_state=...)`` can transiently fail with
+    "Execution context was destroyed" while Playwright restores localStorage.
+    """
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await browser.new_context(
+                storage_state=str(storage_state),
+                **TIKTOK_CONTEXT_KWARGS,
+            )
+        except (PlaywrightError, OSError) as exc:
+            last_exc = exc
+            tiktok_logger.warning(
+                "[+] TikTok local context creation failed "
+                f"({attempt}/{attempts}): {exc}"
+            )
+            await asyncio.sleep(1)
+    raise last_exc
+
+
 async def cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) -> bool:
     """Validate a local cookie file against TikTok Studio.
 
@@ -788,9 +831,8 @@ async def _cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) 
             return False
         try:
             try:
-                context = await browser.new_context(
-                    storage_state=str(account_file),
-                    **TIKTOK_CONTEXT_KWARGS,
+                context = await _new_local_context(
+                    browser, storage_state=account_file
                 )
             except (PlaywrightError, OSError, ValueError) as exc:
                 tiktok_logger.error(
@@ -893,7 +935,16 @@ async def get_tiktok_cookie(account_file) -> str:
                 if TIKTOK_INIT_SCRIPT:
                     context = await set_init_script(context)
                 page = await context.new_page()
-                await page.goto("https://www.tiktok.com/login?lang=en")
+                try:
+                    await page.goto(
+                        "https://www.tiktok.com/login?lang=en",
+                        wait_until="domcontentloaded",
+                        timeout=60_000,
+                    )
+                except Exception as exc:
+                    tiktok_logger.warning(
+                        f"[+] TikTok login page was slow: {exc}"
+                    )
                 tiktok_logger.info(
                     "请在打开的浏览器中完成 TikTok 登录；完成后回到终端按 Enter "
                     "保存 cookie。"
@@ -961,10 +1012,15 @@ class TiktokBaseUploader(BaseVideoUploader):
             headless=self.headless, **TIKTOK_LAUNCH_KWARGS
         )
         try:
-            context = await browser.new_context(
-                storage_state=f"{self.account_file}",
-                **TIKTOK_CONTEXT_KWARGS,
-            )
+            try:
+                context = await _new_local_context(
+                    browser, storage_state=self.account_file
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "TikTok 本地 cookie 加载失败，请重新运行 "
+                    "`sau tiktok login --account <name>`。"
+                ) from exc
             try:
                 if TIKTOK_INIT_SCRIPT:
                     context = await set_init_script(context)
@@ -989,17 +1045,35 @@ class TiktokBaseUploader(BaseVideoUploader):
             await browser.close()
 
     async def change_language(self, page):
-        # set the language to english
-        await page.goto("https://www.tiktok.com")
-        await page.wait_for_load_state('domcontentloaded')
-        await page.wait_for_selector('[data-e2e="nav-more-menu"]')
-        # 已经设置为英文, 省略这个步骤
-        if await page.locator('[data-e2e="nav-more-menu"]').text_content() == "More":
-            return
+        # Best-effort only: local mode already sets ``locale=en-US``; TikTok's
+        # analytics-heavy home page can exceed a ``load`` timeout.
+        try:
+            await page.goto(
+                "https://www.tiktok.com",
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+            await page.wait_for_selector(
+                '[data-e2e="nav-more-menu"]', timeout=10_000
+            )
+            # 已经设置为英文, 省略这个步骤
+            if (
+                await page.locator(
+                    '[data-e2e="nav-more-menu"]'
+                ).text_content()
+                == "More"
+            ):
+                return
 
-        await page.locator('[data-e2e="nav-more-menu"]').click()
-        await page.locator('[data-e2e="language-select"]').click()
-        await page.locator('#creator-tools-selection-menu-header >> text=English (US)').click()
+            await page.locator('[data-e2e="nav-more-menu"]').click()
+            await page.locator('[data-e2e="language-select"]').click()
+            await page.locator(
+                '#creator-tools-selection-menu-header >> text=English (US)'
+            ).click()
+        except Exception as exc:
+            tiktok_logger.warning(
+                f"[+] TikTok language switch skipped: {exc}"
+            )
 
     def _check_publish_deadline(self, deadline: float | None) -> None:
         if deadline is not None and time.monotonic() >= deadline:
@@ -1035,17 +1109,34 @@ class TiktokBaseUploader(BaseVideoUploader):
         tiktok_logger.success(self.result_label(self.last_item_id))
 
     async def open_upload_page(self, page, *, multilogin: bool) -> None:
-        await page.goto(self.upload_url)
+        try:
+            await page.goto(
+                self.upload_url,
+                wait_until="domcontentloaded",
+                timeout=60_000,
+            )
+        except Exception as exc:
+            if multilogin:
+                _raise_if_login_required(page)
+            # The Studio app can still render after a slow ``load``; the entry
+            # wait below owns the real failure if it did not.
+            tiktok_logger.warning(
+                f"[+] TikTok upload navigation was slow: {exc}"
+            )
         tiktok_logger.info(f'[+]Uploading-------{self.media_label()}')
         if multilogin:
             _raise_if_login_required(page)
 
         try:
             await page.wait_for_url(self.upload_url, timeout=10000)
-        except Exception:
+        except Exception as exc:
             if multilogin:
                 _raise_if_login_required(page)
-            raise
+            # The Studio app may already be rendering even when the exact URL
+            # wait loses a race with a redirect; the entry wait below decides.
+            tiktok_logger.warning(
+                f"[+] TikTok upload URL wait was slow: {exc}"
+            )
 
         try:
             # The current Studio shell can be the ``Select video`` entry itself,
@@ -1098,6 +1189,9 @@ class TiktokBaseUploader(BaseVideoUploader):
         ):
             return
 
+        # AIGC/brand switches live in the collapsed advanced-settings section.
+        # Expand it before resolving controls so they are visible and clickable.
+        await self._expand_advanced_settings(page)
         controls = await self.resolve_option_controls(page)
         url = _page_url(page)
         if options.privacy is not None:
@@ -1112,19 +1206,33 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
         if options.allow_reuse is not None:
-            await _set_toggle_option(
-                controls.reuse,
-                options.allow_reuse,
-                option="allow_reuse",
-                url=url,
-            )
+            if controls.reuse is None and options.allow_reuse is False:
+                # Private accounts may not render the control at all; the
+                # requested state is already the account-enforced state.
+                tiktok_logger.info(
+                    "[+] TikTok options: reuse control not rendered; "
+                    "disabled state already satisfied"
+                )
+            else:
+                self._require_option_control(
+                    controls.reuse,
+                    "allow_reuse",
+                    options.allow_reuse,
+                    url,
+                )
+                await _set_toggle_option(
+                    controls.reuse,
+                    options.allow_reuse,
+                    option="allow_reuse",
+                    url=url,
+                )
         if options.aigc is not None:
             self._require_option_control(
                 controls.aigc, "aigc", options.aigc, url
             )
             await self._set_aigc_option(controls.aigc, options.aigc, page=page, url=url)
         if self._brand_requested():
-            await self._apply_brand_options(controls, url=url)
+            await self._apply_brand_options(controls, page=page, url=url)
 
     def _brand_requested(self) -> bool:
         options = getattr(self, "options", None)
@@ -1232,13 +1340,15 @@ class TiktokBaseUploader(BaseVideoUploader):
             ) from exc
 
     async def _apply_brand_options(
-        self, controls: TiktokSettingsControls, *, url: str
+        self, controls: TiktokSettingsControls, *, page, url: str
     ) -> None:
         """Open the master switch, then explicitly set both checkboxes.
 
         The checkbox that was not requested is normalized to ``False`` so a
         stale selection from the page/previous post can never leak through.
-        Both may be ``True`` at the same time.
+        Both may be ``True`` at the same time.  The two checkboxes are only
+        resolved *after* the master switch is on, because Studio does not
+        render them until then.
         """
         options = self.options
         your_brand = options.your_brand is True
@@ -1253,24 +1363,34 @@ class TiktokBaseUploader(BaseVideoUploader):
             option="brand_switch",
             url=url,
         )
+        await page.wait_for_timeout(500)
+
+        your_control = controls.your_brand
+        if your_control is None:
+            your_control = await self._resolve_single_control("your_brand")
+        branded_control = controls.branded_content
+        if branded_control is None:
+            branded_control = await self._resolve_single_control(
+                "branded_content"
+            )
 
         self._require_option_control(
-            controls.your_brand, "your_brand", your_brand, url
+            your_control, "your_brand", your_brand, url
         )
         self._require_option_control(
-            controls.branded_content,
+            branded_control,
             "branded_content",
             branded_content,
             url,
         )
         await _set_toggle_option(
-            controls.your_brand,
+            your_control,
             your_brand,
             option="your_brand",
             url=url,
         )
         await _set_toggle_option(
-            controls.branded_content,
+            branded_control,
             branded_content,
             option="branded_content",
             url=url,
@@ -1290,7 +1410,8 @@ class TiktokBaseUploader(BaseVideoUploader):
         if options.aigc is not None:
             names.append("aigc")
         if self._brand_requested():
-            names.extend(("brand_switch", "your_brand", "branded_content"))
+            # The two checkboxes are resolved after the master switch is on.
+            names.append("brand_switch")
         return names
 
     def _option_request_value(self, name: str):
@@ -1362,8 +1483,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     "data-e2e=user_perm_container+label=Allow comments",
                     lambda: _LocatorControl(
                         perm.locator(
-                            'label:has-text("Allow comments") '
-                            'input[type="checkbox"]'
+                            'label:has-text("Allow comments")'
                         ).first
                     ),
                 ),
@@ -1371,8 +1491,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     "data-e2e=user_perm_container+label=Comment",
                     lambda: _LocatorControl(
                         perm.locator(
-                            'label:has-text("Comment") '
-                            'input[type="checkbox"]'
+                            'label:has-text("Comment")'
                         ).first
                     ),
                 ),
@@ -1392,8 +1511,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     "data-e2e=user_perm_container+label=Allow reuse of content",
                     lambda: _LocatorControl(
                         perm.locator(
-                            'label:has-text("Allow reuse of content") '
-                            'input[type="checkbox"]'
+                            'label:has-text("Allow reuse of content")'
                         ).first
                     ),
                 ),
@@ -1405,15 +1523,15 @@ class TiktokBaseUploader(BaseVideoUploader):
             )
             return (
                 (
-                    'data-e2e=aigc_container+role=switch',
-                    lambda: _LocatorControl(
-                        aigc_container.locator('[role="switch"]').first
-                    ),
-                ),
-                (
                     'data-e2e=aigc_container+.Switch__content',
                     lambda: _LocatorControl(
                         aigc_container.locator('.Switch__content').first
+                    ),
+                ),
+                (
+                    'data-e2e=aigc_container+role=switch',
+                    lambda: _LocatorControl(
+                        aigc_container.locator('[role="switch"]').first
                     ),
                 ),
             )
@@ -1424,15 +1542,15 @@ class TiktokBaseUploader(BaseVideoUploader):
             )
             return (
                 (
-                    'data-e2e=disclose_content_container+role=switch',
-                    lambda: _LocatorControl(
-                        disclose.locator('[role="switch"]').first
-                    ),
-                ),
-                (
                     'data-e2e=disclose_content_container+.Switch__content',
                     lambda: _LocatorControl(
                         disclose.locator('.Switch__content').first
+                    ),
+                ),
+                (
+                    'data-e2e=disclose_content_container+role=switch',
+                    lambda: _LocatorControl(
+                        disclose.locator('[role="switch"]').first
                     ),
                 ),
             )
@@ -1441,7 +1559,46 @@ class TiktokBaseUploader(BaseVideoUploader):
             label = (
                 "Your brand" if name == "your_brand" else "Branded content"
             )
+            disclose = base.locator(
+                '[data-e2e="disclose_content_container"]'
+            )
+            # Studio renders an empty checkbox label followed by a sibling
+            # text span; the label has no accessible name of its own.
+            xpath_sibling = (
+                f'xpath=//span[normalize-space(text())="{label}"]'
+                '/preceding-sibling::label[1]'
+            )
+            xpath_title_line = (
+                'xpath=//div[contains(@class,"title-line")]'
+                f'[.//span[normalize-space(text())="{label}"]]/label[1]'
+            )
             return (
+                (
+                    f'xpath=span "{label}" -> preceding label',
+                    lambda: _LocatorControl(
+                        base.locator(xpath_sibling).first
+                    ),
+                ),
+                (
+                    f'xpath=title-line "{label}" -> label',
+                    lambda: _LocatorControl(
+                        base.locator(xpath_title_line).first
+                    ),
+                ),
+                (
+                    f'disclose+role=checkbox[name="{label}"]',
+                    lambda: _LocatorControl(
+                        disclose.get_by_role("checkbox", name=label).first
+                    ),
+                ),
+                (
+                    f'disclose+label="{label}" input[type=checkbox]',
+                    lambda: _LocatorControl(
+                        disclose.locator(
+                            f'label:has-text("{label}")'
+                        ).first
+                    ),
+                ),
                 (
                     f'role=checkbox[name="{label}"]',
                     lambda: _LocatorControl(
@@ -1540,6 +1697,18 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url = _page_url(page)
                 details = []
                 for name in still_missing:
+                    if (
+                        name == "reuse"
+                        and getattr(self.options, "allow_reuse", None)
+                        is False
+                    ):
+                        # No reuse control is rendered for some private
+                        # accounts; the requested disabled state is satisfied.
+                        tiktok_logger.info(
+                            "[+] TikTok options: reuse control not rendered; "
+                            "disabled state already satisfied"
+                        )
+                        continue
                     candidates = tuple(
                         label
                         for label, _ in self._option_candidate_factories(name)
@@ -1550,9 +1719,10 @@ class TiktokBaseUploader(BaseVideoUploader):
                         f"actual='control-not-found' "
                         f"candidates={candidates!r} url={url!r}"
                     )
-                raise RuntimeError(
-                    "TikTok 发布选项设置失败：" + " | ".join(details)
-                )
+                if details:
+                    raise RuntimeError(
+                        "TikTok 发布选项设置失败：" + " | ".join(details)
+                    )
 
         return TiktokSettingsControls(
             privacy=resolved.get("privacy"),

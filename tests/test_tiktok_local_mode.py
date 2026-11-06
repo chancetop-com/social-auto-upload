@@ -82,6 +82,30 @@ class _BoomCM:
         return False
 
 
+class LocalContextRetryTests(unittest.TestCase):
+    def test_context_creation_retries_storage_state_race(self):
+        class _FlakyBrowser:
+            def __init__(self):
+                self.calls = 0
+
+            async def new_context(self, **kwargs):
+                self.calls += 1
+                if self.calls < 3:
+                    raise OSError("execution context was destroyed")
+                return "context"
+
+        browser = _FlakyBrowser()
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            context = asyncio.run(
+                tk_main._new_local_context(
+                    browser, storage_state="/tmp/tiktok_creator.json"
+                )
+            )
+
+        self.assertEqual(context, "context")
+        self.assertEqual(browser.calls, 3)
+
+
 class CookieAuthTests(unittest.TestCase):
     def test_playwright_start_failure_returns_false(self):
         with patch.object(tk_main, "async_playwright", lambda: _BoomCM()):
