@@ -480,32 +480,63 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         self._fallback_scope = fallback_scope
         self.candidates = candidates
 
+    async def _target(self):
+        """First visible trigger of a possibly-multi locator."""
+        locator = self._trigger
+        total = 0
+        count = getattr(locator, "count", None)
+        if callable(count):
+            try:
+                total = await count()
+            except Exception:
+                total = 0
+        if total > 1:
+            nth = getattr(locator, "nth", None)
+            if callable(nth):
+                for index in range(total):
+                    node = nth(index)
+                    is_visible = getattr(node, "is_visible", None)
+                    if not callable(is_visible):
+                        return node
+                    try:
+                        if await is_visible():
+                            return node
+                    except Exception:
+                        continue
+        first = getattr(locator, "first", None)
+        return first if first is not None else locator
+
     async def is_checked(self) -> bool:
         return False
 
     async def is_disabled(self) -> bool:
+        target = await self._target()
         try:
-            if await self._trigger.is_disabled():
+            if await target.is_disabled():
                 return True
         except Exception:
             pass
-        classes = (await self._trigger.get_attribute("class")) or ""
+        classes = (await target.get_attribute("class")) or ""
         return _classes_mark_disabled(classes)
 
     async def is_visible(self) -> bool:
+        target = await self._target()
         try:
-            return bool(await self._trigger.is_visible())
+            return bool(await target.is_visible())
         except Exception:
             return True
 
     async def click(self) -> None:
-        await self._trigger.click()
+        target = await self._target()
+        await target.click()
 
     async def get_attribute(self, name: str) -> str | None:
-        return await self._trigger.get_attribute(name)
+        target = await self._target()
+        return await target.get_attribute(name)
 
     async def read_text(self) -> str:
-        return (await self._trigger.inner_text()).strip()
+        target = await self._target()
+        return (await target.inner_text()).strip()
 
     async def options(self) -> list[TiktokOptionControl]:
         # Current Studio renders options as ``div[role="option"]`` in a portal
@@ -1568,7 +1599,7 @@ class TiktokBaseUploader(BaseVideoUploader):
 
             def from_role():
                 return _LocatorPrivacyControl(
-                    base.get_by_role("combobox").first, base
+                    base.get_by_role("combobox"), base
                 )
 
             def from_text():
@@ -2427,7 +2458,6 @@ class TiktokBaseUploader(BaseVideoUploader):
                     f"(dialog role=button[name=/{name}/])"
                 )
                 return True
-        return False
         return False
 
     async def choose_base_locator(self, page):
