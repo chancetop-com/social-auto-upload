@@ -469,46 +469,10 @@ class TiktokPublishOptions:
 
 - `tests/test_tiktok_settings.py`：内存 fake + 步骤逻辑。
 - `tests/test_tiktok_note_cli.py`：`upload-note` 参数、校验、映射、图片特有流程。
-- `tests/test_tiktok_smoke.py`：opt-in 冒烟（8.2）。
 
-### 8.2 opt-in 表单级冒烟
+### 8.2 opt-in 表单级冒烟（已移除）
 
-文件：`tests/test_tiktok_smoke.py`；开关 `SAU_TIKTOK_SMOKE=1`，未设置整模块 skip。
-
-前置：
-
-1. Multilogin 桌面应用在本机运行，Profile 使用 Mimic 内核。
-2. Profile 界面语言 English (US)，已登录一个可发布的公开 TikTok 账号。
-3. 复用 `MLX_API_TOKEN`、`SAU_MLX_FOLDER_ID`、`SAU_MLX_PROFILE_ID`；与 `SAU_MLX_SMOKE` 共用 Profile 时串行运行。
-4. 样本：`videos/demo.mp4`、`videos/demo.png`，不新增二进制。
-
-视频用例：
-
-1. 打开 `TIKTOK_UPLOAD_URL`，断言上传入口存在。
-2. 选 `videos/demo.mp4`，等表单出现。
-3. 展开 Settings / Show more。
-4. 逐控件定位 → 设置安全值 → 回读断言；覆盖隐私、评论、reuse、AIGC、Your brand、Branded content。
-5. 打开封面编辑器并验证 `Upload cover` 入口。
-6. **绝不点击 Post / Schedule。**
-
-图片用例：
-
-1. 探测 Photos tab；缺失 → 只 skip 本用例并输出原因（灰度，不是代码失败）。
-2. 有则选 `videos/demo.png`，验证 Title/Description/tags 与隐私/评论/AIGC/品牌控件（不测 reuse）。
-3. 第 1 张即封面；**绝不点击 Post / Schedule。**
-
-失败与跳过矩阵：
-
-| 情况 | 行为 |
-| --- | --- |
-| `SAU_TIKTOK_SMOKE` 未设置 | 整模块 skip |
-| 开关打开但变量缺失 | fail，指出缺哪个变量 |
-| 未登录 / 登录页 / 验证码跳转 | fail，要求先在 Multilogin 登录 |
-| 上传页打不开 / 视频路径控件缺失 | fail，报控件名 + 候选 + URL |
-| 账号没有 Photos tab | 只 skip 图片用例 |
-| 设置后回读不一致 | fail，报选项/请求值/实际值 |
-
-副作用：不发布，但可能留下未发布草稿。冒烟不自动删除；清理方式：TikTok Studio → Content/Drafts 手动删除。设置不跨表单记忆，冒烟不会污染后续运行。
+早期计划的 opt-in 表单级冒烟（模块与开关均已删除）已由真实账号手工验收（[acceptance-local.md](./acceptance-local.md)）替代，测试模块与开关已删除；当前漂移排查直接按 8.4 在真实账号上复跑受影响控件。
 
 ### 8.3 人工发布验收清单
 
@@ -535,7 +499,7 @@ class TiktokPublishOptions:
 
 ### 8.4 选择器漂移刷新流程
 
-1. 跑 `SAU_TIKTOK_SMOKE=1` 冒烟。
+1. 按 [acceptance-local.md](./acceptance-local.md) 在真实账号上复跑受影响控件（原 opt-in 冒烟已移除）。
 2. 失败信息会给出控件名、已尝试候选、当前 URL、阶段。
 3. 只更新对应步骤的候选列表，不做全局替换。
 4. 重跑冒烟；再跑默认离线套件确认无回归。

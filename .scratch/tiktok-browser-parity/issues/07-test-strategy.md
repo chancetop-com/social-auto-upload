@@ -25,7 +25,7 @@ Blocked by: 05, 06
 | 层 | 是否默认运行 | 证明什么 |
 | --- | --- | --- |
 | 离线自动化 | 是 | 参数契约、映射、步骤逻辑、流程顺序、退出码、超时常量、旧行为回归 |
-| opt-in 表单级冒烟 | 否（`SAU_TIKTOK_SMOKE=1`） | 选择器在真实 TikTok Studio 上确实命中；控件可设置且回读一致 |
+| 真实账号手工验收（原 opt-in 冒烟已移除） | 否 | 选择器在真实 TikTok Studio 上确实命中；控件可设置且回读一致 |
 | 人工发布验收 | 否 | 设置的实际效果、真实发布/定时/封面/图片帖结果 |
 
 真实页面能证明选择器有效，但证明不了失败分支；失败分支（回读不一致、置灰但已满足、品牌二选一补零）由内存 fake 覆盖，不需要模拟 DOM。
@@ -72,11 +72,11 @@ disabled -> bool
 
 ### 4. opt-in 表单级冒烟
 
-文件：`tests/test_tiktok_smoke.py`。
+原 opt-in 冒烟文件已删除；真实账号手工验收见 [acceptance-local.md](../acceptance-local.md)。
 
 **开关与配置**
 
-- 开关：`SAU_TIKTOK_SMOKE=1`；关闭时整模块 skip。
+- 原 opt-in 冒烟已移除；真实账号手工验收不使用环境开关。
 - 复用 `MLX_API_TOKEN`、`SAU_MLX_FOLDER_ID`、`SAU_MLX_PROFILE_ID`。
 - 样本：`videos/demo.mp4`、`videos/demo.png`，不新增二进制。
 - 前置条件：
@@ -103,7 +103,7 @@ disabled -> bool
 
 | 情况 | 行为 |
 | --- | --- |
-| `SAU_TIKTOK_SMOKE` 未设置 | 整模块 skip |
+| 原 opt-in 冒烟已移除 | 由真实账号手工验收替代 |
 | 开关打开但变量缺失 | **fail**，消息指出缺哪个变量 |
 | 未登录 / 登录页 / 验证码跳转 | **fail**，消息要求先在 Multilogin 登录 |
 | 上传页打不开 / 视频路径控件缺失 | **fail**，报控件名 + 候选 + URL |
@@ -144,7 +144,7 @@ disabled -> bool
 - 新增按主题拆分：
   - `tests/test_tiktok_settings.py`：内存 fake + 步骤逻辑（第 1 节第 3 组）。
   - `tests/test_tiktok_note_cli.py`：`upload-note` 参数、校验、映射、图片特有流程（第 1、2、7 组）。
-  - `tests/test_tiktok_smoke.py`：第 4 节的 opt-in 冒烟。
+  - 原 opt-in 冒烟文件已删除；真实账号手工验收见 [acceptance-local.md](../acceptance-local.md)。
 - 新增一条回归断言：`upload-video` 不传任何新参数时，fake 记录的操作序列中**没有任何设置类调用**。
 
 ### 7. 明确不测
@@ -162,3 +162,5 @@ disabled -> bool
 - **实现阶段**：只改上述两条旧断言；不新增测试依赖；默认套件保持离线。
 
 ## Comments
+
+- 2026-11-06：原计划的 opt-in 表单级冒烟已由真实账号手工验收（[acceptance-local.md](../acceptance-local.md)）替代；测试模块与开关已删除，本工单其余两层（离线契约 + 人工发布验收）继续有效。

@@ -43,7 +43,7 @@
 - [02 — AI 生成标识与品牌内容声明](./issues/02-aigc-brand-disclosure.md) — 三项都在 `Show more` 高级设置；AI 标识默认关、首次开启需点 `Turn on`；Your brand / Branded content 可同选但至少选一个；Branded content 不能配 Private，campaign 关联仍需移动端完成。
 - [05 — CLI 参数契约与默认值](./issues/05-cli-parameter-contract.md) — `upload-video` 新增 `--privacy` / `--no-comments` / `--disable-reuse` / `--aigc|--no-aigc` / `--your-brand` / `--branded-content`；`upload-note` 用 `--images` + 可选 `--title` / `--note|--notef` / `--tags` / `--schedule`；未传就不动，显式传则设置并回读；超长/超限直接报错；不做 `--cover-ms`、`--bgm`、`--cover-index`。
 - [06 — 能力预检与失败语义](./issues/06-preflight-failure-semantics.md) — 不做能力预检，只用“设置后回读最终状态”（置灰但目标已满足算成功）；账号能力不支持仍退出 1；新增退出码 `9` 表示“发布结果未知”（点击已发出、未到成功页、未跳登录），禁止自动重发；超时沿用现状常量；验证码/2FA 仅靠 URL 标记判 10。
-- [07 — 测试与验收策略](./issues/07-test-strategy.md) — 三层证明：默认离线 `unittest`（7 组契约，逻辑用内存控件 fake，不模拟 DOM）+ `SAU_TIKTOK_SMOKE=1` 表单级冒烟（复用 MLX 变量，设置/回读但不发布，缺 Photos tab 只 skip 图片用例）+ 人工发布验收（公开账号必做，私有/灰度有条件）；不引入 manifest，漂移靠冒烟命名失败；旧 `test_mlx_tiktok.py` 只改两条冲突断言。
+- [07 — 测试与验收策略](./issues/07-test-strategy.md) — 两层证明：默认离线 `unittest`（7 组契约，逻辑用内存控件 fake，不模拟 DOM）+ 真实账号手工发布验收（公开账号必做，私有/灰度有条件；见 [acceptance-local.md](./acceptance-local.md)）；原 opt-in 冒烟已移除；不引入 manifest，漂移靠真实账号复跑命名失败；旧 `test_mlx_tiktok.py` 只改两条冲突断言。
 - [09 — 视频/图片共用流程与扩展点](./issues/09-shared-flow-extension-points.md) — 视频号式模板方法：`TiktokBaseUploader` 持 9 步骨架与发布循环，`TiktokVideo` / `TiktokNote` 只实现钩子；分叉点提前到进页（URL / Photos tab），表单填写不是唯一；选项打包 `TiktokPublishOptions` + 构造器 keyword-only；选择器内联、`tk_config` 只放常量；登录 / 15 分钟 deadline / 映射完全复用；全量改名到骨架词汇，测试仅 2 条断言 + 2 行调用。
 - [08 — 汇总实施规格](./issues/08-assemble-spec.md) — 规格已产出（[spec.md](./spec.md)）：能力矩阵、命令/参数契约、视频与图片两条 UI 路径及候选选择器、设置后回读、退出码 `9`、三层测试、部署/阶段/回滚齐全；选择器降级改为每步有序候选、`--json` 明确为非目标。
 
