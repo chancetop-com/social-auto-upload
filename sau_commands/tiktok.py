@@ -30,6 +30,7 @@ from uploader.tk_uploader.main_chrome import (
     TIKTOK_CONTEXT_KWARGS,
     TIKTOK_INIT_SCRIPT,
     TIKTOK_LAUNCH_KWARGS,
+    TiktokPublishOptions,
     TiktokVideo,
     is_logged_in,
 )
@@ -89,6 +90,27 @@ def register(platform_parsers):
     upload_video_parser.add_argument(
         "--thumbnail", type=existing_file_path, help="Optional thumbnail path"
     )
+    upload_video_parser.add_argument(
+        "--privacy",
+        choices=("public", "friends", "followers", "only-me"),
+        help=(
+            "Set video privacy (public/friends/followers/only-me); "
+            "omit to leave the page default"
+        ),
+    )
+    upload_video_parser.add_argument(
+        "--no-comments",
+        action="store_true",
+        help="Turn off Allow comments; omit to leave the page default",
+    )
+    upload_video_parser.add_argument(
+        "--disable-reuse",
+        action="store_true",
+        help=(
+            "Turn off Allow reuse of content (also affects Duet, Stitch, "
+            "Stickers and Story); omit to leave the page default"
+        ),
+    )
     add_runtime_flags(upload_video_parser)
     add_multilogin_flags(upload_video_parser)
 
@@ -103,6 +125,25 @@ class TiktokVideoUploadRequest:
     thumbnail_file: Path | None = None
     debug: bool = True
     headless: bool = True
+    options: TiktokPublishOptions | None = None
+
+
+def _build_publish_options(args) -> TiktokPublishOptions | None:
+    """Map CLI flags to the uploader's tri-state options.
+
+    Every ``None`` means "do not touch the page default".  When all three are
+    ``None`` the legacy code path stays genuinely untouched (``options=None``).
+    """
+    privacy = getattr(args, "privacy", None) or None
+    allow_comments = False if getattr(args, "no_comments", False) else None
+    allow_reuse = False if getattr(args, "disable_reuse", False) else None
+    if privacy is None and allow_comments is None and allow_reuse is None:
+        return None
+    return TiktokPublishOptions(
+        privacy=privacy,
+        allow_comments=allow_comments,
+        allow_reuse=allow_reuse,
+    )
 
 
 def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
@@ -116,6 +157,7 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
         thumbnail_path=(
             str(request.thumbnail_file) if request.thumbnail_file else None
         ),
+        options=request.options,
     )
 
 
@@ -158,6 +200,7 @@ async def run(args):
             thumbnail_file=args.thumbnail,
             debug=args.debug,
             headless=args.headless,
+            options=_build_publish_options(args),
         )
         app = _build_video_uploader(request)
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 # Multilogin runs on the same Patchright client as every other uploader.
@@ -39,6 +40,288 @@ TIKTOK_CONTEXT_KWARGS: dict = {}
 TIKTOK_INIT_SCRIPT = False
 
 _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokPublishOptions:
+    """Tri-state publish options requested by the caller.
+
+    ``None`` means "leave the page default untouched" and must never be
+    replaced with a local default.  Ticket 13 extends this dataclass with the
+    AIGC and brand-disclosure fields.
+    """
+
+    privacy: str | None = None          # public / friends / followers / only-me
+    allow_comments: bool | None = None
+    allow_reuse: bool | None = None
+
+
+# Page copy -> CLI/API semantic value.  ``Only you`` and ``Private`` are the
+# same option in two A/B variants; ``Everyone`` and ``Public`` likewise.
+_PRIVACY_LABELS = {
+    "everyone": "public",
+    "public": "public",
+    "friends": "friends",
+    "followers": "followers",
+    "only you": "only-me",
+    "private": "only-me",
+}
+
+
+def normalize_privacy_label(text: str | None) -> str | None:
+    """Normalize a visibility label to ``public/friends/followers/only-me``.
+
+    The first line is used because the ``Friends`` option renders its subtitle
+    (``Followers you follow back``) on the following line.  Unknown copy
+    returns ``None`` so callers can fail strictly instead of guessing.
+    """
+    if not text:
+        return None
+    first_line = text.strip().splitlines()[0].strip()
+    return _PRIVACY_LABELS.get(first_line.casefold())
+
+
+class TiktokOptionControl:
+    """Small async seam used by the publish-option steps.
+
+    Tests drive the steps with in-memory implementations; production code uses
+    the locator adapters below.  Keeping the steps on this interface means the
+    option logic never contains DOM/CSS assertions.
+    """
+
+    candidates: tuple[str, ...] = ()
+    candidate_index: int | None = None
+
+    async def is_checked(self) -> bool:
+        raise NotImplementedError
+
+    async def is_disabled(self) -> bool:
+        raise NotImplementedError
+
+    async def click(self) -> None:
+        raise NotImplementedError
+
+    async def get_attribute(self, name: str) -> str | None:
+        raise NotImplementedError
+
+    async def read_text(self) -> str:
+        raise NotImplementedError
+
+    async def options(self) -> list["TiktokOptionControl"]:
+        return []
+
+    async def count(self) -> int:
+        raise NotImplementedError
+
+
+class _LocatorControl(TiktokOptionControl):
+    """Checkbox/option adapter over a Patchright locator."""
+
+    def __init__(self, locator, *, candidates: tuple[str, ...] = ()) -> None:
+        self._locator = locator
+        self.candidates = candidates
+
+    async def is_checked(self) -> bool:
+        return bool(await self._locator.is_checked())
+
+    async def is_disabled(self) -> bool:
+        try:
+            if await self._locator.is_disabled():
+                return True
+        except Exception:
+            pass
+        aria = await self._locator.get_attribute("aria-disabled")
+        if str(aria).lower() == "true":
+            return True
+        classes = (await self._locator.get_attribute("class")) or ""
+        return "disabled" in classes.casefold()
+
+    async def click(self) -> None:
+        await self._locator.click()
+
+    async def get_attribute(self, name: str) -> str | None:
+        return await self._locator.get_attribute(name)
+
+    async def read_text(self) -> str:
+        return (await self._locator.inner_text()).strip()
+
+    async def count(self) -> int:
+        return await self._locator.count()
+
+
+class _LocatorPrivacyControl(TiktokOptionControl):
+    """Visibility combobox adapter: trigger text plus its option list."""
+
+    def __init__(
+        self, trigger, option_scope, *, candidates: tuple[str, ...] = ()
+    ) -> None:
+        self._trigger = trigger
+        self._option_scope = option_scope
+        self.candidates = candidates
+
+    async def is_checked(self) -> bool:
+        return False
+
+    async def is_disabled(self) -> bool:
+        try:
+            if await self._trigger.is_disabled():
+                return True
+        except Exception:
+            pass
+        classes = (await self._trigger.get_attribute("class")) or ""
+        return "disabled" in classes.casefold()
+
+    async def click(self) -> None:
+        await self._trigger.click()
+
+    async def get_attribute(self, name: str) -> str | None:
+        return await self._trigger.get_attribute(name)
+
+    async def read_text(self) -> str:
+        return (await self._trigger.inner_text()).strip()
+
+    async def options(self) -> list[TiktokOptionControl]:
+        locator = self._option_scope.locator('li[role="option"]')
+        count = await locator.count()
+        return [_LocatorControl(locator.nth(i)) for i in range(count)]
+
+    async def count(self) -> int:
+        return await self._trigger.count()
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokSettingsControls:
+    """Resolved controls for one ``apply_options`` run."""
+
+    privacy: TiktokOptionControl | None = None
+    comments: TiktokOptionControl | None = None
+    reuse: TiktokOptionControl | None = None
+
+
+def _page_url(page) -> str:
+    return str(getattr(page, "url", "") or "")
+
+
+def _option_error(
+    *,
+    option: str,
+    stage: str,
+    requested,
+    actual,
+    control,
+    url: str,
+) -> RuntimeError:
+    candidates = tuple(getattr(control, "candidates", ()) or ())
+    return RuntimeError(
+        "TikTok 发布选项设置失败："
+        f"option={option} stage={stage} requested={requested!r} "
+        f"actual={actual!r} candidates={candidates!r} url={url!r}"
+    )
+
+
+async def _read_toggle_state(control: TiktokOptionControl) -> bool:
+    try:
+        return bool(await control.is_checked())
+    except Exception:
+        aria = await control.get_attribute("aria-checked")
+        if aria is None:
+            raise
+        return str(aria).lower() == "true"
+
+
+async def _set_toggle_option(
+    control: TiktokOptionControl,
+    requested: bool,
+    *,
+    option: str,
+    url: str,
+) -> None:
+    current = await _read_toggle_state(control)
+    if current == requested:
+        # Already satisfied, even when the account-level setting disabled the
+        # control: this is success and must not require a click.
+        return
+    if await control.is_disabled():
+        raise _option_error(
+            option=option,
+            stage="disabled",
+            requested=requested,
+            actual=current,
+            control=control,
+            url=url,
+        )
+    await control.click()
+    actual = await _read_toggle_state(control)
+    if actual != requested:
+        raise _option_error(
+            option=option,
+            stage="readback",
+            requested=requested,
+            actual=actual,
+            control=control,
+            url=url,
+        )
+
+
+async def _set_privacy_option(
+    control: TiktokOptionControl, requested: str, *, url: str
+) -> None:
+    current_label = await control.read_text()
+    if normalize_privacy_label(current_label) == requested:
+        # Already satisfied; do not require a click on a possibly disabled
+        # combobox.
+        return
+    if await control.is_disabled():
+        raise _option_error(
+            option="privacy",
+            stage="disabled",
+            requested=requested,
+            actual=current_label,
+            control=control,
+            url=url,
+        )
+
+    await control.click()
+    matched: TiktokOptionControl | None = None
+    for option in await control.options():
+        if normalize_privacy_label(await option.read_text()) == requested:
+            matched = option
+            break
+
+    if matched is None:
+        # Strict: the requested level is not rendered for this account.  Never
+        # fall back or rename the option.
+        raise _option_error(
+            option="privacy",
+            stage="select",
+            requested=requested,
+            actual=current_label,
+            control=control,
+            url=url,
+        )
+
+    matched_label = await matched.read_text()
+    if await matched.is_disabled():
+        raise _option_error(
+            option="privacy",
+            stage="select-disabled",
+            requested=requested,
+            actual=matched_label,
+            control=matched,
+            url=url,
+        )
+
+    await matched.click()
+    actual_label = await control.read_text()
+    if normalize_privacy_label(actual_label) != requested:
+        raise _option_error(
+            option="privacy",
+            stage="readback",
+            requested=requested,
+            actual=actual_label,
+            control=control,
+            url=url,
+        )
 
 
 def _raise_if_login_required(page) -> None:
@@ -224,9 +507,9 @@ class TiktokBaseUploader(BaseVideoUploader):
     """Shared TikTok Studio upload skeleton.
 
     The template in ``_upload_on_page`` runs the nine steps in a fixed order;
-    subclasses implement the media-specific hooks.  ``ensure_mode``,
-    ``apply_options`` and ``apply_cover`` are no-ops until later tickets fill
-    them in.
+    subclasses implement the media-specific hooks.  ``ensure_mode`` and
+    ``apply_cover`` are no-ops until later tickets fill them in; publish
+    options are applied by ``apply_options`` (ticket 12).
     """
 
     async def upload_in(self, session: BrowserSession) -> None:
@@ -261,7 +544,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self.wait_media_ready(
             page, deadline=deadline, multilogin=multilogin
         )
-        # 5. publish options (no-op in this ticket)
+        # 5. publish options (privacy / comments / reuse)
         await self.apply_options(page)
         # 6. custom cover (video only; base is a no-op)
         await self.apply_cover(page)
@@ -320,7 +603,257 @@ class TiktokBaseUploader(BaseVideoUploader):
         raise NotImplementedError
 
     async def apply_options(self, page) -> None:
-        """Publish options; no-op until the option steps land."""
+        """Apply the explicitly requested publish options, then read back.
+
+        ``None`` (or all-``None`` options) means the legacy path: not a single
+        control interaction, not even a read.
+        """
+        options = getattr(self, "options", None)
+        if options is None:
+            return
+        if (
+            options.privacy is None
+            and options.allow_comments is None
+            and options.allow_reuse is None
+        ):
+            return
+
+        controls = await self.resolve_option_controls(page)
+        url = _page_url(page)
+        if options.privacy is not None:
+            await _set_privacy_option(
+                controls.privacy, options.privacy, url=url
+            )
+        if options.allow_comments is not None:
+            await _set_toggle_option(
+                controls.comments,
+                options.allow_comments,
+                option="allow_comments",
+                url=url,
+            )
+        if options.allow_reuse is not None:
+            await _set_toggle_option(
+                controls.reuse,
+                options.allow_reuse,
+                option="allow_reuse",
+                url=url,
+            )
+
+    def _requested_option_names(self) -> list[str]:
+        options = getattr(self, "options", None)
+        if options is None:
+            return []
+        names = []
+        if options.privacy is not None:
+            names.append("privacy")
+        if options.allow_comments is not None:
+            names.append("comments")
+        if options.allow_reuse is not None:
+            names.append("reuse")
+        return names
+
+    def _option_request_value(self, name: str):
+        options = self.options
+        return {
+            "privacy": options.privacy,
+            "comments": options.allow_comments,
+            "reuse": options.allow_reuse,
+        }[name]
+
+    def _option_candidate_factories(self, name: str):
+        """Ordered candidates per spec §5.5: data-e2e, role, then text."""
+        base = self.locator_base
+        if base is None:
+            return ()
+
+        if name == "privacy":
+            def from_container():
+                scope = base.locator(
+                    'div[data-e2e="video_visibility_container"]'
+                )
+                return _LocatorPrivacyControl(
+                    scope.locator('button[role="combobox"]'), scope
+                )
+
+            def from_role():
+                return _LocatorPrivacyControl(
+                    base.get_by_role("combobox").first, base
+                )
+
+            def from_text():
+                trigger = base.locator(
+                    'xpath=//div[contains(text(), "Who can see this post")]'
+                    '/following::button[@role="combobox"][1]'
+                )
+                return _LocatorPrivacyControl(trigger, base)
+
+            return (
+                ("data-e2e=video_visibility_container", from_container),
+                ("role=combobox", from_role),
+                ("text=Who can see this post", from_text),
+            )
+
+        perm = base.locator('div[data-e2e="user_perm_container"]')
+        if name == "comments":
+            return (
+                (
+                    "data-e2e=user_perm_container+role=Allow comments",
+                    lambda: _LocatorControl(
+                        perm.get_by_role(
+                            "checkbox", name="Allow comments"
+                        ).first
+                    ),
+                ),
+                (
+                    "data-e2e=user_perm_container+role=Comment",
+                    lambda: _LocatorControl(
+                        perm.get_by_role("checkbox", name="Comment").first
+                    ),
+                ),
+                (
+                    "data-e2e=user_perm_container+label=Allow comments",
+                    lambda: _LocatorControl(
+                        perm.locator(
+                            'label:has-text("Allow comments") '
+                            'input[type="checkbox"]'
+                        ).first
+                    ),
+                ),
+                (
+                    "data-e2e=user_perm_container+label=Comment",
+                    lambda: _LocatorControl(
+                        perm.locator(
+                            'label:has-text("Comment") '
+                            'input[type="checkbox"]'
+                        ).first
+                    ),
+                ),
+            )
+
+        if name == "reuse":
+            return (
+                (
+                    "data-e2e=user_perm_container+role=Allow reuse of content",
+                    lambda: _LocatorControl(
+                        perm.get_by_role(
+                            "checkbox", name="Allow reuse of content"
+                        ).first
+                    ),
+                ),
+                (
+                    "data-e2e=user_perm_container+label=Allow reuse of content",
+                    lambda: _LocatorControl(
+                        perm.locator(
+                            'label:has-text("Allow reuse of content") '
+                            'input[type="checkbox"]'
+                        ).first
+                    ),
+                ),
+            )
+
+        return ()
+
+    async def _resolve_single_control(
+        self, name: str
+    ) -> TiktokOptionControl | None:
+        factories = self._option_candidate_factories(name)
+        labels = tuple(label for label, _ in factories)
+        for index, (label, factory) in enumerate(factories):
+            try:
+                control = factory()
+                if await control.count() > 0:
+                    control.candidates = labels
+                    control.candidate_index = index
+                    tiktok_logger.info(
+                        f"[+] TikTok options: {name} resolved by "
+                        f"candidate #{index} ({label})"
+                    )
+                    return control
+            except Exception:
+                continue
+        return None
+
+    async def _expand_advanced_settings(self, page) -> None:
+        if self.locator_base is None:
+            return
+        container = self.locator_base.locator(
+            '[data-e2e="advanced_settings_container"]'
+        )
+        try:
+            if await container.count() == 0:
+                return
+            classes = ((await container.get_attribute("class")) or "").casefold()
+        except Exception:
+            return
+        collapsed = "collapsed" in classes.split()
+
+        more_btn = container.locator(".more-btn")
+        try:
+            if await more_btn.count():
+                text = (await more_btn.first.inner_text()).strip().casefold()
+                if collapsed or "show more" in text:
+                    await more_btn.first.click()
+                    await page.wait_for_timeout(300)
+                    return
+        except Exception:
+            pass
+
+        show_more = container.get_by_text("Show more", exact=True)
+        try:
+            if await show_more.count():
+                await show_more.first.click()
+                await page.wait_for_timeout(300)
+        except Exception:
+            pass
+
+    async def resolve_option_controls(self, page) -> TiktokSettingsControls:
+        """Resolve only the requested controls; expand advanced settings once.
+
+        Missing controls are looked up again after a single expansion attempt.
+        There is deliberately no whole-page fallback.
+        """
+        resolved: dict[str, TiktokOptionControl] = {}
+        missing: list[str] = []
+        for name in self._requested_option_names():
+            control = await self._resolve_single_control(name)
+            if control is None:
+                missing.append(name)
+            else:
+                resolved[name] = control
+
+        if missing:
+            await self._expand_advanced_settings(page)
+            still_missing: list[str] = []
+            for name in missing:
+                control = await self._resolve_single_control(name)
+                if control is None:
+                    still_missing.append(name)
+                else:
+                    resolved[name] = control
+
+            if still_missing:
+                url = _page_url(page)
+                details = []
+                for name in still_missing:
+                    candidates = tuple(
+                        label
+                        for label, _ in self._option_candidate_factories(name)
+                    )
+                    details.append(
+                        f"option={name} stage=resolve "
+                        f"requested={self._option_request_value(name)!r} "
+                        f"actual='control-not-found' "
+                        f"candidates={candidates!r} url={url!r}"
+                    )
+                raise RuntimeError(
+                    "TikTok 发布选项设置失败：" + " | ".join(details)
+                )
+
+        return TiktokSettingsControls(
+            privacy=resolved.get("privacy"),
+            comments=resolved.get("comments"),
+            reuse=resolved.get("reuse"),
+        )
 
     async def apply_cover(self, page) -> None:
         """Custom cover; the base has none (photo posts use the first image)."""
@@ -451,13 +984,24 @@ class TiktokBaseUploader(BaseVideoUploader):
 
 
 class TiktokVideo(TiktokBaseUploader):
-    def __init__(self, title, file_path, tags, publish_date, account_file, thumbnail_path=None):
+    def __init__(
+        self,
+        title,
+        file_path,
+        tags,
+        publish_date,
+        account_file,
+        thumbnail_path=None,
+        *,
+        options: TiktokPublishOptions | None = None,
+    ):
         self.title = title
         self.file_path = file_path
         self.tags = tags
         self.publish_date = publish_date
         self.thumbnail_path = thumbnail_path
         self.account_file = account_file
+        self.options = options
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = LOCAL_CHROME_HEADLESS
         self.locator_base = None
