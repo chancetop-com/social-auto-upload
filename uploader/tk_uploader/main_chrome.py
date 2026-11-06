@@ -116,6 +116,28 @@ _AIGC_TURN_ON_CANDIDATES = (
 _AIGC_DIALOG_TIMEOUT_MS = 5_000
 
 
+def _find_scheduled_row_marker(
+    body: str, values: tuple[str, ...]
+) -> str | None:
+    """Return the first value whose occurrence has a timezone marker nearby.
+
+    The Content list can render the time before or after the title, and the
+    same title may appear in filters or older rows, so every occurrence is
+    checked with a window on both sides.
+    """
+    for value in values:
+        start = 0
+        while True:
+            index = body.find(value, start)
+            if index < 0:
+                break
+            window = body[max(0, index - 240) : index + 240]
+            if "(GMT" in window or "（GMT" in window:
+                return value
+            start = index + 1
+    return None
+
+
 async def _find_candidate(scope, candidates, *, visible: bool = False):
     """Return ``(locator, index, description)`` for the first present candidate.
 
@@ -2351,24 +2373,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 body = await page.locator("body").inner_text()
             except Exception:
                 body = ""
-            for value in values:
-                start = 0
-                while True:
-                    index = body.find(value, start)
-                    if index < 0:
-                        break
-                    # The time can render before or after the title; inspect
-                    # both directions instead of a forward-only window.
-                    window = body[
-                        max(0, index - 240) : index + 240
-                    ]
-                    if "(GMT" in window or "（GMT" in window:
-                        tiktok_logger.info(
-                            "[+] scheduled post confirmed in Content list: "
-                            f"{value!r}"
-                        )
-                        return
-                    start = index + 1
+            marker = _find_scheduled_row_marker(body, values)
+            if marker is not None:
+                tiktok_logger.info(
+                    "[+] scheduled post confirmed in Content list: "
+                    f"{marker!r}"
+                )
+                return
             await page.wait_for_timeout(1000)
         raise PublishResultUnknownError(
             "TikTok 定时发布结果未知：Content 列表未找到带时区标记的定时行；"

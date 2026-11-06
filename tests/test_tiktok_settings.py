@@ -1016,6 +1016,8 @@ class TiktokOptionStepTests(unittest.TestCase):
             with self.subTest(body=body):
                 with patch.object(
                     tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 1
+                ), patch.object(
+                    tk_main, "_find_scheduled_row_marker", return_value=None
                 ):
                     with self.assertRaises(
                         tk_main.PublishResultUnknownError
@@ -1024,37 +1026,32 @@ class TiktokOptionStepTests(unittest.TestCase):
                             video._verify_scheduled_post(_Page(body))
                         )
 
-    def test_scheduled_verification_checks_every_occurrence(self):
-        from datetime import datetime
+    def test_scheduled_marker_check_scans_every_occurrence(self):
+        values = ("TB19 scheduled row",)
 
-        class _Page:
-            url = "https://www.tiktok.com/tiktokstudio/content"
-
-            def locator(self, _selector):
-                return self
-
-            async def inner_text(self):
-                # First occurrence has no marker nearby; the real row is far
-                # below.  A first-occurrence-only check would reject this.
-                return (
-                    "TB19 scheduled row filter"
-                    + "x" * 600
-                    + " | TB19 scheduled row | "
-                    "Nov 6, 5:35 PM (GMT+8) Shanghai | Everyone"
-                )
-
-            async def wait_for_timeout(self, _ms):
-                return None
-
-        video = TiktokVideo(
-            "TB19 scheduled row",
-            "/tmp/demo.mp4",
-            [],
-            datetime(2026, 11, 6, 17, 35),
-            None,
+        self.assertIsNone(
+            tk_main._find_scheduled_row_marker(
+                "TB19 scheduled row | Nov 6, 5:35 PM | Everyone",
+                values,
+            )
         )
-
-        asyncio.run(video._verify_scheduled_post(_Page()))
+        self.assertEqual(
+            tk_main._find_scheduled_row_marker(
+                "TB19 scheduled row filter"
+                + "x" * 600
+                + " | TB19 scheduled row | "
+                "Nov 6, 5:35 PM (GMT+8) Shanghai | Everyone",
+                values,
+            ),
+            "TB19 scheduled row",
+        )
+        self.assertEqual(
+            tk_main._find_scheduled_row_marker(
+                "Nov 6, 5:35 PM（GMT+8）| TB19 scheduled row | Everyone",
+                values,
+            ),
+            "TB19 scheduled row",
+        )
 
     def test_scheduled_verification_fails_closed_without_text(self):
         from datetime import datetime
