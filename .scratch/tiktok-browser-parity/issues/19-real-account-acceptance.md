@@ -35,4 +35,4 @@ Blocked by: 17, 18
 - 2026-11-06：公开账号 `--disable-reuse` 补测发现当前文案是 **“Reuse of content”**，旧候选漏配导致 v1 未实际取消；已补候选并缩短点击超时，v2 `7704978171703069966` 日志 `reuse resolved by candidate #0 (Reuse of content)` 并成功发布。
 - 2026-11-06：图文 Title 公开展示由用户确认正常，验收项勾选；不再列为未确认。
 - 2026-11-06：公开账号新建 17:35 定时帖 `TB19 scheduled public 1735`（`--privacy public --schedule "2026-11-06 17:35"`），退出 `0`；Content 行显示 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已进入定时状态。用户随后确认到点自动发布正常；按用户要求未再跑到点探针。
-- 2026-11-06：reuse 语义纠正。only-me 实测控件存在（Show more 后可见，默认 `checked=true`、`enabled`），旧“私有账号不渲染/禁用”结论来自折叠 + 旧文案误判。代码新增 `_reuse_control_absent`：只有 `user_perm_container` 完全没有 Reuse 文案时才把缺失视为已满足；文案存在但控件解析失败 → 退出 `1`，避免选择器漂移静默通过。only-me `--disable-reuse` v3 `7704985011614764302` 实际取消并回读成功。
+- 2026-11-06：reuse 语义纠正。only-me 实测控件存在（Show more 后可见，默认 `checked=true`、`enabled`），旧“私有账号不渲染/禁用”结论来自折叠 + 旧文案误判。代码移除“缺失=已满足”捷径：显式请求 `--disable-reuse` 但控件解析不到时直接退出 `1`，避免选择器漂移静默通过（图片帖不请求该选项）。only-me `--disable-reuse` v3 `7704985011614764302` 实际取消并回读成功。

@@ -78,4 +78,4 @@
 21. 图片页没有 `advanced_settings_container`，评论/AIGC/品牌在全局 **Show more** 之后才可见；已加全局 Show more 兜底。公开账号 `--privacy public --no-comments --aigc --your-brand` 图片帖发布成功，帖子页显示 Promotional content + AI 标签。
 22. 公开账号的发布点击会出现 `Post now` 确认弹窗；已有兜底在真实发布中触发并成功。
 23. 切换到公开账号后，之前创建的 Followers 定时帖不再出现在 Scheduled 列表（账号类型变更可能导致取消）；该条不再作为到点证据，用户已另行确认到点发布正常，并用公开账号 17:35 定时帖补充证据。
-24. reuse 控件实际文案是 **“Reuse of content”**，旧候选只找 “Allow reuse of content”；同时该控件位于 **Show more** 折叠区，`get_by_role` 默认忽略隐藏元素。两者叠加导致 v1 与私有账号期间误判“控件未渲染”，实际控件存在且默认 `checked=true`。已补文案候选、全局 Show more 兜底，并把“缺失=已满足”收紧为“页面完全没有 Reuse 文案才算满足”；公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际取消并回读成功。
+24. reuse 控件实际文案是 **“Reuse of content”**，旧候选只找 “Allow reuse of content”；同时该控件位于 **Show more** 折叠区，`get_by_role` 默认忽略隐藏元素。两者叠加导致 v1 与私有账号期间误判“控件未渲染”，实际控件存在且默认 `checked=true`。已补文案候选、全局 Show more 兜底，并移除“缺失=已满足”捷径：显式请求 `--disable-reuse` 但控件解析不到时直接退出 `1`（图片帖不请求该选项）。公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际取消并回读成功。
