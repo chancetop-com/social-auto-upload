@@ -14,10 +14,14 @@ from unittest.mock import AsyncMock, patch
 from conf import BASE_DIR
 from sau_commands.arguments import resolve_account_file
 from uploader.tk_uploader import main_chrome as tk_main
+from uploader.tk_uploader.tk_config import TIKTOK_LOCAL_ENTRY_WAIT_MS
 from utils.files_times import get_absolute_path
 
 
 class AccountFileTests(unittest.TestCase):
+    def test_local_entry_wait_allows_client_rendered_studio(self):
+        self.assertEqual(TIKTOK_LOCAL_ENTRY_WAIT_MS, 20_000)
+
     def test_local_cookie_name_is_platform_and_account(self):
         path = resolve_account_file("tiktok", "creator")
         self.assertEqual(path.name, "tiktok_creator.json")

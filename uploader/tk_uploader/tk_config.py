@@ -12,6 +12,8 @@ TIKTOK_PHOTO_UPLOAD_URL = (
 TIKTOK_LOGIN_CHECK_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
 TIKTOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
 TIKTOK_ENTRY_WAIT_MS = 5_000
+# Local Studio is client-rendered; the upload shell can take >5s after login.
+TIKTOK_LOCAL_ENTRY_WAIT_MS = 20_000
 TIKTOK_PUBLISH_TIMEOUT_SECONDS = 15 * 60
 
 # Web UI photo-post limits (TikTok Studio front-end constants, research 01).

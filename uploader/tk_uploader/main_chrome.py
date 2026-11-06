@@ -19,6 +19,7 @@ from uploader.base_video import BaseVideoUploader
 from uploader.tk_uploader.tk_config import (
     TIKTOK_ENTRY_WAIT_MS,
     TIKTOK_IMAGE_SUFFIXES,
+    TIKTOK_LOCAL_ENTRY_WAIT_MS,
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_URL,
     TIKTOK_LOGIN_FORM_SELECTOR,
@@ -801,7 +802,9 @@ async def _cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) 
                 if await _login_form_present(page):
                     tiktok_logger.error("[+] cookie expired")
                     return False
-                if await _upload_entry_present(page, TIKTOK_ENTRY_WAIT_MS):
+                if await _upload_entry_present(
+                    page, TIKTOK_LOCAL_ENTRY_WAIT_MS
+                ):
                     tiktok_logger.success("[+] cookie valid")
                     return True
                 tiktok_logger.error("[+] cookie check failed: upload entry not found")

@@ -1,6 +1,6 @@
 # 19 — 真实账号冒烟与发布验收
 
-Status: resolved（未执行：外部依赖缺失；待验收）
+Status: claimed（本地私有账号 lukechen 验证中；公开账号项条件未满足）
 Type: task
 Blocked by: 17, 18
 规格依据: spec.md §8.3、§11.1
@@ -25,3 +25,4 @@ Blocked by: 17, 18
 
 - 2026-11-06：领取前环境确认失败——本机未设置 `MLX_API_TOKEN`，`https://launcher.mlx.yt:45001` 不可达，且没有已登录的公开 TikTok 账号/Photos 灰度。因此本工单的真实账号冒烟与发布验收**未执行**；所有验收项保持未勾选，结论保持“待验收”。
 - 已交付的离线证明：退出码 `9` 的映射与“禁止自动重发”stderr 由 `tests.test_tiktok_exit_codes` 锁定。真实发布效果、封面、定时、多图顺序、私有账号文案、Photos 灰度与 `friends` + 品牌组合仍必须按 spec §8.3 在真实环境核验；未核验前不得写成已验证。
+- 2026-11-06：用户提供本地私有账号 `lukechen` 并同意按 spec 做真实验收。公开账号专属项（无参数公开发布、`--privacy public` 正向、公开账号首项文案）因账号类型不满足，保持“条件未满足/未验证”；私有账号正向用 `followers` / `friends` / `only-me`，页面未渲染的 AIGC/品牌/Photos 项记录为“页面不支持/灰度未覆盖”，不误报为功能失败。本地登录需用户在终端执行 `sau tiktok login --account lukechen`（agent shell 非 TTY）。
