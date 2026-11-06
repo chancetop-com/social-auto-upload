@@ -1,7 +1,7 @@
 # TikTok 浏览器能力对齐 — 路线图
 
 > **实施状态（2026-11-06）**：ticket 10–18 已实现、通过 code review 并合入 `integration/tiktok-browser-parity`；ticket 19 的真实账号冒烟与发布验收未执行（本机无 MLX token / Launcher / 真实账号），保持“待验收”。
-> **后续扩展**：TikTok 本地 cookie 模式见 [`../tiktok-local-mode/spec.md`](../tiktok-local-mode/spec.md)。
+> **后续扩展**：TikTok 本地 cookie 模式已实现并合入（见 [`../tiktok-local-mode/spec.md`](../tiktok-local-mode/spec.md)）；本地私有账号真实验收证据见 [`acceptance-local.md`](./acceptance-local.md)。
 
 ## Destination
 

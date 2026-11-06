@@ -24,4 +24,4 @@ Blocked by: 无
 
 ## Comments
 
-- 已实现并合入 `integration/tiktok-browser-parity`（merge `ef9834b`，feature HEAD `d1ebcba`）；TikTok 专项 207 tests 全绿，全量 745 tests 仅保留既有基线 5 failures + 1 error + 2 skips；真实账号登录/发布未执行，保持“待验收”。
+- 已实现并合入 `integration/tiktok-browser-parity`（merge `ef9834b`，feature HEAD `d1ebcba`）；本地私有账号 `lukechen` 真实验收已执行，证据见 [`../../tiktok-browser-parity/acceptance-local.md`](../../tiktok-browser-parity/acceptance-local.md)。验证了登录/check、隐私、评论/reuse/AIGC/品牌、封面、定时创建与图文多图；公开账号、定时到点、图文 Title 公开展示、图片帖选项等条件项仍未满足。
