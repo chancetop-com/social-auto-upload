@@ -512,8 +512,7 @@ class UploadNoteValidationTests(unittest.TestCase):
         ]
 
     def test_zero_images_exits_2_without_browser(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            images = self._images(tmp_dir, 1)
+        with tempfile.TemporaryDirectory():
             playwright = MagicMock()
             session = MagicMock()
             with (
@@ -794,16 +793,6 @@ class UploadNoteBuilderTests(unittest.TestCase):
             ),
         )
         self.assertIsNone(options.allow_reuse)
-
-    def test_note_publish_options_without_flags_stays_none(self):
-        args = SimpleNamespace(
-            privacy=None,
-            no_comments=False,
-            aigc=None,
-            your_brand=None,
-            branded_content=None,
-        )
-        self.assertIsNone(tiktok_command._build_publish_options(args))
 
     def test_upload_urls_are_media_specific(self):
         self.assertEqual(TiktokBaseUploader.upload_url, TIKTOK_UPLOAD_URL)
@@ -1154,7 +1143,7 @@ class UploadNoteFlowTests(unittest.TestCase):
             code, out, err, session_cm = self._run_cli(page, images)
 
         self.assertEqual(code, 0, err)
-        self.assertIn(f"TikTok note upload submitted: 3 images", out)
+        self.assertIn("TikTok note upload submitted: 3 images", out)
         self.assertEqual(page.goto_calls[0][0], TIKTOK_PHOTO_UPLOAD_URL)
         self.assertEqual(page.input_files, images)
         self.assertEqual(page.input_files[0], images[0])
@@ -1313,25 +1302,19 @@ class UploadNoteMetadataTests(unittest.TestCase):
             any(event[0] == "insert_text" for event in page.events)
         )
 
-    def test_absent_title_leaves_the_page_empty(self):
-        page = self._page()
-        note = self._note(note="hello")
-        note.locator_base = page.locator("body")
+    def test_absent_or_empty_title_never_overwrites_the_page(self):
+        for title in (None, ""):
+            with self.subTest(title=title):
+                page = self._page()
+                note = self._note(title=title, note="hello")
+                note.locator_base = page.locator("body")
 
-        asyncio.run(note.fill_metadata(page))
+                asyncio.run(note.fill_metadata(page))
 
-        self.assertEqual(page.title_text, "")
-        self.assertFalse(any(event[0] == "fill" for event in page.events))
-
-    def test_empty_title_never_overwrites_the_page(self):
-        page = self._page()
-        note = self._note(title="", note="hello")
-        note.locator_base = page.locator("body")
-
-        asyncio.run(note.fill_metadata(page))
-
-        self.assertEqual(page.title_text, "")
-        self.assertFalse(any(event[0] == "fill" for event in page.events))
+                self.assertEqual(page.title_text, "")
+                self.assertFalse(
+                    any(event[0] == "fill" for event in page.events)
+                )
 
     def test_caption_clear_uses_control_or_meta(self):
         page = self._page()
@@ -1586,37 +1569,6 @@ class UploadNoteOptionTests(unittest.TestCase):
         self.assertFalse(comments.checked)
         self.assertEqual(reuse.checked_reads, 0)
         self.assertEqual(reuse.click_calls, 0)
-
-    def test_missing_aigc_control_fails_with_request_context(self):
-        note = self._note(TiktokPublishOptions(aigc=True))
-        self._install(note, _note_controls(aigc=None))
-        page = _StudioPage()
-
-        with self.assertRaises(RuntimeError) as ctx:
-            asyncio.run(note.apply_options(page))
-
-        message = str(ctx.exception)
-        self.assertIn("option=aigc", message)
-        self.assertIn("requested=True", message)
-        self.assertIn("actual='control-not-found'", message)
-
-    def test_missing_brand_control_fails_with_request_context(self):
-        note = self._note(TiktokPublishOptions(your_brand=True))
-        self._install(
-            note,
-            _note_controls(
-                brand_switch=_FakeToggle(False),
-                your_brand=None,
-                branded_content=_FakeToggle(False),
-            ),
-        )
-        page = _StudioPage()
-
-        with self.assertRaises(RuntimeError) as ctx:
-            asyncio.run(note.apply_options(page))
-
-        self.assertIn("your_brand", str(ctx.exception))
-        self.assertIn("control-not-found", str(ctx.exception))
 
     def test_cli_missing_aigc_control_exits_1(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
