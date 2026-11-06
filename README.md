@@ -88,7 +88,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | 支付宝生活号 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频发布 |
 | 微博 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题最多 30 字 |
 | 虎扑 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题 4–40 字 |
-| TikTok | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 仅 Multilogin 模式；Profile 界面需 English (US) |
+| TikTok | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布；仅 Multilogin 模式；Profile 界面需 English (US) |
 | 雪球 | ✅ | - | ✅ | - | - | ✅ | ✅ | [长文与配图](./docs/xueqiu.md)：支持 HTML/Markdown/TXT、正文图片和封面 |
 | YouTube | ✅ | ✅ | - | - | 开发中 | ✅ | ✅ | 视频发布 |
 | 知乎 | ✅ | ✅ | ✅ | - | 实验性 | ✅ | ✅ | [文章与视频发布](./skills/zhihu-upload/SKILL.md)，文章支持正文位置配图 |
@@ -104,7 +104,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | --- | --- |
 | 视频 | 抖音、快手、小红书、Bilibili、视频号、百家号、大鱼号、知乎、YouTube 等；CLI 示例见下方和[CLI 使用说明](./docs/CLI.md) |
 | 文章 | 大鱼号[文章发布](./docs/dayu-article.md)、雪球[长文与配图](./docs/xueqiu.md)、知乎[文章发布](./skills/zhihu-upload/SKILL.md#文章) |
-| 图文 | 抖音、快手、小红书、Facebook、Facebook Page、Instagram；CLI 示例见[CLI 使用说明](./docs/CLI.md) |
+| 图文 | 抖音、快手、小红书、TikTok（仅 Multilogin X 模式）、Facebook、Facebook Page、Instagram；CLI 示例见[CLI 使用说明](./docs/CLI.md) |
 
 文章主题预览及 Markdown 转 HTML：见 [文章文件与主题渲染](./docs/article.md)。内置 `default/grace/simple/modern/plain` 主题；大鱼号可直接接收 Markdown，并将主题转换为保留文字颜色、背景和近似字号的兼容排版，圆角和精确间距等效果可能与本地预览不同。
 
@@ -185,7 +185,8 @@ sau douyin upload-video --folder-id <folder_id> --profile-id <profile_id> \
 - `--folder-id` / `--profile-id` 在 MLX 模式必填，本地模式忽略。
 - MLX 下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验。
 - MLX 下 `login` 一律拒绝；请先在 Multilogin 应用中登录 Profile，并处理验证码/2FA。
-- 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`10` 需要登录、`130` 用户中断。
+- 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录、`130` 用户中断。
+- 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
 - v1 部署前提：CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器；Profile 使用 Mimic 内核；Profile 已人工登录且无待处理验证码/2FA；TikTok 的 Profile 界面须为 English (US)。
 - 不支持：Docker launcher、跨机 launcher、Linux 无桌面、Bilibili、TikTok 本地模式、通过 CLI 在 MLX 中登录。
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 launcher。
@@ -241,12 +242,13 @@ sau zhihu upload-article --account creator --title "文章标题" --content-file
 
 #### 图文
 
-图文指独立图片帖、轮播或图片笔记，使用 `upload-note`；支持抖音、快手、小红书、Facebook、Facebook Page 和 Instagram。
+图文指独立图片帖、轮播或图片笔记，使用 `upload-note`；支持抖音、快手、小红书、TikTok（仅 Multilogin X 模式）、Facebook、Facebook Page 和 Instagram。
 
 ```bash
 sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
 sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
+sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
 sau facebook-page upload-note --account <account_name> --images images/1.jpg --title "Page 图文" --note "正文" --page "我的 Page" --schedule "2026-10-21 10:30" --result .local/page-result.json
 sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图片帖" --note "正文"
 sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "图片轮播" --note "正文"
@@ -280,7 +282,7 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 - 抖音视频发布若触发短信二次验证，程序会优先读取项目根目录下的 `verify_code.txt`；如果你是在本地交互式终端手动运行 CLI，也可以直接按终端提示输入验证码
 - 浏览器平台统一约定：
 - 视频使用 `title + desc + tags`
-- 抖音、快手、小红书的图片笔记使用 `title + note + tags`
+- 抖音、快手、小红书、TikTok 的图片笔记使用 `title + note + tags`（TikTok 的 `title` / `note` 均可选，仅 Multilogin X 模式）
 - 大鱼号文章使用 `title + content-file + source`，正文保存在 HTML、Markdown 或 TXT 文件中
 - Bilibili CLI 不要求用户手动安装 `biliup`
 - 首次运行相关命令时，程序会自动下载 `biliup`

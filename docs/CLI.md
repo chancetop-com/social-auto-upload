@@ -101,8 +101,9 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 | 码 | 含义 | 典型场景 |
 | --- | --- | --- |
 | `0` | 成功 | 上传已提交；check 已登录；Stop 失败但上传成功（仅 warning） |
-| `1` | 运行失败 | Launcher 不可达、token 无效、Profile 被占用、CDP 连不上、上传失败、网络错误 |
-| `2` | 用法错误 | 未知子命令、缺必填参数、MLX 缺 `--folder-id/--profile-id`、本地缺 `--account` |
+| `1` | 运行失败 | Launcher 不可达、token 无效、Profile 被占用、CDP 连不上、上传失败、网络错误、发布选项回读不一致、Photos tab 未覆盖 |
+| `2` | 用法错误 | 未知子命令、缺必填参数、MLX 缺 `--folder-id/--profile-id`、本地缺 `--account`、本地校验失败 |
+| `9` | 发布结果未知 | 发布点击已发出但未观察到成功页；**禁止自动重发**，需先人工核验 |
 | `10` | 需要登录 | 登录页、登录表单、验证码、2FA |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 |
 
@@ -118,7 +119,7 @@ MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 
 | 大鱼号 | `check`、`upload-video`、`upload-article` | |
 | 知乎 | `check`、`upload-article`、`upload-video` | |
 | 雪球 | `check`、`upload-article` | |
-| TikTok | `check`、`upload-video` | 仅 MLX，没有本地模式 |
+| TikTok | `check`、`upload-video`、`upload-note` | 仅 MLX，没有本地模式；图文依赖账号 Photos tab 灰度 |
 | Bilibili | 不支持 | `biliup` 没有浏览器上下文；MLX 下退出 `1` |
 
 `sau article` 是本地文件处理命令，不使用 MLX Profile。
@@ -129,6 +130,7 @@ MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 
 2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
 3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
 4. TikTok 额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。
+5. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`。
 
 **明确不支持：**
 
@@ -146,6 +148,7 @@ MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 
 - 保证同一 Profile **不并发**；CLI 不加锁。
 - 传错 `profile_id` 会直接操作另一个账号；CLI 只校验“已登录”，不校验账号是否匹配，调度侧承担该风险。
 - 收到退出码 `10` 时安排人工登录，再重试。
+- 收到退出码 `9`（发布结果未知）时**禁止自动重发**；先到 TikTok Studio → Content/Posts 按标题与发布时间核对，已存在不要重发，不存在才可人工重试。
 - Stop 失败但上传仍返回 `0` 时，调度侧负责清理残留 Profile。
 - 跨机调度应在“MLX 那台机器”上远程执行 CLI，而不是把 CLI 指向远程 launcher。
 - 429 限流不在 CLI 内等待，由调度侧重试。
@@ -409,16 +412,64 @@ export MLX_API_TOKEN="<token>"
 
 sau tiktok check --folder-id <folder_id> --profile-id <profile_id>
 
+# 视频：发布选项均可选，不传时保持页面默认
 sau tiktok upload-video \
   --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
+  --privacy public --no-comments --disable-reuse --aigc --your-brand \
   --schedule "2026-10-21 10:30" --thumbnail covers/demo.png
+
+# 图文：1–35 张本地图片，按传入顺序展示，第 1 张即封面
+sau tiktok upload-note \
+  --folder-id <folder_id> --profile-id <profile_id> \
+  --images images/1.jpg images/2.png \
+  --title "图文标题" --note "图文正文" --tags 图文,测试 \
+  --privacy friends --no-comments --aigc
 ```
 
-- 仅支持 `check` 和 `upload-video`；`login` 退出 `1`，请先在 Multilogin 应用中登录 Profile。
+- 仅支持 `check`、`upload-video`、`upload-note`；`login` 退出 `1`，请先在 Multilogin 应用中登录 Profile。
 - MLX 分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**。
 - 不读写 `cookies/tk_uploader/*.json`；登录页、验证码或 2FA 会退出 `10`，上传发布循环总超时为 15 分钟。
 - 本地模式调用任何 TikTok action 都退出 `1`；未注册的子命令仍由 argparse 退出 `2`。
+
+### 视频发布选项
+
+`upload-video` 的原有位置参数和行为不变；以下选项均为可选，不传时不操作对应控件，保持页面默认：
+
+| 参数 | 取值 | 含义 |
+| --- | --- | --- |
+| `--privacy` | `public` / `friends` / `followers` / `only-me` | 设置隐私级别；账号类型不匹配时回读失败并退出 `1` |
+| `--no-comments` | 开关 | 关闭评论 |
+| `--disable-reuse` | 开关 | 关闭内容复用；同时影响 Duet、Stitch、Stickers 和 Story |
+| `--aigc` / `--no-aigc` | 互斥 | 开启/关闭 AI 生成内容标识；不传则保持页面默认 |
+| `--your-brand` | 开关 | 声明为自家品牌推广，会自动打开品牌声明总开关 |
+| `--branded-content` | 开关 | 声明为付费品牌内容；不能与 `--privacy only-me` 同时使用（本地退出 `2`） |
+| `--thumbnail` | 文件路径 | 自定义视频封面，语义不变 |
+
+视频标题仍为必填；视频 caption 不新增长度校验。`--your-brand` 与 `--branded-content` 可同时使用；只请求其中一项时，另一项会被显式取消勾选。`--branded-content` 与 `--privacy friends` 允许组合，但仍以页面回读为准。
+
+### 图文发布参数
+
+| 参数 | 必填 | 含义 |
+| --- | --- | --- |
+| `--images` | 是 | 1–35 张本地图片，按传入顺序展示，第 1 张即封面 |
+| `--title` | 否 | 页面 Title，≤90 字符；不传则不改动页面输入 |
+| `--note` | 否 | Description，≤4000 字符（含 tags 展开后的文本）；不传且无 tags 时不改动页面输入 |
+| `--notef` | 否 | 从本地 txt/md 读取 Description；与 `--note` 互斥 |
+| `--tags` | 否 | 逗号分隔，规范化后追加到 Description；最多 50 个 |
+| `--schedule` | 否 | 与视频相同的 `YYYY-MM-DD HH:MM` |
+| `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义 |
+
+`upload-note` 没有 `--disable-reuse`、`--thumbnail` 或 `--cover-index`：图片帖没有内容复用设置，第 1 张即封面。
+
+### TikTok 限制与错误语义
+
+- 图片仅支持 JPG / JPEG / PNG / WEBP（扩展名大小写不敏感），单张 ≤50 MB。
+- 图片数量、格式、大小，以及 Title/Description/hashtag 超限、`--note`/`--notef` 冲突、`--branded-content --privacy only-me` 都在启动浏览器前校验失败并退出 `2`，不会截断后继续。
+- 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
+- 账号没有 Photos tab（未在图文灰度内）时，`upload-note` 在选文件前退出 `1`，不会把图片送进视频 input。
+- 退出码 `9` 表示发布结果未知：发布点击已发出但未确认成功；**禁止自动重发**，先到 TikTok Studio → Content/Posts 按标题与发布时间核对。
+- 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关；机器信号只有退出码与 stderr。
 
 ## 登录二维码说明
 
@@ -431,7 +482,7 @@ sau tiktok upload-video \
 
 ## 定时发布
 
-抖音、快手、小红书、视频号的图文或视频上传、Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
+抖音、快手、小红书、视频号的图文或视频上传，TikTok（仅 MLX）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
 
 ```bash
 sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
@@ -442,6 +493,8 @@ sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --t
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
 sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249 --schedule "2026-03-24 21:30"
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
+sau tiktok upload-video --folder-id <folder_id> --profile-id <profile_id> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24 21:30"
+sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
 ```
 
 ## 运行时参数
@@ -516,5 +569,6 @@ Bilibili 额外要求：
 - 抖音：最多 35 张图片，不支持 GIF
 - 快手：支持多张图片，建议传真实不同文件，不要把同一路径重复多次
 - 小红书：支持多张图片，正文 `--note` 可选，但 `--title` 建议始终显式传入
+- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面，仅 Multilogin X 模式
 
 大鱼号文章使用 `--content-file` 提供 HTML、Markdown 或 TXT 正文文件，支持本地图片和图文混排，正文最多 2 万字；来源与封面等参数见 [大鱼号图文发布](./dayu-article.md)。
