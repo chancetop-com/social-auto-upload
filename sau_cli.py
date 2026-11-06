@@ -15,13 +15,6 @@ from sau_commands.arguments import resolve_account_file
 from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
 
 
-PUBLISH_RESULT_UNKNOWN_STDERR = (
-    "发布结果未知：发布点击已发出，无法确认帖子是否已经发布。\n"
-    "禁止自动重发。请先人工核验：TikTok Studio → Content/Posts，"
-    "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
-)
-
-
 PLATFORMS = {
     "article": article,
     "douyin": douyin,
@@ -83,10 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
     except PublishResultUnknownError as exc:
-        detail = str(exc).strip()
-        if detail:
-            print(detail, file=sys.stderr)
-        print(PUBLISH_RESULT_UNKNOWN_STDERR, file=sys.stderr)
+        print(str(exc), file=sys.stderr)
         return 9
     except Exception as exc:
         print(str(exc), file=sys.stderr)

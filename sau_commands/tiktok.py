@@ -337,20 +337,20 @@ def _validate_note_metadata(
     """
     if title is not None and len(title) > TIKTOK_MAX_TITLE_LENGTH:
         raise UsageError(
-            f"图文帖 Title 过长：{len(title)} 字符，"
+            f"图片帖 Title 过长：{len(title)} 字符，"
             f"上限 {TIKTOK_MAX_TITLE_LENGTH} 字符（不会截断）。"
         )
 
     description = _render_description(note, tags)
     if len(description) > TIKTOK_MAX_DESCRIPTION_LENGTH:
         raise UsageError(
-            f"图文帖 Description 过长：{len(description)} 字符，"
+            f"图片帖 Description 过长：{len(description)} 字符，"
             f"上限 {TIKTOK_MAX_DESCRIPTION_LENGTH} 字符（不会截断）。"
         )
 
     if len(tags) > TIKTOK_MAX_HASHTAG_COUNT:
         raise UsageError(
-            f"图文帖 hashtag 过多：{len(tags)} 个，"
+            f"图片帖 hashtag 过多：{len(tags)} 个，"
             f"上限 {TIKTOK_MAX_HASHTAG_COUNT} 个。"
         )
 
@@ -365,11 +365,11 @@ def _validate_note_images(image_files: list[Path]) -> None:
     count = len(image_files)
     if count < 1:
         raise UsageError(
-            f"图文帖至少需要 1 张图片，当前 {count} 张。"
+            f"图片帖至少需要 1 张图片，当前 {count} 张。"
         )
     if count > TIKTOK_MAX_IMAGE_COUNT:
         raise UsageError(
-            f"图文帖最多 {TIKTOK_MAX_IMAGE_COUNT} 张图片，当前 {count} 张。"
+            f"图片帖最多 {TIKTOK_MAX_IMAGE_COUNT} 张图片，当前 {count} 张。"
         )
 
     for raw_path in image_files:

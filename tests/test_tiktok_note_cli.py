@@ -199,10 +199,17 @@ class _TextTab:
 
 
 class _StudioPage:
-    def __init__(self, *, photo_mode: bool = True, photos_tab: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        photo_mode: bool = True,
+        photos_tab: bool = True,
+        image_input: bool | None = None,
+    ) -> None:
         self.url = "about:blank"
         self.photo_mode = photo_mode
         self.photos_tab = photos_tab
+        self.image_input = photo_mode if image_input is None else image_input
         self.events: list = []
         self.goto_calls: list[tuple[str, dict]] = []
         self.wait_for_url_calls: list[tuple[str, dict]] = []
@@ -245,16 +252,18 @@ class _StudioPage:
         return _Locator(self, f"role={role}", count=0)
 
     def locator(self, selector: str) -> _Locator:
-        if selector in (
-            'input[placeholder*="catchy"]',
-            'input[type="file"][accept*="image"]',
-        ):
+        if selector == 'input[placeholder*="catchy"]':
             return _Locator(self, selector, count=1 if self.photo_mode else 0)
+        if selector in (
+            'input[type="file"][accept*="image"]',
+            'input[type="file"][multiple]',
+        ):
+            return _Locator(
+                self, selector, count=1 if self.image_input else 0
+            )
         if selector == 'input[placeholder="Add a catchy title"]':
             return _Locator(self, selector, count=1 if self.photo_mode else 0)
         if selector.endswith("div.public-DraftEditor-content"):
-            return _Locator(self, selector, count=1 if self.photo_mode else 0)
-        if selector == 'input[type="file"][multiple]':
             return _Locator(self, selector, count=1 if self.photo_mode else 0)
         if selector == "div[data-id]":
             return _Locator(self, selector, count=1 if self.processed else 0)
@@ -1109,6 +1118,28 @@ class UploadNoteFlowTests(unittest.TestCase):
         )
         self.assertEqual(session_cm.exit_calls, 1)
 
+    def test_image_input_without_title_is_not_treated_as_photo_mode(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "cover.png"
+            image.write_bytes(b"x")
+
+            # The image file input exists, but the Title input does not: this is
+            # not the photo composer, so the abort must happen before any file
+            # is selected.
+            page = _StudioPage(
+                photo_mode=False, photos_tab=False, image_input=True
+            )
+            code, out, err, session_cm = self._run_cli(page, [str(image)])
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("submitted", out)
+        self.assertIn("Photos", err)
+        self.assertIsNone(page.input_files)
+        self.assertFalse(
+            any(event[0] == "set_input_files" for event in page.events)
+        )
+        self.assertEqual(session_cm.exit_calls, 1)
+
     def test_no_reuse_duet_or_stitch_controls_are_touched(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             image = Path(tmp_dir) / "cover.png"
@@ -1132,8 +1163,14 @@ class UploadNoteFlowTests(unittest.TestCase):
         note = self._note(["/tmp/cover.png"])
         page = _StudioPage()
         page.item_href = None
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError) as ctx:
             asyncio.run(note.read_result(page))
+
+        message = str(ctx.exception)
+        # Exit 1 read failures must not reuse the reserved exit-9 term.
+        self.assertNotIn("发布结果未知", message)
+        self.assertIn("发布结果读取失败", message)
+        self.assertIn("Content", message)
 
     def test_photo_upload_rejects_local_mode(self):
         note = self._note(["/tmp/cover.png"])

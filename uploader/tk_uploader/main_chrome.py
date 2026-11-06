@@ -103,13 +103,28 @@ _AIGC_TURN_ON_CANDIDATES = (
 _AIGC_DIALOG_TIMEOUT_MS = 5_000
 
 
-async def _find_candidate(scope, candidates):
-    """Return ``(locator, index, description)`` for the first present candidate."""
+async def _find_candidate(scope, candidates, *, visible: bool = False):
+    """Return ``(locator, index, description)`` for the first present candidate.
+
+    When ``visible`` is true the candidate must also report visible; a locator
+    double that does not implement ``is_visible`` is treated as visible so the
+    pure in-memory tests stay minimal.
+    """
     for index, (description, factory) in enumerate(candidates):
         try:
             locator = factory(scope)
-            if await locator.count():
-                return locator.first, index, description
+            if not await locator.count():
+                continue
+            if visible:
+                first = locator.first
+                is_visible = getattr(first, "is_visible", None)
+                if callable(is_visible):
+                    try:
+                        if not await is_visible():
+                            continue
+                    except Exception:
+                        continue
+            return locator.first, index, description
         except Exception:
             # A detached frame/closed page makes ``count`` throw; treat it as
             # this candidate being absent and try the next one.
@@ -141,11 +156,57 @@ async def _resolve_candidate(scope, candidates, *, control, stage, page):
 
 _PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "TikTok 发布结果未知：发布点击已发出，但未观察到成功页，"
-    "也未命中登录/验证码跳转；帖子可能已经发布。"
+    "也未命中登录/验证码跳转；帖子可能已经发布。\n"
+    "禁止自动重发。请先人工核验：TikTok Studio → Content/Posts，"
+    "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
 )
 
 _PRE_PUBLISH_TIMEOUT_MESSAGE = (
     "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
+)
+
+# Publish button candidates, in spec §5.2/§5.3 order.
+_PUBLISH_BUTTON_CANDIDATES = (
+    (
+        'data-e2e=post_video_button',
+        lambda base: base.locator('[data-e2e="post_video_button"]'),
+    ),
+    (
+        'button:has-text("Post").last',
+        lambda base: base.locator('button:has-text("Post")').last,
+    ),
+    (
+        'div.button-group button nth(0)',
+        lambda base: base.locator('div.button-group button').nth(0),
+    ),
+)
+
+# The photo composer can raise a "Post now" confirmation after the first
+# click.  It is the only fallback click allowed; the original Post button is
+# never clicked twice.
+_POST_NOW_CANDIDATES = (
+    (
+        'button:has-text("Post now")',
+        lambda page: page.locator('button:has-text("Post now")'),
+    ),
+    (
+        'role=button[name="Post now"]',
+        lambda page: page.get_by_role("button", name="Post now"),
+    ),
+)
+_COVER_EDITOR_CLOSE_TIMEOUT_MS = 10_000
+
+# Video file chooser entry, in spec §5.2 step 2 order.
+_VIDEO_FILE_WAIT_MS = 30_000
+_VIDEO_FILE_CANDIDATES = (
+    (
+        'button:has-text("Select video"):visible',
+        lambda base: base.locator('button:has-text("Select video"):visible'),
+    ),
+    (
+        'button[aria-label="Select file"]',
+        lambda base: base.locator('button[aria-label="Select file"]'),
+    ),
 )
 
 
@@ -232,7 +293,26 @@ class _LocatorControl(TiktokOptionControl):
         self.candidates = candidates
 
     async def is_checked(self) -> bool:
-        return bool(await self._locator.is_checked())
+        try:
+            return bool(await self._locator.is_checked())
+        except Exception as original:
+            # The brand fallback candidate may resolve to the text/label node
+            # instead of the checkbox input.  Read the nested checkbox when one
+            # exists, then fall back to an ARIA state; otherwise re-raise so the
+            # caller can attach option/context data.
+            try:
+                nested = self._locator.locator('input[type="checkbox"]')
+                if await nested.count():
+                    return bool(await nested.first.is_checked())
+            except Exception:
+                pass
+            try:
+                aria = await self._locator.get_attribute("aria-checked")
+                if aria is not None:
+                    return str(aria).lower() == "true"
+            except Exception:
+                pass
+            raise original
 
     async def is_disabled(self) -> bool:
         try:
@@ -324,12 +404,16 @@ def _option_error(
     actual,
     control,
     url: str,
+    detail: str | None = None,
+    candidates: tuple[str, ...] | None = None,
 ) -> RuntimeError:
-    candidates = tuple(getattr(control, "candidates", ()) or ())
+    if candidates is None:
+        candidates = tuple(getattr(control, "candidates", ()) or ())
+    suffix = f" detail={detail}" if detail else ""
     return RuntimeError(
         "TikTok 发布选项设置失败："
         f"option={option} stage={stage} requested={requested!r} "
-        f"actual={actual!r} candidates={candidates!r} url={url!r}"
+        f"actual={actual!r} candidates={candidates!r} url={url!r}{suffix}"
     )
 
 
@@ -351,6 +435,30 @@ async def _read_switch_state(control: TiktokOptionControl) -> bool:
     return bool(await control.is_checked())
 
 
+async def _guarded_state(
+    read,
+    control: TiktokOptionControl,
+    *,
+    option: str,
+    stage: str,
+    requested,
+    url: str,
+) -> bool:
+    """Run a state reader and attach option context to any low-level error."""
+    try:
+        return await read(control)
+    except Exception as exc:
+        raise _option_error(
+            option=option,
+            stage=stage,
+            requested=requested,
+            actual="read-error",
+            control=control,
+            url=url,
+            detail=str(exc),
+        ) from exc
+
+
 async def _set_toggle_option(
     control: TiktokOptionControl,
     requested: bool,
@@ -358,7 +466,14 @@ async def _set_toggle_option(
     option: str,
     url: str,
 ) -> None:
-    current = await _read_toggle_state(control)
+    current = await _guarded_state(
+        _read_toggle_state,
+        control,
+        option=option,
+        stage="read",
+        requested=requested,
+        url=url,
+    )
     if current == requested:
         # Already satisfied, even when the account-level setting disabled the
         # control: this is success and must not require a click.
@@ -373,7 +488,14 @@ async def _set_toggle_option(
             url=url,
         )
     await control.click()
-    actual = await _read_toggle_state(control)
+    actual = await _guarded_state(
+        _read_toggle_state,
+        control,
+        option=option,
+        stage="readback",
+        requested=requested,
+        url=url,
+    )
     if actual != requested:
         raise _option_error(
             option=option,
@@ -393,7 +515,14 @@ async def _set_switch_option(
     url: str,
 ) -> None:
     """Set an ARIA switch via ``aria-checked`` readback."""
-    current = await _read_switch_state(control)
+    current = await _guarded_state(
+        _read_switch_state,
+        control,
+        option=option,
+        stage="read",
+        requested=requested,
+        url=url,
+    )
     if current == requested:
         # Already satisfied, even when the platform disabled the switch.
         return
@@ -407,7 +536,14 @@ async def _set_switch_option(
             url=url,
         )
     await control.click()
-    actual = await _read_switch_state(control)
+    actual = await _guarded_state(
+        _read_switch_state,
+        control,
+        option=option,
+        stage="readback",
+        requested=requested,
+        url=url,
+    )
     if actual != requested:
         raise _option_error(
             option=option,
@@ -840,7 +976,14 @@ class TiktokBaseUploader(BaseVideoUploader):
         page,
         url: str,
     ) -> None:
-        current = await _read_switch_state(control)
+        current = await _guarded_state(
+            _read_switch_state,
+            control,
+            option="aigc",
+            stage="read",
+            requested=requested,
+            url=url,
+        )
         if current == requested:
             # Already satisfied, even when the account-level setting disabled
             # the switch: no click and no dialog.
@@ -857,7 +1000,14 @@ class TiktokBaseUploader(BaseVideoUploader):
         await control.click()
         if requested:
             await self._confirm_aigc_turn_on(page)
-        actual = await _read_switch_state(control)
+        actual = await _guarded_state(
+            _read_switch_state,
+            control,
+            option="aigc",
+            stage="readback",
+            requested=requested,
+            url=url,
+        )
         if actual != requested:
             raise _option_error(
                 option="aigc",
@@ -888,9 +1038,22 @@ class TiktokBaseUploader(BaseVideoUploader):
             await button.wait_for(
                 state="detached", timeout=_AIGC_DIALOG_TIMEOUT_MS
             )
-        except Exception:
-            # Let the explicit aria-checked readback report the real failure.
-            return
+        except Exception as exc:
+            # A dialog click that fails or never dismisses is a real page
+            # failure.  Do not swallow it: the caller must see why the AIGC
+            # first-run guidance could not be confirmed.
+            raise _option_error(
+                option="aigc",
+                stage="turn-on-dialog",
+                requested=True,
+                actual="dialog-error",
+                control=None,
+                url=_page_url(page),
+                detail=str(exc),
+                candidates=tuple(
+                    label for label, _ in _AIGC_TURN_ON_CANDIDATES
+                ),
+            ) from exc
 
     async def _apply_brand_options(
         self, controls: TiktokSettingsControls, *, url: str
@@ -1328,6 +1491,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         # click that raises proves nothing was sent.  Once flipped, the button
         # is never clicked again: a second click could duplicate the post.
         publish_clicked = False
+        dialog_clicked = False
         while True:
             try:
                 self._check_publish_deadline(deadline)
@@ -1346,10 +1510,19 @@ class TiktokBaseUploader(BaseVideoUploader):
 
             if not publish_clicked:
                 try:
-                    publish_button = self.locator_base.locator('div.button-group button').nth(0)
-                    if await publish_button.count():
+                    found = await _find_candidate(
+                        self.locator_base, _PUBLISH_BUTTON_CANDIDATES
+                    )
+                    if found is not None:
+                        publish_button, index, description = found
+                        tiktok_logger.info(
+                            "[+] TikTok publish: candidate "
+                            f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} "
+                            f"matched ({description})"
+                        )
                         await publish_button.click()
                         publish_clicked = True
+                        tiktok_logger.info("  [-] publish click sent")
                 except Exception as e:
                     if multilogin:
                         _raise_if_login_required(page)
@@ -1361,6 +1534,13 @@ class TiktokBaseUploader(BaseVideoUploader):
             try:
                 await page.wait_for_url("https://www.tiktok.com/tiktokstudio/content",  timeout=3000)
             except (PlaywrightTimeoutError, TimeoutError):
+                # Photo posts may show a "Post now" confirmation instead of
+                # navigating.  Attempt it at most once: mark the attempt before
+                # clicking so a failed click is never retried.  The failure is
+                # non-fatal; the success-URL wait still owns the outcome.
+                if publish_clicked and not dialog_clicked:
+                    dialog_clicked = True
+                    await self._click_post_now(page)
                 tiktok_logger.info("  [-] video publishing")
                 await asyncio.sleep(0.5)
                 continue
@@ -1380,6 +1560,28 @@ class TiktokBaseUploader(BaseVideoUploader):
 
             tiktok_logger.success("  [-] video published success")
             return
+
+    async def _click_post_now(self, page) -> bool:
+        """Click the visible ``Post now`` dialog button once, if present."""
+        found = await _find_candidate(page, _POST_NOW_CANDIDATES, visible=True)
+        if found is None:
+            return False
+        button, index, description = found
+        try:
+            await button.click()
+        except Exception as exc:
+            # Do not turn a failed optional fallback into a different exit
+            # code; the success-URL wait still owns the outcome.
+            tiktok_logger.info(
+                f"  [-] Post now click failed ({description}): {exc}"
+            )
+            return False
+        tiktok_logger.info(
+            "[+] TikTok publish: Post now fallback candidate "
+            f"#{index + 1}/{len(_POST_NOW_CANDIDATES)} clicked "
+            f"({description})"
+        )
+        return True
 
     async def choose_base_locator(self, page):
         # await page.wait_for_selector('div.upload-container')
@@ -1453,14 +1655,41 @@ class TiktokVideo(TiktokBaseUploader):
         await browser.close()
 
     async def attach_media(self, page) -> None:
-        upload_button = self.locator_base.locator(
-            'button:has-text("Select video"):visible')
-        await upload_button.wait_for(state='visible')  # 确保按钮可见
+        tried = tuple(label for label, _ in _VIDEO_FILE_CANDIDATES)
+        last_error = None
+        for index, (description, factory) in enumerate(_VIDEO_FILE_CANDIDATES):
+            try:
+                upload_button = factory(self.locator_base)
+                await upload_button.wait_for(
+                    state="visible", timeout=_VIDEO_FILE_WAIT_MS
+                )
+            except Exception as exc:
+                last_error = exc
+                continue
+            tiktok_logger.info(
+                "[+] TikTok video file: candidate "
+                f"#{index + 1}/{len(_VIDEO_FILE_CANDIDATES)} matched "
+                f"({description})"
+            )
+            try:
+                async with page.expect_file_chooser() as fc_info:
+                    await upload_button.click()
+                file_chooser = await fc_info.value
+                await file_chooser.set_files(self.file_path)
+            except Exception as exc:
+                raise RuntimeError(
+                    "TikTok 视频文件选择失败 | control=Select video | "
+                    "stage=choose file | "
+                    f"tried={list(tried)!r} | url={_page_url(page)!r} | "
+                    f"detail={exc}"
+                ) from exc
+            return
 
-        async with page.expect_file_chooser() as fc_info:
-            await upload_button.click()
-        file_chooser = await fc_info.value
-        await file_chooser.set_files(self.file_path)
+        raise RuntimeError(
+            "TikTok 视频文件选择失败 | control=Select video | "
+            f"stage=wait for button | tried={list(tried)!r} | "
+            f"url={_page_url(page)!r} | detail={last_error}"
+        )
 
     async def fill_metadata(self, page) -> None:
         await self.fill_caption(page, self.title, self.tags)
@@ -1501,18 +1730,18 @@ class TiktokVideo(TiktokBaseUploader):
 
         file_candidates = (
             (_COVER_FILE_ARIA_SELECTOR,
-             lambda _scope: control_scope.locator(_COVER_FILE_ARIA_SELECTOR)),
+             lambda scope: scope.locator(_COVER_FILE_ARIA_SELECTOR)),
             # When the cover editor root is unavailable the scoped fallback is
             # left unmatched rather than widening to the whole form.
             (_COVER_FILE_ACCEPT_SELECTOR,
-             lambda _scope: (
-                 editor.locator(_COVER_FILE_ACCEPT_SELECTOR)
+             lambda scope: (
+                 scope.locator(_COVER_FILE_ACCEPT_SELECTOR)
                  if editor is not None
                  else editor_query
              )),
         )
         file_input = await _resolve_candidate(
-            base,
+            control_scope,
             file_candidates,
             control="Upload cover file input",
             stage="set cover file",
@@ -1545,29 +1774,35 @@ class TiktokVideo(TiktokBaseUploader):
             page=page,
         )
 
-        preview = await _find_candidate(control_scope, _COVER_PREVIEW_CANDIDATES)
+        # The upload must produce the editor's preview before the save is
+        # meaningful.  Waiting for it is the only proof the page accepted the
+        # file; an enabled Save button is not an equivalent signal.
+        preview_error = None
         preview_visible = False
-        if preview is not None:
-            preview_locator, index, description = preview
-            tiktok_logger.info(
-                f"[+] cover wait for cover preview: Uploaded cover image "
-                f"candidate {index + 1}/{len(_COVER_PREVIEW_CANDIDATES)}"
-                f" matched ({description})"
-            )
+        for index, (description, factory) in enumerate(_COVER_PREVIEW_CANDIDATES):
             try:
+                preview_locator = factory(control_scope).first
                 await preview_locator.wait_for(
                     state="visible", timeout=_COVER_PREVIEW_TIMEOUT_MS
                 )
-                preview_visible = True
-            except Exception:
-                preview_visible = False
+            except Exception as exc:
+                preview_error = exc
+                continue
+            tiktok_logger.info(
+                "[+] cover wait for cover preview: Uploaded cover image "
+                f"candidate {index + 1}/{len(_COVER_PREVIEW_CANDIDATES)}"
+                f" matched ({description})"
+            )
+            preview_visible = True
+            break
 
-        if not preview_visible and not await save_button.is_enabled():
+        if not preview_visible:
             raise _cover_error(
                 "Uploaded cover image",
                 "wait for cover preview",
                 _COVER_PREVIEW_CANDIDATES,
                 page,
+                detail=str(preview_error),
             )
 
         try:
@@ -1580,6 +1815,36 @@ class TiktokVideo(TiktokBaseUploader):
                 page,
                 detail=str(exc),
             ) from exc
+
+        # Saving must close the editor.  Confirm that explicitly instead of
+        # assuming the click took effect.
+        close_error = None
+        editor_closed = False
+        if editor is not None:
+            try:
+                await editor.wait_for(
+                    state="detached", timeout=_COVER_EDITOR_CLOSE_TIMEOUT_MS
+                )
+                editor_closed = True
+            except Exception as exc:
+                close_error = exc
+        if not editor_closed:
+            try:
+                await upload_tab.wait_for(
+                    state="hidden", timeout=_COVER_EDITOR_CLOSE_TIMEOUT_MS
+                )
+                editor_closed = True
+            except Exception as exc:
+                close_error = exc
+
+        if not editor_closed:
+            raise _cover_error(
+                "Upload cover",
+                "wait for cover editor close",
+                _COVER_UPLOAD_TAB_CANDIDATES,
+                page,
+                detail=str(close_error),
+            )
 
         await page.wait_for_timeout(3000)  # wait 3s, fix it later
 
@@ -1692,16 +1957,17 @@ class TiktokNote(TiktokBaseUploader):
         return f"photo post id: {item_id}"
 
     async def _photo_form_present(self, page) -> bool:
-        for selector in (
-            self._PHOTO_TITLE_SELECTOR,
-            self._PHOTO_INPUT_SELECTOR,
-        ):
-            try:
-                if await page.locator(selector).count() > 0:
-                    return True
-            except Exception:
-                continue
-        return False
+        """The photo form is identified by its Title input, never by an input.
+
+        File inputs are not a reliable mode signal: an image file input can be
+        present while the composer is still in video mode, and feeding images
+        there would misclassify the post.  Spec §5.3 step 1 makes the Title
+        input the definitive signal.
+        """
+        try:
+            return await page.locator(self._PHOTO_TITLE_SELECTOR).count() > 0
+        except Exception:
+            return False
 
     async def ensure_mode(self, page) -> None:
         """Require the photo form *before* any file selection.
@@ -1769,7 +2035,7 @@ class TiktokNote(TiktokBaseUploader):
             except Exception:
                 continue
         raise RuntimeError(
-            "TikTok 图文帖 Title 输入框未找到："
+            "TikTok 图片帖 Title 输入框未找到："
             f"tried={list(self._PHOTO_TITLE_CANDIDATES)!r} "
             f"url={_page_url(page)!r}"
         )
@@ -1784,7 +2050,7 @@ class TiktokNote(TiktokBaseUploader):
             except Exception:
                 continue
         raise RuntimeError(
-            "TikTok 图文帖 Description 编辑器未找到："
+            "TikTok 图片帖 Description 编辑器未找到："
             f"tried={list(self._PHOTO_CAPTION_CANDIDATES)!r} "
             f"url={_page_url(page)!r}"
         )
@@ -1870,7 +2136,7 @@ class TiktokNote(TiktokBaseUploader):
             await page.wait_for_selector(self._CONTENT_CONTAINER_SELECTOR)
         except Exception as exc:
             raise RuntimeError(
-                "TikTok 图文帖发布结果未知：未找到内容列表容器。"
+                "TikTok 图片帖发布结果读取失败（按现有契约退出 1；先核查 Content 列表，避免重复发布）：未找到内容列表容器。"
             ) from exc
 
         photo_links = page.locator(self._PHOTO_LINK_SELECTOR)
@@ -1881,7 +2147,7 @@ class TiktokNote(TiktokBaseUploader):
                 return match.group(1)
 
         raise RuntimeError(
-            "TikTok 图文帖发布结果未知：未找到 "
+            "TikTok 图片帖发布结果读取失败（按现有契约退出 1；先核查 Content 列表，避免重复发布）：未找到 "
             '/post/photo?item_id= 链接。'
         )
 
@@ -1890,6 +2156,6 @@ class TiktokNote(TiktokBaseUploader):
     ) -> None:
         if session is None:
             raise RuntimeError(
-                "TikTok 仅支持 Multilogin 模式：图文帖没有本地浏览器路径。"
+                "TikTok 仅支持 Multilogin 模式：图片帖没有本地浏览器路径。"
             )
         await self.upload_in(session)

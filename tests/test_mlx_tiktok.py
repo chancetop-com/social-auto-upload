@@ -602,6 +602,124 @@ class UploaderSeamTests(unittest.TestCase):
         self.assertEqual(app.thumbnail_path, None)
 
 
+class _MediaButton:
+    def __init__(self, *, present: bool = True) -> None:
+        self.present = present
+        self.click_calls = 0
+
+    @property
+    def first(self):
+        return self
+
+    async def count(self) -> int:
+        return 1 if self.present else 0
+
+    async def wait_for(self, **kwargs) -> None:
+        if not self.present:
+            raise TimeoutError("button never became visible")
+
+    async def click(self) -> None:
+        self.click_calls += 1
+
+
+class _MediaBase:
+    def __init__(self, by_selector: dict[str, _MediaButton]) -> None:
+        self._by_selector = by_selector
+
+    def locator(self, selector: str) -> _MediaButton:
+        return self._by_selector.get(selector, _MediaButton(present=False))
+
+
+class _FileChooser:
+    def __init__(self) -> None:
+        self.files = None
+
+    async def _self(self):
+        return self
+
+    def __await__(self):
+        # Production awaits ``fc_info.value`` (matching the other uploaders).
+        return self._self().__await__()
+
+    async def set_files(self, files) -> None:
+        self.files = files
+
+
+class _ChooserContext:
+    def __init__(self, chooser: _FileChooser) -> None:
+        self.value = chooser
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _ChooserPage:
+    url = TIKTOK_UPLOAD_URL
+
+    def __init__(self) -> None:
+        self.chooser = _FileChooser()
+
+    def expect_file_chooser(self) -> _ChooserContext:
+        return _ChooserContext(self.chooser)
+
+
+class VideoAttachMediaTests(unittest.TestCase):
+    def _video(self) -> TiktokVideo:
+        return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
+
+    def test_prefers_select_video_before_the_aria_fallback(self):
+        primary = _MediaButton()
+        fallback = _MediaButton()
+        video = self._video()
+        video.locator_base = _MediaBase(
+            {
+                'button:has-text("Select video"):visible': primary,
+                'button[aria-label="Select file"]': fallback,
+            }
+        )
+        page = _ChooserPage()
+
+        asyncio.run(video.attach_media(page))
+
+        self.assertEqual(primary.click_calls, 1)
+        self.assertEqual(fallback.click_calls, 0)
+        self.assertEqual(page.chooser.files, "/tmp/demo.mp4")
+
+    def test_falls_back_to_select_file_when_select_video_is_missing(self):
+        primary = _MediaButton(present=False)
+        fallback = _MediaButton()
+        video = self._video()
+        video.locator_base = _MediaBase(
+            {
+                'button:has-text("Select video"):visible': primary,
+                'button[aria-label="Select file"]': fallback,
+            }
+        )
+        page = _ChooserPage()
+
+        asyncio.run(video.attach_media(page))
+
+        self.assertEqual(primary.click_calls, 0)
+        self.assertEqual(fallback.click_calls, 1)
+        self.assertEqual(page.chooser.files, "/tmp/demo.mp4")
+
+    def test_missing_candidates_fail_with_control_stage_and_url(self):
+        video = self._video()
+        video.locator_base = _MediaBase({})
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.attach_media(_ChooserPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("Select video", message)
+        self.assertIn("wait for button", message)
+        self.assertIn("Select file", message)
+        self.assertIn(TIKTOK_UPLOAD_URL, message)
+
+
 # ---------------------------------------------------------------------------
 # Publish timeout and login mapping
 # ---------------------------------------------------------------------------
