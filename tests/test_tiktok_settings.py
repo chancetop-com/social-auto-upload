@@ -953,7 +953,7 @@ class TiktokOptionStepTests(unittest.TestCase):
             scheduled, ("Schedule", "Confirm", "Post now")
         )
 
-    def test_scheduled_verification_accepts_timezone_marked_row(self):
+    def test_scheduled_verification_accepts_row_without_timezone_text(self):
         from datetime import datetime
 
         class _Page:
@@ -966,7 +966,7 @@ class TiktokOptionStepTests(unittest.TestCase):
             async def inner_text(self):
                 return (
                     "Posts (Created on) | TB19 scheduled row | "
-                    "Nov 6, 5:35 PM (GMT+8) Shanghai | Everyone"
+                    "Nov 6, 5:35 PM | Everyone"
                 )
 
             async def wait_for_timeout(self, _ms):
@@ -982,7 +982,7 @@ class TiktokOptionStepTests(unittest.TestCase):
 
         asyncio.run(video._verify_scheduled_post(_Page()))
 
-    def test_scheduled_verification_rejects_published_or_missing_row(self):
+    def test_scheduled_verification_rejects_missing_row(self):
         from datetime import datetime
 
         class _Page:
@@ -1007,51 +1007,148 @@ class TiktokOptionStepTests(unittest.TestCase):
             None,
         )
 
-        for body in (
-            # No timezone marker: looks like an immediately published row.
-            "Posts (Created on) | TB19 scheduled row | Nov 6, 5:35 PM | Everyone",
-            # Row absent entirely.
-            "Posts (Created on) | something else | Everyone",
-        ):
-            with self.subTest(body=body):
-                with patch.object(
-                    tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 1
-                ), patch.object(
-                    tk_main, "_find_scheduled_row_marker", return_value=None
+        with self.subTest("row absent"):
+            with patch.object(
+                tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 1
+            ):
+                with self.assertRaises(
+                    tk_main.PublishResultUnknownError
                 ):
-                    with self.assertRaises(
-                        tk_main.PublishResultUnknownError
-                    ):
-                        asyncio.run(
-                            video._verify_scheduled_post(_Page(body))
+                    asyncio.run(
+                        video._verify_scheduled_post(
+                            _Page("Posts (Created on) | something else")
                         )
+                    )
 
-    def test_scheduled_marker_check_scans_every_occurrence(self):
-        values = ("TB19 scheduled row",)
+    def test_scheduled_verification_rejects_tags_only(self):
+        from datetime import datetime
 
+        class _Page:
+            url = "https://www.tiktok.com/tiktokstudio/content"
+
+            def locator(self, _selector):
+                return self
+
+            async def inner_text(self):
+                return "old scheduled clip | #fyp | Everyone"
+
+            async def wait_for_timeout(self, _ms):
+                return None
+
+        video = TiktokVideo(
+            "",
+            "/tmp/demo.mp4",
+            ["fyp"],
+            datetime(2026, 11, 6, 17, 35),
+            None,
+        )
+
+        with self.assertRaises(tk_main.PublishResultUnknownError):
+            asyncio.run(video._verify_scheduled_post(_Page()))
+
+    def test_scheduled_row_check_tolerates_truncated_and_wrapped_copy(self):
+        body = (
+            "TB19 scheduled row that is very long and gets tr… | Everyone"
+        )
+
+        self.assertEqual(
+            tk_main._find_scheduled_row_marker(
+                body,
+                ("TB19 scheduled row that is very long",),
+            ),
+            "TB19 scheduled row that is very long",
+        )
+        self.assertEqual(
+            tk_main._find_scheduled_row_marker(
+                "TB19 scheduled\nrow line two | Everyone",
+                ("TB19 scheduled",),
+            ),
+            "TB19 scheduled",
+        )
         self.assertIsNone(
             tk_main._find_scheduled_row_marker(
-                "TB19 scheduled row | Nov 6, 5:35 PM | Everyone",
-                values,
+                "something else | Everyone",
+                ("TB19 scheduled",),
             )
         )
-        self.assertEqual(
-            tk_main._find_scheduled_row_marker(
-                "TB19 scheduled row filter"
-                + "x" * 600
-                + " | TB19 scheduled row | "
-                "Nov 6, 5:35 PM (GMT+8) Shanghai | Everyone",
-                values,
-            ),
-            "TB19 scheduled row",
+
+    def test_find_candidate_skips_hidden_first_match(self):
+        class _Node:
+            def __init__(self, visible):
+                self.visible = visible
+
+            async def is_visible(self):
+                return self.visible
+
+        class _Locator:
+            def __init__(self):
+                self.nodes = [_Node(False), _Node(True)]
+
+            async def count(self):
+                return len(self.nodes)
+
+            def nth(self, index):
+                return self.nodes[index]
+
+            @property
+            def first(self):
+                return self.nodes[0]
+
+        found = asyncio.run(
+            tk_main._find_candidate(
+                object(), (("x", lambda _scope: _Locator()),), visible=True
+            )
         )
-        self.assertEqual(
-            tk_main._find_scheduled_row_marker(
-                "Nov 6, 5:35 PM（GMT+8）| TB19 scheduled row | Everyone",
-                values,
-            ),
-            "TB19 scheduled row",
+
+        self.assertIsNotNone(found)
+        self.assertTrue(found[0].visible)
+
+    def test_result_link_prefers_title_over_shared_hashtag(self):
+        class _Link:
+            def __init__(self, href, text):
+                self.href = href
+                self.text = text
+
+            async def get_attribute(self, name):
+                return self.href if name == "href" else None
+
+            async def inner_text(self):
+                return self.text
+
+        class _Links:
+            def __init__(self, links):
+                self.links = links
+
+            async def count(self):
+                return len(self.links)
+
+            def nth(self, index):
+                return self.links[index]
+
+        class _Page:
+            url = "https://www.tiktok.com/tiktokstudio/content"
+
+            def locator(self, _selector):
+                return _Links(
+                    [
+                        _Link("/video/111", "#fyp"),
+                        _Link("/video/222", "TB19 title here"),
+                    ]
+                )
+
+            async def wait_for_timeout(self, _ms):
+                return None
+
+        video = TiktokVideo(
+            "TB19 title here", "/tmp/demo.mp4", ["fyp"], 0, None
         )
+        href = asyncio.run(
+            video._find_result_link(
+                _Page(), ('a[href*="/video/"]',), timeout_ms=1
+            )
+        )
+
+        self.assertEqual(href, "/video/222")
 
     def test_scheduled_verification_fails_closed_without_text(self):
         from datetime import datetime

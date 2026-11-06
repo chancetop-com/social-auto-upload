@@ -36,9 +36,10 @@
 | 私有账号 reuse 回归（only-me） | `--privacy only-me --disable-reuse` | `0` | `https://www.tiktok.com/@lukechen95/video/7704987038025534734` | 账号切回私有后复验：reuse 控件实际存在并被取消回读；旧“私有账号不渲染”结论彻底撤销 |
 | 私有账号 reuse 回归（friends） | `--privacy friends --disable-reuse` | `0` | `https://www.tiktok.com/@lukechen95/video/7704987250399907085` | Friends 选项下同样 `reuse resolved by candidate #0`，取消回读通过 |
 | 选择器加固：品牌 | `--privacy only-me --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704994747462454541` | `your_brand`/`branded_content` 均由 `title-line` 候选 #0 解析；发布按钮 `data-e2e`；确认弹窗 dialog 内精确 `Post now` |
-| 选择器加固：定时回读 | `--privacy followers --schedule "2026-11-06 18:15"` | `0` | Scheduled 行：`TB19 selector scheduled 1815` | 新逻辑确认 `scheduled post confirmed in Content list`（标题 + `(GMT` 时区标记）；未再返回静默成功 |
+| 选择器加固：定时回读 | `--privacy followers --schedule "2026-11-06 18:15"` | `0` | Scheduled 行：`TB19 selector scheduled 1815` | 新逻辑确认 `scheduled post confirmed in Content list`（按标题/正文）；未再返回静默成功 |
 | 第二轮：品牌轮询 | `--privacy only-me --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704997256453229837` | 主开关后轮询 `title-line`；确认弹窗只在可见 dialog 内点击（#1/1） |
 | 第二轮：定时核验 | `--privacy followers --schedule "2026-11-06 18:25"` | `0` | Scheduled 行：`TB19 selector scheduled 1825` | dialog 内确认候选 #3/3（`Post now`）；Content 行核验通过 |
+| 第三轮：无时区核验 | `--privacy followers --schedule "2026-11-06 18:50"` | `0` | Scheduled 行：`TB19 selector scheduled 1850` | 只按标题确认 Content 行存在，不匹配时间/时区；日志 `scheduled post confirmed in Content list` |
 | 公开账号定时创建 | `--privacy public --schedule "2026-11-06 17:35"` | `0` | 定时中，尚无帖子 URL | Content 行 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已定时；到点发布已由用户确认正常，按用户要求不再跑探针 |
 | only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `ControlOrMeta+A` 修复，v4 复验 |
 | only-me 基线 v4 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950472880229645` | 干净标题；read_result 返回 ID；only-me 隐私路径复验 |
@@ -56,7 +57,7 @@
 ## 结论
 
 - **已验证**：本地登录/check、私有账号 `only-me`/`followers`/`friends`、公开账号无新参数发布、`--privacy public`（Everyone）与 `followers` 严格失败、`--no-comments`、`--disable-reuse`（公开账号可见控件 v2、only-me v3 均实际取消并回读）、`--aigc`（帖子显示 AI 标签）、`--your-brand`（Promotional content）、`--branded-content` + friends（Paid partnership）、自定义封面、定时创建与时间/隐私回读、**定时到点发布（2026-11-06 用户确认正常）**、图文 3 图/Description/tags/首图封面、**公开账号图片帖选项**（评论/AIGC/品牌）。
-- **定时到点发布**：2026-11-06 用户确认正常；公开账号 17:35 定时帖 `TB19 scheduled public 1735` 已确认进入定时状态（Content 行 `5:35 PM (GMT+8) Shanghai` + Everyone），按用户要求不再跑到点探针。
+- **定时到点发布**：2026-11-06 用户确认正常；定时提交的核验只按标题/正文（不依赖时间/时区）；公开账号 17:35 定时帖 `TB19 scheduled public 1735` 已确认进入定时状态（Content 行 `5:35 PM (GMT+8) Shanghai` + Everyone），按用户要求不再跑到点探针。
 - **图文 Title**：2026-11-06 用户确认真实公开展示正常，不再列为未确认项。
 - **公开账号首项文案**：Content 行显示 **Everyone**，与公开账号预期一致。
 - **发现并修复**：Content `read_result` 原取第一条，定时帖排在最前导致图文帖误取定时帖 ID；已改为按标题/正文/标签匹配，并在真实 Content 页验证图文 `7704966090018786574`、视频 `7704956309300382989` 均正确。
@@ -87,5 +88,6 @@
 22. 公开账号的发布点击会出现 `Post now` 确认弹窗；兜底已改为 `[role="dialog"]` 内精确匹配，真实发布触发并成功。
 23. 切换到公开账号后，之前创建的 Followers 定时帖不再出现在 Scheduled 列表（账号类型变更可能导致取消）；该条不再作为到点证据，用户已另行确认到点发布正常，并用公开账号 17:35 定时帖补充证据。
 24. 选择器加固（2026-11-06）：发布按钮移除子串/位置兜底，改为 `data-e2e` + 精确 `^(Post|Schedule)$`；确认弹窗按 `dialog` + 精确名称（定时优先 Schedule/Confirm）；品牌 XPath 改回 `title-line` + 兄弟 label（disclose 容器只包主开关）；隐私 disabled 判定按 class token；Show more 后轮询控件可见；图片 input 统一 `locator_base`；封面按钮仅可见；AIGC `Turn on` 精确匹配；定时帖新增 Content 行回读。
-26. 第二轮 review 修复（2026-11-06）：确认弹窗改为**仅可见 dialog 内**精确点击，删除页面级兜底（避免二次点击主 `Schedule` 按钮）；定时核验改为遍历所有出现位置、前后各 240 字符窗口，无文本/找不到行 → `PublishResultUnknownError`（exit 9）；定时图片帖无文本在 CLI 阶段 exit 2；品牌标签改轮询；Show more 幂等；`visible=True` 遍历所有匹配而非只看 `.first`；AIGC `Turn on` 仅限 dialog；封面 Save 去掉预绑定 `.first`。
-27. reuse 控件实际文案是 **“Reuse of content”**，旧候选只找 “Allow reuse of content”；同时该控件位于 **Show more** 折叠区，`get_by_role` 默认忽略隐藏元素。两者叠加导致 v1 与私有账号期间误判“控件未渲染”，实际控件存在且默认 `checked=true`。已补文案候选、全局 Show more 兜底，并移除“缺失=已满足”捷径：显式请求 `--disable-reuse` 但控件解析不到时直接退出 `1`（图片帖不请求该选项）。公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际取消并回读成功；严格逻辑复验 public `7704986094458227982`、only-me `7704986350126140686` 也均通过；账号切回私有后 only-me `7704987038025534734`、friends `7704987250399907085` 同样通过。
+26. 第二轮 review 修复（2026-11-06）：确认弹窗改为**仅可见 dialog 内**精确点击，删除页面级兜底（避免二次点击主 `Schedule` 按钮）；定时核验无文本/找不到行 → `PublishResultUnknownError`（exit 9）；品牌标签改轮询；Show more 幂等；`visible=True` 遍历所有匹配而非只看 `.first`；AIGC `Turn on` 仅限 dialog；封面 Save 去掉预绑定 `.first`。
+28. 第三轮修正（2026-11-06）：定时核验**完全不看时间/时区**（Studio 可能显示 PST/EST/GMT 等），只按标题/正文确认 Content 行存在；标签不再作为证据，定时图片帖必须提供 `--title` 或 `--note/--notef`（仅 tags → CLI exit 2）；发布 role 候选移除 `.last`，确认弹窗取最上层可见 dialog；`_resolve_single_control` 加入可见性过滤；图片帖 Post 按钮统一走可见 role 候选。
+29. reuse 控件实际文案是 **“Reuse of content”**，旧候选只找 “Allow reuse of content”；同时该控件位于 **Show more** 折叠区，`get_by_role` 默认忽略隐藏元素。两者叠加导致 v1 与私有账号期间误判“控件未渲染”，实际控件存在且默认 `checked=true`。已补文案候选、全局 Show more 兜底，并移除“缺失=已满足”捷径：显式请求 `--disable-reuse` 但控件解析不到时直接退出 `1`（图片帖不请求该选项）。公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际取消并回读成功；严格逻辑复验 public `7704986094458227982`、only-me `7704986350126140686` 也均通过；账号切回私有后 only-me `7704987038025534734`、friends `7704987250399907085` 同样通过。

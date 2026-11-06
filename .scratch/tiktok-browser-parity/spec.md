@@ -305,7 +305,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 10. 折叠区展开后等待任一选项面（`user_perm_container`/`aigc_container`/`disclose_content_container`）可见（≤3s），不只 sleep 固定 300ms；展开本身幂等（已有任一选项面可见时不再点 Show more，避免二次调用把面板关回去）。
 11. 隐私 combobox 的 disabled 判定必须按 class token（`--disabled-false` 不是禁用）；`Only me` 与 `Only you` 都归一化为 `only-me`。
 12. 图片文件 input 用 `locator_base`（与其它步骤一致），避免 iframe 模式失效；封面 `Edit cover`/`Upload cover`/`Save` 只接受可见候选。
-13. 定时帖：`read_result` 不能返回视频 ID，但必须在 Content 列表按标题/正文/标签找到行，并校验出现位置前后各 240 字符窗口内出现 `(GMT`/`（GMT` 时区标记；遍历所有出现位置。找不到或没有可用于核验的文本 → `PublishResultUnknownError`（exit 9），禁止静默 exit 0。定时图片帖若无 `--title`/`--note`/`--tags`，在 CLI 阶段直接 exit 2。
+13. 定时帖：`read_result` 不能返回视频 ID，但必须在 Content 列表按**标题/正文**确认该行存在（截断/换行容错；标签不作为核验依据）。**不匹配时间或时区**：Studio 可能显示 PST/EST/GMT 等账号时区，本地时间不可靠；定时时间与隐私已在点击前由 picker 回读确认。找不到或没有标题/正文 → `PublishResultUnknownError`（exit 9），禁止静默 exit 0。定时图片帖必须提供 `--title` 或 `--note`/`--notef`（仅 `--tags` 不行），否则在 CLI 阶段 exit 2。
 14. `visible=True` 的候选解析必须遍历全部匹配元素；`.first` 可能命中隐藏的重复节点，从而漏掉真正可见的控件。
 
 ---

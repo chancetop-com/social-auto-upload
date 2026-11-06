@@ -263,9 +263,15 @@ class _StudioPage:
             return _TextTab(self)
         return _Locator(self, f"text={text}", count=0)
 
-    def get_by_role(self, role: str, name: str | None = None):
+    def get_by_role(self, role: str, name=None):
         if role == "tab" and name == "Photos":
             return _TextTab(self)
+        if (
+            role == "button"
+            and hasattr(name, "fullmatch")
+            and name.fullmatch("Post")
+        ):
+            return _Locator(self, "role=button[name=/^Post$/]", count=1)
         return _Locator(self, f"role={role}", count=0)
 
     def locator(self, selector: str) -> _Locator:
@@ -598,6 +604,19 @@ class UploadNoteValidationTests(unittest.TestCase):
             self._assert_exit_2_without_browser(
                 self._argv(
                     images,
+                    "--schedule",
+                    "2026-11-06 18:15",
+                )
+            )
+
+    def test_scheduled_note_with_only_tags_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            self._assert_exit_2_without_browser(
+                self._argv(
+                    images,
+                    "--tags",
+                    "fyp",
                     "--schedule",
                     "2026-11-06 18:15",
                 )

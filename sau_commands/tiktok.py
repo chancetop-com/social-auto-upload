@@ -345,10 +345,10 @@ def _validate_note_metadata(
 
     Values are never truncated; each failure is a usage error (exit 2).
     """
-    if scheduled and not (title or note or tags):
+    if scheduled and not (title or note):
         raise UsageError(
-            "定时图片帖必须至少提供 --title、--note/--notef 或 --tags 之一："
-            "没有可匹配的文本时，发布后无法在 Content 列表核验定时是否成功。"
+            "定时图片帖必须提供 --title 或 --note/--notef：仅 tags 无法在 "
+            "Content 列表稳定定位该帖，发布后也无法核验定时是否成功。"
         )
 
     if title is not None and len(title) > TIKTOK_MAX_TITLE_LENGTH:

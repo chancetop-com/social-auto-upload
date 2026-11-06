@@ -163,18 +163,31 @@ class _FakePage:
             self.url = outcome
 
 
+class _DialogNode:
+    def __init__(self, dialog: _CandidateLocator) -> None:
+        self.dialog = dialog
+
+    async def is_visible(self) -> bool:
+        return await self.dialog.is_visible()
+
+    def get_by_role(self, role: str, name=None):
+        if role == "button":
+            return self.dialog
+        return _CandidateLocator(count=0)
+
+
 class _DialogScope:
     def __init__(self, dialog: _CandidateLocator) -> None:
         self.dialog = dialog
 
     async def count(self) -> int:
-        return 1
+        return await self.dialog.count()
 
     def nth(self, _index: int):
-        return self
+        return _DialogNode(self.dialog)
 
     async def is_visible(self) -> bool:
-        return True
+        return await self.dialog.is_visible()
 
     def get_by_role(self, role: str, name=None):
         if role == "button":
@@ -466,6 +479,23 @@ class ClickPublishTests(unittest.TestCase):
 
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(dialog.click_calls, 1)
+
+    def test_confirmation_without_visible_dialog_clicks_nothing(self):
+        button = _CandidateLocator()
+        base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
+        dialog = _CandidateLocator(count=0)
+        page = _PostNowPage(
+            dialog,
+            wait_outcomes=[("timeout", None), CONTENT_URL],
+        )
+        video = _video()
+        video.locator_base = base
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(dialog.click_calls, 0)
 
     def test_pre_publish_media_deadline_is_exit_1(self):
         video = _video()

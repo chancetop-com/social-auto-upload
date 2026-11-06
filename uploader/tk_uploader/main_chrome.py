@@ -119,22 +119,16 @@ _AIGC_DIALOG_TIMEOUT_MS = 5_000
 def _find_scheduled_row_marker(
     body: str, values: tuple[str, ...]
 ) -> str | None:
-    """Return the first value whose occurrence has a timezone marker nearby.
+    """Return the first title/note value that appears in the Content list.
 
-    The Content list can render the time before or after the title, and the
-    same title may appear in filters or older rows, so every occurrence is
-    checked with a window on both sides.
+    Verification is timezone-agnostic on purpose: Studio may render the
+    scheduled time in PST/EST/GMT or another account timezone, so the row is
+    identified by title/note only.  The schedule value itself was already
+    read back from the picker before the publish click.
     """
     for value in values:
-        start = 0
-        while True:
-            index = body.find(value, start)
-            if index < 0:
-                break
-            window = body[max(0, index - 240) : index + 240]
-            if "(GMT" in window or "（GMT" in window:
-                return value
-            start = index + 1
+        if value in body:
+            return value
     return None
 
 
@@ -232,7 +226,7 @@ _PUBLISH_BUTTON_CANDIDATES = (
         'role=button[name=/^(Post|Schedule)$/]',
         lambda base: base.get_by_role(
             "button", name=re.compile(r"^(Post|Schedule)$")
-        ).last,
+        ),
     ),
 )
 
@@ -342,6 +336,9 @@ class TiktokOptionControl:
     async def is_disabled(self) -> bool:
         raise NotImplementedError
 
+    async def is_visible(self) -> bool:
+        return True
+
     async def click(self) -> None:
         raise NotImplementedError
 
@@ -407,6 +404,12 @@ class _LocatorControl(TiktokOptionControl):
         classes = ((await self._locator.get_attribute("class")) or "").casefold()
         return _classes_mark_disabled(classes)
 
+    async def is_visible(self) -> bool:
+        try:
+            return bool(await self._locator.is_visible())
+        except Exception:
+            return True
+
     async def click(self) -> None:
         try:
             # Don't wait the full 30s for a styled label whose icon intercepts
@@ -454,6 +457,12 @@ class _LocatorPrivacyControl(TiktokOptionControl):
             pass
         classes = (await self._trigger.get_attribute("class")) or ""
         return _classes_mark_disabled(classes)
+
+    async def is_visible(self) -> bool:
+        try:
+            return bool(await self._trigger.is_visible())
+        except Exception:
+            return True
 
     async def click(self) -> None:
         await self._trigger.click()
@@ -1696,7 +1705,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         for index, (label, factory) in enumerate(factories):
             try:
                 control = factory()
-                if await control.count() > 0:
+                if await control.count() > 0 and await control.is_visible():
                     control.candidates = labels
                     control.candidate_index = index
                     tiktok_logger.info(
@@ -2048,7 +2057,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             getattr(self, "note", None),
         ):
             if value:
-                values.append(str(value).strip())
+                values.append(" ".join(str(value).split()))
         for tag in getattr(self, "tags", None) or []:
             values.append(f"#{tag}")
         # Tolerate truncation in the Content list.
@@ -2064,16 +2073,30 @@ class TiktokBaseUploader(BaseVideoUploader):
         """Find the Content link for THIS post, not just the first row.
 
         The list can put a scheduled post first, so matching by title/note/tags
-        avoids returning another post's ID.
+        avoids returning another post's ID.  Title/note are authoritative; a
+        generic hashtag is only consulted when no title/note exists, otherwise
+        an older post sharing ``#fyp`` could supply the wrong URL.
         """
-        expected = self._result_text_candidates()
+        primary = tuple(
+            " ".join(str(value).split())[:40]
+            for value in (
+                getattr(self, "title", None),
+                getattr(self, "note", None),
+            )
+            if value and str(value).strip()
+        )
+        fallback = tuple(
+            f"#{tag}" for tag in (getattr(self, "tags", None) or [])
+        )
         timeout = (
             TIKTOK_RESULT_READ_TIMEOUT_MS
             if timeout_ms is None
             else timeout_ms
         )
         deadline = time.monotonic() + timeout / 1000
-        while True:
+        if not primary and not fallback:
+            # Nothing to identify this post; keep the legacy
+            # "first result link" behavior rather than spinning.
             for selector in selectors:
                 links = page.locator(selector)
                 try:
@@ -2081,18 +2104,35 @@ class TiktokBaseUploader(BaseVideoUploader):
                 except Exception:
                     continue
                 for index in range(min(count, 50)):
-                    link = links.nth(index)
-                    href = await link.get_attribute("href")
-                    if not href:
-                        continue
-                    if not expected:
+                    href = await links.nth(index).get_attribute("href")
+                    if href:
                         return href
+            return None
+        while True:
+            for group in (primary, fallback):
+                if not group:
+                    continue
+                for selector in selectors:
+                    links = page.locator(selector)
                     try:
-                        text = (await link.inner_text()).strip()
+                        count = await links.count()
                     except Exception:
-                        text = ""
-                    if any(value in text for value in expected):
-                        return href
+                        continue
+                    for index in range(min(count, 50)):
+                        link = links.nth(index)
+                        href = await link.get_attribute("href")
+                        if not href:
+                            continue
+                        if not primary and not fallback:
+                            # Nothing to identify this post; keep the legacy
+                            # "first result link" behavior rather than spin.
+                            return href
+                        try:
+                            text = (await link.inner_text()).strip()
+                        except Exception:
+                            text = ""
+                        if any(value in text for value in group):
+                            return href
             if time.monotonic() >= deadline:
                 return None
             await page.wait_for_timeout(1000)
@@ -2309,12 +2349,10 @@ class TiktokBaseUploader(BaseVideoUploader):
                     candidate = locator.nth(position)
                     is_visible = getattr(candidate, "is_visible", None)
                     if not callable(is_visible) or await is_visible():
+                        # Keep the last visible dialog: it is the topmost one.
                         dialog = candidate
-                        break
             except Exception:
                 continue
-            if dialog is not None:
-                break
         if dialog is None:
             return False
 
@@ -2361,19 +2399,39 @@ class TiktokBaseUploader(BaseVideoUploader):
         """
         if not self.publish_date:
             return
-        values = self._result_text_candidates()
+        values = tuple(
+            " ".join(str(value).split())
+            for value in (
+                getattr(self, "title", None),
+                getattr(self, "note", None),
+            )
+            if value and str(value).strip()
+        )
         if not values:
             raise PublishResultUnknownError(
-                "TikTok 定时发布结果未知：帖子没有标题/正文/标签可用于核验，"
+                "TikTok 定时发布结果未知：帖子没有标题/正文可用于核验，"
                 "无法确认定时是否成功；请先人工核验 Content 列表，避免重复发布。"
             )
+        # The list truncates long copy and can collapse newlines; try shorter
+        # prefixes so a correctly scheduled post is not reported as unknown.
+        variants: list[str] = []
+        for value in values:
+            normalized = " ".join(str(value).split())
+            if not normalized:
+                continue
+            for length in (None, 40, 24, 12):
+                candidate = (
+                    normalized if length is None else normalized[:length]
+                )
+                if candidate and candidate not in variants:
+                    variants.append(candidate)
         deadline = time.monotonic() + TIKTOK_RESULT_READ_TIMEOUT_MS / 1000
         while time.monotonic() < deadline:
             try:
                 body = await page.locator("body").inner_text()
             except Exception:
                 body = ""
-            marker = _find_scheduled_row_marker(body, values)
+            marker = _find_scheduled_row_marker(body, tuple(variants))
             if marker is not None:
                 tiktok_logger.info(
                     "[+] scheduled post confirmed in Content list: "
@@ -2382,7 +2440,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 return
             await page.wait_for_timeout(1000)
         raise PublishResultUnknownError(
-            "TikTok 定时发布结果未知：Content 列表未找到带时区标记的定时行；"
+            "TikTok 定时发布结果未知：Content 列表未找到匹配日期/时间的定时行；"
             "请先人工核验，避免重复发布。"
             f" expected={values!r} url={_page_url(page)!r}"
         )
@@ -2746,7 +2804,6 @@ class TiktokNote(TiktokBaseUploader):
     )
     _PHOTO_INPUT_SELECTOR = 'input[type="file"][accept*="image"]'
     _MULTI_INPUT_SELECTOR = 'input[type="file"][multiple]'
-    _POST_BUTTON_SELECTOR = 'div.button-group > button >> text=Post'
     _PHOTO_LINK_SELECTOR = 'a[href*="/post/photo?item_id="]'
     _PHOTOS_TAB = "Photos"
 
@@ -2966,13 +3023,22 @@ class TiktokNote(TiktokBaseUploader):
                     except Exception:
                         processed = False
 
-                post = page.get_by_role(
-                    "button", name=re.compile(r"^(Post|Schedule)$")
-                ).last
-                if await post.count() == 0:
-                    post = page.locator(self._POST_BUTTON_SELECTOR).last
+                found = await _find_candidate(
+                    page,
+                    (
+                        (
+                            'role=button[name=/^(Post|Schedule)$/]',
+                            lambda scope: scope.get_by_role(
+                                "button",
+                                name=re.compile(r"^(Post|Schedule)$"),
+                            ),
+                        ),
+                    ),
+                    visible=True,
+                )
+                post = found[0] if found is not None else None
                 post_enabled = False
-                if await post.count() > 0:
+                if post is not None:
                     try:
                         post_enabled = await post.is_enabled()
                     except Exception:
