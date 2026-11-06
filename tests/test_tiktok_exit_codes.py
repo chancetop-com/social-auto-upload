@@ -167,6 +167,15 @@ class _DialogScope:
     def __init__(self, dialog: _CandidateLocator) -> None:
         self.dialog = dialog
 
+    async def count(self) -> int:
+        return 1
+
+    def nth(self, _index: int):
+        return self
+
+    async def is_visible(self) -> bool:
+        return True
+
     def get_by_role(self, role: str, name=None):
         if role == "button":
             return self.dialog

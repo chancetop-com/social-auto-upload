@@ -300,12 +300,13 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 5. 设置与回读使用同一候选列表解析控件，避免“点到一个、读的是另一个”。
 6. `data-e2e` 选择器作用在 `locator_base` 上；弹窗/toast 才用顶层 `page`。
 7. 发布按钮只允许 `data-e2e=post_video_button` → 精确 role `^(Post|Schedule)$`；**禁止** `button:has-text("Post").last` 与 `button-group nth(0)`（前者会命中 `Post now`，后者可能是 Discard，且一旦点错会被 `publish_clicked` 锁死到超时）。
-8. 确认弹窗必须在 `[role="dialog"]` 内精确匹配；定时帖优先 `Schedule`/`Confirm`，再退 `Post now`（实测当前 Studio 定时流仍显示 `Post now`，点击后保持定时）。
-9. 品牌复选框：`disclose_content_container` 只包主开关，两个复选框在主开关打开后渲染到兄弟容器；用 `//div[contains(@class,"title-line")][.//span[normalize-space(text())="{label}"]]/label[1]`，再退 `//span[...]/preceding-sibling::label[1]`。**不要**在 disclose 容器内查（永远不命中）。
-10. 折叠区展开后等待任一选项面（`user_perm_container`/`aigc_container`/`disclose_content_container`）可见（≤3s），不只 sleep 固定 300ms。
+8. 确认弹窗**只在可见的 `[role="dialog"]` / `.TUXModal` 内**精确点击；不存在可见弹窗时宁可不点，禁止页面级兜底（页面级 `Schedule` 会命中主发布按钮导致二次点击/重复发布）。定时帖优先 `Schedule`/`Confirm`，再退 `Post now`（实测当前 Studio 定时流仍显示 `Post now`，点击后保持定时）。
+9. 品牌复选框：`disclose_content_container` 只包主开关，两个复选框在主开关打开后渲染到兄弟容器；打开主开关后轮询 `title-line` 行（≤3s），再用 `//div[contains(@class,"title-line")][.//span[normalize-space(text())="{label}"]]/label[1]`，再退 `//span[...]/preceding-sibling::label[1]`。**不要**在 disclose 容器内查（永远不命中）。
+10. 折叠区展开后等待任一选项面（`user_perm_container`/`aigc_container`/`disclose_content_container`）可见（≤3s），不只 sleep 固定 300ms；展开本身幂等（已有任一选项面可见时不再点 Show more，避免二次调用把面板关回去）。
 11. 隐私 combobox 的 disabled 判定必须按 class token（`--disabled-false` 不是禁用）；`Only me` 与 `Only you` 都归一化为 `only-me`。
 12. 图片文件 input 用 `locator_base`（与其它步骤一致），避免 iframe 模式失效；封面 `Edit cover`/`Upload cover`/`Save` 只接受可见候选。
-13. 定时帖：`read_result` 不能返回视频 ID，但必须在 Content 列表按标题/正文/标签找到行，并校验 240 字符窗口内出现 `(GMT`/`（GMT` 时区标记；找不到 → 失败，禁止静默 exit 0。
+13. 定时帖：`read_result` 不能返回视频 ID，但必须在 Content 列表按标题/正文/标签找到行，并校验出现位置前后各 240 字符窗口内出现 `(GMT`/`（GMT` 时区标记；遍历所有出现位置。找不到或没有可用于核验的文本 → `PublishResultUnknownError`（exit 9），禁止静默 exit 0。定时图片帖若无 `--title`/`--note`/`--tags`，在 CLI 阶段直接 exit 2。
+14. `visible=True` 的候选解析必须遍历全部匹配元素；`.first` 可能命中隐藏的重复节点，从而漏掉真正可见的控件。
 
 ---
 

@@ -98,16 +98,12 @@ _COVER_SAVE_CANDIDATES = (
     ('get_by_role("button", name=re.compile(r"^(Save|Confirm)$"))',
      lambda scope: scope.get_by_role(
          "button", name=re.compile(r"^(Save|Confirm)$")
-     ).first),
+     )),
 )
 
 # First-run AIGC guidance dialog.  It is top-level (outside the upload iframe),
 # so these candidates run against ``page`` rather than ``locator_base``.
 _AIGC_TURN_ON_CANDIDATES = (
-    ('get_by_role("button", name=/^Turn on$/)',
-     lambda page: page.get_by_role(
-         "button", name=re.compile(r"^Turn on$")
-     )),
     ('[role="dialog"] role=button[name=/^Turn on$/]',
      lambda page: page.locator('[role="dialog"]').get_by_role(
          "button", name=re.compile(r"^Turn on$")
@@ -123,17 +119,32 @@ _AIGC_DIALOG_TIMEOUT_MS = 5_000
 async def _find_candidate(scope, candidates, *, visible: bool = False):
     """Return ``(locator, index, description)`` for the first present candidate.
 
-    When ``visible`` is true the candidate must also report visible; a locator
-    double that does not implement ``is_visible`` is treated as visible so the
-    pure in-memory tests stay minimal.
+    When ``visible`` is true every match is checked, not just ``.first``: a
+    hidden duplicate earlier in the list must not mask the visible control.
+    A locator double that does not implement ``is_visible`` is treated as
+    visible so the pure in-memory tests stay minimal.
     """
     for index, (description, factory) in enumerate(candidates):
         try:
             locator = factory(scope)
-            if not await locator.count():
+            count = await locator.count()
+            if not count:
                 continue
             if visible:
-                first = locator.first
+                nth = getattr(locator, "nth", None)
+                if callable(nth):
+                    for position in range(count):
+                        candidate = nth(position)
+                        is_visible = getattr(candidate, "is_visible", None)
+                        if not callable(is_visible):
+                            return candidate, index, description
+                        try:
+                            if await is_visible():
+                                return candidate, index, description
+                        except Exception:
+                            continue
+                    continue
+                first = getattr(locator, "first", locator)
                 is_visible = getattr(first, "is_visible", None)
                 if callable(is_visible):
                     try:
@@ -141,6 +152,7 @@ async def _find_candidate(scope, candidates, *, visible: bool = False):
                             continue
                     except Exception:
                         continue
+                return first, index, description
             return locator.first, index, description
         except Exception:
             # A detached frame/closed page makes ``count`` throw; treat it as
@@ -203,42 +215,20 @@ _PUBLISH_BUTTON_CANDIDATES = (
 )
 
 
-def _confirmation_button_candidates(publish_date) -> tuple:
-    """Dialog confirmation candidates, scoped to the modal first.
+def _confirmation_names(publish_date) -> tuple[str, ...]:
+    """Exact confirmation button names, in priority order.
 
     Current Studio uses a generic ``Post now`` confirm button even when the
     post is scheduled (the schedule radio keeps its value).  Prefer a
     ``Schedule``/``Confirm`` button when one is rendered, then fall back to the
-    observed ``Post now`` label.  Exact-name matching avoids the first-run
-    ``Turn on automatic content checks``-style false positives.
+    observed ``Post now`` label.
     """
-    names = (
-        ("Post now",)
-        if not publish_date
-        else ("Schedule", "Confirm", "Post now")
-    )
-    candidates = []
-    for name in names:
-        pattern = re.compile(rf"^{re.escape(name)}$")
-        candidates.append(
-            (
-                f'dialog role=button[name=/{name}/]',
-                lambda page, pattern=pattern: page.locator(
-                    '[role="dialog"]'
-                ).get_by_role("button", name=pattern),
-            )
-        )
-    for name in names:
-        pattern = re.compile(rf"^{re.escape(name)}$")
-        candidates.append(
-            (
-                f'role=button[name=/{name}/]',
-                lambda page, pattern=pattern: page.get_by_role(
-                    "button", name=pattern
-                ),
-            )
-        )
-    return tuple(candidates)
+    if not publish_date:
+        return ("Post now",)
+    return ("Schedule", "Confirm", "Post now")
+
+
+_CONFIRMATION_DIALOG_SELECTORS = ('[role="dialog"]', '.TUXModal')
 _COVER_EDITOR_CLOSE_TIMEOUT_MS = 10_000
 
 # Video file chooser entry, in spec §5.2 step 2 order.
@@ -1383,6 +1373,29 @@ class TiktokBaseUploader(BaseVideoUploader):
                 ),
             ) from exc
 
+    async def _wait_for_brand_labels(
+        self, page, *, timeout_ms: int = 3000
+    ) -> None:
+        """Wait for the brand rows that render only after the master switch.
+
+        A fixed 500 ms sleep raced slower Studio renders; polling the actual
+        ``title-line`` row keeps the one-shot resolver from raising early.
+        """
+        if self.locator_base is None:
+            return
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            try:
+                shelf = self.locator_base.locator(
+                    'xpath=//div[contains(@class,"title-line")]'
+                    '[.//span[normalize-space(text())="Your brand"]]'
+                )
+                if await shelf.count() and await shelf.first.is_visible():
+                    return
+            except Exception:
+                pass
+            await page.wait_for_timeout(150)
+
     async def _apply_brand_options(
         self, controls: TiktokSettingsControls, *, page, url: str
     ) -> None:
@@ -1407,7 +1420,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             option="brand_switch",
             url=url,
         )
-        await page.wait_for_timeout(500)
+        await self._wait_for_brand_labels(page)
 
         your_control = controls.your_brand
         if your_control is None:
@@ -1701,6 +1714,21 @@ class TiktokBaseUploader(BaseVideoUploader):
     async def _expand_advanced_settings(self, page) -> None:
         if self.locator_base is None:
             return
+        # Idempotent: a second call must not toggle "Show more" back closed.
+        for selector in (
+            '[data-e2e="user_perm_container"]',
+            '[data-e2e="aigc_container"]',
+            '[data-e2e="disclose_content_container"]',
+        ):
+            try:
+                surface = self.locator_base.locator(selector)
+                if (
+                    await surface.count()
+                    and await surface.first.is_visible()
+                ):
+                    return
+            except Exception:
+                continue
         container = self.locator_base.locator(
             '[data-e2e="advanced_settings_container"]'
         )
@@ -2244,27 +2272,55 @@ class TiktokBaseUploader(BaseVideoUploader):
             return
 
     async def _click_post_now(self, page) -> bool:
-        """Click the visible publish-confirmation button once, if present."""
-        candidates = _confirmation_button_candidates(self.publish_date)
-        found = await _find_candidate(page, candidates, visible=True)
-        if found is None:
+        """Click an exact confirmation button inside a visible dialog.
+
+        The click is deliberately dialog-only: a page-level fallback can match
+        the primary ``Schedule``/``Post`` button and click it a second time,
+        producing a duplicate post.  If no visible dialog exists, do nothing
+        and let the success-URL wait own the outcome.
+        """
+        dialog = None
+        for selector in _CONFIRMATION_DIALOG_SELECTORS:
+            try:
+                locator = page.locator(selector)
+                for position in range(await locator.count()):
+                    candidate = locator.nth(position)
+                    is_visible = getattr(candidate, "is_visible", None)
+                    if not callable(is_visible) or await is_visible():
+                        dialog = candidate
+                        break
+            except Exception:
+                continue
+            if dialog is not None:
+                break
+        if dialog is None:
             return False
-        button, index, description = found
-        try:
-            await button.click()
-        except Exception as exc:
-            # Do not turn a failed optional fallback into a different exit
-            # code; the success-URL wait still owns the outcome.
+
+        names = _confirmation_names(self.publish_date)
+        for index, name in enumerate(names, start=1):
+            pattern = re.compile(rf"^{re.escape(name)}$")
+            try:
+                button = dialog.get_by_role("button", name=pattern).first
+                if await button.count() == 0:
+                    continue
+                is_visible = getattr(button, "is_visible", None)
+                if callable(is_visible) and not await is_visible():
+                    continue
+                await button.click()
+            except Exception as exc:
+                # Do not turn a failed optional fallback into a different exit
+                # code; the success-URL wait still owns the outcome.
+                tiktok_logger.info(
+                    f"  [-] confirmation click failed ({name}): {exc}"
+                )
+                return False
             tiktok_logger.info(
-                f"  [-] publish confirmation click failed ({description}): {exc}"
+                "[+] TikTok publish: confirmation candidate "
+                f"#{index}/{len(names)} clicked "
+                f"(dialog role=button[name=/{name}/])"
             )
-            return False
-        tiktok_logger.info(
-            "[+] TikTok publish: confirmation candidate "
-            f"#{index + 1}/{len(candidates)} clicked "
-            f"({description})"
-        )
-        return True
+            return True
+        return False
 
     async def choose_base_locator(self, page):
         # await page.wait_for_selector('div.upload-container')
@@ -2285,11 +2341,10 @@ class TiktokBaseUploader(BaseVideoUploader):
             return
         values = self._result_text_candidates()
         if not values:
-            tiktok_logger.info(
-                "[+] scheduled post: no title/note/tags to match; "
-                "skipped row readback"
+            raise PublishResultUnknownError(
+                "TikTok 定时发布结果未知：帖子没有标题/正文/标签可用于核验，"
+                "无法确认定时是否成功；请先人工核验 Content 列表，避免重复发布。"
             )
-            return
         deadline = time.monotonic() + TIKTOK_RESULT_READ_TIMEOUT_MS / 1000
         while time.monotonic() < deadline:
             try:
@@ -2297,19 +2352,26 @@ class TiktokBaseUploader(BaseVideoUploader):
             except Exception:
                 body = ""
             for value in values:
-                index = body.find(value)
-                if index < 0:
-                    continue
-                window = body[index : index + 240]
-                if "(GMT" in window or "（GMT" in window:
-                    tiktok_logger.info(
-                        "[+] scheduled post confirmed in Content list: "
-                        f"{value!r}"
-                    )
-                    return
+                start = 0
+                while True:
+                    index = body.find(value, start)
+                    if index < 0:
+                        break
+                    # The time can render before or after the title; inspect
+                    # both directions instead of a forward-only window.
+                    window = body[
+                        max(0, index - 240) : index + 240
+                    ]
+                    if "(GMT" in window or "（GMT" in window:
+                        tiktok_logger.info(
+                            "[+] scheduled post confirmed in Content list: "
+                            f"{value!r}"
+                        )
+                        return
+                    start = index + 1
             await page.wait_for_timeout(1000)
-        raise RuntimeError(
-            "TikTok 定时发布核验失败：Content 列表未找到带时区标记的定时行；"
+        raise PublishResultUnknownError(
+            "TikTok 定时发布结果未知：Content 列表未找到带时区标记的定时行；"
             "请先人工核验，避免重复发布。"
             f" expected={values!r} url={_page_url(page)!r}"
         )

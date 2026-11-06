@@ -335,12 +335,22 @@ def _render_description(note: str | None, tags: list[str]) -> str:
 
 
 def _validate_note_metadata(
-    title: str | None, note: str | None, tags: list[str]
+    title: str | None,
+    note: str | None,
+    tags: list[str],
+    *,
+    scheduled: bool = False,
 ) -> None:
     """Reject over-limit Title/Description/hashtags before any browser work.
 
     Values are never truncated; each failure is a usage error (exit 2).
     """
+    if scheduled and not (title or note or tags):
+        raise UsageError(
+            "定时图片帖必须至少提供 --title、--note/--notef 或 --tags 之一："
+            "没有可匹配的文本时，发布后无法在 Content 列表核验定时是否成功。"
+        )
+
     if title is not None and len(title) > TIKTOK_MAX_TITLE_LENGTH:
         raise UsageError(
             f"图片帖 Title 过长：{len(title)} 字符，"
@@ -484,7 +494,9 @@ async def run(args):
         note = _note_text(args)
         tags = parse_tags(getattr(args, "tags", ""))
         _validate_note_images(image_files)
-        _validate_note_metadata(title, note, tags)
+        _validate_note_metadata(
+            title, note, tags, scheduled=bool(args.schedule)
+        )
         note_inputs = (image_files, title, note, tags)
 
     if args.action == "login":

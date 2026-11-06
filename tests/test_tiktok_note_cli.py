@@ -592,6 +592,17 @@ class UploadNoteValidationTests(unittest.TestCase):
                 self._argv(images, "--note", "x" * 4001)
             )
 
+    def test_scheduled_note_without_any_text_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            self._assert_exit_2_without_browser(
+                self._argv(
+                    images,
+                    "--schedule",
+                    "2026-11-06 18:15",
+                )
+            )
+
     def test_description_length_includes_expanded_tags(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)

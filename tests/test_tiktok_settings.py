@@ -632,13 +632,9 @@ class _LabelTextLocator:
         return None
 
 
-class FakeAigcPage:
-    """Top-level page that renders the first-run ``Labeling ...`` dialog."""
-
-    url = _OptionPage.url
-
+class _AigcDialogScope:
     def __init__(self, button: FakeDialogButton) -> None:
-        self._button = button
+        self.button = button
 
     def get_by_role(self, role, name=None):
         if role == "button" and (
@@ -648,10 +644,24 @@ class FakeAigcPage:
                 and name.fullmatch("Turn on")
             )
         ):
-            return self._button
+            return self.button
+        return _MissingLocator()
+
+
+class FakeAigcPage:
+    """Top-level page that renders the first-run ``Labeling ...`` dialog."""
+
+    url = _OptionPage.url
+
+    def __init__(self, button: FakeDialogButton) -> None:
+        self._button = button
+
+    def get_by_role(self, role, name=None):
         return _MissingLocator()
 
     def locator(self, selector):
+        if selector == '[role="dialog"]':
+            return _AigcDialogScope(self._button)
         return _MissingLocator()
 
     async def wait_for_timeout(self, ms) -> None:
@@ -930,31 +940,17 @@ class TiktokOptionStepTests(unittest.TestCase):
             all("disclose" not in label for label in labels), labels
         )
 
-    def test_confirmation_candidates_prefer_schedule_for_scheduled_posts(self):
+    def test_confirmation_names_prefer_schedule_for_scheduled_posts(self):
         from datetime import datetime
 
-        immediate = [
-            label
-            for label, _ in tk_main._confirmation_button_candidates(0)
-        ]
-        scheduled = [
-            label
-            for label, _ in tk_main._confirmation_button_candidates(
-                datetime(2026, 11, 6, 17, 35)
-            )
-        ]
+        immediate = tk_main._confirmation_names(0)
+        scheduled = tk_main._confirmation_names(
+            datetime(2026, 11, 6, 17, 35)
+        )
 
+        self.assertEqual(immediate, ("Post now",))
         self.assertEqual(
-            immediate[0], "dialog role=button[name=/Post now/]"
-        )
-        self.assertNotIn(
-            "dialog role=button[name=/Schedule/]", immediate
-        )
-        self.assertEqual(
-            scheduled[0], "dialog role=button[name=/Schedule/]"
-        )
-        self.assertIn(
-            "dialog role=button[name=/Post now/]", scheduled
+            scheduled, ("Schedule", "Confirm", "Post now")
         )
 
     def test_scheduled_verification_accepts_timezone_marked_row(self):
@@ -1019,12 +1015,72 @@ class TiktokOptionStepTests(unittest.TestCase):
         ):
             with self.subTest(body=body):
                 with patch.object(
-                    tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 0
+                    tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 1
                 ):
-                    with self.assertRaises(RuntimeError):
+                    with self.assertRaises(
+                        tk_main.PublishResultUnknownError
+                    ):
                         asyncio.run(
                             video._verify_scheduled_post(_Page(body))
                         )
+
+    def test_scheduled_verification_checks_every_occurrence(self):
+        from datetime import datetime
+
+        class _Page:
+            url = "https://www.tiktok.com/tiktokstudio/content"
+
+            def locator(self, _selector):
+                return self
+
+            async def inner_text(self):
+                # First occurrence has no marker nearby; the real row is far
+                # below.  A first-occurrence-only check would reject this.
+                return (
+                    "TB19 scheduled row filter"
+                    + "x" * 600
+                    + " | TB19 scheduled row | "
+                    "Nov 6, 5:35 PM (GMT+8) Shanghai | Everyone"
+                )
+
+            async def wait_for_timeout(self, _ms):
+                return None
+
+        video = TiktokVideo(
+            "TB19 scheduled row",
+            "/tmp/demo.mp4",
+            [],
+            datetime(2026, 11, 6, 17, 35),
+            None,
+        )
+
+        asyncio.run(video._verify_scheduled_post(_Page()))
+
+    def test_scheduled_verification_fails_closed_without_text(self):
+        from datetime import datetime
+
+        class _Page:
+            url = "https://www.tiktok.com/tiktokstudio/content"
+
+            def locator(self, _selector):
+                return self
+
+            async def inner_text(self):
+                return ""
+
+            async def wait_for_timeout(self, _ms):
+                return None
+
+        video = TiktokVideo(
+            "",
+            "/tmp/demo.mp4",
+            [],
+            datetime(2026, 11, 6, 17, 35),
+            None,
+        )
+
+        with self.assertRaises(tk_main.PublishResultUnknownError):
+            asyncio.run(video._verify_scheduled_post(_Page()))
 
     def test_disable_reuse_touches_only_the_single_reuse_switch(self):
         comments = FakeToggleControl(True)
