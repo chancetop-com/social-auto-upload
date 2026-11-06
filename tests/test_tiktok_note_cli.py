@@ -1118,6 +1118,9 @@ class UploadNoteFlowTests(unittest.TestCase):
         session, session_cm, factory = _fake_session(_StudioContext(page))
         with (
             patch.object(
+                tk_main, "TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS", 0
+            ),
+            patch.object(
                 tiktok_command, "async_playwright", lambda: _AsyncCM(object())
             ),
             patch.object(tiktok_command, "browser_session", new=factory),
@@ -1271,6 +1274,13 @@ class UploadNoteFlowTests(unittest.TestCase):
 
 
 class UploadNoteMetadataTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.object(
+            tk_main, "TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS", 0
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _note(
         self,
         *,

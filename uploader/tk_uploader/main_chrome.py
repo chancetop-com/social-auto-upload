@@ -59,6 +59,8 @@ TIKTOK_INIT_SCRIPT = False
 
 _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
 TIKTOK_RESULT_READ_TIMEOUT_MS = 30_000
+TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS = 3_000
+TIKTOK_HASHTAG_SETTLE_MS = 600
 
 # ---------------------------------------------------------------------------
 # Ordered selector candidates (spec §5.5)
@@ -2273,6 +2275,122 @@ class TiktokBaseUploader(BaseVideoUploader):
         if last_exc is not None:
             raise last_exc
 
+    async def _wait_for_no_options(
+        self, scopes, page, *, timeout_ms: int = 1000
+    ) -> None:
+        """Wait for a previous suggestion dropdown to close."""
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            open_scopes = 0
+            for scope in scopes:
+                try:
+                    if await scope.locator('[role="option"]').count():
+                        open_scopes += 1
+                except Exception:
+                    pass
+            if not open_scopes:
+                return
+            await page.wait_for_timeout(100)
+
+    async def _apply_hashtag(self, page, tag: str) -> bool:
+        """Insert ``#tag`` as a real hashtag entity, like native selection.
+
+        Typing ``#tag`` and pressing **Space** leaves plain text (no
+        ``mention`` span).  Clicking the exact suggestion creates the real
+        entity.  The suggestion dropdown renders asynchronously, so poll for
+        it instead of a single fixed sleep.  Only an exact suggestion is
+        accepted: picking the first item blindly could replace the user's tag
+        with a different one.
+        """
+        wanted = f"#{tag}".casefold()
+        scopes = []
+        if self.locator_base is not None:
+            scopes.append(self.locator_base)
+        if not any(scope is page for scope in scopes):
+            scopes.append(page)
+
+        await page.keyboard.insert_text("#" + tag)
+        deadline = (
+            time.monotonic() + TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS / 1000
+        )
+        settle_deadline = None
+        while True:
+            rendered = False
+            for scope in scopes:
+                try:
+                    options = scope.locator('[role="option"]')
+                    count = await options.count()
+                except Exception:
+                    continue
+                if count:
+                    rendered = True
+                for index in range(count):
+                    option = options.nth(index)
+                    try:
+                        first_line = (
+                            await option.inner_text()
+                        ).strip().splitlines()[0].strip()
+                    except Exception:
+                        continue
+                    if not first_line.startswith("#"):
+                        continue
+                    if first_line.casefold() == wanted:
+                        selected = False
+                        try:
+                            selected = (
+                                str(
+                                    await option.get_attribute(
+                                        "aria-selected"
+                                    )
+                                ).lower()
+                                == "true"
+                            )
+                        except Exception:
+                            selected = False
+                        if selected:
+                            # The typed tag is already the focused suggestion;
+                            # Enter accepts it without viewport/overlay issues.
+                            await page.keyboard.press("Enter")
+                        else:
+                            try:
+                                await option.click(
+                                    timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
+                                )
+                            except Exception:
+                                try:
+                                    await option.click(force=True)
+                                except Exception:
+                                    await option.evaluate(
+                                        "el => el.click()"
+                                    )
+                        await page.wait_for_timeout(300)
+                        tiktok_logger.info(
+                            f"  [-] tag #{tag} inserted as hashtag entity"
+                        )
+                        await self._wait_for_no_options(scopes, page)
+                        return True
+
+            now = time.monotonic()
+            if rendered and settle_deadline is None:
+                # Let a partially rendered list settle before giving up, but
+                # don't wait the full timeout when the dropdown is already up.
+                settle_deadline = now + TIKTOK_HASHTAG_SETTLE_MS / 1000
+            if settle_deadline is not None and now >= settle_deadline:
+                break
+            if not rendered and now >= deadline:
+                break
+            await page.wait_for_timeout(200)
+
+        # No exact suggestion: one Space is enough for a plain-text tag (the
+        # old insert/space/backspace dance only produced the same result).
+        await page.keyboard.press("Space")
+        await page.wait_for_timeout(300)
+        tiktok_logger.info(
+            f"  [-] tag #{tag} inserted as plain text (no exact suggestion)"
+        )
+        return False
+
+
     async def fill_caption(self, page, text, tags, *, editor=None) -> None:
 
         editor_locator = (
@@ -2304,12 +2422,8 @@ class TiktokBaseUploader(BaseVideoUploader):
         for index, tag in enumerate(tags, start=1):
             tiktok_logger.info("Setting the %s tag" % index)
             await page.keyboard.press("End")
-            await page.wait_for_timeout(1000)  # 等待1秒
-            await page.keyboard.insert_text("#" + tag + " ")
-            await page.keyboard.press("Space")
-            await page.wait_for_timeout(1000)  # 等待1秒
-
-            await page.keyboard.press("Backspace")
+            await page.wait_for_timeout(300)
+            await self._apply_hashtag(page, tag)
             await page.keyboard.press("End")
 
     async def click_publish(self, page, *, deadline: float | None = None, multilogin: bool = False):

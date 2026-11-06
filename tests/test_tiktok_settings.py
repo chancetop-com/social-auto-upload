@@ -1854,5 +1854,130 @@ class TiktokOptionCliFlowTests(unittest.TestCase):
         self.assertIsNone(request.options.branded_content)
 
 
+class HashtagEntityTests(unittest.TestCase):
+    class _Option:
+        def __init__(self, page, text, selected=False):
+            self.page = page
+            self.text = text
+            self.selected = selected
+
+        async def inner_text(self):
+            return self.text
+
+        async def get_attribute(self, name):
+            if name == "aria-selected" and self.selected:
+                return "true"
+            return None
+
+        async def click(self, **_kwargs):
+            self.page.clicked.append(self.text)
+            if self in self.page.options:
+                self.page.options.remove(self)
+
+    class _Options:
+        def __init__(self, items):
+            self.items = items
+
+        async def count(self):
+            return len(self.items)
+
+        def nth(self, index):
+            return self.items[index]
+
+    class _Keyboard:
+        def __init__(self, page):
+            self.page = page
+            self.events = []
+
+        async def insert_text(self, text):
+            self.events.append(("insert_text", text))
+
+        async def press(self, key):
+            self.events.append(("press", key))
+            if key == "Enter":
+                self.page.options.clear()
+
+    class _Page:
+        def __init__(self, option_texts):
+            self.keyboard = HashtagEntityTests._Keyboard(self)
+            self.clicked = []
+            self.options = [
+                HashtagEntityTests._Option(self, text)
+                for text in option_texts
+            ]
+
+        def locator(self, selector):
+            if selector == '[role="option"]':
+                return HashtagEntityTests._Options(self.options)
+            return HashtagEntityTests._Options([])
+
+        async def wait_for_timeout(self, _ms):
+            return None
+
+    def test_exact_suggestion_is_clicked_and_becomes_entity(self):
+        page = self._Page(
+            ["#tiktok\n2.0B posts", "#tiktokshop\n175.4M posts"]
+        )
+        video = _uploader(TiktokPublishOptions())
+
+        self.assertTrue(asyncio.run(video._apply_hashtag(page, "tiktok")))
+
+        self.assertEqual(page.clicked, ["#tiktok\n2.0B posts"])
+        self.assertEqual(
+            page.keyboard.events[0], ("insert_text", "#tiktok")
+        )
+        self.assertNotIn(("press", "Space"), page.keyboard.events)
+        self.assertNotIn(("press", "Backspace"), page.keyboard.events)
+
+    def test_selected_suggestion_is_accepted_with_enter(self):
+        page = self._Page(["#tiktok\n2.0B posts"])
+        page.options[0].selected = True
+        video = _uploader(TiktokPublishOptions())
+
+        self.assertTrue(asyncio.run(video._apply_hashtag(page, "tiktok")))
+
+        self.assertIn(("press", "Enter"), page.keyboard.events)
+        self.assertEqual(page.clicked, [])
+
+    def test_no_exact_suggestion_falls_back_to_plain_text(self):
+        page = self._Page(["#tiktokshop\n175.4M posts"])
+        video = _uploader(TiktokPublishOptions())
+
+        with patch.object(tk_main, "TIKTOK_HASHTAG_SETTLE_MS", 0):
+            self.assertFalse(
+                asyncio.run(video._apply_hashtag(page, "tiktok"))
+            )
+
+        self.assertEqual(page.clicked, [])
+        self.assertEqual(
+            [event for event in page.keyboard.events if event[0] == "press"],
+            [("press", "Space")],
+        )
+
+    def test_no_suggestions_at_all_falls_back_after_timeout(self):
+        page = self._Page([])
+        video = _uploader(TiktokPublishOptions())
+
+        with patch.object(
+            tk_main, "TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS", 0
+        ):
+            self.assertFalse(
+                asyncio.run(video._apply_hashtag(page, "tiktok"))
+            )
+
+        self.assertEqual(page.clicked, [])
+        self.assertIn(("press", "Space"), page.keyboard.events)
+
+    def test_non_hashtag_option_is_ignored(self):
+        page = self._Page(["tiktok", "#other"])
+        video = _uploader(TiktokPublishOptions())
+
+        with patch.object(tk_main, "TIKTOK_HASHTAG_SETTLE_MS", 0):
+            self.assertFalse(
+                asyncio.run(video._apply_hashtag(page, "tiktok"))
+            )
+        self.assertEqual(page.clicked, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -106,7 +106,7 @@
 | 图片数量与格式 | `photo_images` | image file input | 条件可行 | `[官方前端代码]` | 1–35 张；JPG/JPEG/PNG/WebP；单张 ≤50 MB |
 | 图片帖 Title | `title` | `Add a catchy title` 输入框 | 可行 | `[官方前端代码]` + `[开源实现]` | ≤90 字符 |
 | 图片帖 Description | `description` | Draft.js / caption 区 | 可行 | `[官方前端代码]` + `[开源实现]` | ≤4000 字符；hashtags 计入 |
-| Hashtags | `hashtags` | Description 内文本 | 可行 | `[官方前端代码]` | ≤50 个；网页不单独存储 |
+| Hashtags | `hashtags` | Description 内 hashtag 实体（`span.mention`） | 可行 | `[官方前端代码]` + `[实测]` | ≤50 个；网页不单独存储；必须走建议下拉生成真实实体，纯文本与原生效果不同 |
 | 多图排序 | `photo_images` 顺序 | 图片卡片拖拽 | 可行（不暴露） | `[官方前端代码]` | CLI 按 `--images` 传入顺序，不做排序参数 |
 | 图片帖封面 | `photo_cover_index` | 无独立控件；第 1 张即封面 | 不可行 | `[官方前端代码]` | 换封面等于改顺序，v1 不暴露 |
 | 隐私级别 | `privacy_level` | `video_visibility_container` 下拉 | 条件可行 | `[官方文档]` + `[官方前端代码]` | 只有 3 项；公开/私有账号文案不同；不可用项置灰 |
@@ -309,6 +309,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 14. `visible=True` 的候选解析必须遍历全部匹配元素；`.first` 可能命中隐藏的重复节点，从而漏掉真正可见的控件。
 15. 选项控件工厂不要预绑定 `.first`；`_LocatorControl` 对多元素 locator 取“第一个可见节点”，避免响应式/隐藏重复把控件误判为不存在。
 16. 定时首次授权的 `Allow` 必须精确匹配并优先 dialog 内，禁止 `button:has-text("Allow")` 命中 cookie 横幅。
+17. Hashtags 必须生成真实实体：输入 `#tag` 后等待建议，点击**文案完全等于** `#tag` 的 `[role="option"]`（生成 `span.mention`）；没有精确建议时回退纯文本并记录日志。`Space`/`Backspace` 只会留下纯文本，不要作为默认路径。
 
 ---
 
