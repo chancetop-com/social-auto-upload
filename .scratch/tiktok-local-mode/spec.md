@@ -1,6 +1,6 @@
 # TikTok CLI 本地模式 — 实施规格
 
-- 状态：实现中；真实账号登录/发布验收未执行（与 ticket 19 同样属外部依赖）。
+- 状态：已实现并合入 `integration/tiktok-browser-parity`（merge `ef9834b`）；真实账号登录/发布验收未执行（与 ticket 19 同样属外部依赖，保持“待验收”）。
 - 背景：`tiktok-browser-parity` 只交付了 Multilogin（MLX）模式。本次扩展让 `sau tiktok` 在未设置 `MLX_API_TOKEN` 时走原有本地 Chromium + cookie 文件路径；MLX 行为不变。
 
 ## 1. 目标

@@ -24,4 +24,4 @@ Blocked by: 无
 
 ## Comments
 
-- 已实现并合入 `feature/tiktok-local-mode`（最终 commit 见分支 HEAD）；TikTok 专项与全量离线套件通过；真实账号登录/发布未执行，保持“待验收”。
+- 已实现并合入 `integration/tiktok-browser-parity`（merge `ef9834b`，feature HEAD `d1ebcba`）；TikTok 专项 207 tests 全绿，全量 745 tests 仅保留既有基线 5 failures + 1 error + 2 skips；真实账号登录/发布未执行，保持“待验收”。
