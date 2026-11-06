@@ -7,6 +7,7 @@ from datetime import datetime
 # ``main.py`` (Firefox) intentionally stays on upstream Playwright and is not
 # wired into the CLI.
 from patchright.async_api import Playwright, async_playwright
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 import os
 import asyncio
 
@@ -24,7 +25,7 @@ from uploader.tk_uploader.tk_config import (
 )
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.files_times import get_absolute_path
 from utils.log import tiktok_logger
 
@@ -39,6 +40,15 @@ TIKTOK_CONTEXT_KWARGS: dict = {}
 TIKTOK_INIT_SCRIPT = False
 
 _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
+
+_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
+    "TikTok 发布结果未知：发布点击已发出，但未观察到成功页，"
+    "也未命中登录/验证码跳转；帖子可能已经发布。"
+)
+
+_PRE_PUBLISH_TIMEOUT_MESSAGE = (
+    "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
+)
 
 
 def _raise_if_login_required(page) -> None:
@@ -419,25 +429,62 @@ class TiktokBaseUploader(BaseVideoUploader):
             await page.keyboard.press("End")
 
     async def click_publish(self, page, *, deadline: float | None = None, multilogin: bool = False):
-        success_flag_div = 'div.common-modal-confirm-modal'
+        # ``publish_clicked`` flips only after ``click()`` returns cleanly; a
+        # click that raises proves nothing was sent.  Once flipped, the button
+        # is never clicked again: a second click could duplicate the post.
+        publish_clicked = False
         while True:
-            self._check_publish_deadline(deadline)
+            try:
+                self._check_publish_deadline(deadline)
+            except RuntimeError:
+                if publish_clicked:
+                    # A login redirect still wins over "result unknown".
+                    if multilogin:
+                        _raise_if_login_required(page)
+                    raise PublishResultUnknownError(
+                        _PUBLISH_RESULT_UNKNOWN_MESSAGE
+                    ) from None
+                raise RuntimeError(_PRE_PUBLISH_TIMEOUT_MESSAGE) from None
+
             if multilogin:
                 _raise_if_login_required(page)
-            try:
-                publish_button = self.locator_base.locator('div.button-group button').nth(0)
-                if await publish_button.count():
-                    await publish_button.click()
 
+            if not publish_clicked:
+                try:
+                    publish_button = self.locator_base.locator('div.button-group button').nth(0)
+                    if await publish_button.count():
+                        await publish_button.click()
+                        publish_clicked = True
+                except Exception as e:
+                    if multilogin:
+                        _raise_if_login_required(page)
+                    tiktok_logger.exception(f"  [-] Exception: {e}")
+                    tiktok_logger.info("  [-] video publishing")
+                    await asyncio.sleep(0.5)
+                    continue
+
+            try:
                 await page.wait_for_url("https://www.tiktok.com/tiktokstudio/content",  timeout=3000)
-                tiktok_logger.success("  [-] video published success")
-                break
+            except (PlaywrightTimeoutError, TimeoutError):
+                tiktok_logger.info("  [-] video publishing")
+                await asyncio.sleep(0.5)
+                continue
             except Exception as e:
                 if multilogin:
                     _raise_if_login_required(page)
+                if publish_clicked:
+                    # Page/context closed, CDP dropped, or a form error after
+                    # the click: stop at once instead of spinning to deadline.
+                    raise PublishResultUnknownError(
+                        _PUBLISH_RESULT_UNKNOWN_MESSAGE
+                    ) from e
                 tiktok_logger.exception(f"  [-] Exception: {e}")
                 tiktok_logger.info("  [-] video publishing")
                 await asyncio.sleep(0.5)
+                continue
+
+            tiktok_logger.success("  [-] video published success")
+            return
 
     async def choose_base_locator(self, page):
         # await page.wait_for_selector('div.upload-container')
