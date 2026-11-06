@@ -1,0 +1,283 @@
+# -*- coding: utf-8 -*-
+"""TikTok exit-code contract for the publish stage (ticket 11).
+
+All tests are offline: in-memory page/locator doubles, no browser, no network.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest.mock import AsyncMock, patch
+
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
+
+import sau_cli
+from uploader.tk_uploader import main_chrome as tk_main
+from uploader.tk_uploader.main_chrome import TiktokVideo
+from utils.errors import LoginRequiredError, PublishResultUnknownError
+
+CONTENT_URL = "https://www.tiktok.com/tiktokstudio/content"
+UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload"
+LOGIN_URL = "https://www.tiktok.com/login?lang=en"
+
+
+class _FakeLocator:
+    """The publish button; ``nth`` keeps pointing at the same fake button."""
+
+    def __init__(self, *, click_error: BaseException | None = None) -> None:
+        self.click_error = click_error
+        self.click_calls = 0
+
+    def nth(self, _index: int):
+        return self
+
+    async def count(self) -> int:
+        return 1
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        if self.click_error is not None:
+            raise self.click_error
+
+
+class _FakeLocatorBase:
+    def __init__(self, button: _FakeLocator) -> None:
+        self.button = button
+
+    def locator(self, _selector: str) -> _FakeLocator:
+        return self.button
+
+
+class _Clock:
+    """Mutable monotonic clock so async internals cannot consume the values."""
+
+    def __init__(self, value: float = 500.0) -> None:
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+    def expire(self) -> None:
+        self.value = 1000.0
+
+
+class _FakePage:
+    """Scripted ``wait_for_url``; each outcome is consumed in order.
+
+    ``"<url>"`` / ``None``  → success (optionally changing ``page.url``).
+    ``("timeout", url)``   → raise the Playwright timeout.
+    ``BaseException``      → raise it as a page/context failure.
+    """
+
+    def __init__(
+        self, *, url: str = UPLOAD_URL, wait_outcomes=(), on_timeout=None
+    ) -> None:
+        self.url = url
+        self.wait_calls = 0
+        self.wait_timeouts: list[int] = []
+        self.on_timeout = on_timeout
+        self._outcomes = list(wait_outcomes)
+
+    async def wait_for_url(self, _url: str, timeout: int | None = None) -> None:
+        self.wait_calls += 1
+        self.wait_timeouts.append(timeout)
+        outcome = (
+            self._outcomes.pop(0) if self._outcomes else ("timeout", None)
+        )
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if isinstance(outcome, tuple) and outcome[0] == "timeout":
+            if outcome[1] is not None:
+                self.url = outcome[1]
+            if self.on_timeout is not None:
+                self.on_timeout()
+            raise PlaywrightTimeoutError("wait_for_url timed out")
+        if isinstance(outcome, str):
+            self.url = outcome
+
+
+def _video() -> TiktokVideo:
+    return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
+
+
+def _run_cli(dispatch) -> tuple[int, str, str]:
+    with patch.object(sau_cli, "dispatch", new=dispatch):
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(
+            io.StringIO()
+        ) as err:
+            code = sau_cli.main(["tiktok", "check"])
+    return code, out.getvalue(), err.getvalue()
+
+
+def _returning(result: int = 0):
+    async def _dispatch(_args):
+        return result
+
+    return _dispatch
+
+
+def _raising(error: BaseException):
+    async def _dispatch(_args):
+        raise error
+
+    return _dispatch
+
+
+class CliExitCodeTests(unittest.TestCase):
+    def test_success_maps_to_0(self):
+        code, _, _ = _run_cli(_returning(0))
+        self.assertEqual(code, 0)
+
+    def test_generic_failure_maps_to_1(self):
+        code, _, err = _run_cli(_raising(RuntimeError("boom")))
+        self.assertEqual(code, 1)
+        self.assertIn("boom", err)
+
+    def test_publish_result_unknown_maps_to_9_with_manual_verification(self):
+        code, _, err = _run_cli(
+            _raising(PublishResultUnknownError("发布点击已发出，结果未知。"))
+        )
+        self.assertEqual(code, 9)
+        self.assertIn("发布结果未知", err)
+        self.assertIn("禁止自动重发", err)
+        self.assertIn("Content/Posts", err)
+        self.assertIn("标题", err)
+        self.assertIn("发布时间", err)
+
+    def test_login_required_maps_to_10(self):
+        code, _, _ = _run_cli(_raising(LoginRequiredError("需要登录")))
+        self.assertEqual(code, 10)
+
+
+class ClickPublishTests(unittest.TestCase):
+    def test_success_returns_normally(self):
+        video = _video()
+        button = _FakeLocator()
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage(wait_outcomes=[CONTENT_URL])
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()) as sleep:
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(page.wait_calls, 1)
+        self.assertEqual(page.url, CONTENT_URL)
+        sleep.assert_not_awaited()
+
+    def test_never_clicked_deadline_is_exit_1_not_9(self):
+        video = _video()
+        button = _FakeLocator()
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage()
+
+        async def _dispatch(_args):
+            await video.click_publish(page, deadline=999.0, multilogin=True)
+            return 0
+
+        with patch.object(tk_main.time, "monotonic", return_value=1000.0):
+            code, _, err = _run_cli(_dispatch)
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("禁止自动重发", err)
+        self.assertIn("未发布", err)
+        self.assertEqual(button.click_calls, 0)
+        self.assertEqual(page.wait_calls, 0)
+
+    def test_clicked_then_deadline_is_publish_result_unknown_exit_9(self):
+        video = _video()
+        button = _FakeLocator()
+        video.locator_base = _FakeLocatorBase(button)
+        clock = _Clock()
+        page = _FakePage(
+            wait_outcomes=[("timeout", None)], on_timeout=clock.expire
+        )
+
+        async def _dispatch(_args):
+            await video.click_publish(page, deadline=999.0, multilogin=True)
+            return 0
+
+        sleep = AsyncMock()
+        with (
+            patch.object(tk_main.time, "monotonic", clock),
+            patch.object(tk_main.asyncio, "sleep", sleep),
+        ):
+            code, _, err = _run_cli(_dispatch)
+
+        self.assertEqual(code, 9)
+        self.assertIn("禁止自动重发", err)
+        self.assertIn("Content/Posts", err)
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(sleep.await_count, 1)
+
+    def test_login_redirect_at_deadline_wins_over_unknown(self):
+        video = _video()
+        button = _FakeLocator()
+        video.locator_base = _FakeLocatorBase(button)
+        clock = _Clock()
+        page = _FakePage(
+            wait_outcomes=[("timeout", LOGIN_URL)], on_timeout=clock.expire
+        )
+
+        async def _dispatch(_args):
+            await video.click_publish(page, deadline=999.0, multilogin=True)
+            return 0
+
+        with (
+            patch.object(tk_main.time, "monotonic", clock),
+            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
+        ):
+            code, _, err = _run_cli(_dispatch)
+
+        self.assertEqual(code, 10)
+        self.assertNotIn("禁止自动重发", err)
+        self.assertEqual(button.click_calls, 1)
+
+    def test_clicked_then_page_closed_is_exit_9_without_spinning(self):
+        video = _video()
+        button = _FakeLocator()
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage(
+            wait_outcomes=[
+                RuntimeError("Target page, context or browser has been closed")
+            ]
+        )
+
+        async def _dispatch(_args):
+            await video.click_publish(page, deadline=999.0, multilogin=True)
+            return 0
+
+        sleep = AsyncMock()
+        with (
+            patch.object(tk_main.time, "monotonic", return_value=500.0),
+            patch.object(tk_main.asyncio, "sleep", sleep),
+        ):
+            code, _, err = _run_cli(_dispatch)
+
+        self.assertEqual(code, 9)
+        self.assertIn("禁止自动重发", err)
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(page.wait_calls, 1)
+        sleep.assert_not_awaited()
+
+    def test_pre_publish_media_deadline_is_exit_1(self):
+        video = _video()
+        page = _FakePage()
+
+        async def _dispatch(_args):
+            await video.wait_media_ready(
+                page, deadline=999.0, multilogin=True
+            )
+            return 0
+
+        with patch.object(tk_main.time, "monotonic", return_value=1000.0):
+            code, _, err = _run_cli(_dispatch)
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("禁止自动重发", err)
+
+
+if __name__ == "__main__":
+    unittest.main()

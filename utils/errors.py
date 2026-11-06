@@ -12,5 +12,13 @@ class LoginRequiredError(Exception):
     """Platform login state is invalid; the CLI maps this to exit code 10."""
 
 
+class PublishResultUnknownError(Exception):
+    """The publish click was sent but success was never observed.
+
+    The post may already exist.  The CLI maps this to exit code 9 and callers
+    must never retry automatically.
+    """
+
+
 class UsageError(Exception):
     """Invalid CLI usage discovered at runtime; the CLI maps this to exit code 2."""
