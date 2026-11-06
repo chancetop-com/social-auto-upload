@@ -358,10 +358,12 @@ class _LocatorControl(TiktokOptionControl):
 
     async def click(self) -> None:
         try:
-            await self._locator.click()
+            # Don't wait the full 30s for a styled label whose icon intercepts
+            # the native input; force after a short attempt.
+            await self._locator.click(
+                timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
+            )
         except Exception:
-            # Styled checkboxes cover the native input with an icon; force the
-            # click and let the readback decide whether it actually toggled.
             await self._locator.click(force=True)
 
     async def get_attribute(self, name: str) -> str | None:
@@ -1507,7 +1509,25 @@ class TiktokBaseUploader(BaseVideoUploader):
             )
 
         if name == "reuse":
+            # Current Studio labels the single switch "Reuse of content";
+            # older bundles used "Allow reuse of content".
             return (
+                (
+                    "data-e2e=user_perm_container+role=Reuse of content",
+                    lambda: _LocatorControl(
+                        perm.get_by_role(
+                            "checkbox", name="Reuse of content"
+                        ).first
+                    ),
+                ),
+                (
+                    "data-e2e=user_perm_container+label=Reuse of content",
+                    lambda: _LocatorControl(
+                        perm.locator(
+                            'label:has-text("Reuse of content")'
+                        ).first
+                    ),
+                ),
                 (
                     "data-e2e=user_perm_container+role=Allow reuse of content",
                     lambda: _LocatorControl(

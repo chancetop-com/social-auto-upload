@@ -12,7 +12,7 @@ Blocked by: 17, 18
 ## Acceptance criteria
 
 - [x] 视频无新参数发布成功，退出 `0`，Content 列表出现新帖。**（公开账号 `7704974050090683661`，Content 行 Everyone）**
-- [x] `--privacy only-me`、`--no-comments`、`--disable-reuse`、`--aigc`、`--your-brand`、`--branded-content` 各完成一次，结果与页面/帖子一致。
+- [x] `--privacy only-me`、`--no-comments`、`--disable-reuse`、`--aigc`、`--your-brand`、`--branded-content` 各完成一次，结果与页面/帖子一致。**（公开账号 `--disable-reuse` v2 `7704978171703069966` 实际取消 Reuse of content 并回读；私有账号控件缺失时按目标 False 满足）**
 - [x] 视频自定义封面生效。
 - [ ] `--schedule` 到点发布且时间正确。**（已创建 22:00 Followers 定时帖并核对时间/隐私；未等待到点。切换公开账号后该 Followers 定时帖从 Scheduled 列表消失，账号类型变更可能导致取消）**
 - [ ] `upload-note` 多图顺序正确、第 1 张为封面、Title/Description/tags 正确。**（多图/首图封面/Description/tags 通过；Title 已填写但 Web 帖子页不展示，未做编辑页复核）**
@@ -32,3 +32,4 @@ Blocked by: 17, 18
 - 发现并修复：Content `read_result` 原取列表第一条，定时帖排在最前导致图文帖误取定时帖 ID；已改为按标题/正文/标签匹配，并在真实 Content 页验证图文 `7704966090018786574`、视频 `7704956309300382989` 均正确。账号能力不匹配时退出 `1` 已验证：私有账号请求 `public`（actual `Followers`）、only-me 下 Schedule 禁用、图片帖选项不可见。
 - 2026-11-06：用户将 `lukechen` 切换为**公开账号**，复验公开账号专属项，并复查图片帖评论/AIGC/品牌控件（用户界面可见，需重新定位 Settings 展开方式/可见性判断）。
 - 2026-11-06：公开账号复验完成。无新参数发布 `7704974050090683661`、`--privacy public` `7704974226096246029` 均为 Content **Everyone**；`--privacy followers` 严格失败（requested followers / actual Everyone）。图片帖选项确认支持：图片页没有 `advanced_settings_container`，点击全局 **Show more** 后评论/AIGC/品牌控件可见；`--privacy public --no-comments --aigc --your-brand` 图片帖 `7704976028485176590` 发布成功，帖子页显示 **Promotional content** + **Creator labeled as AI-generated**，Content 行 Everyone。此前“图片页选项页面不支持”的结论已撤销。
+- 2026-11-06：公开账号 `--disable-reuse` 补测发现当前文案是 **“Reuse of content”**，旧候选漏配导致 v1 未实际取消；已补候选并缩短点击超时，v2 `7704978171703069966` 日志 `reuse resolved by candidate #0 (Reuse of content)` 并成功发布。

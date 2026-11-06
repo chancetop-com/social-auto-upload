@@ -628,6 +628,9 @@ class _LabelTextLocator:
             return self._aria
         return None
 
+    async def click(self, **kwargs) -> None:
+        return None
+
 
 class FakeAigcPage:
     """Top-level page that renders the first-run ``Labeling ...`` dialog."""
@@ -887,6 +890,17 @@ class TiktokOptionStepTests(unittest.TestCase):
         controls = asyncio.run(video.resolve_option_controls(_OptionPage()))
 
         self.assertIsNone(controls.reuse)
+
+    def test_reuse_candidates_include_current_studio_label(self):
+        video = _uploader(TiktokPublishOptions(allow_reuse=False))
+        video.locator_base = MagicMock()
+        labels = [
+            label
+            for label, _ in video._option_candidate_factories("reuse")
+        ]
+        self.assertTrue(
+            any("Reuse of content" in label for label in labels), labels
+        )
 
     def test_disable_reuse_touches_only_the_single_reuse_switch(self):
         comments = FakeToggleControl(True)
