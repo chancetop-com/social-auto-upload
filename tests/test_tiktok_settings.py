@@ -879,17 +879,42 @@ class TiktokOptionStepTests(unittest.TestCase):
     def test_missing_reuse_control_with_disable_reuse_is_satisfied(self):
         video = _uploader(TiktokPublishOptions(allow_reuse=False))
         _install(video, _controls())
+        video._reuse_control_absent = AsyncMock(return_value=True)
 
         asyncio.run(video.apply_options(_OptionPage()))
+
+    def test_missing_reuse_control_with_reuse_label_fails(self):
+        video = _uploader(TiktokPublishOptions(allow_reuse=False))
+        _install(video, _controls())
+        video._reuse_control_absent = AsyncMock(return_value=False)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("allow_reuse", str(ctx.exception))
+        self.assertIn("control-not-found", str(ctx.exception))
 
     def test_resolve_tolerates_missing_reuse_when_disabling(self):
         video = _uploader(TiktokPublishOptions(allow_reuse=False))
         video._resolve_single_control = AsyncMock(return_value=None)
         video._expand_advanced_settings = AsyncMock()
+        video._reuse_control_absent = AsyncMock(return_value=True)
 
         controls = asyncio.run(video.resolve_option_controls(_OptionPage()))
 
         self.assertIsNone(controls.reuse)
+
+    def test_resolve_fails_when_reuse_label_present_without_control(self):
+        video = _uploader(TiktokPublishOptions(allow_reuse=False))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+        video._reuse_control_absent = AsyncMock(return_value=False)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.resolve_option_controls(_OptionPage()))
+
+        self.assertIn("option=reuse", str(ctx.exception))
+        self.assertIn("control-not-found", str(ctx.exception))
 
     def test_reuse_candidates_include_current_studio_label(self):
         video = _uploader(TiktokPublishOptions(allow_reuse=False))

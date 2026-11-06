@@ -56,7 +56,7 @@
 | 设置后回读（set-then-readback） | CLI 显式传参后操作控件，再从页面读取最终状态；不一致即失败。本规格不叫“能力预检”。 |
 | 发布结果未知 | 发布点击已发出、未观察到成功页、未命中登录/验证码跳转；对应退出码 `9`。 |
 | Photos tab | TikTok Studio 上传页的图片帖模式入口；按账号/地区灰度。 |
-| 内容复用（reuse） | 页面上的 `Allow reuse of content`，同时控制 Duet / Stitch / Stickers / Story。 |
+| 内容复用（reuse） | 页面上的 `Reuse of content`（旧版文案 `Allow reuse of content`），同时控制 Duet / Stitch / Stickers / Story。 |
 | 图片帖（note） | TikTok 的多图帖，对应 API 的 Photo post；本仓命令名 `upload-note`。 |
 | 图文字段 | 图片帖的 Title（≤90）与 Description（≤4000，含 hashtags）。 |
 
@@ -111,9 +111,9 @@
 | 图片帖封面 | `photo_cover_index` | 无独立控件；第 1 张即封面 | 不可行 | `[官方前端代码]` | 换封面等于改顺序，v1 不暴露 |
 | 隐私级别 | `privacy_level` | `video_visibility_container` 下拉 | 条件可行 | `[官方文档]` + `[官方前端代码]` | 只有 3 项；公开/私有账号文案不同；不可用项置灰 |
 | 评论 | `disable_comment` | `Allow comments` 复选框 | 可行 | `[官方前端代码]` | 账号级禁止时置灰；回读一致即成功 |
-| 合拍 | `disable_duet` | 合并进 `Allow reuse of content` | 条件可行 | `[官方前端代码]` | 不能独立设置 |
-| 拼接 | `disable_stitch` | 合并进 `Allow reuse of content` | 条件可行 | `[官方前端代码]` | 不能独立设置 |
-| 内容复用总开关 | 无单独字段 | `Allow reuse of content` | 可行 | `[官方前端代码]` | 同时影响 Stickers / Story；CLI 用 `--disable-reuse` |
+| 合拍 | `disable_duet` | 合并进 `Reuse of content` | 条件可行 | `[官方前端代码]` | 不能独立设置 |
+| 拼接 | `disable_stitch` | 合并进 `Reuse of content` | 条件可行 | `[官方前端代码]` | 不能独立设置 |
+| 内容复用总开关 | 无单独字段 | `Reuse of content`（旧版 `Allow reuse of content`） | 可行 | `[官方前端代码]` | 同时影响 Stickers / Story；CLI 用 `--disable-reuse` |
 | AI 生成标识 | `is_aigc` | `AI-generated content` 开关 | 条件可行 | `[官方前端代码]` | 受 A/B `show_aigc_toggle` 控制；首次开启需点 `Turn on` |
 | 品牌：Your brand | `brand_organic_toggle` | `Disclose post content` + `Your brand` | 可行 | `[官方前端代码]` | 发布后标签 `Promotional content` |
 | 品牌：Branded content | `brand_content_toggle` | `Disclose post content` + `Branded content` | 条件可行 | `[官方前端代码]` | 与 `Only you` 互斥；发布后标签 `Paid partnership` |
@@ -146,7 +146,7 @@
 | --- | --- | --- | --- |
 | `--privacy` | `public` / `friends` / `followers` / `only-me` | 不传 = 不动 | 显式设置隐私级别并回读 |
 | `--no-comments` | 开关 | 不传 = 不动 | 取消 `Allow comments` |
-| `--disable-reuse` | 开关 | 不传 = 不动 | 取消 `Allow reuse of content`（同时影响 Duet/Stitch/Stickers/Story） |
+| `--disable-reuse` | 开关 | 不传 = 不动 | 取消 `Reuse of content`（旧版 `Allow reuse of content`；同时影响 Duet/Stitch/Stickers/Story） |
 | `--aigc` / `--no-aigc` | 互斥三态 | 不传 = 不动 | 开启/关闭 `AI-generated content` |
 | `--your-brand` | 开关 | 不传 = 不动 | 勾选 `Your brand` |
 | `--branded-content` | 开关 | 不传 = 不动 | 勾选 `Branded content` |
@@ -271,7 +271,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 | 展开高级设置 | `[data-e2e="advanced_settings_container"]` | `.more-btn` → `text="Show more"`；检查 `.collapsed` | 等待目标控件可见 |
 | 隐私 | `[data-e2e="video_visibility_container"]` | `button[role="combobox"]` → 点击 → `li[role="option"]` | combobox 文本；选项 `aria-selected="true"` |
 | 评论 | `[data-e2e="user_perm_container"]` | `get_by_role("checkbox", name="Allow comments")` → label 文本 | `is_checked()` |
-| 内容复用 | 同上 | `get_by_role("checkbox", name="Allow reuse of content")` → label 文本 | `is_checked()` |
+| 内容复用 | 同上 | `get_by_role("checkbox", name="Reuse of content")` → 旧版 `Allow reuse of content` → label 文本（需先 Show more） | `is_checked()` |
 | AIGC | `[data-e2e="aigc_container"]` | `[role="switch"]` → `.Switch__content` | `aria-checked` |
 | AIGC 首次引导 | 顶层 dialog | `get_by_role("button", name="Turn on")` → `[role="dialog"] button:has-text("Turn on")` | 弹窗消失后再回读 |
 | 品牌总开关 | `[data-e2e="disclose_content_container"]` | `[role="switch"]` → `.Switch__content` | `aria-checked` |

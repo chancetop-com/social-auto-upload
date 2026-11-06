@@ -1217,11 +1217,15 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
         if options.allow_reuse is not None:
-            if controls.reuse is None and options.allow_reuse is False:
-                # Private accounts may not render the control at all; the
-                # requested state is already the account-enforced state.
+            if (
+                controls.reuse is None
+                and options.allow_reuse is False
+                and await self._reuse_control_absent(page)
+            ):
+                # The composer has no reuse option at all, so the requested
+                # disabled state is already the account-enforced state.
                 tiktok_logger.info(
-                    "[+] TikTok options: reuse control not rendered; "
+                    "[+] TikTok options: composer has no reuse option; "
                     "disabled state already satisfied"
                 )
             else:
@@ -1262,6 +1266,24 @@ class TiktokBaseUploader(BaseVideoUploader):
                 control=None,
                 url=url,
             )
+
+    async def _reuse_control_absent(self, page) -> bool:
+        """True only when the composer has no reuse option at all.
+
+        A missing reuse control used to be treated as "already disabled", but
+        the only-me composer does render it (behind Show more, checked on by
+        default).  A visible "Reuse" label with an unresolvable control means
+        selector drift and must fail instead of silently claiming success.
+        """
+        scope = self.locator_base if self.locator_base is not None else page
+        try:
+            perm = scope.locator('div[data-e2e="user_perm_container"]')
+            if await perm.count() == 0:
+                return True
+            text = ((await perm.first.inner_text()) or "").casefold()
+        except Exception:
+            return False
+        return "reuse" not in text
 
     async def _set_aigc_option(
         self,
@@ -1741,11 +1763,12 @@ class TiktokBaseUploader(BaseVideoUploader):
                         name == "reuse"
                         and getattr(self.options, "allow_reuse", None)
                         is False
+                        and await self._reuse_control_absent(page)
                     ):
-                        # No reuse control is rendered for some private
-                        # accounts; the requested disabled state is satisfied.
+                        # The composer offers no reuse option at all; the
+                        # requested disabled state is already satisfied.
                         tiktok_logger.info(
-                            "[+] TikTok options: reuse control not rendered; "
+                            "[+] TikTok options: composer has no reuse option; "
                             "disabled state already satisfied"
                         )
                         continue
