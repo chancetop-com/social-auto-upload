@@ -282,6 +282,15 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 | 封面文件输入 | 封面编辑器 | `[aria-label="Upload cover image"] input[type="file"]` → `input[type="file"][accept*="image/jpeg"]`（限定在编辑器内） | 上传后出现 `[aria-label="Uploaded cover image"]` |
 | 封面保存 | 封面编辑器 | `get_by_role("button", name=re.compile(r"^(Save|Confirm)$"))` | 编辑器关闭 |
 
+### 5.4.1 首次上传浮层（实测补充）
+
+首次在账号上上传视频时，TikTok Studio 可能依次出现两个阻塞浮层：
+
+1. `Turn on automatic content checks?` 模态框（`[role="dialog"]` 内含 `automatic content checks` 文案）——点击 `Cancel`，不要点击 `Turn on`，避免改写账号设置。
+2. react-joyride 新手引导遮罩（`#react-joyride-portal` / `.react-joyride__overlay`）——点击遮罩本身关闭。
+
+两者都会拦截 caption 编辑器与后续控件的点击。实现上把它们做成共用步骤 `dismiss_blocking_overlays`，并在 caption 编辑器点击时重试；缺失浮层时是 no-op。该步骤对视频与图片帖都适用，MLX 与本地模式共用。
+
 ### 5.5 选择器策略（08 决策）
 
 1. 每个步骤维护**有序候选列表**；主选优先 `data-e2e`，其次 role/accessible name，最后文本。
@@ -358,7 +367,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 | 环节 | 值 | 现状 |
 | --- | --- | --- |
 | 登录检测总预算 | 20s | `TIKTOK_LOGIN_CHECK_TIMEOUT_MS` |
-| 登录检测入口轮询 | 5s | `TIKTOK_ENTRY_WAIT_MS` |
+| 登录检测入口轮询 | 15s（总预算 20s 内） | `TIKTOK_ENTRY_WAIT_MS`；本地校验用 `TIKTOK_LOCAL_ENTRY_WAIT_MS=20s` |
 | 进入上传页 URL | 10s | `page.wait_for_url` |
 | iframe / `div.upload-container` 出现 | 10s | `wait_for_selector` |
 | 上传按钮可见 | 30s | Playwright 默认 |
@@ -584,6 +593,7 @@ class TiktokPublishOptions:
 | 图片帖 `Post now` / 检查弹窗 | 点击后可能不跳成功页 | 兜底点击 `Post now`；否则按 `9` 处理 |
 | AIGC `show_aigc_toggle` A/B flag | 容器可能不存在 | 显式请求时退出 `1`；未请求不触碰 |
 | 封面预览变化是否等于服务端接受（上游 issue #228） | 可能显示成功但封面未生效 | 发布后人工核验；页面状态断言 |
+| 首次上传的自动内容检查弹窗 / 新手引导遮罩拦截点击 | 已在真实账号实测出现 | `dismiss_blocking_overlays`：Cancel 关闭弹窗、点击 joyride 遮罩；编辑器点击重试 |
 | 35×50 MB 是否在 15 分钟内完成 | 极端情况超时 | 保留常量，后续单独调；不在本规格预设 |
 
 ### 11.2 风险表

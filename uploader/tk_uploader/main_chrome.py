@@ -20,6 +20,7 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_ENTRY_WAIT_MS,
     TIKTOK_IMAGE_SUFFIXES,
     TIKTOK_LOCAL_ENTRY_WAIT_MS,
+    TIKTOK_OVERLAY_CLICK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_URL,
     TIKTOK_LOGIN_FORM_SELECTOR,
@@ -1028,10 +1029,14 @@ class TiktokBaseUploader(BaseVideoUploader):
             raise
 
         try:
-            await page.wait_for_selector('iframe[data-tt="Upload_index_iframe"], div.upload-container', timeout=10000)
-            tiktok_logger.info("Either iframe or div appeared.")
+            # The current Studio shell can be the ``Select video`` entry itself,
+            # without an iframe or ``div.upload-container``.
+            await page.wait_for_selector(
+                TIKTOK_UPLOAD_ENTRY_SELECTOR, timeout=10000
+            )
+            tiktok_logger.info("TikTok upload entry appeared.")
         except Exception as e:
-            tiktok_logger.error("Neither iframe nor div appeared within the timeout.")
+            tiktok_logger.error("TikTok upload entry did not appear in time.")
             if multilogin:
                 _raise_if_login_required(page)
 
@@ -1601,6 +1606,73 @@ class TiktokBaseUploader(BaseVideoUploader):
         # click title to remove the focus.
         # await self.locator_base.locator("h1:has-text('Upload video')").click()
 
+    async def dismiss_blocking_overlays(self, page) -> None:
+        """Close TikTok's first-run overlays that intercept pointer events.
+
+        Two independent blockers can appear after the first upload:
+        1. ``Turn on automatic content checks?`` modal — dismiss with Cancel.
+        2. react-joyride onboarding overlay — clicking the overlay dismisses it.
+        Both are first-run UI, not publish options; missing overlays are a no-op.
+        """
+        try:
+            dialogs = page.locator('[role="dialog"]').filter(
+                has_text="automatic content checks"
+            )
+            if await dialogs.count():
+                dialog = dialogs.first
+                for label in ("Cancel", "Got it", "Close"):
+                    button = dialog.get_by_role("button", name=label)
+                    if await button.count():
+                        await button.first.click(
+                            timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
+                        )
+                        try:
+                            await dialog.wait_for(
+                                state="detached", timeout=5_000
+                            )
+                        except Exception:
+                            pass
+                        tiktok_logger.info(
+                            "[+] dismissed automatic content checks modal"
+                        )
+                        break
+        except Exception as exc:
+            tiktok_logger.info(
+                f"  [-] automatic content checks modal not dismissed: {exc}"
+            )
+
+        try:
+            joyride = page.locator("#react-joyride-portal")
+            if await joyride.count():
+                overlay = page.locator(".react-joyride__overlay")
+                target = overlay if await overlay.count() else joyride
+                await target.first.click(
+                    timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
+                )
+                try:
+                    await joyride.wait_for(state="detached", timeout=5_000)
+                except Exception:
+                    pass
+                tiktok_logger.info("[+] dismissed onboarding overlay")
+        except Exception as exc:
+            tiktok_logger.info(f"  [-] onboarding overlay not dismissed: {exc}")
+
+    async def _click_editor(self, page, editor_locator) -> None:
+        """Click the caption editor, clearing first-run overlays as they appear."""
+        last_exc = None
+        for _ in range(8):
+            await self.dismiss_blocking_overlays(page)
+            try:
+                await editor_locator.click(
+                    timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
+                )
+                return
+            except Exception as exc:
+                last_exc = exc
+                await page.wait_for_timeout(1000)
+        if last_exc is not None:
+            raise last_exc
+
     async def fill_caption(self, page, text, tags, *, editor=None) -> None:
 
         editor_locator = (
@@ -1608,7 +1680,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             if editor is not None
             else self.locator_base.locator('div.public-DraftEditor-content')
         )
-        await editor_locator.click()
+        await self._click_editor(page, editor_locator)
 
         await page.keyboard.press("End")
 
@@ -2145,29 +2217,40 @@ class TiktokNote(TiktokBaseUploader):
 
     async def _fill_title(self, page) -> None:
         scope = await self._resolve_photo_scope(page)
-        for selector in self._PHOTO_TITLE_CANDIDATES:
-            locator = scope.locator(selector)
-            try:
-                if await locator.count() > 0:
-                    await locator.first.fill(self.title)
+        last_exc = None
+        for _ in range(8):
+            await self.dismiss_blocking_overlays(page)
+            for selector in self._PHOTO_TITLE_CANDIDATES:
+                locator = scope.locator(selector)
+                try:
+                    if await locator.count() == 0:
+                        continue
+                    await locator.first.fill(
+                        self.title,
+                        timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS,
+                    )
                     return
-            except Exception:
-                continue
+                except Exception as exc:
+                    last_exc = exc
+            await page.wait_for_timeout(1000)
         raise RuntimeError(
-            "TikTok 图片帖 Title 输入框未找到："
+            "TikTok 图片帖 Title 输入框未找到或无法填写："
             f"tried={list(self._PHOTO_TITLE_CANDIDATES)!r} "
-            f"url={_page_url(page)!r}"
+            f"url={_page_url(page)!r} error={last_exc!r}"
         )
 
     async def _resolve_caption_editor(self, page):
         scope = await self._resolve_photo_scope(page)
-        for selector in self._PHOTO_CAPTION_CANDIDATES:
-            locator = scope.locator(selector)
-            try:
-                if await locator.count() > 0:
-                    return locator
-            except Exception:
-                continue
+        for _ in range(8):
+            await self.dismiss_blocking_overlays(page)
+            for selector in self._PHOTO_CAPTION_CANDIDATES:
+                locator = scope.locator(selector)
+                try:
+                    if await locator.count() > 0:
+                        return locator
+                except Exception:
+                    continue
+            await page.wait_for_timeout(1000)
         raise RuntimeError(
             "TikTok 图片帖 Description 编辑器未找到："
             f"tried={list(self._PHOTO_CAPTION_CANDIDATES)!r} "

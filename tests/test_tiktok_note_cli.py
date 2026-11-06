@@ -163,7 +163,7 @@ class _Locator:
         self.page.events.append(("set_input_files", tuple(files)))
         self.page.input_files = list(files)
 
-    async def fill(self, text: str) -> None:
+    async def fill(self, text: str, **kwargs) -> None:
         self.page.events.append(("fill", self.selector, text))
         if "catchy" in self.selector:
             self.page.title_text = text
