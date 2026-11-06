@@ -40,6 +40,83 @@ TIKTOK_INIT_SCRIPT = False
 
 _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
 
+# ---------------------------------------------------------------------------
+# Ordered selector candidates (spec §5.5)
+#
+# Each step keeps its own ordered list, the first candidate whose locator
+# count is non-zero wins, and the winning index is logged.  There is no
+# cross-step fuzzy fallback.
+# ---------------------------------------------------------------------------
+
+# The cover editor is the nearest ancestor of the "Upload cover" tab that
+# actually contains a file input.  Used to scope the broad file-input
+# fallback so it can never reach the main video upload input.
+COVER_EDITOR_SCOPE_SELECTOR = "xpath=ancestor::*[.//input[@type='file']][1]"
+_COVER_PREVIEW_TIMEOUT_MS = 10_000
+
+_COVER_EDIT_CANDIDATES = (
+    ('get_by_text("Edit cover", exact=True)',
+     lambda scope: scope.get_by_text("Edit cover", exact=True)),
+    ('get_by_role("button", name="Edit cover")',
+     lambda scope: scope.get_by_role("button", name="Edit cover")),
+)
+
+_COVER_UPLOAD_TAB_CANDIDATES = (
+    ('get_by_text("Upload cover", exact=True)',
+     lambda scope: scope.get_by_text("Upload cover", exact=True)),
+)
+
+_COVER_FILE_ARIA_SELECTOR = '[aria-label="Upload cover image"] input[type="file"]'
+_COVER_FILE_ACCEPT_SELECTOR = 'input[type="file"][accept*="image/jpeg"]'
+
+_COVER_PREVIEW_CANDIDATES = (
+    ('[aria-label="Uploaded cover image"]',
+     lambda scope: scope.locator('[aria-label="Uploaded cover image"]')),
+)
+
+_COVER_SAVE_CANDIDATES = (
+    ('get_by_role("button", name=re.compile(r"^(Save|Confirm)$"))',
+     lambda scope: scope.get_by_role(
+         "button", name=re.compile(r"^(Save|Confirm)$")
+     )),
+)
+
+
+async def _find_candidate(scope, candidates):
+    """Return ``(locator, index, description)`` for the first present candidate."""
+    for index, (description, factory) in enumerate(candidates):
+        try:
+            locator = factory(scope)
+            if await locator.count():
+                return locator.first, index, description
+        except Exception:
+            # A detached frame/closed page makes ``count`` throw; treat it as
+            # this candidate being absent and try the next one.
+            continue
+    return None
+
+
+def _cover_error(control, stage, candidates, page, detail=None):
+    tried = [description for description, _ in candidates]
+    current_url = str(getattr(page, "url", "") or "<unknown>")
+    suffix = f" | detail={detail}" if detail else ""
+    return RuntimeError(
+        f"TikTok 封面设置失败 | control={control} | stage={stage} | "
+        f"tried={tried} | url={current_url}{suffix}"
+    )
+
+
+async def _resolve_candidate(scope, candidates, *, control, stage, page):
+    found = await _find_candidate(scope, candidates)
+    if found is None:
+        raise _cover_error(control, stage, candidates, page)
+    locator, index, description = found
+    tiktok_logger.info(
+        f"[+] cover {stage}: {control} candidate {index + 1}/{len(candidates)}"
+        f" matched ({description})"
+    )
+    return locator
+
 
 def _raise_if_login_required(page) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
@@ -516,14 +593,118 @@ class TiktokVideo(TiktokBaseUploader):
         if not self.thumbnail_path:
             return
         tiktok_logger.info(f'[+] Uploading thumbnail file {self.title}.png')
-        await self.locator_base.locator(".cover-container").click()
-        await self.locator_base.locator(".cover-edit-container >> text=Upload cover").click()
-        async with page.expect_file_chooser() as fc_info:
-            await self.locator_base.locator(".upload-image-upload-area").click()
-            file_chooser = await fc_info.value
-            await file_chooser.set_files(self.thumbnail_path)
-        await self.locator_base.locator('div.cover-edit-panel:not(.hide-panel)').get_by_role(
-            "button", name="Confirm").click()
+        base = self.locator_base
+
+        edit_cover = await _resolve_candidate(
+            base,
+            _COVER_EDIT_CANDIDATES,
+            control="Edit cover",
+            stage="open cover editor",
+            page=page,
+        )
+        await edit_cover.click()
+
+        upload_tab = await _resolve_candidate(
+            base,
+            _COVER_UPLOAD_TAB_CANDIDATES,
+            control="Upload cover",
+            stage="select upload tab",
+            page=page,
+        )
+        await upload_tab.click()
+
+        # Scope the broad fallback input to the cover editor so it cannot hit
+        # the main form's video input.  When the ancestor is not found the
+        # aria-labelled candidate above is still tried against the base.
+        editor_query = upload_tab.locator(COVER_EDITOR_SCOPE_SELECTOR)
+        try:
+            editor = editor_query.first if await editor_query.count() else None
+        except Exception:
+            editor = None
+        control_scope = editor if editor is not None else base
+
+        file_candidates = (
+            (_COVER_FILE_ARIA_SELECTOR,
+             lambda _scope: control_scope.locator(_COVER_FILE_ARIA_SELECTOR)),
+            # When the cover editor root is unavailable the scoped fallback is
+            # left unmatched rather than widening to the whole form.
+            (_COVER_FILE_ACCEPT_SELECTOR,
+             lambda _scope: (
+                 editor.locator(_COVER_FILE_ACCEPT_SELECTOR)
+                 if editor is not None
+                 else editor_query
+             )),
+        )
+        file_input = await _resolve_candidate(
+            base,
+            file_candidates,
+            control="Upload cover file input",
+            stage="set cover file",
+            page=page,
+        )
+        try:
+            # The input is hidden but ``set_input_files`` works on it directly.
+            await file_input.set_input_files(self.thumbnail_path)
+        except Exception as exc:
+            # Last resort: keep the legacy file-chooser pattern.
+            try:
+                async with page.expect_file_chooser() as fc_info:
+                    await file_input.click(force=True)
+                file_chooser = await fc_info.value
+                await file_chooser.set_files(self.thumbnail_path)
+            except Exception:
+                raise _cover_error(
+                    "Upload cover file input",
+                    "set cover file",
+                    file_candidates,
+                    page,
+                    detail=f"set_input_files failed: {exc}",
+                ) from exc
+
+        save_button = await _resolve_candidate(
+            control_scope,
+            _COVER_SAVE_CANDIDATES,
+            control="Save",
+            stage="save cover",
+            page=page,
+        )
+
+        preview = await _find_candidate(control_scope, _COVER_PREVIEW_CANDIDATES)
+        preview_visible = False
+        if preview is not None:
+            preview_locator, index, description = preview
+            tiktok_logger.info(
+                f"[+] cover wait for cover preview: Uploaded cover image "
+                f"candidate {index + 1}/{len(_COVER_PREVIEW_CANDIDATES)}"
+                f" matched ({description})"
+            )
+            try:
+                await preview_locator.wait_for(
+                    state="visible", timeout=_COVER_PREVIEW_TIMEOUT_MS
+                )
+                preview_visible = True
+            except Exception:
+                preview_visible = False
+
+        if not preview_visible and not await save_button.is_enabled():
+            raise _cover_error(
+                "Uploaded cover image",
+                "wait for cover preview",
+                _COVER_PREVIEW_CANDIDATES,
+                page,
+            )
+
+        try:
+            await save_button.click()
+        except Exception as exc:
+            raise _cover_error(
+                "Save",
+                "save cover",
+                _COVER_SAVE_CANDIDATES,
+                page,
+                detail=str(exc),
+            ) from exc
+
         await page.wait_for_timeout(3000)  # wait 3s, fix it later
 
     async def change_language(self, page):
