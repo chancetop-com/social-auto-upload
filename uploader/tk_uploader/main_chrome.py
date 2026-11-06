@@ -859,7 +859,9 @@ async def get_tiktok_cookie(account_file) -> str:
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             headless=False,
-            args=["--lang", "en-US"],
+            # Patchright rejects any arg that does not start with "-"; keep the
+            # language as one ``--lang=...`` argument, never two tokens.
+            args=["--lang=en-US"],
             **TIKTOK_LAUNCH_KWARGS,
         )
         try:
