@@ -22,19 +22,26 @@
 | 私有账号请求 `--privacy public` | 严格失败，退出 `1`，不发布 | 退出 `1`；请求 `public`，实际 `Followers`；浮层已关闭 | `.local/tiktok19/public-negative-v2.log` |
 | `--branded-content --privacy only-me` | 本地校验失败，退出 `2`，不启动浏览器 | 退出 `2`，argparse 前业务校验；未启动浏览器 | `.local/tiktok19/brand-onlyme-negative.log` |
 
-## 正向发布（待填）
+## 正向发布
 
 | 用例 | 参数 | 退出码 | 帖子 ID / URL | 页面/帖子核对 |
 | --- | --- | --- | --- | --- |
-| only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `Meta+A` 修复，v4 复验 |
-| 隐私 followers | `--privacy followers` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950885151018254` | 待 Content 核对 |
-| 隐私 friends | `--privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704951141179641102` | 待 Content 核对 |
-| 互动/复用/AIGC/品牌组合 | `--privacy only-me --no-comments --disable-reuse --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956309300382989` | 评论关闭、复用控件未渲染（已禁用视为满足）、AIGC Turn on、Your brand 已勾选；待 Content/帖子核对 |
-| branded-content + friends | `--branded-content --privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956629594279182` | 私有账号支持该组合；待帖子/Content 核对 Paid partnership |
-| 自定义封面 | `--thumbnail videos/demo.png --privacy only-me` | 待跑 | — | — |
-| 定时发布 | `--schedule 2026-11-06 22:00 --privacy followers` | `0` | Scheduled 列表待核对 | 日期/时间选择与回读通过；only-me 下 Schedule 被 TikTok 禁用（已补明确报错） |
-| 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title "TB19 note multi v2" --note "TB19 note body" --tags tbtest,note --privacy only-me` | `0` | `photo post id 7704962821439769869` | 3 张图、Title/Description/tags 已填写；待 Content/封面核对 |
-| 图片帖设置项 | `upload-note ... --no-comments --aigc --your-brand` | `1` | — | 控件在 DOM 但 `user_perm_container`/AIGC/品牌不可见；按 spec 记录“页面未渲染/条件未满足”，显式请求严格失败 |
+| only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `ControlOrMeta+A` 修复，v4 复验 |
+| only-me 基线 v4 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950472880229645` | 干净标题；read_result 返回 ID；only-me 隐私路径复验 |
+| 隐私 followers | `--privacy followers` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950885151018254` | CLI 回读 Followers；Scheduled 列表同账号 Followers 行确认；Web 帖子页不显示 Followers 标签 |
+| 隐私 friends | `--privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704951141179641102` | 帖子页 **Friends only**；Content 行 **Friends** |
+| 互动/复用/AIGC/品牌组合 | `--privacy only-me --no-comments --disable-reuse --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956309300382989` | 帖子页 **Private** + **Promotional content** + **Creator labeled as AI-generated**；Content 行 **Only me**；评论关闭、复用控件未渲染（目标 False 已满足） |
+| branded-content + friends | `--branded-content --privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956629594279182` | 帖子页 **Friends only** + **Paid partnership**；Content 行 **Friends** |
+| 自定义封面 | `--thumbnail videos/demo.png --privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704957967111638286` | `Edit cover` → `Upload cover` → 预览 → Save 全链路通过；帖子页 **Private**；截图 `.local/tiktok19/custom-cover-post.png` |
+| 定时发布 | `--schedule 2026-11-06 22:00 --privacy followers` | `0` | Scheduled 行：`TB19 scheduled followers 2200` | Content/Scheduled 列表显示 **10:00 PM (GMT+8) Shanghai**、**Followers**；未等待到点发布。only-me 下 Schedule 被 TikTok 禁用（已补明确报错） |
+| 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title "TB19 note multi v2" --note "TB19 note body" --tags tbtest,note --privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704966090018786574` | Content 行 **Only me** + `TB19 note body #tbtest #note`；帖子页 Description/tags 正确；Title 已填写但 Web 帖子页不展示；3 张图，第 1 张为封面；截图 `.local/tiktok19/note-multi-post.png` |
+| 图片帖设置项 | `upload-note ... --no-comments --aigc --your-brand` | `1` | — | `user_perm_container`/AIGC/品牌在 DOM 中存在但不可见，点击 Settings 也不展开；按 spec 记录“页面未渲染/条件未满足”，显式请求严格失败 |
+
+## 结论
+
+- **已验证**：本地登录/check、`only-me`/`followers`/`friends` 隐私、`--no-comments`、`--disable-reuse`（账号不渲染时按目标 False 满足）、`--aigc`（帖子显示 AI 标签）、`--your-brand`（Promotional content）、`--branded-content` + friends（Paid partnership）、自定义封面、定时创建与时间/隐私回读、图文 3 图/Description/tags/首图封面。
+- **条件未满足/未等待**：公开账号专属的“无新参数公开发布/`--privacy public` 正向/公开账号首项文案”；定时帖未等到 22:00 到点；图文 Title 不在 Web 帖子页展示（已填写）；图片帖评论/AIGC/品牌控件页面不可见，按“页面不支持”记录。
+- **发现并修复**：Content `read_result` 原取第一条，定时帖排在最前导致图文帖误取定时帖 ID；已改为按标题/正文/标签匹配，并在真实 Content 页验证图文 `7704966090018786574`、视频 `7704956309300382989` 均正确。
 
 ## 真实环境发现并修复
 
