@@ -1,6 +1,6 @@
 # 19 — 真实账号冒烟与发布验收
 
-Status: ready-for-agent
+Status: resolved（未执行：外部依赖缺失；待验收）
 Type: task
 Blocked by: 17, 18
 规格依据: spec.md §8.3、§11.1
@@ -20,3 +20,8 @@ Blocked by: 17, 18
 - [ ] 私有账号首项文案、Photos 灰度、`friends` + 品牌组合未实测时，结论保持“条件可行 / 未验证”。
 - [ ] 不制造“发布结果未知”；退出码 `9` 仅由离线测试锁定。
 - [ ] 账号能力不匹配时退出 `1`，stderr 含请求值与实际值。
+
+## Comments
+
+- 2026-11-06：领取前环境确认失败——本机未设置 `MLX_API_TOKEN`，`https://launcher.mlx.yt:45001` 不可达，且没有已登录的公开 TikTok 账号/Photos 灰度。因此本工单的真实账号冒烟与发布验收**未执行**；所有验收项保持未勾选，结论保持“待验收”。
+- 已交付的离线证明：退出码 `9` 的映射与“禁止自动重发”stderr 由 `tests.test_tiktok_exit_codes` 锁定。真实发布效果、封面、定时、多图顺序、私有账号文案、Photos 灰度与 `friends` + 品牌组合仍必须按 spec §8.3 在真实环境核验；未核验前不得写成已验证。

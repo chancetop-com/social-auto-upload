@@ -1,5 +1,7 @@
 # TikTok 浏览器能力对齐 — 路线图
 
+> **实施状态（2026-11-06）**：ticket 10–18 已实现、通过 code review 并合入 `integration/tiktok-browser-parity`；ticket 19 的真实账号冒烟与发布验收未执行（本机无 MLX token / Launcher / 真实账号），保持“待验收”。
+
 ## Destination
 
 一份可交给后续会话实施的规格：在不引入 TikTok 官方 API 的前提下，用现有 MLX 浏览器流程补齐 Content Posting API 的作者侧能力（隐私级别、评论/合拍/拼接开关、AI 生成标识、品牌内容声明、封面、图片帖），并给出参数契约、默认值、失败语义、测试策略与“API 能力 ↔ 浏览器实现”对照矩阵。
@@ -44,6 +46,12 @@
 - [09 — 视频/图片共用流程与扩展点](./issues/09-shared-flow-extension-points.md) — 视频号式模板方法：`TiktokBaseUploader` 持 9 步骨架与发布循环，`TiktokVideo` / `TiktokNote` 只实现钩子；分叉点提前到进页（URL / Photos tab），表单填写不是唯一；选项打包 `TiktokPublishOptions` + 构造器 keyword-only；选择器内联、`tk_config` 只放常量；登录 / 15 分钟 deadline / 映射完全复用；全量改名到骨架词汇，测试仅 2 条断言 + 2 行调用。
 - [08 — 汇总实施规格](./issues/08-assemble-spec.md) — 规格已产出（[spec.md](./spec.md)）：能力矩阵、命令/参数契约、视频与图片两条 UI 路径及候选选择器、设置后回读、退出码 `9`、三层测试、部署/阶段/回滚齐全；选择器降级改为每步有序候选、`--json` 明确为非目标。
 
+## Implementation status
+
+- [10–18] 已实现并合入 `integration/tiktok-browser-parity`：共用骨架、退出码 `9`、视频隐私/互动、AIGC/品牌、封面刷新、`upload-note` 核心与文案/选项、文档/Skill/术语表、opt-in 冒烟。
+- 验证：TikTok 专项 188 tests 全绿；默认离线套件 726 tests，基线 5 failures + 1 error + 2 skips 均为既有、非 TikTok 问题；`git diff --check` 干净。两轴 code review 已完成，spec 缺口已修复。
+- [19 — 真实账号冒烟与发布验收](./issues/19-real-account-acceptance.md) — **未执行**：本机无 `MLX_API_TOKEN`、Launcher 不可达、无真实账号；所有发布效果项保持“待验收”。
+
 ## Not yet specified
 
 <!-- 无。规格已覆盖原先的 4 项雾；事实性不确定项转为 spec §11.1「实施时必须先实测」，且已给出兜底行为。 -->
@@ -56,4 +64,3 @@
 - TikTok 本地模式（Firefox/Chromium cookie 文件）。
 - Flask 后端 `sau_backend.py`、Vue 前端、调度 App 本身。
 - 账号↔Profile 映射与身份校验。
-- 实际代码实现、选择器改写与测试执行（本 effort 只产出规格）。

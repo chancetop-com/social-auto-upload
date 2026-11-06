@@ -1,6 +1,6 @@
 # 11 — 发布结果未知时退出码 `9`
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 10
 规格依据: spec.md §6.2、§6.3
@@ -11,14 +11,15 @@ Blocked by: 10
 
 ## Acceptance criteria
 
-- [ ] 点击动作已返回且未抛异常后，若到总预算仍未到内容页且未命中登录 URL，抛出 `PublishResultUnknownError`，CLI 退出 `9`。
-- [ ] 点击前就失败（上传未完成、选项回读失败、页面结构异常）退出 `1`，不得误报 `9`。
-- [ ] 点击后 URL 命中 `/login`、`captcha`、`verify`、`two-factor`、`2fa` 时退出 `10`，优先于 `9`。
-- [ ] 点击后页面/上下文关闭、CDP 断开或停在表单报错时，按“发布结果未知”处理，不再空转到预算耗尽。
-- [ ] 退出 `9` 时 stderr 含中文说明、人工核验路径与“禁止自动重发”。
-- [ ] 离线测试覆盖 `0/1/9/10` 四种分支，包括“从未点击发布 → 1”和“登录跳转优先于未知 → 10”。
-- [ ] 该异常只能由发布阶段抛出；新增步骤不得吞异常。
+- [x] 点击动作已返回且未抛异常后，若到总预算仍未到内容页且未命中登录 URL，抛出 `PublishResultUnknownError`，CLI 退出 `9`。
+- [x] 点击前就失败（上传未完成、选项回读失败、页面结构异常）退出 `1`，不得误报 `9`。
+- [x] 点击后 URL 命中 `/login`、`captcha`、`verify`、`two-factor`、`2fa` 时退出 `10`，优先于 `9`。
+- [x] 点击后页面/上下文关闭、CDP 断开或停在表单报错时，按“发布结果未知”处理，不再空转到预算耗尽。
+- [x] 退出 `9` 时 stderr 含中文说明、人工核验路径与“禁止自动重发”。
+- [x] 离线测试覆盖 `0/1/9/10` 四种分支，包括“从未点击发布 → 1”和“登录跳转优先于未知 → 10”。
+- [x] 该异常只能由发布阶段抛出；新增步骤不得吞异常。
 
 ## Comments
 
 - 去重行为（code-review fix）：首次 `click()` 成功后只等待/重试成功页导航，绝不再点击原 Post 按钮，避免重复发布。成功页未出现时，唯一允许的兜底是点击一次可见的 `Post now` 弹窗按钮（`button:has-text("Post now")` / role button）；该兜底也只点击一次。这样比旧的“循环点击”更安全，同时保留“点击已发出但结果未知 → 9”的判定。
+- 2026-11-06：实现完成并合入 `integration/tiktok-browser-parity`（feature commit `d12e36b`）。TikTok 专项 188 tests 全绿；默认离线套件 726 tests，基线 5 failures + 1 error + 2 skips 均为既有、非 TikTok 问题。真实账号发布验收见 ticket 19，尚未执行。
