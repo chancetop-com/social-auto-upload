@@ -2,7 +2,7 @@
 
 ## 目录约定
 
-`skills/` 是 Skills 的源目录，包含一个跨平台总入口和每个平台一个独立入口。CLI 平台的 Skill 使用仓库中的 `sau` 命令；TikTok 使用 `sau tiktok`，但仅支持 Multilogin X 模式。
+`skills/` 是 Skills 的源目录，包含一个跨平台总入口和每个平台一个独立入口。CLI 平台的 Skill 使用仓库中的 `sau` 命令；TikTok 使用 `sau tiktok`，默认本地模式；设置 `MLX_API_TOKEN` 后为 Multilogin X 模式。
 
 | 平台 | Skill 目录 | CLI 入口 |
 | --- | --- | --- |
@@ -17,7 +17,7 @@
 | 支付宝生活号 | `alipay-upload` | `sau alipay` |
 | 微博 | `weibo-upload` | `sau weibo` |
 | 虎扑 | `hupu-upload` | `sau hupu` |
-| TikTok | `tiktok-upload` | `sau tiktok`（仅 Multilogin X 模式） |
+| TikTok | `tiktok-upload` | `sau tiktok`（本地或 Multilogin X 模式） |
 | 雪球 | `xueqiu-upload` | `sau xueqiu` |
 | YouTube | `youtube-upload` | `sau youtube` |
 | 知乎 | `zhihu-upload` | `sau zhihu` |

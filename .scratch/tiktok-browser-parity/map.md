@@ -1,6 +1,7 @@
 # TikTok 浏览器能力对齐 — 路线图
 
 > **实施状态（2026-11-06）**：ticket 10–18 已实现、通过 code review 并合入 `integration/tiktok-browser-parity`；ticket 19 的真实账号冒烟与发布验收未执行（本机无 MLX token / Launcher / 真实账号），保持“待验收”。
+> **后续扩展**：TikTok 本地 cookie 模式见 [`../tiktok-local-mode/spec.md`](../tiktok-local-mode/spec.md)。
 
 ## Destination
 
@@ -61,6 +62,5 @@
 ## Out of scope
 
 - 官方 Content Posting API、OAuth、开发者 App 审核、`PULL_FROM_URL`、图床、`MEDIA_UPLOAD` 收件箱、取消拉取、分片上传。
-- TikTok 本地模式（Firefox/Chromium cookie 文件）。
 - Flask 后端 `sau_backend.py`、Vue 前端、调度 App 本身。
 - 账号↔Profile 映射与身份校验。

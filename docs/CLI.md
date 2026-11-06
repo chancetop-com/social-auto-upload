@@ -11,7 +11,7 @@
 - `alipay`
 - `weibo`
 - `hupu`
-- `tiktok`：仅 Multilogin X 模式
+- `tiktok`：本地 cookie 模式或 Multilogin X 模式
 - `youtube`
 - `facebook`：Facebook 个人主页视频/图文立即发布、查询和删除
 - `facebook-page`：Meta Business Suite 的 Facebook Page 视频/图文立即或定时发布
@@ -21,7 +21,7 @@
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
-面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，但仅支持 [Multilogin X 模式](#multilogin-x-模式)；见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
+面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地 cookie 模式；设置 `MLX_API_TOKEN` 后走 [Multilogin X 模式](#multilogin-x-模式)。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
 
 实现说明：
 
@@ -107,7 +107,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 | `10` | 需要登录 | 登录页、登录表单、验证码、2FA |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 |
 
-MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 也退出 `1`。
+MLX 下 `login` 一律退出 `1`。TikTok 本地模式支持 `login`；本地模式下 `--folder-id` / `--profile-id` 被忽略，`--account` 必填。
 
 ### 平台支持范围
 
@@ -119,7 +119,7 @@ MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 
 | 大鱼号 | `check`、`upload-video`、`upload-article` | |
 | 知乎 | `check`、`upload-article`、`upload-video` | |
 | 雪球 | `check`、`upload-article` | |
-| TikTok | `check`、`upload-video`、`upload-note` | 仅 MLX，没有本地模式；图文依赖账号 Photos tab 灰度 |
+| TikTok | `check`、`upload-video`、`upload-note`、`login`（仅本地） | 本地 cookie 模式或 MLX；图文依赖账号 Photos tab 灰度 |
 | Bilibili | 不支持 | `biliup` 没有浏览器上下文；MLX 下退出 `1` |
 
 `sau article` 是本地文件处理命令，不使用 MLX Profile。
@@ -129,8 +129,8 @@ MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 
 1. CLI 与 Multilogin 桌面应用在**同一台 macOS/Windows 机器**上，桌面应用已启动，45001/45003 未被占用。
 2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
 3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
-4. TikTok 额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。
-5. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`。
+4. TikTok 的 Multilogin 模式额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。本地模式会自动切换页面语言。
+5. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`（本地与 MLX 相同）。
 
 **明确不支持：**
 
@@ -138,8 +138,7 @@ MLX 下 `login` 一律退出 `1`。TikTok 在本地模式下调用任何 action 
 - 跨机 launcher（官方只支持 `127.0.0.1`，不引导 SSH 隧道）
 - Linux 无桌面部署
 - Bilibili
-- TikTok 本地模式
-- 通过 CLI 在 MLX 中登录（登录必须在 Multilogin 应用中完成）
+- 通过 CLI 在 MLX 中登录（登录必须在 Multilogin 应用中完成；TikTok 本地模式支持 `login`）
 
 启动前 CLI 会探活 `GET /api/v1/version`；失败退出 `1`，并提示确认桌面应用、同机部署和 45001 端口。Start 成功但 CDP 连接连续 3 次失败时，错误信息会附带 Docker launcher 提示，并在退出前停止本次启动的 Profile。
 
@@ -403,11 +402,21 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 虎扑当前支持登录、账号检查和视频上传；标题长度要求为 4–40 个字，暂不支持图文上传和 `--schedule`。虎扑登录可能需要在浏览器中完成 QQ 或手机号登录，需要人工查看页面时可以加 `--headed`。
 
-## TikTok CLI 子命令（仅 Multilogin X 模式）
+## TikTok CLI 子命令（本地模式或 Multilogin X 模式）
 
-TikTok 没有本地浏览器路径，只支持 [Multilogin X 模式](#multilogin-x-模式)。未设置 `MLX_API_TOKEN` 时，任何 `sau tiktok` 命令都以 `1` 退出。
+TikTok 支持两种模式：
+
+- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。
+- **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**。
 
 ```bash
+# 本地模式：先交互式登录一次（打开有头浏览器，登录后回终端按 Enter）
+sau tiktok login --account creator
+sau tiktok check --account creator
+sau tiktok upload-video --account creator --file videos/demo.mp4 --title "示例标题"
+sau tiktok upload-note --account creator --images images/1.jpg images/2.png
+
+# Multilogin 模式
 export MLX_API_TOKEN="<token>"
 
 sau tiktok check --folder-id <folder_id> --profile-id <profile_id>
@@ -427,10 +436,13 @@ sau tiktok upload-note \
   --privacy friends --no-comments --aigc
 ```
 
-- 仅支持 `check`、`upload-video`、`upload-note`；`login` 退出 `1`，请先在 Multilogin 应用中登录 Profile。
-- MLX 分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**。
-- 不读写 `cookies/tk_uploader/*.json`；登录页、验证码或 2FA 会退出 `10`，上传发布循环总超时为 15 分钟。
-- 本地模式调用任何 TikTok action 都退出 `1`；未注册的子命令仍由 argparse 退出 `2`。
+- 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，MLX 下退出 `1`，请先在 Multilogin 应用中登录 Profile。
+- 本地 `check` 返回 `0`（有效）/ `1`（无效）；MLX `check` 返回 `0/10/1/2`。
+- 本地模式读写 `cookies/tiktok_<account>.json`；MLX 模式不读写 cookie 文件。
+- MLX 分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**；本地模式会自动切换页面语言。
+- 本地模式与 MLX 共用 15 分钟上传预算；登录页、验证码或 2FA 在 MLX 下退出 `10`，本地模式按运行失败退出 `1`。
+- 真实账号的本地登录与发布**待验收**；未在真实账号验证前，不要把“命令已支持”当成“发布效果已验证”。
+- 未注册的子命令仍由 argparse 退出 `2`。
 
 ### 视频发布选项
 
@@ -482,7 +494,7 @@ sau tiktok upload-note \
 
 ## 定时发布
 
-抖音、快手、小红书、视频号的图文或视频上传，TikTok（仅 MLX）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
+抖音、快手、小红书、视频号的图文或视频上传，TikTok（本地或 MLX）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
 
 ```bash
 sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
@@ -493,6 +505,8 @@ sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --t
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
 sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249 --schedule "2026-03-24 21:30"
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
+sau tiktok upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24 21:30"
+sau tiktok upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
 sau tiktok upload-video --folder-id <folder_id> --profile-id <profile_id> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24 21:30"
 sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
 ```
@@ -569,6 +583,6 @@ Bilibili 额外要求：
 - 抖音：最多 35 张图片，不支持 GIF
 - 快手：支持多张图片，建议传真实不同文件，不要把同一路径重复多次
 - 小红书：支持多张图片，正文 `--note` 可选，但 `--title` 建议始终显式传入
-- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面，仅 Multilogin X 模式
+- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面；本地与 Multilogin X 模式均支持
 
 大鱼号文章使用 `--content-file` 提供 HTML、Markdown 或 TXT 正文文件，支持本地图片和图文混排，正文最多 2 万字；来源与封面等参数见 [大鱼号图文发布](./dayu-article.md)。

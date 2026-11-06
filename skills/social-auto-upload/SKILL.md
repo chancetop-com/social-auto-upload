@@ -26,7 +26,7 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 | 支付宝生活号 | `alipay-upload` | `alipay` |
 | 微博 | `weibo-upload` | `weibo` |
 | 虎扑 | `hupu-upload` | `hupu` |
-| TikTok | `tiktok-upload` | `tiktok`（仅 Multilogin X 模式） |
+| TikTok | `tiktok-upload` | `tiktok`（本地或 Multilogin X 模式） |
 | 雪球 | `xueqiu-upload` | `xueqiu` |
 | YouTube | `youtube-upload` | `youtube` |
 | 知乎 | `zhihu-upload` | `zhihu` |
@@ -37,7 +37,7 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 ## 工作流程
 
 1. 如已安装对应平台 Skill，先读取并遵循它；从仓库运行时读取 `skills/<skill-name>/SKILL.md`。
-2. 若仓库可用，从 `skills/<skill-name>/SKILL.md` 读取平台说明；否则先提供对应安装命令。执行 CLI 前使用 `sau <平台> --help` 确认当前参数。不要猜测参数；TikTok 仅支持 Multilogin X 模式，本地调用会退出 1。
+2. 若仓库可用，从 `skills/<skill-name>/SKILL.md` 读取平台说明；否则先提供对应安装命令。执行 CLI 前使用 `sau <平台> --help` 确认当前参数。不要猜测参数；TikTok 默认本地模式，设置 `MLX_API_TOKEN` 后为 Multilogin X 模式。
 3. 先检查目标账号状态；登录需要用户在平台页面完成时，交给用户操作，不索取或保存密码。
 4. 发布前核对文件、标题、文案、标签、可见范围、发布时间及目标账号。只发布用户明确指定的平台；同一份内容也要逐个平台核对要求。
 5. 只有命令或平台提供本次提交的成功证据才报告已发布。超时或结果未知时先查原作品，不盲目重发。
