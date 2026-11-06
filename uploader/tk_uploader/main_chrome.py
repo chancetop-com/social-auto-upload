@@ -11,7 +11,17 @@ import os
 import asyncio
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
-from uploader.tk_uploader.tk_config import Tk_Locator
+from uploader.base_video import BaseVideoUploader
+from uploader.tk_uploader.tk_config import (
+    TIKTOK_ENTRY_WAIT_MS,
+    TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
+    TIKTOK_LOGIN_CHECK_URL,
+    TIKTOK_LOGIN_FORM_SELECTOR,
+    TIKTOK_PUBLISH_TIMEOUT_SECONDS,
+    TIKTOK_UPLOAD_ENTRY_SELECTOR,
+    TIKTOK_UPLOAD_URL,
+    Tk_Locator,
+)
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -21,21 +31,6 @@ from utils.log import tiktok_logger
 # Multilogin deployment prerequisite: the Profile UI must already be English
 # (US).  The MLX branch deliberately skips ``change_language`` so it never
 # rewrites the Profile preference.
-TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload"
-TIKTOK_LOGIN_CHECK_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
-TIKTOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
-TIKTOK_ENTRY_WAIT_MS = 5_000
-TIKTOK_PUBLISH_TIMEOUT_SECONDS = 15 * 60
-
-TIKTOK_UPLOAD_ENTRY_SELECTOR = (
-    'button:has-text("Select video"), div.upload-container, '
-    'iframe[data-tt="Upload_index_iframe"]'
-)
-TIKTOK_LOGIN_FORM_SELECTOR = (
-    'input[name="username"], form[action*="login"], '
-    'div[data-e2e="login-modal"], '
-    'button:has-text("Use phone / email / username")'
-)
 
 # Golden local-mode browser options.  The Multilogin branch ignores them, but
 # locking them here keeps the legacy Chromium path byte-equivalent.
@@ -225,19 +220,116 @@ async def get_tiktok_cookie(account_file):
         await context.storage_state(path=account_file)
 
 
-class TiktokVideo(object):
-    def __init__(self, title, file_path, tags, publish_date, account_file, thumbnail_path=None):
-        self.title = title
-        self.file_path = file_path
-        self.tags = tags
-        self.publish_date = publish_date
-        self.thumbnail_path = thumbnail_path
-        self.account_file = account_file
-        self.local_executable_path = LOCAL_CHROME_PATH
-        self.headless = LOCAL_CHROME_HEADLESS
-        self.locator_base = None
+class TiktokBaseUploader(BaseVideoUploader):
+    """Shared TikTok Studio upload skeleton.
 
-    async def set_schedule_time(self, page, publish_date):
+    The template in ``_upload_on_page`` runs the nine steps in a fixed order;
+    subclasses implement the media-specific hooks.  ``ensure_mode``,
+    ``apply_options`` and ``apply_cover`` are no-ops until later tickets fill
+    them in.
+    """
+
+    async def upload_in(self, session: BrowserSession) -> None:
+        """Upload through an injected session without owning its lifecycle."""
+        # Ticket 13 §3: reuse a URL-matching page, then pages[0], and only
+        # create a page when the context has none.
+        page, _owned = await _select_probe_page(session.context)
+        multilogin = session.mode == "multilogin"
+        deadline = (
+            time.monotonic() + TIKTOK_PUBLISH_TIMEOUT_SECONDS
+            if multilogin
+            else None
+        )
+        await self._upload_on_page(
+            page, multilogin=multilogin, deadline=deadline
+        )
+
+    def _check_publish_deadline(self, deadline: float | None) -> None:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError(
+                "TikTok 上传超时（15 分钟），已中止发布。"
+            )
+
+    async def _upload_on_page(self, page, *, multilogin: bool, deadline: float | None) -> None:
+        # 1. open the upload page and pick the locator base
+        await self.open_upload_page(page, multilogin=multilogin)
+        # 2. attach the media file(s)
+        await self.attach_media(page)
+        # 3. fill the caption/title fields
+        await self.fill_metadata(page)
+        # 4. wait until the editor finished processing the media
+        await self.wait_media_ready(
+            page, deadline=deadline, multilogin=multilogin
+        )
+        # 5. publish options (no-op in this ticket)
+        await self.apply_options(page)
+        # 6. custom cover (video only; base is a no-op)
+        await self.apply_cover(page)
+        # 7. schedule, when requested
+        await self.apply_schedule(page)
+        # 8. publish
+        await self.click_publish(
+            page, deadline=deadline, multilogin=multilogin
+        )
+        if multilogin:
+            _raise_if_login_required(page)
+        # 9. read back the published item
+        self.last_item_id = await self.read_result(page)
+        tiktok_logger.success(f"video_id: {self.last_item_id}")
+
+    async def open_upload_page(self, page, *, multilogin: bool) -> None:
+        await page.goto(TIKTOK_UPLOAD_URL)
+        tiktok_logger.info(f'[+]Uploading-------{self.title}.mp4')
+        if multilogin:
+            _raise_if_login_required(page)
+
+        try:
+            await page.wait_for_url(TIKTOK_UPLOAD_URL, timeout=10000)
+        except Exception:
+            if multilogin:
+                _raise_if_login_required(page)
+            raise
+
+        try:
+            await page.wait_for_selector('iframe[data-tt="Upload_index_iframe"], div.upload-container', timeout=10000)
+            tiktok_logger.info("Either iframe or div appeared.")
+        except Exception as e:
+            tiktok_logger.error("Neither iframe nor div appeared within the timeout.")
+            if multilogin:
+                _raise_if_login_required(page)
+
+        await self.choose_base_locator(page)
+        await self.ensure_mode(page)
+
+    async def ensure_mode(self, page) -> None:
+        """Confirm the TikTok Studio mode; the default is the video mode."""
+
+    async def attach_media(self, page) -> None:
+        raise NotImplementedError
+
+    async def fill_metadata(self, page) -> None:
+        raise NotImplementedError
+
+    async def wait_media_ready(
+        self,
+        page,
+        *,
+        deadline: float | None = None,
+        multilogin: bool = False,
+    ) -> None:
+        raise NotImplementedError
+
+    async def apply_options(self, page) -> None:
+        """Publish options; no-op until the option steps land."""
+
+    async def apply_cover(self, page) -> None:
+        """Custom cover; the base has none (photo posts use the first image)."""
+
+    async def apply_schedule(self, page) -> None:
+        if self.publish_date == 0:
+            return
+
+        publish_date = self.publish_date
         schedule_input_element = self.locator_base.get_by_label('Schedule')
         await schedule_input_element.wait_for(state='visible')  # 确保按钮可见
 
@@ -293,6 +385,83 @@ class TiktokVideo(object):
         # click title to remove the focus.
         # await self.locator_base.locator("h1:has-text('Upload video')").click()
 
+    async def fill_caption(self, page, text, tags) -> None:
+
+        editor_locator = self.locator_base.locator('div.public-DraftEditor-content')
+        await editor_locator.click()
+
+        await page.keyboard.press("End")
+
+        await page.keyboard.press("Control+A")
+
+        await page.keyboard.press("Delete")
+
+        await page.keyboard.press("End")
+
+        await page.wait_for_timeout(1000)  # 等待1秒
+
+        await page.keyboard.insert_text(text)
+        await page.wait_for_timeout(1000)  # 等待1秒
+        await page.keyboard.press("End")
+
+        await page.keyboard.press("Enter")
+
+        # tag part
+        for index, tag in enumerate(tags, start=1):
+            tiktok_logger.info("Setting the %s tag" % index)
+            await page.keyboard.press("End")
+            await page.wait_for_timeout(1000)  # 等待1秒
+            await page.keyboard.insert_text("#" + tag + " ")
+            await page.keyboard.press("Space")
+            await page.wait_for_timeout(1000)  # 等待1秒
+
+            await page.keyboard.press("Backspace")
+            await page.keyboard.press("End")
+
+    async def click_publish(self, page, *, deadline: float | None = None, multilogin: bool = False):
+        success_flag_div = 'div.common-modal-confirm-modal'
+        while True:
+            self._check_publish_deadline(deadline)
+            if multilogin:
+                _raise_if_login_required(page)
+            try:
+                publish_button = self.locator_base.locator('div.button-group button').nth(0)
+                if await publish_button.count():
+                    await publish_button.click()
+
+                await page.wait_for_url("https://www.tiktok.com/tiktokstudio/content",  timeout=3000)
+                tiktok_logger.success("  [-] video published success")
+                break
+            except Exception as e:
+                if multilogin:
+                    _raise_if_login_required(page)
+                tiktok_logger.exception(f"  [-] Exception: {e}")
+                tiktok_logger.info("  [-] video publishing")
+                await asyncio.sleep(0.5)
+
+    async def choose_base_locator(self, page):
+        # await page.wait_for_selector('div.upload-container')
+        if await page.locator('iframe[data-tt="Upload_index_iframe"]').count():
+            self.locator_base = page.frame_locator(Tk_Locator.tk_iframe)
+        else:
+            self.locator_base = page.locator(Tk_Locator.default)
+
+    async def read_result(self, page):
+        raise NotImplementedError
+
+
+class TiktokVideo(TiktokBaseUploader):
+    def __init__(self, title, file_path, tags, publish_date, account_file, thumbnail_path=None):
+        self.title = title
+        self.file_path = file_path
+        self.tags = tags
+        self.publish_date = publish_date
+        self.thumbnail_path = thumbnail_path
+        self.account_file = account_file
+        self.local_executable_path = LOCAL_CHROME_PATH
+        self.headless = LOCAL_CHROME_HEADLESS
+        self.locator_base = None
+
     async def handle_upload_error(self, page):
         tiktok_logger.info("video upload error retrying.")
         select_file_button = self.locator_base.locator('button[aria-label="Select file"]')
@@ -330,50 +499,7 @@ class TiktokVideo(object):
         await context.close()
         await browser.close()
 
-    async def upload_in(self, session: BrowserSession) -> None:
-        """Upload through an injected session without owning its lifecycle."""
-        # Ticket 13 §3: reuse a URL-matching page, then pages[0], and only
-        # create a page when the context has none.
-        page, _owned = await _select_probe_page(session.context)
-        multilogin = session.mode == "multilogin"
-        deadline = (
-            time.monotonic() + TIKTOK_PUBLISH_TIMEOUT_SECONDS
-            if multilogin
-            else None
-        )
-        await self._upload_on_page(
-            page, multilogin=multilogin, deadline=deadline
-        )
-
-    def _check_publish_deadline(self, deadline: float | None) -> None:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError(
-                "TikTok 上传超时（15 分钟），已中止发布。"
-            )
-
-    async def _upload_on_page(self, page, *, multilogin: bool, deadline: float | None) -> None:
-        await page.goto(TIKTOK_UPLOAD_URL)
-        tiktok_logger.info(f'[+]Uploading-------{self.title}.mp4')
-        if multilogin:
-            _raise_if_login_required(page)
-
-        try:
-            await page.wait_for_url(TIKTOK_UPLOAD_URL, timeout=10000)
-        except Exception:
-            if multilogin:
-                _raise_if_login_required(page)
-            raise
-
-        try:
-            await page.wait_for_selector('iframe[data-tt="Upload_index_iframe"], div.upload-container', timeout=10000)
-            tiktok_logger.info("Either iframe or div appeared.")
-        except Exception as e:
-            tiktok_logger.error("Neither iframe nor div appeared within the timeout.")
-            if multilogin:
-                _raise_if_login_required(page)
-
-        await self.choose_base_locator(page)
-
+    async def attach_media(self, page) -> None:
         upload_button = self.locator_base.locator(
             'button:has-text("Select video"):visible')
         await upload_button.wait_for(state='visible')  # 确保按钮可见
@@ -383,59 +509,13 @@ class TiktokVideo(object):
         file_chooser = await fc_info.value
         await file_chooser.set_files(self.file_path)
 
-        await self.add_title_tags(page)
-        # detect upload status
-        await self.detect_upload_status(
-            page, deadline=deadline, multilogin=multilogin
-        )
-        if self.thumbnail_path:
-            tiktok_logger.info(f'[+] Uploading thumbnail file {self.title}.png')
-            await self.upload_thumbnails(page)
+    async def fill_metadata(self, page) -> None:
+        await self.fill_caption(page, self.title, self.tags)
 
-        if self.publish_date != 0:
-            await self.set_schedule_time(page, self.publish_date)
-
-        await self.click_publish(
-            page, deadline=deadline, multilogin=multilogin
-        )
-        if multilogin:
-            _raise_if_login_required(page)
-        tiktok_logger.success(f"video_id: {await self.get_last_video_id(page)}")
-
-    async def add_title_tags(self, page):
-
-        editor_locator = self.locator_base.locator('div.public-DraftEditor-content')
-        await editor_locator.click()
-
-        await page.keyboard.press("End")
-
-        await page.keyboard.press("Control+A")
-
-        await page.keyboard.press("Delete")
-
-        await page.keyboard.press("End")
-
-        await page.wait_for_timeout(1000)  # 等待1秒
-
-        await page.keyboard.insert_text(self.title)
-        await page.wait_for_timeout(1000)  # 等待1秒
-        await page.keyboard.press("End")
-
-        await page.keyboard.press("Enter")
-
-        # tag part
-        for index, tag in enumerate(self.tags, start=1):
-            tiktok_logger.info("Setting the %s tag" % index)
-            await page.keyboard.press("End")
-            await page.wait_for_timeout(1000)  # 等待1秒
-            await page.keyboard.insert_text("#" + tag + " ")
-            await page.keyboard.press("Space")
-            await page.wait_for_timeout(1000)  # 等待1秒
-
-            await page.keyboard.press("Backspace")
-            await page.keyboard.press("End")
-
-    async def upload_thumbnails(self, page):
+    async def apply_cover(self, page) -> None:
+        if not self.thumbnail_path:
+            return
+        tiktok_logger.info(f'[+] Uploading thumbnail file {self.title}.png')
         await self.locator_base.locator(".cover-container").click()
         await self.locator_base.locator(".cover-edit-container >> text=Upload cover").click()
         async with page.expect_file_chooser() as fc_info:
@@ -459,28 +539,7 @@ class TiktokVideo(object):
         await page.locator('[data-e2e="language-select"]').click()
         await page.locator('#creator-tools-selection-menu-header >> text=English (US)').click()
 
-    async def click_publish(self, page, *, deadline: float | None = None, multilogin: bool = False):
-        success_flag_div = 'div.common-modal-confirm-modal'
-        while True:
-            self._check_publish_deadline(deadline)
-            if multilogin:
-                _raise_if_login_required(page)
-            try:
-                publish_button = self.locator_base.locator('div.button-group button').nth(0)
-                if await publish_button.count():
-                    await publish_button.click()
-
-                await page.wait_for_url("https://www.tiktok.com/tiktokstudio/content",  timeout=3000)
-                tiktok_logger.success("  [-] video published success")
-                break
-            except Exception as e:
-                if multilogin:
-                    _raise_if_login_required(page)
-                tiktok_logger.exception(f"  [-] Exception: {e}")
-                tiktok_logger.info("  [-] video publishing")
-                await asyncio.sleep(0.5)
-
-    async def get_last_video_id(self, page):
+    async def read_result(self, page):
         await page.wait_for_selector('div[data-tt="components_PostTable_Container"]')
         video_list_locator = self.locator_base.locator('div[data-tt="components_PostTable_Container"] div[data-tt="components_PostInfoCell_Container"] a')
         if await video_list_locator.count():
@@ -488,8 +547,7 @@ class TiktokVideo(object):
             video_id = re.search(r'video/(\d+)', first_video_obj).group(1) if first_video_obj else None
             return video_id
 
-
-    async def detect_upload_status(self, page, *, deadline: float | None = None, multilogin: bool = False):
+    async def wait_media_ready(self, page, *, deadline: float | None = None, multilogin: bool = False):
         while True:
             self._check_publish_deadline(deadline)
             if multilogin:
@@ -512,13 +570,6 @@ class TiktokVideo(object):
                     _raise_if_login_required(page)
                 tiktok_logger.info("  [-] video uploading...")
                 await asyncio.sleep(2)
-
-    async def choose_base_locator(self, page):
-        # await page.wait_for_selector('div.upload-container')
-        if await page.locator('iframe[data-tt="Upload_index_iframe"]').count():
-            self.locator_base = page.frame_locator(Tk_Locator.tk_iframe)
-        else:
-            self.locator_base = page.locator(Tk_Locator.default) 
 
     async def main(self):
         async with async_playwright() as playwright:
