@@ -300,13 +300,15 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 5. 设置与回读使用同一候选列表解析控件，避免“点到一个、读的是另一个”。
 6. `data-e2e` 选择器作用在 `locator_base` 上；弹窗/toast 才用顶层 `page`。
 7. 发布按钮只允许 `data-e2e=post_video_button` → 精确 role `^(Post|Schedule)$`；**禁止** `button:has-text("Post").last` 与 `button-group nth(0)`（前者会命中 `Post now`，后者可能是 Discard，且一旦点错会被 `publish_clicked` 锁死到超时）。
-8. 确认弹窗**只在可见的 `[role="dialog"]` / `.TUXModal` 内**精确点击；不存在可见弹窗时宁可不点，禁止页面级兜底（页面级 `Schedule` 会命中主发布按钮导致二次点击/重复发布）。定时帖优先 `Schedule`/`Confirm`，再退 `Post now`（实测当前 Studio 定时流仍显示 `Post now`，点击后保持定时）。
+8. 确认弹窗**只在可见的 `[role="dialog"]` / `.TUXModal` 内**精确点击；从最上层可见 dialog 开始，选择**真正包含**精确 `Schedule`/`Post now` 按钮的那个；不存在的确认按钮（包括泛化的 `Confirm`）绝不在无关弹窗里点击；不存在可见弹窗时宁可不点，禁止页面级兜底（页面级 `Schedule` 会命中主发布按钮导致二次点击/重复发布）。
 9. 品牌复选框：`disclose_content_container` 只包主开关，两个复选框在主开关打开后渲染到兄弟容器；打开主开关后轮询 `title-line` 行（≤3s），再用 `//div[contains(@class,"title-line")][.//span[normalize-space(text())="{label}"]]/label[1]`，再退 `//span[...]/preceding-sibling::label[1]`。**不要**在 disclose 容器内查（永远不命中）。
 10. 折叠区展开后等待任一选项面（`user_perm_container`/`aigc_container`/`disclose_content_container`）可见（≤3s），不只 sleep 固定 300ms；展开本身幂等（已有任一选项面可见时不再点 Show more，避免二次调用把面板关回去）。
 11. 隐私 combobox 的 disabled 判定必须按 class token（`--disabled-false` 不是禁用）；`Only me` 与 `Only you` 都归一化为 `only-me`。
 12. 图片文件 input 用 `locator_base`（与其它步骤一致），避免 iframe 模式失效；封面 `Edit cover`/`Upload cover`/`Save` 只接受可见候选。
 13. 定时帖：`read_result` 不能返回视频 ID，但必须在 Content 列表按**标题/正文**确认该行存在（截断/换行容错；标签不作为核验依据）。**不匹配时间或时区**：Studio 可能显示 PST/EST/GMT 等账号时区，本地时间不可靠；定时时间与隐私已在点击前由 picker 回读确认。找不到或没有标题/正文 → `PublishResultUnknownError`（exit 9），禁止静默 exit 0。定时图片帖必须提供 `--title` 或 `--note`/`--notef`（仅 `--tags` 不行），否则在 CLI 阶段 exit 2。
 14. `visible=True` 的候选解析必须遍历全部匹配元素；`.first` 可能命中隐藏的重复节点，从而漏掉真正可见的控件。
+15. 选项控件工厂不要预绑定 `.first`；`_LocatorControl` 对多元素 locator 取“第一个可见节点”，避免响应式/隐藏重复把控件误判为不存在。
+16. 定时首次授权的 `Allow` 必须精确匹配并优先 dialog 内，禁止 `button:has-text("Allow")` 命中 cookie 横幅。
 
 ---
 

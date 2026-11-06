@@ -949,9 +949,7 @@ class TiktokOptionStepTests(unittest.TestCase):
         )
 
         self.assertEqual(immediate, ("Post now",))
-        self.assertEqual(
-            scheduled, ("Schedule", "Confirm", "Post now")
-        )
+        self.assertEqual(scheduled, ("Schedule", "Post now"))
 
     def test_scheduled_verification_accepts_row_without_timezone_text(self):
         from datetime import datetime
@@ -1071,6 +1069,55 @@ class TiktokOptionStepTests(unittest.TestCase):
                 ("TB19 scheduled",),
             )
         )
+
+    def test_label_control_uses_first_visible_duplicate(self):
+        class _Node:
+            def __init__(self, visible, checked):
+                self.visible = visible
+                self.checked = checked
+                self.click_calls = 0
+
+            async def is_checked(self):
+                return self.checked
+
+            async def is_visible(self):
+                return self.visible
+
+            async def is_disabled(self):
+                return False
+
+            async def get_attribute(self, _name):
+                return None
+
+            def locator(self, _selector):
+                return _MissingLocator()
+
+            async def click(self, **_kwargs):
+                self.click_calls += 1
+
+        hidden = _Node(False, False)
+        visible = _Node(True, True)
+
+        class _Multi:
+            def __init__(self):
+                self.nodes = [hidden, visible]
+
+            async def count(self):
+                return len(self.nodes)
+
+            def nth(self, index):
+                return self.nodes[index]
+
+            @property
+            def first(self):
+                return hidden
+
+        control = tk_main._LocatorControl(_Multi())
+
+        self.assertTrue(asyncio.run(control.is_checked()))
+        asyncio.run(control.click())
+        self.assertEqual(visible.click_calls, 1)
+        self.assertEqual(hidden.click_calls, 0)
 
     def test_find_candidate_skips_hidden_first_match(self):
         class _Node:

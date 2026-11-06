@@ -176,6 +176,20 @@ class _DialogNode:
         return _CandidateLocator(count=0)
 
 
+class _DialogList:
+    def __init__(self, nodes) -> None:
+        self.nodes = nodes
+
+    async def count(self) -> int:
+        return len(self.nodes)
+
+    def nth(self, index: int):
+        return self.nodes[index]
+
+    async def is_visible(self) -> bool:
+        return True
+
+
 class _DialogScope:
     def __init__(self, dialog: _CandidateLocator) -> None:
         self.dialog = dialog
@@ -192,6 +206,17 @@ class _DialogScope:
     def get_by_role(self, role: str, name=None):
         if role == "button":
             return self.dialog
+        return _CandidateLocator(count=0)
+
+
+class _MultiDialogPage(_FakePage):
+    def __init__(self, nodes, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.nodes = nodes
+
+    def locator(self, selector: str):
+        if selector == '[role="dialog"]':
+            return _DialogList(self.nodes)
         return _CandidateLocator(count=0)
 
 
@@ -496,6 +521,19 @@ class ClickPublishTests(unittest.TestCase):
 
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(dialog.click_calls, 0)
+
+    def test_confirmation_skips_unrelated_top_dialog(self):
+        real = _CandidateLocator()
+        unrelated = _CandidateLocator(count=0)
+        page = _MultiDialogPage(
+            [_DialogNode(real), _DialogNode(unrelated)]
+        )
+        video = _video()
+
+        self.assertTrue(asyncio.run(video._click_post_now(page)))
+
+        self.assertEqual(unrelated.click_calls, 0)
+        self.assertEqual(real.click_calls, 1)
 
     def test_pre_publish_media_deadline_is_exit_1(self):
         video = _video()

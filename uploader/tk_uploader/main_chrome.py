@@ -235,13 +235,13 @@ def _confirmation_names(publish_date) -> tuple[str, ...]:
     """Exact confirmation button names, in priority order.
 
     Current Studio uses a generic ``Post now`` confirm button even when the
-    post is scheduled (the schedule radio keeps its value).  Prefer a
-    ``Schedule``/``Confirm`` button when one is rendered, then fall back to the
-    observed ``Post now`` label.
+    post is scheduled (the schedule radio keeps its value).  A bare
+    ``Confirm`` is deliberately not accepted: an unrelated dialog's Confirm
+    must never be treated as the publish confirmation.
     """
     if not publish_date:
         return ("Post now",)
-    return ("Schedule", "Confirm", "Post now")
+    return ("Schedule", "Post now")
 
 
 _CONFIRMATION_DIALOG_SELECTORS = ('[role="dialog"]', '.TUXModal')
@@ -362,22 +362,53 @@ class _LocatorControl(TiktokOptionControl):
         self._locator = locator
         self.candidates = candidates
 
+    async def _target(self):
+        """Return the first visible element of a possibly-multi locator.
+
+        Option factories no longer append ``.first`` so a hidden responsive
+        duplicate cannot mask the visible control.
+        """
+        locator = self._locator
+        total = 0
+        count = getattr(locator, "count", None)
+        if callable(count):
+            try:
+                total = await count()
+            except Exception:
+                total = 0
+        if total > 1:
+            nth = getattr(locator, "nth", None)
+            if callable(nth):
+                for index in range(total):
+                    node = nth(index)
+                    is_visible = getattr(node, "is_visible", None)
+                    if not callable(is_visible):
+                        return node
+                    try:
+                        if await is_visible():
+                            return node
+                    except Exception:
+                        continue
+        first = getattr(locator, "first", None)
+        return first if first is not None else locator
+
     async def is_checked(self) -> bool:
+        target = await self._target()
         try:
-            return bool(await self._locator.is_checked())
+            return bool(await target.is_checked())
         except Exception as original:
             # The brand fallback candidate may resolve to the text/label node
             # instead of the checkbox input.  Read the nested checkbox when one
             # exists, then fall back to an ARIA state; otherwise re-raise so the
             # caller can attach option/context data.
             try:
-                nested = self._locator.locator('input[type="checkbox"]')
+                nested = target.locator('input[type="checkbox"]')
                 if await nested.count():
                     return bool(await nested.first.is_checked())
             except Exception:
                 pass
             try:
-                aria = await self._locator.get_attribute("aria-checked")
+                aria = await target.get_attribute("aria-checked")
                 if aria is not None:
                     return str(aria).lower() == "true"
             except Exception:
@@ -385,46 +416,49 @@ class _LocatorControl(TiktokOptionControl):
             raise original
 
     async def is_disabled(self) -> bool:
+        target = await self._target()
         try:
-            if await self._locator.is_disabled():
+            if await target.is_disabled():
                 return True
         except Exception:
             pass
         # A label candidate wraps the native checkbox; read the input too.
         try:
-            nested = self._locator.locator('input[type="checkbox"]')
+            nested = target.locator('input[type="checkbox"]')
             if await nested.count():
                 if await nested.first.is_disabled():
                     return True
         except Exception:
             pass
-        aria = await self._locator.get_attribute("aria-disabled")
+        aria = await target.get_attribute("aria-disabled")
         if str(aria).lower() == "true":
             return True
-        classes = ((await self._locator.get_attribute("class")) or "").casefold()
+        classes = ((await target.get_attribute("class")) or "").casefold()
         return _classes_mark_disabled(classes)
 
     async def is_visible(self) -> bool:
+        target = await self._target()
         try:
-            return bool(await self._locator.is_visible())
+            return bool(await target.is_visible())
         except Exception:
             return True
 
     async def click(self) -> None:
+        target = await self._target()
         try:
             # Don't wait the full 30s for a styled label whose icon intercepts
             # the native input; force after a short attempt.
-            await self._locator.click(
-                timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
-            )
+            await target.click(timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS)
         except Exception:
-            await self._locator.click(force=True)
+            await target.click(force=True)
 
     async def get_attribute(self, name: str) -> str | None:
-        return await self._locator.get_attribute(name)
+        target = await self._target()
+        return await target.get_attribute(name)
 
     async def read_text(self) -> str:
-        return (await self._locator.inner_text()).strip()
+        target = await self._target()
+        return (await target.inner_text()).strip()
 
     async def count(self) -> int:
         return await self._locator.count()
@@ -1558,13 +1592,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.get_by_role(
                             "checkbox", name="Allow comments"
-                        ).first
+                        )
                     ),
                 ),
                 (
                     "data-e2e=user_perm_container+role=Comment",
                     lambda: _LocatorControl(
-                        perm.get_by_role("checkbox", name="Comment").first
+                        perm.get_by_role("checkbox", name="Comment")
                     ),
                 ),
                 (
@@ -1572,7 +1606,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.locator(
                             'label:has-text("Allow comments")'
-                        ).first
+                        )
                     ),
                 ),
                 (
@@ -1580,7 +1614,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.locator(
                             'label:has-text("Comment")'
-                        ).first
+                        )
                     ),
                 ),
             )
@@ -1594,7 +1628,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.get_by_role(
                             "checkbox", name="Reuse of content"
-                        ).first
+                        )
                     ),
                 ),
                 (
@@ -1602,7 +1636,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.locator(
                             'label:has-text("Reuse of content")'
-                        ).first
+                        )
                     ),
                 ),
                 (
@@ -1610,7 +1644,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.get_by_role(
                             "checkbox", name="Allow reuse of content"
-                        ).first
+                        )
                     ),
                 ),
                 (
@@ -1618,7 +1652,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     lambda: _LocatorControl(
                         perm.locator(
                             'label:has-text("Allow reuse of content")'
-                        ).first
+                        )
                     ),
                 ),
             )
@@ -1631,13 +1665,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 (
                     'data-e2e=aigc_container+.Switch__content',
                     lambda: _LocatorControl(
-                        aigc_container.locator('.Switch__content').first
+                        aigc_container.locator('.Switch__content')
                     ),
                 ),
                 (
                     'data-e2e=aigc_container+role=switch',
                     lambda: _LocatorControl(
-                        aigc_container.locator('[role="switch"]').first
+                        aigc_container.locator('[role="switch"]')
                     ),
                 ),
             )
@@ -1650,13 +1684,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 (
                     'data-e2e=disclose_content_container+.Switch__content',
                     lambda: _LocatorControl(
-                        disclose.locator('.Switch__content').first
+                        disclose.locator('.Switch__content')
                     ),
                 ),
                 (
                     'data-e2e=disclose_content_container+role=switch',
                     lambda: _LocatorControl(
-                        disclose.locator('[role="switch"]').first
+                        disclose.locator('[role="switch"]')
                     ),
                 ),
             )
@@ -1684,13 +1718,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 (
                     f'title-line "{label}" -> label',
                     lambda: _LocatorControl(
-                        base.locator(xpath_title_line).first
+                        base.locator(xpath_title_line)
                     ),
                 ),
                 (
                     f'span "{label}" -> preceding label',
                     lambda: _LocatorControl(
-                        base.locator(xpath_sibling).first
+                        base.locator(xpath_sibling)
                     ),
                 ),
             )
@@ -1918,9 +1952,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 date_visible = (
                     bool(date_count) and await date_cb.first.is_visible()
                 )
-                allow = page.get_by_role("button", name="Allow")
+                allow = page.locator('[role="dialog"]').get_by_role(
+                    "button", name=re.compile(r"^Allow$")
+                )
                 if await allow.count() == 0:
-                    allow = page.locator('button:has-text("Allow")')
+                    allow = page.get_by_role(
+                        "button", name=re.compile(r"^Allow$")
+                    )
                 allow_visible = (
                     bool(await allow.count()) and await allow.first.is_visible()
                 )
@@ -2341,7 +2379,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         producing a duplicate post.  If no visible dialog exists, do nothing
         and let the success-URL wait own the outcome.
         """
-        dialog = None
+        dialogs = []
         for selector in _CONFIRMATION_DIALOG_SELECTORS:
             try:
                 locator = page.locator(selector)
@@ -2349,37 +2387,47 @@ class TiktokBaseUploader(BaseVideoUploader):
                     candidate = locator.nth(position)
                     is_visible = getattr(candidate, "is_visible", None)
                     if not callable(is_visible) or await is_visible():
-                        # Keep the last visible dialog: it is the topmost one.
-                        dialog = candidate
+                        dialogs.append(candidate)
             except Exception:
                 continue
-        if dialog is None:
+        if not dialogs:
             return False
 
         names = _confirmation_names(self.publish_date)
-        for index, name in enumerate(names, start=1):
-            pattern = re.compile(rf"^{re.escape(name)}$")
-            try:
-                button = dialog.get_by_role("button", name=pattern).first
-                if await button.count() == 0:
-                    continue
-                is_visible = getattr(button, "is_visible", None)
-                if callable(is_visible) and not await is_visible():
-                    continue
-                await button.click()
-            except Exception as exc:
-                # Do not turn a failed optional fallback into a different exit
-                # code; the success-URL wait still owns the outcome.
-                tiktok_logger.info(
-                    f"  [-] confirmation click failed ({name}): {exc}"
+        for dialog in reversed(dialogs):
+            for index, name in enumerate(names, start=1):
+                pattern = re.compile(rf"^{re.escape(name)}$")
+                found = await _find_candidate(
+                    dialog,
+                    (
+                        (
+                            f"dialog role=button[name=/{name}/]",
+                            lambda scope, pattern=pattern: scope.get_by_role(
+                                "button", name=pattern
+                            ),
+                        ),
+                    ),
+                    visible=True,
                 )
-                return False
-            tiktok_logger.info(
-                "[+] TikTok publish: confirmation candidate "
-                f"#{index}/{len(names)} clicked "
-                f"(dialog role=button[name=/{name}/])"
-            )
-            return True
+                if found is None:
+                    continue
+                button, _, _ = found
+                try:
+                    await button.click()
+                except Exception as exc:
+                    # Do not turn a failed optional fallback into a different
+                    # exit code; the success-URL wait still owns the outcome.
+                    tiktok_logger.info(
+                        f"  [-] confirmation click failed ({name}): {exc}"
+                    )
+                    return False
+                tiktok_logger.info(
+                    "[+] TikTok publish: confirmation candidate "
+                    f"#{index}/{len(names)} clicked "
+                    f"(dialog role=button[name=/{name}/])"
+                )
+                return True
+        return False
         return False
 
     async def choose_base_locator(self, page):
@@ -2742,10 +2790,6 @@ class TiktokVideo(TiktokBaseUploader):
                 post = self.locator_base.locator(
                     '[data-e2e="post_video_button"]'
                 )
-                if await post.count() == 0:
-                    post = self.locator_base.locator(
-                        'div.button-group > button >> text=Post'
-                    )
                 post = post.first
                 enabled = False
                 if await post.count() > 0:
