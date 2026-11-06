@@ -641,7 +641,13 @@ class FakeAigcPage:
         self._button = button
 
     def get_by_role(self, role, name=None):
-        if role == "button" and name == "Turn on":
+        if role == "button" and (
+            name == "Turn on"
+            or (
+                hasattr(name, "fullmatch")
+                and name.fullmatch("Turn on")
+            )
+        ):
             return self._button
         return _MissingLocator()
 
@@ -908,6 +914,118 @@ class TiktokOptionStepTests(unittest.TestCase):
             any("Reuse of content" in label for label in labels), labels
         )
 
+    def test_brand_candidates_use_semantic_rows_not_scoped_container(self):
+        video = _uploader(TiktokPublishOptions(your_brand=True))
+        video.locator_base = MagicMock()
+
+        labels = [
+            label
+            for label, _ in video._option_candidate_factories("your_brand")
+        ]
+
+        self.assertEqual(len(labels), 2, labels)
+        self.assertIn("title-line", labels[0])
+        self.assertIn("preceding label", labels[1])
+        self.assertTrue(
+            all("disclose" not in label for label in labels), labels
+        )
+
+    def test_confirmation_candidates_prefer_schedule_for_scheduled_posts(self):
+        from datetime import datetime
+
+        immediate = [
+            label
+            for label, _ in tk_main._confirmation_button_candidates(0)
+        ]
+        scheduled = [
+            label
+            for label, _ in tk_main._confirmation_button_candidates(
+                datetime(2026, 11, 6, 17, 35)
+            )
+        ]
+
+        self.assertEqual(
+            immediate[0], "dialog role=button[name=/Post now/]"
+        )
+        self.assertNotIn(
+            "dialog role=button[name=/Schedule/]", immediate
+        )
+        self.assertEqual(
+            scheduled[0], "dialog role=button[name=/Schedule/]"
+        )
+        self.assertIn(
+            "dialog role=button[name=/Post now/]", scheduled
+        )
+
+    def test_scheduled_verification_accepts_timezone_marked_row(self):
+        from datetime import datetime
+
+        class _Page:
+            url = "https://www.tiktok.com/tiktokstudio/content"
+
+            def locator(self, selector):
+                self.selector = selector
+                return self
+
+            async def inner_text(self):
+                return (
+                    "Posts (Created on) | TB19 scheduled row | "
+                    "Nov 6, 5:35 PM (GMT+8) Shanghai | Everyone"
+                )
+
+            async def wait_for_timeout(self, _ms):
+                return None
+
+        video = TiktokVideo(
+            "TB19 scheduled row",
+            "/tmp/demo.mp4",
+            [],
+            datetime(2026, 11, 6, 17, 35),
+            None,
+        )
+
+        asyncio.run(video._verify_scheduled_post(_Page()))
+
+    def test_scheduled_verification_rejects_published_or_missing_row(self):
+        from datetime import datetime
+
+        class _Page:
+            def __init__(self, body):
+                self.body = body
+                self.url = "https://www.tiktok.com/tiktokstudio/content"
+
+            def locator(self, _selector):
+                return self
+
+            async def inner_text(self):
+                return self.body
+
+            async def wait_for_timeout(self, _ms):
+                return None
+
+        video = TiktokVideo(
+            "TB19 scheduled row",
+            "/tmp/demo.mp4",
+            [],
+            datetime(2026, 11, 6, 17, 35),
+            None,
+        )
+
+        for body in (
+            # No timezone marker: looks like an immediately published row.
+            "Posts (Created on) | TB19 scheduled row | Nov 6, 5:35 PM | Everyone",
+            # Row absent entirely.
+            "Posts (Created on) | something else | Everyone",
+        ):
+            with self.subTest(body=body):
+                with patch.object(
+                    tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 0
+                ):
+                    with self.assertRaises(RuntimeError):
+                        asyncio.run(
+                            video._verify_scheduled_post(_Page(body))
+                        )
+
     def test_disable_reuse_touches_only_the_single_reuse_switch(self):
         comments = FakeToggleControl(True)
         reuse = FakeToggleControl(True)
@@ -1135,6 +1253,39 @@ class TiktokAigcOptionTests(unittest.TestCase):
         control = tk_main._LocatorControl(_Locator())
 
         self.assertFalse(asyncio.run(control.is_disabled()))
+
+    def test_privacy_control_does_not_treat_disabled_false_class_as_disabled(self):
+        class _Trigger:
+            async def is_disabled(self):
+                return False
+
+            async def get_attribute(self, name):
+                if name == "class":
+                    return "TUXSelect TUXSelect--disabled-false"
+                return None
+
+        control = tk_main._LocatorPrivacyControl(_Trigger(), None)
+
+        self.assertFalse(asyncio.run(control.is_disabled()))
+
+    def test_privacy_control_detects_disabled_true_class(self):
+        class _Trigger:
+            async def is_disabled(self):
+                return False
+
+            async def get_attribute(self, name):
+                if name == "class":
+                    return "TUXSelect TUXSelect--disabled-true"
+                return None
+
+        control = tk_main._LocatorPrivacyControl(_Trigger(), None)
+
+        self.assertTrue(asyncio.run(control.is_disabled()))
+
+    def test_privacy_label_normalizes_only_me_alias(self):
+        self.assertEqual(
+            tk_main.normalize_privacy_label("Only me"), "only-me"
+        )
 
     def test_label_control_reads_nested_checkbox_state(self):
         control = tk_main._LocatorControl(

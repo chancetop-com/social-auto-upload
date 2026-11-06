@@ -241,11 +241,11 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 | 1 | `open_upload_page` | `goto(TIKTOK_UPLOAD_URL)`；`choose_base_locator` | iframe `[data-tt="Upload_index_iframe"]`；否则 `body` | `wait_for_url` 10s；shell 10s；`[本仓]` |
 | 2 | `attach_media` | `expect_file_chooser` + `set_files([file_path])` | `button:has-text("Select video"):visible` → `button[aria-label="Select file"]` | 按钮可见 30s；`[本仓]` |
 | 3 | `fill_metadata` | 清空 caption，插入 title，逐个插入 `#tag ` | `div.public-DraftEditor-content` | 每步 1s；`[本仓]` |
-| 4 | `wait_media_ready` | 等 Post 可点；失败时重选文件 | `div.button-group > button >> text=Post`；重试入口 `button[aria-label="Select file"]` | 2s 轮询，受总预算约束；`[本仓]` |
+| 4 | `wait_media_ready` | 等 Post 可点；失败时重选文件 | `[data-e2e="post_video_button"]` → `div.button-group > button >> text=Post`（仅兜底）；`is_enabled()` + `aria-disabled`；重试入口复用视频文件候选（`data-e2e=select_video_button` 优先） | 2s 轮询，受总预算约束；`[本仓]` |
 | 5 | `apply_options` | 展开高级设置，按请求设置隐私/评论/复用/AIGC/品牌 | 见 5.4 | 每步 Playwright 默认 30s；`[官方前端代码]` |
 | 6 | `apply_cover` | 仅 `thumbnail_path` 非空时执行 | 见 5.4 | 固定 3s；`[官方前端代码]` + `[开源实现]` |
 | 7 | `apply_schedule` | 现有定时控件 | `get_by_label('Schedule')`、`div.scheduled-picker` | `[本仓]` |
-| 8 | `click_publish` | 单次点击发布并等成功页；未到成功页时最多点一次弹窗 `Post now` | `[data-e2e="post_video_button"]` → `button:has-text("Post").last` → `div.button-group button` nth(0)；弹窗 `button:has-text("Post now")` / role button | 单次 3s，0.5s 重试，总预算 15min；首次点击成功后不再点击原 Post 按钮；`[官方前端代码]` + `[本仓]` |
+| 8 | `click_publish` | 单次点击发布并等成功页；未到成功页时最多点一次确认弹窗 | `[data-e2e="post_video_button"]` → `get_by_role("button", name=/^(Post|Schedule)$/)`（精确、可见、可用）；确认弹窗优先 `[role="dialog"]` 内精确 `Schedule`/`Confirm`/`Post now`，再退页面级精确 `Post now` | 单次 3s，0.5s 重试，总预算 15min；首次点击成功后不再点击原 Post 按钮；`[官方前端代码]` + `[实测]` |
 | 9 | `read_result` | 读 Content 列表首条视频 ID | `div[data-tt="components_PostTable_Container"]`、`a[href*="/video/"]` | 现有；失败退出 1（已知风险） |
 
 ### 5.3 图片路径
@@ -259,7 +259,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 | 5 | `apply_options` | 同视频，但跳过 reuse | 见 5.4 | 控件缺失且显式请求 → 退出 1；`[官方前端代码]` + `[仅推断]` |
 | 6 | `apply_cover` | no-op（第 1 张即封面） | — | `[官方前端代码]` |
 | 7 | `apply_schedule` | 基类复用 | 同视频 | `[本仓]` + `[开源实现]` |
-| 8 | `click_publish` | 同视频；若出现 `Post now` 弹窗则兜底点击 | `[data-e2e="post_video_button"]` → `button:has-text("Post").last` → `div.button-group button` nth(0)；弹窗 `button:has-text("Post now")` | 图片帖通常无弹窗；兜底待实测 |
+| 8 | `click_publish` | 同视频；若出现确认弹窗则兜底点击 | `[data-e2e="post_video_button"]` → `get_by_role("button", name=/^(Post|Schedule)$/)`；弹窗优先 dialog 内精确 `Post now` | 图片帖通常无弹窗；`[实测]` |
 | 9 | `read_result` | 读图片帖 item id | `a[href*="/post/photo?item_id="]` | 失败退出 1（与视频一致） |
 
 ### 5.4 选项控件与回读
@@ -299,6 +299,13 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 4. 所有候选失败时，错误消息必须包含：控件名、阶段、已尝试候选、当前 URL。
 5. 设置与回读使用同一候选列表解析控件，避免“点到一个、读的是另一个”。
 6. `data-e2e` 选择器作用在 `locator_base` 上；弹窗/toast 才用顶层 `page`。
+7. 发布按钮只允许 `data-e2e=post_video_button` → 精确 role `^(Post|Schedule)$`；**禁止** `button:has-text("Post").last` 与 `button-group nth(0)`（前者会命中 `Post now`，后者可能是 Discard，且一旦点错会被 `publish_clicked` 锁死到超时）。
+8. 确认弹窗必须在 `[role="dialog"]` 内精确匹配；定时帖优先 `Schedule`/`Confirm`，再退 `Post now`（实测当前 Studio 定时流仍显示 `Post now`，点击后保持定时）。
+9. 品牌复选框：`disclose_content_container` 只包主开关，两个复选框在主开关打开后渲染到兄弟容器；用 `//div[contains(@class,"title-line")][.//span[normalize-space(text())="{label}"]]/label[1]`，再退 `//span[...]/preceding-sibling::label[1]`。**不要**在 disclose 容器内查（永远不命中）。
+10. 折叠区展开后等待任一选项面（`user_perm_container`/`aigc_container`/`disclose_content_container`）可见（≤3s），不只 sleep 固定 300ms。
+11. 隐私 combobox 的 disabled 判定必须按 class token（`--disabled-false` 不是禁用）；`Only me` 与 `Only you` 都归一化为 `only-me`。
+12. 图片文件 input 用 `locator_base`（与其它步骤一致），避免 iframe 模式失效；封面 `Edit cover`/`Upload cover`/`Save` 只接受可见候选。
+13. 定时帖：`read_result` 不能返回视频 ID，但必须在 Content 列表按标题/正文/标签找到行，并校验 240 字符窗口内出现 `(GMT`/`（GMT` 时区标记；找不到 → 失败，禁止静默 exit 0。
 
 ---
 
@@ -347,7 +354,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 6. 点击后 URL 命中 `/login`、`captcha`、`verify`、`two-factor`、`2fa` → `LoginRequiredError`，退出 `10`（优先于 `9`）。
 7. `PublishResultUnknownError` 只能由发布阶段抛出；新增步骤函数不得吞异常。
 
-点击去重约束：首次 `click()` 返回成功后，代码只等待/重试导航，**永不再次点击原 Post 按钮**，避免生成重复帖子。唯一允许的兜底点击是成功页未出现时对可见 `Post now` 弹窗按钮的一次点击；该按钮也只点一次。
+点击去重约束：首次 `click()` 返回成功后，代码只等待/重试导航，**永不再次点击原 Post 按钮**，避免生成重复帖子。唯一允许的兜底点击是成功页未出现时对可见确认弹窗按钮的一次点击；按钮必须精确匹配 `Schedule`/`Confirm`/`Post now`（定时优先 `Schedule`/`Confirm`），且优先限定在 `[role="dialog"]` 内，只点一次。
 
 调度侧契约：
 
@@ -554,7 +561,7 @@ class TiktokPublishOptions:
 | 图片帖 Title/Description 的精确 DOM 与必填性 | 表单填写失败 | 用可见文案与 `caption-textarea` 候选；冒烟定位 |
 | Photos tab 灰度范围 | 目标账号可能无入口 | 选文件前探测，缺失即退出 `1` |
 | 私有账号首项文案、`friends` + 品牌组合 | 回读映射可能有变体 | 归一化文本；冒烟/人工记录 |
-| 图片帖 `Post now` / 检查弹窗 | 点击后可能不跳成功页 | 兜底点击 `Post now`；否则按 `9` 处理 |
+| 图片帖确认弹窗 | 点击后可能不跳成功页 | 兜底点击 dialog 内精确确认按钮；否则按 `9` 处理 |
 | AIGC `show_aigc_toggle` A/B flag | 容器可能不存在 | 显式请求时退出 `1`；未请求不触碰 |
 | 封面预览变化是否等于服务端接受（上游 issue #228） | 可能显示成功但封面未生效 | 发布后人工核验；页面状态断言 |
 | 首次上传的自动内容检查弹窗 / 新手引导遮罩拦截点击 | 已在真实账号实测出现 | `dismiss_blocking_overlays`：Cancel 关闭弹窗、点击 joyride 遮罩；编辑器点击重试 |

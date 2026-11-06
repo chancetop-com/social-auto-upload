@@ -104,12 +104,18 @@ _COVER_SAVE_CANDIDATES = (
 # First-run AIGC guidance dialog.  It is top-level (outside the upload iframe),
 # so these candidates run against ``page`` rather than ``locator_base``.
 _AIGC_TURN_ON_CANDIDATES = (
-    ('get_by_role("button", name="Turn on")',
-     lambda page: page.get_by_role("button", name="Turn on")),
-    ('[role="dialog"] button:has-text("Turn on")',
-     lambda page: page.locator('[role="dialog"] button:has-text("Turn on")')),
-    ('.TUXModal button:has-text("Turn on")',
-     lambda page: page.locator('.TUXModal button:has-text("Turn on")')),
+    ('get_by_role("button", name=/^Turn on$/)',
+     lambda page: page.get_by_role(
+         "button", name=re.compile(r"^Turn on$")
+     )),
+    ('[role="dialog"] role=button[name=/^Turn on$/]',
+     lambda page: page.locator('[role="dialog"]').get_by_role(
+         "button", name=re.compile(r"^Turn on$")
+     )),
+    ('.TUXModal role=button[name=/^Turn on$/]',
+     lambda page: page.locator('.TUXModal').get_by_role(
+         "button", name=re.compile(r"^Turn on$")
+     )),
 )
 _AIGC_DIALOG_TIMEOUT_MS = 5_000
 
@@ -153,8 +159,10 @@ def _cover_error(control, stage, candidates, page, detail=None):
     )
 
 
-async def _resolve_candidate(scope, candidates, *, control, stage, page):
-    found = await _find_candidate(scope, candidates)
+async def _resolve_candidate(
+    scope, candidates, *, control, stage, page, visible: bool = False
+):
+    found = await _find_candidate(scope, candidates, visible=visible)
     if found is None:
         raise _cover_error(control, stage, candidates, page)
     locator, index, description = found
@@ -176,35 +184,61 @@ _PRE_PUBLISH_TIMEOUT_MESSAGE = (
     "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
 )
 
-# Publish button candidates, in spec §5.2/§5.3 order.
+# Publish button candidates, in spec §5.2/§5.3 order.  The legacy
+# ``button:has-text("Post").last`` / ``button-group nth(0)`` candidates were
+# removed: substring matching also hits ``Post now``/``Posts`` and the first
+# button-group entry can be Discard, which latched ``publish_clicked`` and
+# ended in a false exit 9.
 _PUBLISH_BUTTON_CANDIDATES = (
     (
         'data-e2e=post_video_button',
         lambda base: base.locator('[data-e2e="post_video_button"]'),
     ),
     (
-        'button:has-text("Post").last',
-        lambda base: base.locator('button:has-text("Post")').last,
-    ),
-    (
-        'div.button-group button nth(0)',
-        lambda base: base.locator('div.button-group button').nth(0),
+        'role=button[name=/^(Post|Schedule)$/]',
+        lambda base: base.get_by_role(
+            "button", name=re.compile(r"^(Post|Schedule)$")
+        ).last,
     ),
 )
 
-# The photo composer can raise a "Post now" confirmation after the first
-# click.  It is the only fallback click allowed; the original Post button is
-# never clicked twice.
-_POST_NOW_CANDIDATES = (
-    (
-        'button:has-text("Post now")',
-        lambda page: page.locator('button:has-text("Post now")'),
-    ),
-    (
-        'role=button[name="Post now"]',
-        lambda page: page.get_by_role("button", name="Post now"),
-    ),
-)
+
+def _confirmation_button_candidates(publish_date) -> tuple:
+    """Dialog confirmation candidates, scoped to the modal first.
+
+    Current Studio uses a generic ``Post now`` confirm button even when the
+    post is scheduled (the schedule radio keeps its value).  Prefer a
+    ``Schedule``/``Confirm`` button when one is rendered, then fall back to the
+    observed ``Post now`` label.  Exact-name matching avoids the first-run
+    ``Turn on automatic content checks``-style false positives.
+    """
+    names = (
+        ("Post now",)
+        if not publish_date
+        else ("Schedule", "Confirm", "Post now")
+    )
+    candidates = []
+    for name in names:
+        pattern = re.compile(rf"^{re.escape(name)}$")
+        candidates.append(
+            (
+                f'dialog role=button[name=/{name}/]',
+                lambda page, pattern=pattern: page.locator(
+                    '[role="dialog"]'
+                ).get_by_role("button", name=pattern),
+            )
+        )
+    for name in names:
+        pattern = re.compile(rf"^{re.escape(name)}$")
+        candidates.append(
+            (
+                f'role=button[name=/{name}/]',
+                lambda page, pattern=pattern: page.get_by_role(
+                    "button", name=pattern
+                ),
+            )
+        )
+    return tuple(candidates)
 _COVER_EDITOR_CLOSE_TIMEOUT_MS = 10_000
 
 # Video file chooser entry, in spec §5.2 step 2 order.
@@ -250,6 +284,7 @@ _PRIVACY_LABELS = {
     "friends": "friends",
     "followers": "followers",
     "only you": "only-me",
+    "only me": "only-me",
     "private": "only-me",
 }
 
@@ -265,6 +300,17 @@ def normalize_privacy_label(text: str | None) -> str | None:
         return None
     first_line = text.strip().splitlines()[0].strip()
     return _PRIVACY_LABELS.get(first_line.casefold())
+
+
+def _classes_mark_disabled(classes: str | None) -> bool:
+    """Interpret BEM/TUX disabled classes without the ``--disabled-false`` trap."""
+    tokens = (classes or "").casefold().split()
+    return any(
+        token == "disabled"
+        or token.endswith("--disabled")
+        or "disabled-true" in token
+        for token in tokens
+    )
 
 
 class TiktokOptionControl:
@@ -347,14 +393,7 @@ class _LocatorControl(TiktokOptionControl):
         if str(aria).lower() == "true":
             return True
         classes = ((await self._locator.get_attribute("class")) or "").casefold()
-        tokens = classes.split()
-        # Do not treat ``...--disabled-false`` as disabled.
-        return any(
-            token == "disabled"
-            or token.endswith("--disabled")
-            or "disabled-true" in token
-            for token in tokens
-        )
+        return _classes_mark_disabled(classes)
 
     async def click(self) -> None:
         try:
@@ -402,7 +441,7 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         except Exception:
             pass
         classes = (await self._trigger.get_attribute("class")) or ""
-        return "disabled" in classes.casefold()
+        return _classes_mark_disabled(classes)
 
     async def click(self) -> None:
         await self._trigger.click()
@@ -1312,7 +1351,9 @@ class TiktokBaseUploader(BaseVideoUploader):
         missing button is not an error; the caller's readback still decides
         success.
         """
-        found = await _find_candidate(page, _AIGC_TURN_ON_CANDIDATES)
+        found = await _find_candidate(
+            page, _AIGC_TURN_ON_CANDIDATES, visible=True
+        )
         if found is None:
             return
         button, index, description = found
@@ -1580,56 +1621,32 @@ class TiktokBaseUploader(BaseVideoUploader):
             label = (
                 "Your brand" if name == "your_brand" else "Branded content"
             )
-            disclose = base.locator(
-                '[data-e2e="disclose_content_container"]'
-            )
-            # Studio renders an empty checkbox label followed by a sibling
-            # text span; the label has no accessible name of its own.
-            xpath_sibling = (
-                f'xpath=//span[normalize-space(text())="{label}"]'
-                '/preceding-sibling::label[1]'
-            )
+            # Real DOM: ``disclose_content_container`` only wraps the master
+            # switch.  The two checkboxes render in a sibling ``container``
+            # after the switch is turned on, so a scoped XPath inside
+            # ``disclose`` can never match.  Anchor on the semantic
+            # ``title-line`` row first, then fall back to the exact-text
+            # span's preceding label.  Both matches are exact-text, so an
+            # unrelated duplicate would have to reuse the same copy.
             xpath_title_line = (
                 'xpath=//div[contains(@class,"title-line")]'
                 f'[.//span[normalize-space(text())="{label}"]]/label[1]'
             )
+            xpath_sibling = (
+                f'xpath=//span[normalize-space(text())="{label}"]'
+                '/preceding-sibling::label[1]'
+            )
             return (
                 (
-                    f'xpath=span "{label}" -> preceding label',
-                    lambda: _LocatorControl(
-                        base.locator(xpath_sibling).first
-                    ),
-                ),
-                (
-                    f'xpath=title-line "{label}" -> label',
+                    f'title-line "{label}" -> label',
                     lambda: _LocatorControl(
                         base.locator(xpath_title_line).first
                     ),
                 ),
                 (
-                    f'disclose+role=checkbox[name="{label}"]',
+                    f'span "{label}" -> preceding label',
                     lambda: _LocatorControl(
-                        disclose.get_by_role("checkbox", name=label).first
-                    ),
-                ),
-                (
-                    f'disclose+label="{label}" input[type=checkbox]',
-                    lambda: _LocatorControl(
-                        disclose.locator(
-                            f'label:has-text("{label}")'
-                        ).first
-                    ),
-                ),
-                (
-                    f'role=checkbox[name="{label}"]',
-                    lambda: _LocatorControl(
-                        base.get_by_role("checkbox", name=label).first
-                    ),
-                ),
-                (
-                    f'text="{label}"',
-                    lambda: _LocatorControl(
-                        base.get_by_text(label, exact=True).first
+                        base.locator(xpath_sibling).first
                     ),
                 ),
             )
@@ -1656,6 +1673,31 @@ class TiktokBaseUploader(BaseVideoUploader):
                 continue
         return None
 
+    async def _wait_for_settings_surface(
+        self, page, *, timeout_ms: int = 3000
+    ) -> None:
+        """Wait for a collapsed option surface to become visible after expand."""
+        if self.locator_base is None:
+            return
+        selectors = (
+            '[data-e2e="user_perm_container"]',
+            '[data-e2e="aigc_container"]',
+            '[data-e2e="disclose_content_container"]',
+        )
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            for selector in selectors:
+                try:
+                    locator = self.locator_base.locator(selector)
+                    if (
+                        await locator.count()
+                        and await locator.first.is_visible()
+                    ):
+                        return
+                except Exception:
+                    continue
+            await page.wait_for_timeout(150)
+
     async def _expand_advanced_settings(self, page) -> None:
         if self.locator_base is None:
             return
@@ -1671,7 +1713,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 )
                 if await show_more.count():
                     await show_more.first.click()
-                    await page.wait_for_timeout(300)
+                    await self._wait_for_settings_surface(page)
                     tiktok_logger.info(
                         "[+] expanded photo settings via Show more"
                     )
@@ -1687,7 +1729,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 text = (await more_btn.first.inner_text()).strip().casefold()
                 if collapsed or "show more" in text:
                     await more_btn.first.click()
-                    await page.wait_for_timeout(300)
+                    await self._wait_for_settings_surface(page)
                     return
         except Exception:
             pass
@@ -1696,7 +1738,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         try:
             if await show_more.count():
                 await show_more.first.click()
-                await page.wait_for_timeout(300)
+                await self._wait_for_settings_surface(page)
         except Exception:
             pass
 
@@ -2136,10 +2178,23 @@ class TiktokBaseUploader(BaseVideoUploader):
             if not publish_clicked:
                 try:
                     found = await _find_candidate(
-                        self.locator_base, _PUBLISH_BUTTON_CANDIDATES
+                        self.locator_base,
+                        _PUBLISH_BUTTON_CANDIDATES,
+                        visible=True,
                     )
                     if found is not None:
                         publish_button, index, description = found
+                        enabled = True
+                        try:
+                            enabled = await publish_button.is_enabled()
+                        except Exception:
+                            enabled = True
+                        if not enabled:
+                            tiktok_logger.info(
+                                "  [-] publish button not enabled yet"
+                            )
+                            await asyncio.sleep(0.5)
+                            continue
                         tiktok_logger.info(
                             "[+] TikTok publish: candidate "
                             f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} "
@@ -2189,8 +2244,9 @@ class TiktokBaseUploader(BaseVideoUploader):
             return
 
     async def _click_post_now(self, page) -> bool:
-        """Click the visible ``Post now`` dialog button once, if present."""
-        found = await _find_candidate(page, _POST_NOW_CANDIDATES, visible=True)
+        """Click the visible publish-confirmation button once, if present."""
+        candidates = _confirmation_button_candidates(self.publish_date)
+        found = await _find_candidate(page, candidates, visible=True)
         if found is None:
             return False
         button, index, description = found
@@ -2200,12 +2256,12 @@ class TiktokBaseUploader(BaseVideoUploader):
             # Do not turn a failed optional fallback into a different exit
             # code; the success-URL wait still owns the outcome.
             tiktok_logger.info(
-                f"  [-] Post now click failed ({description}): {exc}"
+                f"  [-] publish confirmation click failed ({description}): {exc}"
             )
             return False
         tiktok_logger.info(
-            "[+] TikTok publish: Post now fallback candidate "
-            f"#{index + 1}/{len(_POST_NOW_CANDIDATES)} clicked "
+            "[+] TikTok publish: confirmation candidate "
+            f"#{index + 1}/{len(candidates)} clicked "
             f"({description})"
         )
         return True
@@ -2216,6 +2272,47 @@ class TiktokBaseUploader(BaseVideoUploader):
             self.locator_base = page.frame_locator(Tk_Locator.tk_iframe)
         else:
             self.locator_base = page.locator(Tk_Locator.default)
+
+    async def _verify_scheduled_post(self, page) -> None:
+        """Confirm the scheduled row is present in the Content list.
+
+        ``read_result`` cannot return a video id before the scheduled time, so
+        the row itself (title/note/tags plus a timezone-qualified time) is the
+        only proof the schedule was accepted.  Without this check a failed
+        schedule still exited 0.
+        """
+        if not self.publish_date:
+            return
+        values = self._result_text_candidates()
+        if not values:
+            tiktok_logger.info(
+                "[+] scheduled post: no title/note/tags to match; "
+                "skipped row readback"
+            )
+            return
+        deadline = time.monotonic() + TIKTOK_RESULT_READ_TIMEOUT_MS / 1000
+        while time.monotonic() < deadline:
+            try:
+                body = await page.locator("body").inner_text()
+            except Exception:
+                body = ""
+            for value in values:
+                index = body.find(value)
+                if index < 0:
+                    continue
+                window = body[index : index + 240]
+                if "(GMT" in window or "（GMT" in window:
+                    tiktok_logger.info(
+                        "[+] scheduled post confirmed in Content list: "
+                        f"{value!r}"
+                    )
+                    return
+            await page.wait_for_timeout(1000)
+        raise RuntimeError(
+            "TikTok 定时发布核验失败：Content 列表未找到带时区标记的定时行；"
+            "请先人工核验，避免重复发布。"
+            f" expected={values!r} url={_page_url(page)!r}"
+        )
 
     async def read_result(self, page):
         raise NotImplementedError
@@ -2249,7 +2346,15 @@ class TiktokVideo(TiktokBaseUploader):
 
     async def handle_upload_error(self, page):
         tiktok_logger.info("video upload error retrying.")
-        select_file_button = self.locator_base.locator('button[aria-label="Select file"]')
+        found = await _find_candidate(
+            self.locator_base, _VIDEO_FILE_CANDIDATES, visible=True
+        )
+        if found is None:
+            raise RuntimeError(
+                "TikTok 视频上传重试失败：找不到视频选择入口 "
+                f"{tuple(label for label, _ in _VIDEO_FILE_CANDIDATES)!r}"
+            )
+        select_file_button, _, _ = found
         async with page.expect_file_chooser() as fc_info:
             await select_file_button.click()
         file_chooser = await fc_info.value
@@ -2313,6 +2418,7 @@ class TiktokVideo(TiktokBaseUploader):
             control="Edit cover",
             stage="open cover editor",
             page=page,
+            visible=True,
         )
         await edit_cover.click()
 
@@ -2322,6 +2428,7 @@ class TiktokVideo(TiktokBaseUploader):
             control="Upload cover",
             stage="select upload tab",
             page=page,
+            visible=True,
         )
         await upload_tab.click()
 
@@ -2385,6 +2492,7 @@ class TiktokVideo(TiktokBaseUploader):
                     control="Save",
                     stage="save cover",
                     page=page,
+                    visible=True,
                 )
                 break
             except RuntimeError as exc:
@@ -2473,8 +2581,9 @@ class TiktokVideo(TiktokBaseUploader):
 
     async def read_result(self, page):
         if self.publish_date != 0:
-            # A scheduled item has no published video URL yet; the Scheduled
-            # list is the source of truth for acceptance.
+            # A scheduled item has no published video URL yet; the Content
+            # row (title + timezone-qualified time) is the acceptance proof.
+            await self._verify_scheduled_post(page)
             tiktok_logger.info(
                 "[+] scheduled post: published video link is not available yet"
             )
@@ -2497,16 +2606,35 @@ class TiktokVideo(TiktokBaseUploader):
             if multilogin:
                 _raise_if_login_required(page)
             try:
-                # if await self.locator_base.locator('div.btn-post > button').get_attribute("disabled") is None:
-                if await self.locator_base.locator(
-                        'div.button-group > button >> text=Post').get_attribute("disabled") is None:
+                # Current Studio exposes the publish button via data-e2e; the
+                # legacy class+text form remains only as a fallback.
+                post = self.locator_base.locator(
+                    '[data-e2e="post_video_button"]'
+                )
+                if await post.count() == 0:
+                    post = self.locator_base.locator(
+                        'div.button-group > button >> text=Post'
+                    )
+                post = post.first
+                enabled = False
+                if await post.count() > 0:
+                    try:
+                        enabled = await post.is_enabled()
+                    except Exception:
+                        enabled = False
+                    if (
+                        str(await post.get_attribute("aria-disabled")).lower()
+                        == "true"
+                    ):
+                        enabled = False
+                if enabled:
                     tiktok_logger.info("  [-]video uploaded.")
                     break
                 else:
                     tiktok_logger.info("  [-] video uploading...")
                     await asyncio.sleep(2)
                     if await self.locator_base.locator(
-                            'button[aria-label="Select file"]').count():
+                            '[data-e2e="select_video_button"]').count():
                         tiktok_logger.info("  [-] found some error while uploading now retry...")
                         await self.handle_upload_error(page)
             except Exception:
@@ -2535,7 +2663,6 @@ class TiktokNote(TiktokBaseUploader):
         'input[type="file"][accept*="image"]'
     )
 
-    _PHOTO_TITLE_SELECTOR = 'input[placeholder*="catchy"]'
     _PHOTO_TITLE_CANDIDATES = (
         'input[placeholder*="catchy"]',
         'input[placeholder="Add a catchy title"]',
@@ -2547,7 +2674,6 @@ class TiktokNote(TiktokBaseUploader):
     _PHOTO_INPUT_SELECTOR = 'input[type="file"][accept*="image"]'
     _MULTI_INPUT_SELECTOR = 'input[type="file"][multiple]'
     _POST_BUTTON_SELECTOR = 'div.button-group > button >> text=Post'
-    _CONTENT_CONTAINER_SELECTOR = 'div[data-tt="components_PostTable_Container"]'
     _PHOTO_LINK_SELECTOR = 'a[href*="/post/photo?item_id="]'
     _PHOTOS_TAB = "Photos"
 
@@ -2649,15 +2775,18 @@ class TiktokNote(TiktokBaseUploader):
         )
 
     async def attach_media(self, page) -> None:
+        scope = await self._resolve_photo_scope(page)
         selector = self._PHOTO_INPUT_SELECTOR
         try:
-            present = await page.locator(selector).count()
+            present = await scope.locator(selector).count()
         except Exception:
             present = 0
         if not present:
             selector = self._MULTI_INPUT_SELECTOR
         # ``image_paths`` order is the display order; the first one is the cover.
-        await page.locator(selector).first.set_input_files(list(self.image_paths))
+        await scope.locator(selector).first.set_input_files(
+            list(self.image_paths)
+        )
 
     async def _resolve_photo_scope(self, page):
         return self.locator_base if self.locator_base is not None else page
@@ -2764,18 +2893,22 @@ class TiktokNote(TiktokBaseUploader):
                     except Exception:
                         processed = False
 
-                post = page.locator(self._POST_BUTTON_SELECTOR).last
+                post = page.get_by_role(
+                    "button", name=re.compile(r"^(Post|Schedule)$")
+                ).last
                 if await post.count() == 0:
-                    post = page.locator('button:has-text("Post")').last
+                    post = page.locator(self._POST_BUTTON_SELECTOR).last
                 post_enabled = False
                 if await post.count() > 0:
-                    post_enabled = (
-                        await post.get_attribute("disabled") is None
-                        and str(
-                            await post.get_attribute("aria-disabled")
-                        ).lower()
-                        != "true"
-                    )
+                    try:
+                        post_enabled = await post.is_enabled()
+                    except Exception:
+                        post_enabled = False
+                    if (
+                        str(await post.get_attribute("aria-disabled")).lower()
+                        == "true"
+                    ):
+                        post_enabled = False
                 if processed and post_enabled:
                     tiktok_logger.info("  [-] photos uploaded.")
                     return
@@ -2788,6 +2921,7 @@ class TiktokNote(TiktokBaseUploader):
 
     async def read_result(self, page):
         if self.publish_date != 0:
+            await self._verify_scheduled_post(page)
             tiktok_logger.info(
                 "[+] scheduled post: published photo link is not available yet"
             )

@@ -87,6 +87,9 @@ class _CandidateLocator:
     async def is_visible(self) -> bool:
         return self._visible
 
+    async def is_enabled(self) -> bool:
+        return True
+
     async def click(self) -> None:
         self.click_calls += 1
         if self.click_error is not None:
@@ -94,11 +97,22 @@ class _CandidateLocator:
 
 
 class _CandidateBase:
-    def __init__(self, by_selector: dict[str, _CandidateLocator]) -> None:
+    def __init__(
+        self,
+        by_selector: dict[str, _CandidateLocator],
+        by_role: dict[str, _CandidateLocator] | None = None,
+    ) -> None:
         self._by_selector = by_selector
+        self._by_role = by_role or {}
 
     def locator(self, selector: str) -> _CandidateLocator:
         return self._by_selector.get(selector, _CandidateLocator(count=0))
+
+    def get_by_role(self, role: str, name=None) -> _CandidateLocator:
+        key = getattr(name, "pattern", name)
+        return self._by_role.get(
+            f"{role}:{key}", _CandidateLocator(count=0)
+        )
 
 
 class _Clock:
@@ -149,6 +163,16 @@ class _FakePage:
             self.url = outcome
 
 
+class _DialogScope:
+    def __init__(self, dialog: _CandidateLocator) -> None:
+        self.dialog = dialog
+
+    def get_by_role(self, role: str, name=None):
+        if role == "button":
+            return self.dialog
+        return _CandidateLocator(count=0)
+
+
 class _PostNowPage(_FakePage):
     """Publish page whose success URL arrives after a ``Post now`` dialog."""
 
@@ -157,8 +181,8 @@ class _PostNowPage(_FakePage):
         self.dialog = dialog
 
     def locator(self, selector: str):
-        if selector == 'button:has-text("Post now")':
-            return self.dialog
+        if selector == '[role="dialog"]':
+            return _DialogScope(self.dialog)
         return _CandidateLocator(count=0)
 
     def get_by_role(self, _role: str, name=None):
@@ -364,16 +388,12 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(post_last.click_calls, 0)
         self.assertEqual(legacy.click_calls, 0)
 
-    def test_publish_button_falls_back_to_post_last(self):
+    def test_publish_button_falls_back_to_exact_role(self):
         primary = _CandidateLocator(count=0)
-        post_last = _CandidateLocator()
-        legacy = _CandidateLocator()
+        role_button = _CandidateLocator()
         base = _CandidateBase(
-            {
-                '[data-e2e="post_video_button"]': primary,
-                'button:has-text("Post")': post_last,
-                "div.button-group button": legacy,
-            }
+            {'[data-e2e="post_video_button"]': primary},
+            {"button:^(Post|Schedule)$": role_button},
         )
         video = _video()
         video.locator_base = base
@@ -382,27 +402,23 @@ class ClickPublishTests(unittest.TestCase):
         asyncio.run(video.click_publish(page, multilogin=True))
 
         self.assertEqual(primary.click_calls, 0)
-        self.assertEqual(post_last.click_calls, 1)
-        self.assertEqual(legacy.click_calls, 0)
+        self.assertEqual(role_button.click_calls, 1)
 
-    def test_publish_button_falls_back_to_legacy_group_button(self):
-        primary = _CandidateLocator(count=0)
-        post_last = _CandidateLocator(count=0)
-        legacy = _CandidateLocator()
-        base = _CandidateBase(
-            {
-                '[data-e2e="post_video_button"]': primary,
-                'button:has-text("Post")': post_last,
-                "div.button-group button": legacy,
-            }
+    def test_publish_candidates_avoid_substring_and_positional_fallbacks(self):
+        descriptions = [
+            label for label, _ in tk_main._PUBLISH_BUTTON_CANDIDATES
+        ]
+
+        self.assertEqual(
+            descriptions,
+            [
+                "data-e2e=post_video_button",
+                "role=button[name=/^(Post|Schedule)$/]",
+            ],
         )
-        video = _video()
-        video.locator_base = base
-        page = _FakePage(wait_outcomes=[CONTENT_URL])
-
-        asyncio.run(video.click_publish(page, multilogin=True))
-
-        self.assertEqual(legacy.click_calls, 1)
+        joined = " ".join(descriptions)
+        self.assertNotIn("has-text", joined)
+        self.assertNotIn("nth(", joined)
 
     def test_post_now_dialog_is_clicked_once_and_post_is_not_reclicked(self):
         button = _CandidateLocator()

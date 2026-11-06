@@ -165,6 +165,11 @@ class _Locator:
             return self.page.item_href
         return None
 
+    async def is_enabled(self) -> bool:
+        if "text=Post" in self.selector or "role=button" in self.selector:
+            return self.page.post_enabled
+        return True
+
     async def wait_for(self, **kwargs) -> None:
         return None
 
