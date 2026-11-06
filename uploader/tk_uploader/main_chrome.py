@@ -52,7 +52,9 @@ from utils.log import tiktok_logger
 TIKTOK_LAUNCH_KWARGS = (
     {"executable_path": LOCAL_CHROME_PATH} if LOCAL_CHROME_PATH else {}
 )
-TIKTOK_CONTEXT_KWARGS: dict = {}
+# Local mode should not depend on the operator's OS language.  MLX ignores
+# these kwargs and uses the Profile's own English (US) configuration.
+TIKTOK_CONTEXT_KWARGS: dict = {"locale": "en-US"}
 TIKTOK_INIT_SCRIPT = False
 
 _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
@@ -207,6 +209,10 @@ _COVER_EDITOR_CLOSE_TIMEOUT_MS = 10_000
 # Video file chooser entry, in spec §5.2 step 2 order.
 _VIDEO_FILE_WAIT_MS = 30_000
 _VIDEO_FILE_CANDIDATES = (
+    (
+        'data-e2e=select_video_button',
+        lambda base: base.locator('[data-e2e="select_video_button"]'),
+    ),
     (
         'button:has-text("Select video"):visible',
         lambda base: base.locator('button:has-text("Select video"):visible'),
@@ -771,7 +777,8 @@ async def _cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) 
         try:
             try:
                 context = await browser.new_context(
-                    storage_state=str(account_file)
+                    storage_state=str(account_file),
+                    **TIKTOK_CONTEXT_KWARGS,
                 )
             except (PlaywrightError, OSError, ValueError) as exc:
                 tiktok_logger.error(
@@ -869,7 +876,7 @@ async def get_tiktok_cookie(account_file) -> str:
             **TIKTOK_LAUNCH_KWARGS,
         )
         try:
-            context = await browser.new_context()
+            context = await browser.new_context(**TIKTOK_CONTEXT_KWARGS)
             try:
                 if TIKTOK_INIT_SCRIPT:
                     context = await set_init_script(context)
@@ -2147,54 +2154,65 @@ class TiktokNote(TiktokBaseUploader):
     def result_label(self, item_id) -> str:
         return f"photo post id: {item_id}"
 
-    async def _photo_form_present(self, page) -> bool:
-        """The photo form is identified by its Title input, never by an input.
+    async def _photo_input_present(self, page) -> bool:
+        """Return whether the composer currently exposes an image file input.
 
-        File inputs are not a reliable mode signal: an image file input can be
-        present while the composer is still in video mode, and feeding images
-        there would misclassify the post.  Spec §5.3 step 1 makes the Title
-        input the definitive signal.
+        The Title input only appears *after* images are selected, so it cannot
+        be the pre-selection mode signal.  The image ``accept`` attribute is the
+        stable, language-independent way to avoid feeding images into the video
+        input.
         """
         try:
-            return await page.locator(self._PHOTO_TITLE_SELECTOR).count() > 0
+            return (
+                await page.locator(
+                    'input[type="file"][accept*="image"]'
+                ).count()
+                > 0
+            )
         except Exception:
             return False
 
     async def ensure_mode(self, page) -> None:
-        """Require the photo form *before* any file selection.
+        """Require the photo composer *before* any file selection.
 
         ``?tab=photo`` normally lands straight on the photo composer.  If the
-        form is not rendered yet, click the ``Photos`` tab once and re-check.
-        A missing form means the account is outside the rollout: fail instead
-        of feeding images into the video input.
+        image input is not rendered yet, click the ``Photos`` tab once and wait
+        for it.  A missing image input means the account is outside the rollout:
+        fail instead of feeding images into the video input.
         """
-        if await self._photo_form_present(page):
+        if await self._photo_input_present(page):
             return
 
         clicked = False
-        get_by_text = getattr(page, "get_by_text", None)
-        if callable(get_by_text):
-            try:
-                tab = get_by_text(self._PHOTOS_TAB, exact=True).first
-                if await tab.count() > 0:
-                    await tab.click()
-                    clicked = True
-            except Exception:
-                pass
-
-        if not clicked:
-            get_by_role = getattr(page, "get_by_role", None)
-            if callable(get_by_role):
+        get_by_role = getattr(page, "get_by_role", None)
+        if callable(get_by_role):
+            for label in (self._PHOTOS_TAB, "照片"):
                 try:
-                    tab = get_by_role("tab", name=self._PHOTOS_TAB).first
+                    tab = get_by_role("tab", name=label).first
                     if await tab.count() > 0:
                         await tab.click()
                         clicked = True
+                        break
                 except Exception:
-                    pass
+                    continue
 
-        if clicked and await self._photo_form_present(page):
-            return
+        if not clicked:
+            get_by_text = getattr(page, "get_by_text", None)
+            if callable(get_by_text):
+                for label in (self._PHOTOS_TAB, "照片"):
+                    try:
+                        tab = get_by_text(label, exact=True).first
+                        if await tab.count() > 0:
+                            await tab.click()
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+
+        for _ in range(10):
+            if await self._photo_input_present(page):
+                return
+            await page.wait_for_timeout(500)
 
         raise RuntimeError(
             "Photos tab 未覆盖当前账号：上传页没有图片发帖入口，"

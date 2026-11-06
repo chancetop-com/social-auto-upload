@@ -252,7 +252,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 
 | # | 步骤 | 动作 | 候选选择器（按优先级） | 等待/置信度 |
 | --- | --- | --- | --- | --- |
-| 1 | `ensure_mode` | `goto(".../upload?tab=photo")`；确认图片表单；必要时点 `Photos` | `page.get_by_text("Photos", exact=True).first`；Title `input[placeholder*="catchy"]` 作为已进入图片模式的信号 | 入口探测在选文件前；缺失退出 1；`[官方前端代码]` + `[开源实现]` |
+| 1 | `ensure_mode` | `goto(".../upload?tab=photo")`；确认图片表单；必要时点 `Photos` | `get_by_role("tab", name="Photos")` / `get_by_text("Photos", exact=True)`；**`input[type=file][accept*="image"]` 作为已进入图片模式的信号**（Title 只在选图后才渲染，不能做入口探测） | 入口探测在选文件前；缺失退出 1；`[官方前端代码]` + `[实测]` |
 | 2 | `attach_media` | `set_input_files(image_paths)` | `input[type="file"][accept*="image"]` → `input[type="file"][multiple]` | 必须先切 tab；`[官方前端代码]` + `[开源实现]` |
 | 3 | `fill_metadata` | 填 Title；Description；追加 tags | Title `input[placeholder*="catchy"]` / `input[placeholder="Add a catchy title"]`；Description `.public-DraftEditor-content`（限定在 `.caption-textarea` 或 caption 区） | `[官方前端代码]` + `[开源实现]`；描述选择器待实测 |
 | 4 | `wait_media_ready` | 等图片处理完成、Post 可点 | 至少一个 `div[data-id]`；`text=Cover` 徽标；`[data-e2e="post_video_button"]` 可用 | 2s 轮询，受总预算约束；`[官方前端代码]` + `[仅推断]` |
@@ -594,6 +594,8 @@ class TiktokPublishOptions:
 | AIGC `show_aigc_toggle` A/B flag | 容器可能不存在 | 显式请求时退出 `1`；未请求不触碰 |
 | 封面预览变化是否等于服务端接受（上游 issue #228） | 可能显示成功但封面未生效 | 发布后人工核验；页面状态断言 |
 | 首次上传的自动内容检查弹窗 / 新手引导遮罩拦截点击 | 已在真实账号实测出现 | `dismiss_blocking_overlays`：Cancel 关闭弹窗、点击 joyride 遮罩；编辑器点击重试 |
+| 图片页 Title 输入框在选图后才渲染 | 旧 `ensure_mode` 用 Title 会误判 | 用 `input[type=file][accept*="image"]` 做入口信号；Title 仍用于选图后填写 |
+| 有头浏览器使用系统中文界面，英文文案选择器失效 | 实测有头模式入口按钮为“选择视频” | 本地 context 固定 `locale="en-US"`；入口优先 `data-e2e="select_video_button"` |
 | 35×50 MB 是否在 15 分钟内完成 | 极端情况超时 | 保留常量，后续单独调；不在本规格预设 |
 
 ### 11.2 风险表

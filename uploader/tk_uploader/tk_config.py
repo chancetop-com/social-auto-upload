@@ -27,6 +27,8 @@ TIKTOK_MAX_DESCRIPTION_LENGTH = 4000
 TIKTOK_MAX_HASHTAG_COUNT = 50
 
 TIKTOK_UPLOAD_ENTRY_SELECTOR = (
+    '[data-e2e="select_video_button"], '
+    '[data-e2e="select_video_container"], '
     'button:has-text("Select video"), div.upload-container, '
     'iframe[data-tt="Upload_index_iframe"]'
 )

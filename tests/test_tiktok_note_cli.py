@@ -197,6 +197,7 @@ class _TextTab:
     async def click(self, **kwargs) -> None:
         self.page.events.append(("photos_tab_click",))
         self.page.photo_mode = True
+        self.page.image_input = True
 
 
 class _StudioPage:
@@ -1139,26 +1140,21 @@ class UploadNoteFlowTests(unittest.TestCase):
         )
         self.assertEqual(session_cm.exit_calls, 1)
 
-    def test_image_input_without_title_is_not_treated_as_photo_mode(self):
+    def test_image_input_is_the_photo_mode_signal_without_title(self):
+        # Real Studio renders the Title input only after images are selected,
+        # so the image file input's accept attribute is the pre-selection
+        # signal.  Title remains optional.
         with tempfile.TemporaryDirectory() as tmp_dir:
             image = Path(tmp_dir) / "cover.png"
             image.write_bytes(b"x")
-
-            # The image file input exists, but the Title input does not: this is
-            # not the photo composer, so the abort must happen before any file
-            # is selected.
             page = _StudioPage(
                 photo_mode=False, photos_tab=False, image_input=True
             )
             code, out, err, session_cm = self._run_cli(page, [str(image)])
 
-        self.assertEqual(code, 1)
-        self.assertNotIn("submitted", out)
-        self.assertIn("Photos", err)
-        self.assertIsNone(page.input_files)
-        self.assertFalse(
-            any(event[0] == "set_input_files" for event in page.events)
-        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("TikTok note upload submitted: 1 images", out)
+        self.assertEqual(page.input_files, [str(image)])
         self.assertEqual(session_cm.exit_calls, 1)
 
     def test_no_reuse_duet_or_stitch_controls_are_touched(self):

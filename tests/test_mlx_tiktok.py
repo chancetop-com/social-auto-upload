@@ -773,7 +773,7 @@ class UploaderSeamTests(unittest.TestCase):
             else {}
         )
         self.assertEqual(TIKTOK_LAUNCH_KWARGS, expected_launch)
-        self.assertEqual(TIKTOK_CONTEXT_KWARGS, {})
+        self.assertEqual(TIKTOK_CONTEXT_KWARGS, {"locale": "en-US"})
         self.assertIs(TIKTOK_INIT_SCRIPT, False)
 
     def test_mlx_upload_only_uses_injected_context(self):
@@ -972,13 +972,15 @@ class VideoAttachMediaTests(unittest.TestCase):
     def _video(self) -> TiktokVideo:
         return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
 
-    def test_prefers_select_video_before_the_aria_fallback(self):
+    def test_prefers_stable_data_e2e_before_english_text(self):
         primary = _MediaButton()
+        text = _MediaButton()
         fallback = _MediaButton()
         video = self._video()
         video.locator_base = _MediaBase(
             {
-                'button:has-text("Select video"):visible': primary,
+                '[data-e2e="select_video_button"]': primary,
+                'button:has-text("Select video"):visible': text,
                 'button[aria-label="Select file"]': fallback,
             }
         )
@@ -987,16 +989,19 @@ class VideoAttachMediaTests(unittest.TestCase):
         asyncio.run(video.attach_media(page))
 
         self.assertEqual(primary.click_calls, 1)
+        self.assertEqual(text.click_calls, 0)
         self.assertEqual(fallback.click_calls, 0)
         self.assertEqual(page.chooser.files, "/tmp/demo.mp4")
 
-    def test_falls_back_to_select_file_when_select_video_is_missing(self):
+    def test_falls_back_to_select_file_when_data_e2e_and_text_are_missing(self):
         primary = _MediaButton(present=False)
+        text = _MediaButton(present=False)
         fallback = _MediaButton()
         video = self._video()
         video.locator_base = _MediaBase(
             {
-                'button:has-text("Select video"):visible': primary,
+                '[data-e2e="select_video_button"]': primary,
+                'button:has-text("Select video"):visible': text,
                 'button[aria-label="Select file"]': fallback,
             }
         )
@@ -1005,6 +1010,7 @@ class VideoAttachMediaTests(unittest.TestCase):
         asyncio.run(video.attach_media(page))
 
         self.assertEqual(primary.click_calls, 0)
+        self.assertEqual(text.click_calls, 0)
         self.assertEqual(fallback.click_calls, 1)
         self.assertEqual(page.chooser.files, "/tmp/demo.mp4")
 

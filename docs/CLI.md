@@ -406,7 +406,7 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 TikTok 支持两种模式：
 
-- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。
+- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。本地 context 固定 `en-US`，不需要改系统语言。
 - **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**。
 
 ```bash

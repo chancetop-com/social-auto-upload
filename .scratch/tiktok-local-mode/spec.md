@@ -47,6 +47,7 @@
 - `upload-video` / `upload-note`：
   - 先 `tiktok_setup(handle=False)` 校验 cookie；缺失/失效时提示先运行 `sau tiktok login --account <name>`，退出 `1`。
   - 用本地 Chromium 启动、读完 cookie 后执行与 MLX 相同的 `_upload_on_page` 九步流程。`check` / `login` / 上传必须使用同一组 `TIKTOK_LAUNCH_KWARGS`，避免校验的浏览器与实际发布浏览器不一致。
+  - 本地 context 固定 `locale="en-US"`（不改系统语言）；入口优先 `data-e2e`，文案选择器只做兜底。
   - 上传结束后写回 cookie 文件。
   - 总预算沿用 15 分钟（`TIKTOK_PUBLISH_TIMEOUT_SECONDS`），避免进程无限挂起。
   - 发布结果未知仍按 `PublishResultUnknownError` → 退出 `9`；从未点击发布 → `1`。

@@ -189,7 +189,7 @@ sau douyin upload-video --folder-id <folder_id> --profile-id <profile_id> \
 - 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
 - v1 部署前提：CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器；Profile 使用 Mimic 内核；Profile 已人工登录且无待处理验证码/2FA；TikTok 的 Profile 界面须为 English (US)。
 - 不支持：Docker launcher、跨机 launcher、Linux 无桌面、Bilibili、通过 CLI 在 MLX 中登录。
-- TikTok 也支持**本地模式**：不设置 `MLX_API_TOKEN` 时使用本地 Chromium 与 `cookies/tiktok_<account>.json`；需要 `--account`，并先运行 `sau tiktok login --account <name>`（有头浏览器登录后回终端按 Enter）。`check` 返回 `0/1`；`upload-video` / `upload-note` 与 MLX 共用发布流程和退出码 `9`；`--folder-id` / `--profile-id` 在本地模式忽略。真实账号的本地登录与发布**待验收**，首次使用请先用测试账号验证。
+- TikTok 也支持**本地模式**：不设置 `MLX_API_TOKEN` 时使用本地 Chromium 与 `cookies/tiktok_<account>.json`；需要 `--account`，并先运行 `sau tiktok login --account <name>`（有头浏览器登录后回终端按 Enter）。本地 context 固定 `en-US`，不需要改系统语言。`check` 返回 `0/1`；`upload-video` / `upload-note` 与 MLX 共用发布流程和退出码 `9`；`--folder-id` / `--profile-id` 在本地模式忽略。真实账号的本地登录与发布**待验收**，首次使用请先用测试账号验证。
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 launcher。
 - MLX 只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号和 Instagram 的本地 `.identity.json` / 用户 ID 比对在 MLX 下不执行，账号错配风险由调度侧承担。
 

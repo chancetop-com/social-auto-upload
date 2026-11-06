@@ -12,7 +12,7 @@ summary: 使用 sau tiktok 在本地模式或 Multilogin Profile 下检查登录
 
 TikTok 支持两种模式，使用同一个 `sau tiktok` CLI：
 
-- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`。`--account` 必填，`--folder-id` / `--profile-id` 忽略。
+- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器上下文固定 `en-US`，无需改系统语言。
 - **Multilogin X（MLX）模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`。
 
 ## 部署前提
