@@ -244,7 +244,7 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 | 5 | `apply_options` | 展开高级设置，按请求设置隐私/评论/复用/AIGC/品牌 | 见 5.4 | 每步 Playwright 默认 30s；`[官方前端代码]` |
 | 6 | `apply_cover` | 仅 `thumbnail_path` 非空时执行 | 见 5.4 | 固定 3s；`[官方前端代码]` + `[开源实现]` |
 | 7 | `apply_schedule` | 现有定时控件 | `get_by_label('Schedule')`、`div.scheduled-picker` | `[本仓]` |
-| 8 | `click_publish` | 循环点击并等成功页 | `[data-e2e="post_video_button"]` → `div.button-group button` nth(0) | 单次 3s，0.5s 重试，总预算 15min；`[官方前端代码]` + `[本仓]` |
+| 8 | `click_publish` | 单次点击发布并等成功页；未到成功页时最多点一次弹窗 `Post now` | `[data-e2e="post_video_button"]` → `button:has-text("Post").last` → `div.button-group button` nth(0)；弹窗 `button:has-text("Post now")` / role button | 单次 3s，0.5s 重试，总预算 15min；首次点击成功后不再点击原 Post 按钮；`[官方前端代码]` + `[本仓]` |
 | 9 | `read_result` | 读 Content 列表首条视频 ID | `div[data-tt="components_PostTable_Container"]`、`a[href*="/video/"]` | 现有；失败退出 1（已知风险） |
 
 ### 5.3 图片路径
@@ -336,6 +336,8 @@ async def _upload_on_page(self, page, *, multilogin, deadline):
 5. 已点击后页面/上下文关闭、CDP 断开、停在表单报错、点击落在禁用按钮上空操作 → 同样按第 4 条处理，不再吞异常空转到预算耗尽。
 6. 点击后 URL 命中 `/login`、`captcha`、`verify`、`two-factor`、`2fa` → `LoginRequiredError`，退出 `10`（优先于 `9`）。
 7. `PublishResultUnknownError` 只能由发布阶段抛出；新增步骤函数不得吞异常。
+
+点击去重约束：首次 `click()` 返回成功后，代码只等待/重试导航，**永不再次点击原 Post 按钮**，避免生成重复帖子。唯一允许的兜底点击是成功页未出现时对可见 `Post now` 弹窗按钮的一次点击；该按钮也只点一次。
 
 调度侧契约：
 

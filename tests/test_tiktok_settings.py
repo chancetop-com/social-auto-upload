@@ -517,6 +517,57 @@ class _MissingLocator:
         return None
 
 
+class _ExplodingDialogButton(FakeDialogButton):
+    async def click(self) -> None:
+        self.click_calls += 1
+        raise RuntimeError("dialog click exploded")
+
+
+class _FailingReadControl(FakeToggleControl):
+    """A control whose state read raises a raw Playwright-like error."""
+
+    def __init__(self) -> None:
+        super().__init__(False)
+        self.candidates = ("fake-failing-control",)
+
+    async def is_checked(self) -> bool:
+        raise RuntimeError("locator detached while reading the state")
+
+    async def get_attribute(self, name: str) -> str | None:
+        return None
+
+
+class _CheckboxQuery:
+    def __init__(self, checked: bool) -> None:
+        self.checked = checked
+        self.first = self
+
+    async def count(self) -> int:
+        return 1
+
+    async def is_checked(self) -> bool:
+        return self.checked
+
+
+class _LabelTextLocator:
+    """Text/label node: ``is_checked`` fails, nested checkbox carries state."""
+
+    def __init__(self, nested=None, *, aria=None) -> None:
+        self._nested = nested
+        self._aria = aria
+
+    async def is_checked(self) -> bool:
+        raise RuntimeError("not a checkbox")
+
+    def locator(self, _selector: str):
+        return self._nested if self._nested is not None else _MissingLocator()
+
+    async def get_attribute(self, name: str) -> str | None:
+        if name == "aria-checked":
+            return self._aria
+        return None
+
+
 class FakeAigcPage:
     """Top-level page that renders the first-run ``Labeling ...`` dialog."""
 
@@ -877,6 +928,86 @@ class TiktokAigcOptionTests(unittest.TestCase):
         self.assertIn("False", message)
         self.assertIn(_OptionPage.url, message)
         self.assertEqual(aigc.click_calls, 1)
+
+    def test_aigc_dialog_failure_is_not_swallowed(self):
+        aigc = FakeToggleControl(False)
+        button = _ExplodingDialogButton()
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(FakeAigcPage(button)))
+
+        message = str(ctx.exception)
+        self.assertIn("option=aigc", message)
+        self.assertIn("turn-on-dialog", message)
+        self.assertIn("dialog click exploded", message)
+        self.assertIn("Turn on", message)
+        self.assertEqual(button.click_calls, 1)
+
+    def test_toggle_read_error_is_wrapped_with_option_context(self):
+        comments = _FailingReadControl()
+        video = _uploader(TiktokPublishOptions(allow_comments=True))
+        _install(video, _controls(comments=comments))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("option=allow_comments", message)
+        self.assertIn("stage=read", message)
+        self.assertIn("read-error", message)
+        self.assertIn("locator detached", message)
+        self.assertIn("fake-failing-control", message)
+
+    def test_switch_read_error_is_wrapped_with_option_context(self):
+        master = _FailingReadControl()
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(your_brand=True))
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("option=brand_switch", message)
+        self.assertIn("stage=read", message)
+        self.assertIn("read-error", message)
+        self.assertIn("locator detached", message)
+
+    def test_label_control_reads_nested_checkbox_state(self):
+        control = tk_main._LocatorControl(
+            _LabelTextLocator(_CheckboxQuery(True))
+        )
+
+        self.assertTrue(asyncio.run(control.is_checked()))
+
+    def test_label_control_reports_a_read_failure_with_context(self):
+        control = tk_main._LocatorControl(_LabelTextLocator())
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(
+                tk_main._set_toggle_option(
+                    control,
+                    True,
+                    option="your_brand",
+                    url=_OptionPage.url,
+                )
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("option=your_brand", message)
+        self.assertIn("stage=read", message)
+        self.assertIn("read-error", message)
+        self.assertIn("not a checkbox", message)
 
 
 class TiktokBrandDisclosureTests(unittest.TestCase):

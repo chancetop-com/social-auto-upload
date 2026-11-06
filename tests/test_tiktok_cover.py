@@ -10,7 +10,6 @@ which candidate actually won.
 from __future__ import annotations
 
 import asyncio
-import re
 import unittest
 
 from uploader.tk_uploader.main_chrome import (
@@ -21,13 +20,10 @@ from uploader.tk_uploader.main_chrome import (
 THUMBNAIL = "/tmp/cover.png"
 PAGE_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
 
-EDIT_COVER_TEXT = 'get_by_text("Edit cover", exact=True)'
-EDIT_COVER_ROLE = 'get_by_role("button", name="Edit cover")'
 UPLOAD_TAB = 'get_by_text("Upload cover", exact=True)'
 FILE_ARIA = '[aria-label="Upload cover image"] input[type="file"]'
 FILE_ACCEPT = 'input[type="file"][accept*="image/jpeg"]'
 PREVIEW = '[aria-label="Uploaded cover image"]'
-SAVE = 'get_by_role("button", name=re.compile(r"^(Save|Confirm)$"))'
 
 
 def _name_matches(expected, label: str) -> bool:
@@ -67,12 +63,15 @@ class FakeNode:
         count: int = 1,
         enabled: bool = True,
         visible: bool = True,
+        detached: bool = False,
     ) -> None:
         self.name = name
         self.recorder = recorder
         self.count_value = count
         self.enabled = enabled
         self.visible = visible
+        self.detached = detached
+        self.on_click = None
         self._texts: list[tuple[str, bool, FakeNode]] = []
         self._roles: list[tuple[str, str, FakeNode]] = []
         self._css: dict[str, FakeNode] = {}
@@ -153,6 +152,8 @@ class FakeNode:
     # -- actions ---------------------------------------------------------
     async def click(self, **kwargs):
         self.recorder.append(("click", self.name))
+        if self.on_click is not None:
+            self.on_click()
 
     async def set_input_files(self, files, **kwargs):
         self.recorder.append(("set_input_files", self.name, files))
@@ -162,6 +163,15 @@ class FakeNode:
 
     async def wait_for(self, **kwargs):
         self.recorder.append(("wait_for", self.name, kwargs))
+        state = kwargs.get("state", "visible")
+        if state == "detached":
+            if not self.detached:
+                raise TimeoutError(f"{self.name} never detached")
+            return
+        if state == "hidden":
+            if self.visible:
+                raise TimeoutError(f"{self.name} never hid")
+            return
         if not self.visible:
             raise TimeoutError(f"{self.name} never became visible")
 
@@ -187,8 +197,14 @@ def _video(thumbnail: str | None = THUMBNAIL) -> TiktokVideo:
 class CoverTree:
     """Builds a happy-path cover editor tree and records interactions."""
 
-    def __init__(self, *, save_label: str = "Save", save_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        save_label: str = "Save",
+        close_on_save: bool = True,
+    ) -> None:
         self.recorder: list = []
+        self.close_on_save = close_on_save
         self.base = FakeNode("base", recorder=self.recorder)
         self.edit_text = self.base.add_text(
             "Edit cover", exact=True, name="edit-cover-text", count=0
@@ -205,8 +221,15 @@ class CoverTree:
         self.file_input = self.editor.add_css(FILE_ARIA, name="cover-file")
         self.preview = self.editor.add_css(PREVIEW, name="cover-preview")
         self.save = self.editor.add_role(
-            "button", save_label, name="cover-save", enabled=save_enabled
+            "button", save_label, name="cover-save"
         )
+        self.save.on_click = self._close_editor
+
+    def _close_editor(self) -> None:
+        if not self.close_on_save:
+            return
+        self.editor.detached = True
+        self.upload_tab.visible = False
 
 
 class ApplyCoverNoopTests(unittest.TestCase):
@@ -262,9 +285,11 @@ class ApplyCoverCandidateTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("Edit cover", message)
         self.assertIn("open cover editor", message)
-        self.assertIn(EDIT_COVER_TEXT, message)
-        self.assertIn(EDIT_COVER_ROLE, message)
         self.assertIn(PAGE_URL, message)
+        # Candidate order is exercised through the fake queries, not by
+        # restating raw CSS strings in the assertion.
+        self.assertIn(("query", "text", "Edit cover"), recorder)
+        self.assertIn(("query", "role", "button", "'Edit cover'"), recorder)
 
 
 class ApplyCoverSaveTests(unittest.TestCase):
@@ -279,6 +304,10 @@ class ApplyCoverSaveTests(unittest.TestCase):
                 asyncio.run(video.apply_cover(page))
 
                 self.assertIn(("click", "cover-save"), tree.recorder)
+                self.assertIn(
+                    ("wait_for", "cover-editor", {"state": "detached", "timeout": 10_000}),
+                    tree.recorder,
+                )
 
     def test_three_second_wait_is_preserved_after_save(self):
         tree = CoverTree()
@@ -290,22 +319,42 @@ class ApplyCoverSaveTests(unittest.TestCase):
 
         self.assertEqual(page.wait_timeouts, [3000])
 
-
-class ApplyCoverPreviewTests(unittest.TestCase):
-    def test_missing_preview_does_not_block_an_enabled_save(self):
+    def test_editor_close_is_confirmed_before_the_three_second_wait(self):
         tree = CoverTree()
-        tree.editor.remove_css(PREVIEW)
         page = FakePage()
         video = _video()
         video.locator_base = tree.base
 
         asyncio.run(video.apply_cover(page))
 
-        self.assertIn(("click", "cover-save"), tree.recorder)
+        close_index = next(
+            index
+            for index, event in enumerate(tree.recorder)
+            if event[0] == "wait_for" and event[2].get("state") == "detached"
+        )
+        save_index = tree.recorder.index(("click", "cover-save"))
+        self.assertLess(save_index, close_index)
         self.assertEqual(page.wait_timeouts, [3000])
 
-    def test_missing_preview_with_disabled_save_reports_the_preview_stage(self):
-        tree = CoverTree(save_enabled=False)
+    def test_save_without_editor_close_fails_with_the_close_stage(self):
+        tree = CoverTree(close_on_save=False)
+        page = FakePage()
+        video = _video()
+        video.locator_base = tree.base
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_cover(page))
+
+        message = str(ctx.exception)
+        self.assertIn("Upload cover", message)
+        self.assertIn("wait for cover editor close", message)
+        self.assertIn(PAGE_URL, message)
+        self.assertEqual(page.wait_timeouts, [])
+
+
+class ApplyCoverPreviewTests(unittest.TestCase):
+    def test_missing_preview_fails_even_when_save_is_enabled(self):
+        tree = CoverTree()
         tree.editor.remove_css(PREVIEW)
         page = FakePage()
         video = _video()
@@ -317,9 +366,9 @@ class ApplyCoverPreviewTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("Uploaded cover image", message)
         self.assertIn("wait for cover preview", message)
-        self.assertIn(PREVIEW, message)
         self.assertIn(PAGE_URL, message)
         self.assertNotIn(("click", "cover-save"), tree.recorder)
+        self.assertEqual(page.wait_timeouts, [])
 
 
 if __name__ == "__main__":

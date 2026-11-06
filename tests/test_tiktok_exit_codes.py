@@ -31,6 +31,10 @@ class _FakeLocator:
         self.click_error = click_error
         self.click_calls = 0
 
+    @property
+    def first(self):
+        return self
+
     def nth(self, _index: int):
         return self
 
@@ -49,6 +53,52 @@ class _FakeLocatorBase:
 
     def locator(self, _selector: str) -> _FakeLocator:
         return self.button
+
+
+class _CandidateLocator:
+    """Locator double that can be present/absent and record clicks."""
+
+    def __init__(
+        self,
+        *,
+        count: int = 1,
+        visible: bool = True,
+        click_error: BaseException | None = None,
+    ) -> None:
+        self._count = count
+        self._visible = visible
+        self.click_error = click_error
+        self.click_calls = 0
+
+    @property
+    def first(self):
+        return self
+
+    @property
+    def last(self):
+        return self
+
+    def nth(self, _index: int):
+        return self
+
+    async def count(self) -> int:
+        return self._count
+
+    async def is_visible(self) -> bool:
+        return self._visible
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        if self.click_error is not None:
+            raise self.click_error
+
+
+class _CandidateBase:
+    def __init__(self, by_selector: dict[str, _CandidateLocator]) -> None:
+        self._by_selector = by_selector
+
+    def locator(self, selector: str) -> _CandidateLocator:
+        return self._by_selector.get(selector, _CandidateLocator(count=0))
 
 
 class _Clock:
@@ -99,6 +149,22 @@ class _FakePage:
             self.url = outcome
 
 
+class _PostNowPage(_FakePage):
+    """Publish page whose success URL arrives after a ``Post now`` dialog."""
+
+    def __init__(self, dialog: _CandidateLocator, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.dialog = dialog
+
+    def locator(self, selector: str):
+        if selector == 'button:has-text("Post now")':
+            return self.dialog
+        return _CandidateLocator(count=0)
+
+    def get_by_role(self, _role: str, name=None):
+        return _CandidateLocator(count=0)
+
+
 def _video() -> TiktokVideo:
     return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
 
@@ -136,16 +202,31 @@ class CliExitCodeTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("boom", err)
 
-    def test_publish_result_unknown_maps_to_9_with_manual_verification(self):
+    def test_publish_result_unknown_maps_to_9_and_prints_the_exception_text(self):
+        message = "发布结果未知：仅供测试的核验说明。"
         code, _, err = _run_cli(
-            _raising(PublishResultUnknownError("发布点击已发出，结果未知。"))
+            _raising(PublishResultUnknownError(message))
         )
         self.assertEqual(code, 9)
-        self.assertIn("发布结果未知", err)
-        self.assertIn("禁止自动重发", err)
-        self.assertIn("Content/Posts", err)
-        self.assertIn("标题", err)
-        self.assertIn("发布时间", err)
+        self.assertIn(message, err)
+
+    def test_embedded_captcha_is_not_recognized_and_stays_exit_1(self):
+        # Known blind spot (spec §6.4): only URL markers raise 10.  A captcha
+        # rendered inside the form leaves the URL unchanged, so it is not a
+        # login redirect and a pre-click failure stays a normal exit 1.
+        video = _video()
+        page = _FakePage(url=UPLOAD_URL)
+        tk_main._raise_if_login_required(page)
+
+        async def _dispatch(_args):
+            await video.click_publish(page, deadline=999.0, multilogin=True)
+            return 0
+
+        with patch.object(tk_main.time, "monotonic", return_value=1000.0):
+            code, _, err = _run_cli(_dispatch)
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("禁止自动重发", err)
 
     def test_login_required_maps_to_10(self):
         code, _, _ = _run_cli(_raising(LoginRequiredError("需要登录")))
@@ -261,6 +342,105 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(page.wait_calls, 1)
         sleep.assert_not_awaited()
+
+    def test_publish_button_uses_data_e2e_candidate_first(self):
+        primary = _CandidateLocator()
+        post_last = _CandidateLocator()
+        legacy = _CandidateLocator()
+        base = _CandidateBase(
+            {
+                '[data-e2e="post_video_button"]': primary,
+                'button:has-text("Post")': post_last,
+                "div.button-group button": legacy,
+            }
+        )
+        video = _video()
+        video.locator_base = base
+        page = _FakePage(wait_outcomes=[CONTENT_URL])
+
+        asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(primary.click_calls, 1)
+        self.assertEqual(post_last.click_calls, 0)
+        self.assertEqual(legacy.click_calls, 0)
+
+    def test_publish_button_falls_back_to_post_last(self):
+        primary = _CandidateLocator(count=0)
+        post_last = _CandidateLocator()
+        legacy = _CandidateLocator()
+        base = _CandidateBase(
+            {
+                '[data-e2e="post_video_button"]': primary,
+                'button:has-text("Post")': post_last,
+                "div.button-group button": legacy,
+            }
+        )
+        video = _video()
+        video.locator_base = base
+        page = _FakePage(wait_outcomes=[CONTENT_URL])
+
+        asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(primary.click_calls, 0)
+        self.assertEqual(post_last.click_calls, 1)
+        self.assertEqual(legacy.click_calls, 0)
+
+    def test_publish_button_falls_back_to_legacy_group_button(self):
+        primary = _CandidateLocator(count=0)
+        post_last = _CandidateLocator(count=0)
+        legacy = _CandidateLocator()
+        base = _CandidateBase(
+            {
+                '[data-e2e="post_video_button"]': primary,
+                'button:has-text("Post")': post_last,
+                "div.button-group button": legacy,
+            }
+        )
+        video = _video()
+        video.locator_base = base
+        page = _FakePage(wait_outcomes=[CONTENT_URL])
+
+        asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(legacy.click_calls, 1)
+
+    def test_post_now_dialog_is_clicked_once_and_post_is_not_reclicked(self):
+        button = _CandidateLocator()
+        base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
+        dialog = _CandidateLocator()
+        page = _PostNowPage(
+            dialog,
+            wait_outcomes=[("timeout", None), ("timeout", None), CONTENT_URL],
+        )
+        video = _video()
+        video.locator_base = base
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(dialog.click_calls, 1)
+
+    def test_failing_post_now_click_is_attempted_only_once(self):
+        button = _CandidateLocator()
+        base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
+        dialog = _CandidateLocator(
+            click_error=RuntimeError("dialog click failed")
+        )
+        page = _PostNowPage(
+            dialog,
+            # Five timeouts would be five retries if the attempt flag followed
+            # the click result instead of the attempt itself.
+            wait_outcomes=[("timeout", None)] * 5 + [CONTENT_URL],
+        )
+        video = _video()
+        video.locator_base = base
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(dialog.click_calls, 1)
 
     def test_pre_publish_media_deadline_is_exit_1(self):
         video = _video()
