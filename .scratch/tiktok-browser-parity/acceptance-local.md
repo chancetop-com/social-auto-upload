@@ -31,7 +31,7 @@
 | 公开账号 `--privacy followers` | `--privacy followers` | `1` | — | 严格失败：requested `followers` / actual `Everyone`（公开账号无 Followers 选项） |
 | 公开账号图片帖选项 | `upload-note ... --privacy public --no-comments --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704976028485176590` | Content 行 **Everyone**；帖子页 **Promotional content** + **Creator labeled as AI-generated**；Description/tags 正确 |
 | 公开账号 `--disable-reuse`（v2） | `--privacy public --disable-reuse` | `0` | `https://www.tiktok.com/@lukechen95/video/7704978171703069966` | 日志 `reuse resolved by candidate #0 (Reuse of content)`；控件可见时实际取消并回读；v1 `7704977354304539918` 因文案漏配未实际取消，已作废 |
-| 公开账号定时创建 | `--privacy public --schedule "2026-11-06 17:35"` | `0` | 定时中，尚无帖子 URL | Content 行 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已定时；到点发布检查结果见下方 2026-11-06 记录 |
+| 公开账号定时创建 | `--privacy public --schedule "2026-11-06 17:35"` | `0` | 定时中，尚无帖子 URL | Content 行 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已定时；到点发布已由用户确认正常，按用户要求不再跑探针 |
 | only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `ControlOrMeta+A` 修复，v4 复验 |
 | only-me 基线 v4 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950472880229645` | 干净标题；read_result 返回 ID；only-me 隐私路径复验 |
 | 隐私 followers | `--privacy followers` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950885151018254` | CLI 回读 Followers；Scheduled 列表同账号 Followers 行确认；Web 帖子页不显示 Followers 标签 |
@@ -48,7 +48,7 @@
 ## 结论
 
 - **已验证**：本地登录/check、私有账号 `only-me`/`followers`/`friends`、公开账号无新参数发布、`--privacy public`（Everyone）与 `followers` 严格失败、`--no-comments`、`--disable-reuse`（公开账号可见控件 v2、only-me v3 均实际取消并回读）、`--aigc`（帖子显示 AI 标签）、`--your-brand`（Promotional content）、`--branded-content` + friends（Paid partnership）、自定义封面、定时创建与时间/隐私回读、**定时到点发布（2026-11-06 用户确认正常）**、图文 3 图/Description/tags/首图封面、**公开账号图片帖选项**（评论/AIGC/品牌）。
-- **待补充证据**：公开账号 17:35 定时帖 `TB19 scheduled public 1735` 已创建（Content 行 `5:35 PM (GMT+8) Shanghai` + Everyone），到点发布检查见 2026-11-06 记录；用户已确认到点发布功能正常。
+- **定时到点发布**：2026-11-06 用户确认正常；公开账号 17:35 定时帖 `TB19 scheduled public 1735` 已确认进入定时状态（Content 行 `5:35 PM (GMT+8) Shanghai` + Everyone），按用户要求不再跑到点探针。
 - **图文 Title**：2026-11-06 用户确认真实公开展示正常，不再列为未确认项。
 - **公开账号首项文案**：Content 行显示 **Everyone**，与公开账号预期一致。
 - **发现并修复**：Content `read_result` 原取第一条，定时帖排在最前导致图文帖误取定时帖 ID；已改为按标题/正文/标签匹配，并在真实 Content 页验证图文 `7704966090018786574`、视频 `7704956309300382989` 均正确。

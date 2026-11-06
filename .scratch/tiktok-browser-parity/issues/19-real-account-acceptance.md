@@ -1,6 +1,6 @@
 # 19 — 真实账号冒烟与发布验收
 
-Status: resolved（私有/公开本地账号验收完成；定时到点发布已由用户确认，17:35 公开定时帖仅作补充证据）
+Status: resolved（私有/公开本地账号验收完成；定时到点发布已由用户确认）
 Type: task
 Blocked by: 17, 18
 规格依据: spec.md §8.3、§11.1
@@ -14,7 +14,7 @@ Blocked by: 17, 18
 - [x] 视频无新参数发布成功，退出 `0`，Content 列表出现新帖。**（公开账号 `7704974050090683661`，Content 行 Everyone）**
 - [x] `--privacy only-me`、`--no-comments`、`--disable-reuse`、`--aigc`、`--your-brand`、`--branded-content` 各完成一次，结果与页面/帖子一致。**（公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际定位并取消 Reuse of content 后回读成功；旧“控件缺失=已满足”结论已撤销）**
 - [x] 视频自定义封面生效。
-- [x] `--schedule` 到点发布且时间正确。**（2026-11-06 用户确认到点自动发布正常；另创建公开账号 17:35 定时帖 `TB19 scheduled public 1735` 作补充证据，创建时 Content 行 `5:35 PM (GMT+8) Shanghai` + Everyone）**
+- [x] `--schedule` 到点发布且时间正确。**（2026-11-06 用户确认到点自动发布正常；另创建公开账号 17:35 定时帖 `TB19 scheduled public 1735`，创建时 Content 行 `5:35 PM (GMT+8) Shanghai` + Everyone；按用户要求未再跑到点探针）**
 - [x] `upload-note` 多图顺序正确、第 1 张为封面、Title/Description/tags 正确。**（多图/首图封面/Description/tags 通过；Title 已填写，2026-11-06 用户确认公开展示正常）**
 - [x] 图片帖设置项：页面渲染则核对；未渲染记录“页面不支持”。**（公开账号复验：全局 Show more 后评论/AIGC/品牌可见；`--privacy public --no-comments --aigc --your-brand` 发布成功，帖子页显示 Promotional content + AI 标签）**
 - [x] 每条证据记录日期、账号类型、Profile、退出码与帖子 URL/截图。
@@ -34,5 +34,5 @@ Blocked by: 17, 18
 - 2026-11-06：公开账号复验完成。无新参数发布 `7704974050090683661`、`--privacy public` `7704974226096246029` 均为 Content **Everyone**；`--privacy followers` 严格失败（requested followers / actual Everyone）。图片帖选项确认支持：图片页没有 `advanced_settings_container`，点击全局 **Show more** 后评论/AIGC/品牌控件可见；`--privacy public --no-comments --aigc --your-brand` 图片帖 `7704976028485176590` 发布成功，帖子页显示 **Promotional content** + **Creator labeled as AI-generated**，Content 行 Everyone。此前“图片页选项页面不支持”的结论已撤销。
 - 2026-11-06：公开账号 `--disable-reuse` 补测发现当前文案是 **“Reuse of content”**，旧候选漏配导致 v1 未实际取消；已补候选并缩短点击超时，v2 `7704978171703069966` 日志 `reuse resolved by candidate #0 (Reuse of content)` 并成功发布。
 - 2026-11-06：图文 Title 公开展示由用户确认正常，验收项勾选；不再列为未确认。
-- 2026-11-06：公开账号新建 17:35 定时帖 `TB19 scheduled public 1735`（`--privacy public --schedule "2026-11-06 17:35"`），退出 `0`；Content 行显示 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已进入定时状态。用户随后确认到点自动发布正常；17:37 探针仅作补充证据。
+- 2026-11-06：公开账号新建 17:35 定时帖 `TB19 scheduled public 1735`（`--privacy public --schedule "2026-11-06 17:35"`），退出 `0`；Content 行显示 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已进入定时状态。用户随后确认到点自动发布正常；按用户要求未再跑到点探针。
 - 2026-11-06：reuse 语义纠正。only-me 实测控件存在（Show more 后可见，默认 `checked=true`、`enabled`），旧“私有账号不渲染/禁用”结论来自折叠 + 旧文案误判。代码新增 `_reuse_control_absent`：只有 `user_perm_container` 完全没有 Reuse 文案时才把缺失视为已满足；文案存在但控件解析失败 → 退出 `1`，避免选择器漂移静默通过。only-me `--disable-reuse` v3 `7704985011614764302` 实际取消并回读成功。
