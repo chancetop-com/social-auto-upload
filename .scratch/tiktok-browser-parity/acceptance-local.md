@@ -33,8 +33,8 @@
 | branded-content + friends | `--branded-content --privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956629594279182` | 私有账号支持该组合；待帖子/Content 核对 Paid partnership |
 | 自定义封面 | `--thumbnail videos/demo.png --privacy only-me` | 待跑 | — | — |
 | 定时发布 | `--schedule 2026-11-06 22:00 --privacy followers` | `0` | Scheduled 列表待核对 | 日期/时间选择与回读通过；only-me 下 Schedule 被 TikTok 禁用（已补明确报错） |
-| 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title ... --note ... --tags ... --privacy only-me` | 待跑 | — | 顺序/封面/文案 |
-| 图片帖设置项 | `upload-note ... --no-comments --aigc --your-brand` | 待跑 | — | 页面渲染则核对 |
+| 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title "TB19 note multi v2" --note "TB19 note body" --tags tbtest,note --privacy only-me` | `0` | `photo post id 7704962821439769869` | 3 张图、Title/Description/tags 已填写；待 Content/封面核对 |
+| 图片帖设置项 | `upload-note ... --no-comments --aigc --your-brand` | `1` | — | 控件在 DOM 但 `user_perm_container`/AIGC/品牌不可见；按 spec 记录“页面未渲染/条件未满足”，显式请求严格失败 |
 
 ## 真实环境发现并修复
 
@@ -56,3 +56,6 @@
 16. 定时首次点击 `Schedule` 会弹 `Allow` 权限；日期/时间控件是 `Select date` / `Select time` combobox + `DatePicker__day` / `role=option`，已重写 `apply_schedule` 并回读日期/时间。
 17. 私有账号 `only-me` 下 TikTok 禁用 Schedule → 明确报错退出 `1`，不再 30s 轮询。
 18. 定时帖没有即时发布链接 → `read_result` 对定时帖返回 `None`，以 Scheduled 列表为验收依据。
+19. 图片页 Title/Description 在选图后才渲染，入口用 image file input；Title/Description 重试放宽到 20s。
+20. 图片页 Post 按钮没有 `data-e2e` → 用 `button:has-text("Post")` 候选；图片入口等待改为 attached。
+21. 图片页评论/AIGC/品牌控件在 DOM 中存在但不可见，点击 Settings 也不展开 → 显式请求严格失败，验收记为“页面不支持/条件未满足”，不误报为功能缺陷。

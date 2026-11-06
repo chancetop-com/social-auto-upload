@@ -58,6 +58,7 @@ TIKTOK_CONTEXT_KWARGS: dict = {"locale": "en-US"}
 TIKTOK_INIT_SCRIPT = False
 
 _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
+TIKTOK_RESULT_READ_TIMEOUT_MS = 30_000
 
 # ---------------------------------------------------------------------------
 # Ordered selector candidates (spec §5.5)
@@ -974,6 +975,7 @@ class TiktokBaseUploader(BaseVideoUploader):
     """
 
     upload_url = TIKTOK_UPLOAD_URL
+    upload_entry_selector = TIKTOK_UPLOAD_ENTRY_SELECTOR
 
     def media_label(self) -> str:
         """Human label used by the upload log; the video text is unchanged."""
@@ -1128,7 +1130,9 @@ class TiktokBaseUploader(BaseVideoUploader):
             _raise_if_login_required(page)
 
         try:
-            await page.wait_for_url(self.upload_url, timeout=10000)
+            await page.wait_for_url(
+                re.compile(r".*tiktokstudio/upload.*"), timeout=10000
+            )
         except Exception as exc:
             if multilogin:
                 _raise_if_login_required(page)
@@ -1141,8 +1145,13 @@ class TiktokBaseUploader(BaseVideoUploader):
         try:
             # The current Studio shell can be the ``Select video`` entry itself,
             # without an iframe or ``div.upload-container``.
+            entry_timeout = (
+                TIKTOK_LOCAL_ENTRY_WAIT_MS if not multilogin else 10_000
+            )
             await page.wait_for_selector(
-                TIKTOK_UPLOAD_ENTRY_SELECTOR, timeout=10000
+                self.upload_entry_selector,
+                timeout=entry_timeout,
+                state="attached",
             )
             tiktok_logger.info("TikTok upload entry appeared.")
         except Exception as e:
@@ -1929,6 +1938,62 @@ class TiktokBaseUploader(BaseVideoUploader):
                 f"actual_date={actual_date!r} actual_time={actual_time!r}"
             )
 
+    def _result_text_candidates(self) -> tuple[str, ...]:
+        values = []
+        for value in (
+            getattr(self, "title", None),
+            getattr(self, "note", None),
+        ):
+            if value:
+                values.append(str(value).strip())
+        for tag in getattr(self, "tags", None) or []:
+            values.append(f"#{tag}")
+        # Tolerate truncation in the Content list.
+        return tuple(value[:40] for value in values if value)
+
+    async def _find_result_link(
+        self,
+        page,
+        selectors,
+        *,
+        timeout_ms: int | None = None,
+    ) -> str | None:
+        """Find the Content link for THIS post, not just the first row.
+
+        The list can put a scheduled post first, so matching by title/note/tags
+        avoids returning another post's ID.
+        """
+        expected = self._result_text_candidates()
+        timeout = (
+            TIKTOK_RESULT_READ_TIMEOUT_MS
+            if timeout_ms is None
+            else timeout_ms
+        )
+        deadline = time.monotonic() + timeout / 1000
+        while True:
+            for selector in selectors:
+                links = page.locator(selector)
+                try:
+                    count = await links.count()
+                except Exception:
+                    continue
+                for index in range(min(count, 50)):
+                    link = links.nth(index)
+                    href = await link.get_attribute("href")
+                    if not href:
+                        continue
+                    if not expected:
+                        return href
+                    try:
+                        text = (await link.inner_text()).strip()
+                    except Exception:
+                        text = ""
+                    if any(value in text for value in expected):
+                        return href
+            if time.monotonic() >= deadline:
+                return None
+            await page.wait_for_timeout(1000)
+
     async def dismiss_blocking_overlays(self, page) -> None:
         """Close TikTok's first-run overlays that intercept pointer events.
 
@@ -2403,23 +2468,16 @@ class TiktokVideo(TiktokBaseUploader):
                 "[+] scheduled post: published video link is not available yet"
             )
             return None
-        selector = 'a[href*="/video/"]'
-        try:
-            await page.wait_for_selector(selector, timeout=30_000)
-        except Exception as exc:
-            raise RuntimeError(
-                "TikTok 视频发布结果读取失败：Content 列表未出现 video 链接；"
-                "先核查 Content 列表，避免重复发布。"
-            ) from exc
-        links = page.locator(selector)
-        if await links.count():
-            href = await links.nth(0).get_attribute("href")
-            match = re.search(r"/video/(\d+)", href or "")
+        href = await self._find_result_link(
+            page, ('a[href*="/video/"]',)
+        )
+        if href:
+            match = re.search(r"/video/(\d+)", href)
             if match:
                 return match.group(1)
         raise RuntimeError(
-            "TikTok 视频发布结果读取失败：未找到 /@user/video/<id> 链接；"
-            "先核查 Content 列表，避免重复发布。"
+            "TikTok 视频发布结果读取失败：Content 列表未找到匹配当前标题的"
+            " video 链接；先核查 Content 列表，避免重复发布。"
         )
 
     async def wait_media_ready(self, page, *, deadline: float | None = None, multilogin: bool = False):
@@ -2460,6 +2518,11 @@ class TiktokNote(TiktokBaseUploader):
     """
 
     upload_url = TIKTOK_PHOTO_UPLOAD_URL
+    upload_entry_selector = (
+        '[data-e2e="select_photo_button"], '
+        'button:has-text("Select photos"), '
+        'input[type="file"][accept*="image"]'
+    )
 
     _PHOTO_TITLE_SELECTOR = 'input[placeholder*="catchy"]'
     _PHOTO_TITLE_CANDIDATES = (
@@ -2591,7 +2654,7 @@ class TiktokNote(TiktokBaseUploader):
     async def _fill_title(self, page) -> None:
         scope = await self._resolve_photo_scope(page)
         last_exc = None
-        for _ in range(8):
+        for _ in range(20):
             await self.dismiss_blocking_overlays(page)
             for selector in self._PHOTO_TITLE_CANDIDATES:
                 locator = scope.locator(selector)
@@ -2614,7 +2677,7 @@ class TiktokNote(TiktokBaseUploader):
 
     async def _resolve_caption_editor(self, page):
         scope = await self._resolve_photo_scope(page)
-        for _ in range(8):
+        for _ in range(20):
             await self.dismiss_blocking_overlays(page)
             for selector in self._PHOTO_CAPTION_CANDIDATES:
                 locator = scope.locator(selector)
@@ -2690,12 +2753,18 @@ class TiktokNote(TiktokBaseUploader):
                     except Exception:
                         processed = False
 
-                post_enabled = (
-                    await self.locator_base.locator(
-                        self._POST_BUTTON_SELECTOR
-                    ).get_attribute("disabled")
-                    is None
-                )
+                post = page.locator(self._POST_BUTTON_SELECTOR).last
+                if await post.count() == 0:
+                    post = page.locator('button:has-text("Post")').last
+                post_enabled = False
+                if await post.count() > 0:
+                    post_enabled = (
+                        await post.get_attribute("disabled") is None
+                        and str(
+                            await post.get_attribute("aria-disabled")
+                        ).lower()
+                        != "true"
+                    )
                 if processed and post_enabled:
                     tiktok_logger.info("  [-] photos uploaded.")
                     return
@@ -2713,22 +2782,16 @@ class TiktokNote(TiktokBaseUploader):
             )
             return None
         combined = 'a[href*="/photo"], a[href*="/video/"]'
-        selectors = (combined, self._PHOTO_LINK_SELECTOR)
-        for selector in selectors:
-            try:
-                await page.wait_for_selector(selector, timeout=30_000)
-            except Exception:
-                continue
-            links = page.locator(selector)
-            if not await links.count():
-                continue
-            href = await links.nth(0).get_attribute("href")
+        href = await self._find_result_link(
+            page, (combined, self._PHOTO_LINK_SELECTOR)
+        )
+        if href:
             for pattern in (
                 r"item_id=(\d+)",
                 r"/photo/(\d+)",
                 r"/video/(\d+)",
             ):
-                match = re.search(pattern, href or "")
+                match = re.search(pattern, href)
                 if match:
                     return match.group(1)
 

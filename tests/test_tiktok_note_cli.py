@@ -132,6 +132,10 @@ class _Locator:
     def first(self):
         return self
 
+    @property
+    def last(self):
+        return self
+
     def nth(self, index: int):
         locator = self._spawn()
         locator._index = index
@@ -148,6 +152,11 @@ class _Locator:
         self.page.events.append(("click", self.selector))
         if "button-group" in self.selector:
             self.page.publish_clicked = True
+
+    async def inner_text(self) -> str:
+        if 'item_id=' in self.selector:
+            return self.page.caption_text or self.page.title_text or ""
+        return ""
 
     async def get_attribute(self, name: str):
         if "text=Post" in self.selector:
@@ -1181,8 +1190,9 @@ class UploadNoteFlowTests(unittest.TestCase):
         note = self._note(["/tmp/cover.png"])
         page = _StudioPage()
         page.item_href = None
-        with self.assertRaises(RuntimeError) as ctx:
-            asyncio.run(note.read_result(page))
+        with patch.object(tk_main, "TIKTOK_RESULT_READ_TIMEOUT_MS", 0):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.read_result(page))
 
         message = str(ctx.exception)
         # Exit 1 read failures must not reuse the reserved exit-9 term.
