@@ -31,6 +31,8 @@
 | 公开账号 `--privacy followers` | `--privacy followers` | `1` | — | 严格失败：requested `followers` / actual `Everyone`（公开账号无 Followers 选项） |
 | 公开账号图片帖选项 | `upload-note ... --privacy public --no-comments --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704976028485176590` | Content 行 **Everyone**；帖子页 **Promotional content** + **Creator labeled as AI-generated**；Description/tags 正确 |
 | 公开账号 `--disable-reuse`（v2） | `--privacy public --disable-reuse` | `0` | `https://www.tiktok.com/@lukechen95/video/7704978171703069966` | 日志 `reuse resolved by candidate #0 (Reuse of content)`；控件可见时实际取消并回读；v1 `7704977354304539918` 因文案漏配未实际取消，已作废 |
+| reuse 严格逻辑复验（public） | `--privacy public --disable-reuse` | `0` | `https://www.tiktok.com/@lukechen95/video/7704986094458227982` | 移除“缺失=已满足”后复验：`reuse resolved by candidate #0`，取消并回读通过 |
+| reuse 严格逻辑复验（only-me） | `--privacy only-me --disable-reuse` | `0` | `https://www.tiktok.com/@lukechen95/video/7704986350126140686` | 私密级别同样解析到控件并取消回读；日志 `reuse resolved by candidate #0` |
 | 公开账号定时创建 | `--privacy public --schedule "2026-11-06 17:35"` | `0` | 定时中，尚无帖子 URL | Content 行 `Nov 6, 5:35 PM (GMT+8) Shanghai` + **Everyone**，确认已定时；到点发布已由用户确认正常，按用户要求不再跑探针 |
 | only-me 基线 v3 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704949738667298062` | Content 列表显示 **Only me**；标题残留旧文案 “emo”，已用 `ControlOrMeta+A` 修复，v4 复验 |
 | only-me 基线 v4 | `--privacy only-me` | `0` | `https://www.tiktok.com/@lukechen95/video/7704950472880229645` | 干净标题；read_result 返回 ID；only-me 隐私路径复验 |
@@ -78,4 +80,4 @@
 21. 图片页没有 `advanced_settings_container`，评论/AIGC/品牌在全局 **Show more** 之后才可见；已加全局 Show more 兜底。公开账号 `--privacy public --no-comments --aigc --your-brand` 图片帖发布成功，帖子页显示 Promotional content + AI 标签。
 22. 公开账号的发布点击会出现 `Post now` 确认弹窗；已有兜底在真实发布中触发并成功。
 23. 切换到公开账号后，之前创建的 Followers 定时帖不再出现在 Scheduled 列表（账号类型变更可能导致取消）；该条不再作为到点证据，用户已另行确认到点发布正常，并用公开账号 17:35 定时帖补充证据。
-24. reuse 控件实际文案是 **“Reuse of content”**，旧候选只找 “Allow reuse of content”；同时该控件位于 **Show more** 折叠区，`get_by_role` 默认忽略隐藏元素。两者叠加导致 v1 与私有账号期间误判“控件未渲染”，实际控件存在且默认 `checked=true`。已补文案候选、全局 Show more 兜底，并移除“缺失=已满足”捷径：显式请求 `--disable-reuse` 但控件解析不到时直接退出 `1`（图片帖不请求该选项）。公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际取消并回读成功。
+24. reuse 控件实际文案是 **“Reuse of content”**，旧候选只找 “Allow reuse of content”；同时该控件位于 **Show more** 折叠区，`get_by_role` 默认忽略隐藏元素。两者叠加导致 v1 与私有账号期间误判“控件未渲染”，实际控件存在且默认 `checked=true`。已补文案候选、全局 Show more 兜底，并移除“缺失=已满足”捷径：显式请求 `--disable-reuse` 但控件解析不到时直接退出 `1`（图片帖不请求该选项）。公开账号 v2 `7704978171703069966`、only-me v3 `7704985011614764302` 均实际取消并回读成功；严格逻辑复验 public `7704986094458227982`、only-me `7704986350126140686` 也均通过。
