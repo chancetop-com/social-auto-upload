@@ -613,7 +613,7 @@ class PublishLoopTests(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 asyncio.run(
-                    video.detect_upload_status(
+                    video.wait_media_ready(
                         page, deadline=999.0, multilogin=True
                     )
                 )
@@ -641,7 +641,7 @@ class PublishLoopTests(unittest.TestCase):
         with patch.object(tk_main.asyncio, "sleep", AsyncMock()) as sleep:
             with self.assertRaises(LoginRequiredError):
                 asyncio.run(
-                    video.detect_upload_status(page, multilogin=True)
+                    video.wait_media_ready(page, multilogin=True)
                 )
         sleep.assert_not_awaited()
 
