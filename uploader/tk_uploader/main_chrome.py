@@ -14,9 +14,13 @@ from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
 from uploader.base_video import BaseVideoUploader
 from uploader.tk_uploader.tk_config import (
     TIKTOK_ENTRY_WAIT_MS,
+    TIKTOK_IMAGE_SUFFIXES,
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_URL,
     TIKTOK_LOGIN_FORM_SELECTOR,
+    TIKTOK_MAX_IMAGE_BYTES,
+    TIKTOK_MAX_IMAGE_COUNT,
+    TIKTOK_PHOTO_UPLOAD_URL,
     TIKTOK_PUBLISH_TIMEOUT_SECONDS,
     TIKTOK_UPLOAD_ENTRY_SELECTOR,
     TIKTOK_UPLOAD_URL,
@@ -229,6 +233,16 @@ class TiktokBaseUploader(BaseVideoUploader):
     them in.
     """
 
+    upload_url = TIKTOK_UPLOAD_URL
+
+    def media_label(self) -> str:
+        """Human label used by the upload log; the video text is unchanged."""
+        return f"{self.title}.mp4"
+
+    def result_label(self, item_id) -> str:
+        """Log line for the published item; the video text is unchanged."""
+        return f"video_id: {item_id}"
+
     async def upload_in(self, session: BrowserSession) -> None:
         """Upload through an injected session without owning its lifecycle."""
         # Ticket 13 §3: reuse a URL-matching page, then pages[0], and only
@@ -275,16 +289,16 @@ class TiktokBaseUploader(BaseVideoUploader):
             _raise_if_login_required(page)
         # 9. read back the published item
         self.last_item_id = await self.read_result(page)
-        tiktok_logger.success(f"video_id: {self.last_item_id}")
+        tiktok_logger.success(self.result_label(self.last_item_id))
 
     async def open_upload_page(self, page, *, multilogin: bool) -> None:
-        await page.goto(TIKTOK_UPLOAD_URL)
-        tiktok_logger.info(f'[+]Uploading-------{self.title}.mp4')
+        await page.goto(self.upload_url)
+        tiktok_logger.info(f'[+]Uploading-------{self.media_label()}')
         if multilogin:
             _raise_if_login_required(page)
 
         try:
-            await page.wait_for_url(TIKTOK_UPLOAD_URL, timeout=10000)
+            await page.wait_for_url(self.upload_url, timeout=10000)
         except Exception:
             if multilogin:
                 _raise_if_login_required(page)
@@ -574,3 +588,190 @@ class TiktokVideo(TiktokBaseUploader):
     async def main(self):
         async with async_playwright() as playwright:
             await self.upload(playwright)
+
+
+class TiktokNote(TiktokBaseUploader):
+    """TikTok Studio photo post (1–35 images, first image is the cover).
+
+    Ticket 15 ships the core upload path only.  ``note``/``tags``/``title`` and
+    ``options`` are stored now so ticket 16 can fill the metadata and option
+    steps without changing the constructor again.
+    """
+
+    upload_url = TIKTOK_PHOTO_UPLOAD_URL
+
+    _PHOTO_TITLE_SELECTOR = 'input[placeholder*="catchy"]'
+    _PHOTO_INPUT_SELECTOR = 'input[type="file"][accept*="image"]'
+    _MULTI_INPUT_SELECTOR = 'input[type="file"][multiple]'
+    _POST_BUTTON_SELECTOR = 'div.button-group > button >> text=Post'
+    _CONTENT_CONTAINER_SELECTOR = 'div[data-tt="components_PostTable_Container"]'
+    _PHOTO_LINK_SELECTOR = 'a[href*="/post/photo?item_id="]'
+    _PHOTOS_TAB = "Photos"
+
+    def __init__(
+        self,
+        image_paths,
+        note,
+        tags,
+        publish_date,
+        account_file,
+        *,
+        title=None,
+        options=None,
+        debug=True,
+        headless=True,
+    ):
+        self.image_paths = list(image_paths)
+        self.note = note
+        self.tags = tags
+        self.publish_date = publish_date
+        self.account_file = account_file
+        self.title = title
+        self.options = options
+        self.debug = debug
+        self.headless = headless
+        self.local_executable_path = LOCAL_CHROME_PATH
+        self.locator_base = None
+        self.last_item_id = None
+
+    def media_label(self) -> str:
+        return f"{len(self.image_paths)} images"
+
+    def result_label(self, item_id) -> str:
+        return f"photo post id: {item_id}"
+
+    async def _photo_form_present(self, page) -> bool:
+        for selector in (
+            self._PHOTO_TITLE_SELECTOR,
+            self._PHOTO_INPUT_SELECTOR,
+        ):
+            try:
+                if await page.locator(selector).count() > 0:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    async def ensure_mode(self, page) -> None:
+        """Require the photo form *before* any file selection.
+
+        ``?tab=photo`` normally lands straight on the photo composer.  If the
+        form is not rendered yet, click the ``Photos`` tab once and re-check.
+        A missing form means the account is outside the rollout: fail instead
+        of feeding images into the video input.
+        """
+        if await self._photo_form_present(page):
+            return
+
+        clicked = False
+        get_by_text = getattr(page, "get_by_text", None)
+        if callable(get_by_text):
+            try:
+                tab = get_by_text(self._PHOTOS_TAB, exact=True).first
+                if await tab.count() > 0:
+                    await tab.click()
+                    clicked = True
+            except Exception:
+                pass
+
+        if not clicked:
+            get_by_role = getattr(page, "get_by_role", None)
+            if callable(get_by_role):
+                try:
+                    tab = get_by_role("tab", name=self._PHOTOS_TAB).first
+                    if await tab.count() > 0:
+                        await tab.click()
+                        clicked = True
+                except Exception:
+                    pass
+
+        if clicked and await self._photo_form_present(page):
+            return
+
+        raise RuntimeError(
+            "Photos tab 未覆盖当前账号：上传页没有图片发帖入口，"
+            "已在选择文件前中止（不会改用视频 input）。"
+        )
+
+    async def attach_media(self, page) -> None:
+        selector = self._PHOTO_INPUT_SELECTOR
+        try:
+            present = await page.locator(selector).count()
+        except Exception:
+            present = 0
+        if not present:
+            selector = self._MULTI_INPUT_SELECTOR
+        # ``image_paths`` order is the display order; the first one is the cover.
+        await page.locator(selector).first.set_input_files(list(self.image_paths))
+
+    async def fill_metadata(self, page) -> None:
+        """Title/Description/tags land in ticket 16."""
+
+    async def wait_media_ready(
+        self,
+        page,
+        *,
+        deadline: float | None = None,
+        multilogin: bool = False,
+    ) -> None:
+        while True:
+            self._check_publish_deadline(deadline)
+            if multilogin:
+                _raise_if_login_required(page)
+            try:
+                processed = await page.locator("div[data-id]").count() > 0
+                if not processed:
+                    try:
+                        processed = (
+                            await page.get_by_text(
+                                "Cover", exact=True
+                            ).count()
+                            > 0
+                        )
+                    except Exception:
+                        processed = False
+
+                post_enabled = (
+                    await self.locator_base.locator(
+                        self._POST_BUTTON_SELECTOR
+                    ).get_attribute("disabled")
+                    is None
+                )
+                if processed and post_enabled:
+                    tiktok_logger.info("  [-] photos uploaded.")
+                    return
+            except Exception:
+                if multilogin:
+                    _raise_if_login_required(page)
+
+            tiktok_logger.info("  [-] photos uploading...")
+            await asyncio.sleep(2)
+
+    async def read_result(self, page):
+        try:
+            await page.wait_for_selector(self._CONTENT_CONTAINER_SELECTOR)
+        except Exception as exc:
+            raise RuntimeError(
+                "TikTok 图文帖发布结果未知：未找到内容列表容器。"
+            ) from exc
+
+        photo_links = page.locator(self._PHOTO_LINK_SELECTOR)
+        if await photo_links.count():
+            href = await photo_links.nth(0).get_attribute("href")
+            match = re.search(r"item_id=(\d+)", href or "")
+            if match:
+                return match.group(1)
+
+        raise RuntimeError(
+            "TikTok 图文帖发布结果未知：未找到 "
+            '/post/photo?item_id= 链接。'
+        )
+
+    async def upload(
+        self, playwright: Playwright | None, *, session: BrowserSession | None = None
+    ) -> None:
+        if session is None:
+            raise RuntimeError(
+                "TikTok 仅支持 Multilogin 模式：图文帖没有本地浏览器路径。"
+            )
+        await self.upload_in(session)

@@ -6,10 +6,18 @@ from either module keeps working.
 """
 
 TIKTOK_UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload"
+TIKTOK_PHOTO_UPLOAD_URL = (
+    "https://www.tiktok.com/tiktokstudio/upload?tab=photo"
+)
 TIKTOK_LOGIN_CHECK_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
 TIKTOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
 TIKTOK_ENTRY_WAIT_MS = 5_000
 TIKTOK_PUBLISH_TIMEOUT_SECONDS = 15 * 60
+
+# Web UI photo-post limits (TikTok Studio front-end constants, research 01).
+TIKTOK_MAX_IMAGE_COUNT = 35
+TIKTOK_MAX_IMAGE_BYTES = 50 * 1024 * 1024
+TIKTOK_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 
 TIKTOK_UPLOAD_ENTRY_SELECTOR = (
     'button:has-text("Select video"), div.upload-container, '

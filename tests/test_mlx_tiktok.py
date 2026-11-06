@@ -110,11 +110,11 @@ class TiktokParserTests(unittest.TestCase):
     def test_platform_is_registered(self):
         self.assertIs(sau_cli.PLATFORMS["tiktok"], tiktok_command)
 
-    def test_actions_are_check_upload_video_login_only(self):
+    def test_actions_are_check_upload_video_upload_note_login_only(self):
         self.assertEqual(
-            set(_action_names("tiktok")), {"check", "upload-video", "login"}
+            set(_action_names("tiktok")),
+            {"check", "upload-video", "upload-note", "login"},
         )
-        self.assertNotIn("upload-note", _action_names("tiktok"))
 
     def test_upload_video_parameters_match_repository_naming(self):
         options = _option_strings(_subparser(sau_cli.build_parser(), "tiktok", "upload-video"))
@@ -198,7 +198,7 @@ class TiktokParserTests(unittest.TestCase):
     def test_unknown_subcommand_still_exits_2(self):
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as ctx:
-                sau_cli.main(["tiktok", "upload-note"])
+                sau_cli.main(["tiktok", "upload-audio"])
         self.assertEqual(ctx.exception.code, 2)
 
 
