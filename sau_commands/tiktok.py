@@ -116,6 +116,43 @@ def register(platform_parsers):
             "Stickers and Story); omit to leave the page default"
         ),
     )
+    aigc_group = upload_video_parser.add_mutually_exclusive_group()
+    aigc_group.add_argument(
+        "--aigc",
+        dest="aigc",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "Turn on AI-generated content labeling; omit to leave the page "
+            "default"
+        ),
+    )
+    aigc_group.add_argument(
+        "--no-aigc",
+        dest="aigc",
+        action="store_const",
+        const=False,
+        help="Turn off AI-generated content labeling",
+    )
+    upload_video_parser.add_argument(
+        "--your-brand",
+        action="store_true",
+        default=None,
+        help=(
+            "Disclose the post as promoting your own brand; opens "
+            "Disclose post content automatically"
+        ),
+    )
+    upload_video_parser.add_argument(
+        "--branded-content",
+        action="store_true",
+        default=None,
+        help=(
+            "Disclose the post as paid branded content; cannot be combined "
+            "with --privacy only-me"
+        ),
+    )
     add_runtime_flags(upload_video_parser)
     add_multilogin_flags(upload_video_parser)
 
@@ -159,19 +196,49 @@ class TiktokVideoUploadRequest:
 def _build_publish_options(args) -> TiktokPublishOptions | None:
     """Map CLI flags to the uploader's tri-state options.
 
-    Every ``None`` means "do not touch the page default".  When all three are
+    Every ``None`` means "do not touch the page default".  When all six are
     ``None`` the legacy code path stays genuinely untouched (``options=None``).
+    Absent brand flags stay ``None``; the uploader normalizes the other brand
+    checkbox to an explicit ``False`` only when a brand disclosure is requested.
     """
     privacy = getattr(args, "privacy", None) or None
     allow_comments = False if getattr(args, "no_comments", False) else None
     allow_reuse = False if getattr(args, "disable_reuse", False) else None
-    if privacy is None and allow_comments is None and allow_reuse is None:
+    aigc = getattr(args, "aigc", None)
+    your_brand = getattr(args, "your_brand", None)
+    branded_content = getattr(args, "branded_content", None)
+    if (
+        privacy is None
+        and allow_comments is None
+        and allow_reuse is None
+        and aigc is None
+        and your_brand is None
+        and branded_content is None
+    ):
         return None
     return TiktokPublishOptions(
         privacy=privacy,
         allow_comments=allow_comments,
         allow_reuse=allow_reuse,
+        aigc=aigc,
+        your_brand=your_brand,
+        branded_content=branded_content,
     )
+
+
+def _validate_branded_content_privacy(args) -> None:
+    """Reject ``--branded-content`` + ``--privacy only-me`` before any browser.
+
+    TikTok Studio disables the ``Branded content`` checkbox for private posts,
+    so this is a local usage error (exit 2) rather than an upload failure.
+    """
+    if getattr(args, "branded_content", None) and (
+        getattr(args, "privacy", None) == "only-me"
+    ):
+        raise UsageError(
+            "--branded-content 不能与 --privacy only-me 同时使用："
+            "TikTok 要求 Branded content 帖子必须为 Public 或 Friends。"
+        )
 
 
 def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
@@ -259,6 +326,10 @@ def _raise_login_required(target) -> None:
 
 async def run(args):
     """执行本平台命令；TikTok 没有本地浏览器路径。"""
+    # Reject impossible option combinations before resolving the Profile or
+    # touching any browser/session state (exit 2).
+    _validate_branded_content_privacy(args)
+
     if not multilogin_enabled():
         raise RuntimeError(TIKTOK_LOCAL_MODE_MESSAGE)
 

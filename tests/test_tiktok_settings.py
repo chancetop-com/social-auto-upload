@@ -71,6 +71,44 @@ class TiktokOptionsParserTests(unittest.TestCase):
         self.assertIn("--no-comments", options)
         self.assertIn("--disable-reuse", options)
 
+    def test_upload_video_registers_aigc_and_brand_flags(self):
+        options = _option_strings(
+            _subparser(sau_cli.build_parser(), "tiktok", "upload-video")
+        )
+        for flag in (
+            "--aigc",
+            "--no-aigc",
+            "--your-brand",
+            "--branded-content",
+        ):
+            with self.subTest(flag=flag):
+                self.assertIn(flag, options)
+
+    def test_aigc_flags_are_mutually_exclusive(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = Path(tmp_dir) / "demo.mp4"
+            video.write_bytes(b"video")
+            with redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as ctx:
+                    sau_cli.main(
+                        [
+                            "tiktok",
+                            "upload-video",
+                            "--folder-id",
+                            "folder",
+                            "--profile-id",
+                            "profile",
+                            "--file",
+                            str(video),
+                            "--title",
+                            "标题",
+                            "--aigc",
+                            "--no-aigc",
+                        ]
+                    )
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertIn("not allowed with", err.getvalue())
+
     def test_privacy_accepts_only_four_choices(self):
         parser = _subparser(sau_cli.build_parser(), "tiktok", "upload-video")
         action = parser._option_string_actions["--privacy"]
@@ -130,12 +168,75 @@ class TiktokOptionsMappingTests(unittest.TestCase):
             "privacy": None,
             "no_comments": False,
             "disable_reuse": False,
+            "aigc": None,
+            "your_brand": None,
+            "branded_content": None,
         }
         values.update(overrides)
         return Namespace(**values)
 
     def test_all_flags_unset_maps_to_none(self):
         self.assertIsNone(tiktok_command._build_publish_options(self._args()))
+
+    def test_aigc_true_and_false_stay_tri_state(self):
+        enabled = tiktok_command._build_publish_options(self._args(aigc=True))
+        disabled = tiktok_command._build_publish_options(
+            self._args(aigc=False)
+        )
+        self.assertIsNotNone(enabled)
+        self.assertIs(enabled.aigc, True)
+        self.assertIsNotNone(disabled)
+        self.assertIs(disabled.aigc, False)
+
+    def test_brand_flags_default_to_none_and_preserve_true(self):
+        absent = tiktok_command._build_publish_options(self._args())
+        self.assertIsNone(absent)
+
+        your_brand = tiktok_command._build_publish_options(
+            self._args(your_brand=True)
+        )
+        self.assertIsNotNone(your_brand)
+        self.assertIs(your_brand.your_brand, True)
+        self.assertIsNone(your_brand.branded_content)
+
+        branded = tiktok_command._build_publish_options(
+            self._args(branded_content=True)
+        )
+        self.assertIsNotNone(branded)
+        self.assertIsNone(branded.your_brand)
+        self.assertIs(branded.branded_content, True)
+
+    def test_absent_brand_flags_are_not_coerced_to_false(self):
+        options = tiktok_command._build_publish_options(
+            self._args(privacy="public")
+        )
+        self.assertIsNotNone(options)
+        self.assertIsNone(options.your_brand)
+        self.assertIsNone(options.branded_content)
+        self.assertIsNone(options.aigc)
+
+    def test_all_six_fields_can_be_combined(self):
+        options = tiktok_command._build_publish_options(
+            self._args(
+                privacy="public",
+                no_comments=True,
+                disable_reuse=True,
+                aigc=True,
+                your_brand=True,
+                branded_content=True,
+            )
+        )
+        self.assertEqual(
+            options,
+            TiktokPublishOptions(
+                privacy="public",
+                allow_comments=False,
+                allow_reuse=False,
+                aigc=True,
+                your_brand=True,
+                branded_content=True,
+            ),
+        )
 
     def test_public_privacy_maps_to_a_tri_state_option(self):
         options = tiktok_command._build_publish_options(
@@ -203,6 +304,45 @@ class TiktokOptionsMappingTests(unittest.TestCase):
             app = tiktok_command._build_video_uploader(request)
 
         self.assertIs(app.options, options)
+
+
+# ---------------------------------------------------------------------------
+# Local pre-browser validation
+# ---------------------------------------------------------------------------
+
+
+class TiktokBrandedContentValidationTests(unittest.TestCase):
+    def test_branded_content_with_only_me_exits_2_without_browser(self):
+        playwright = MagicMock()
+        session = MagicMock()
+        with (
+            patch.object(tiktok_command, "async_playwright", playwright),
+            patch.object(tiktok_command, "browser_session", session),
+        ):
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                video = Path(tmp_dir) / "demo.mp4"
+                video.write_bytes(b"video")
+                code, _, err = _run(
+                    [
+                        "tiktok",
+                        "upload-video",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--file",
+                        str(video),
+                        "--title",
+                        "标题",
+                        "--branded-content",
+                        "--privacy",
+                        "only-me",
+                    ]
+                )
+        self.assertEqual(code, 2)
+        self.assertIn("branded-content", err)
+        playwright.assert_not_called()
+        session.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -338,15 +478,89 @@ class _OptionPage:
     url = "https://www.tiktok.com/tiktokstudio/upload"
 
 
+class FakeDialogButton:
+    """Minimal locator for the AIGC ``Turn on`` button."""
+
+    def __init__(self, on_click=None) -> None:
+        self._count = 1
+        self.click_calls = 0
+        self._on_click = on_click
+
+    @property
+    def first(self):
+        return self
+
+    async def count(self) -> int:
+        return self._count
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        self._count = 0
+        if self._on_click is not None:
+            self._on_click()
+
+    async def wait_for(self, **kwargs) -> None:
+        return None
+
+
+class _MissingLocator:
+    def __init__(self) -> None:
+        self.first = self
+
+    async def count(self) -> int:
+        return 0
+
+    async def click(self) -> None:
+        raise AssertionError("missing locator must never be clicked")
+
+    async def wait_for(self, **kwargs) -> None:
+        return None
+
+
+class FakeAigcPage:
+    """Top-level page that renders the first-run ``Labeling ...`` dialog."""
+
+    url = _OptionPage.url
+
+    def __init__(self, button: FakeDialogButton) -> None:
+        self._button = button
+
+    def get_by_role(self, role, name=None):
+        if role == "button" and name == "Turn on":
+            return self._button
+        return _MissingLocator()
+
+    def locator(self, selector):
+        return _MissingLocator()
+
+    async def wait_for_timeout(self, ms) -> None:
+        return None
+
+
 def _uploader(options):
     return TiktokVideo(
         "标题", "/tmp/demo.mp4", [], 0, None, options=options
     )
 
 
-def _controls(*, privacy=None, comments=None, reuse=None):
+def _controls(
+    *,
+    privacy=None,
+    comments=None,
+    reuse=None,
+    aigc=None,
+    brand_switch=None,
+    your_brand=None,
+    branded_content=None,
+):
     return tk_main.TiktokSettingsControls(
-        privacy=privacy, comments=comments, reuse=reuse
+        privacy=privacy,
+        comments=comments,
+        reuse=reuse,
+        aigc=aigc,
+        brand_switch=brand_switch,
+        your_brand=your_brand,
+        branded_content=branded_content,
     )
 
 
@@ -364,6 +578,10 @@ class TiktokOptionStepTests(unittest.TestCase):
                     privacy=FakePrivacyControl("Everyone", ["Everyone"]),
                     comments=FakeToggleControl(True),
                     reuse=FakeToggleControl(True),
+                    aigc=FakeToggleControl(False),
+                    brand_switch=FakeToggleControl(False),
+                    your_brand=FakeToggleControl(False),
+                    branded_content=FakeToggleControl(False),
                 )
                 video = _uploader(options)
                 resolver = _install(video, controls)
@@ -378,6 +596,14 @@ class TiktokOptionStepTests(unittest.TestCase):
                 self.assertEqual(controls.comments.click_calls, 0)
                 self.assertEqual(controls.reuse.checked_reads, 0)
                 self.assertEqual(controls.reuse.click_calls, 0)
+                self.assertEqual(controls.aigc.checked_reads, 0)
+                self.assertEqual(controls.aigc.click_calls, 0)
+                self.assertEqual(controls.brand_switch.checked_reads, 0)
+                self.assertEqual(controls.brand_switch.click_calls, 0)
+                self.assertEqual(controls.your_brand.checked_reads, 0)
+                self.assertEqual(controls.your_brand.click_calls, 0)
+                self.assertEqual(controls.branded_content.checked_reads, 0)
+                self.assertEqual(controls.branded_content.click_calls, 0)
 
     def test_privacy_explicit_set_then_readback(self):
         privacy = FakePrivacyControl(
@@ -563,6 +789,261 @@ class TiktokOptionStepTests(unittest.TestCase):
         self.assertEqual(order, ["privacy", "comments"])
 
 
+class TiktokAigcOptionTests(unittest.TestCase):
+    def test_aigc_on_clicks_switch_confirms_turn_on_and_reads_back(self):
+        aigc = FakeToggleControl(False)
+
+        def turn_on():
+            aigc.checked = True
+
+        button = FakeDialogButton(turn_on)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+
+        asyncio.run(video.apply_options(FakeAigcPage(button)))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(button.click_calls, 1)
+
+    def test_aigc_on_without_dialog_still_reads_back(self):
+        aigc = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+
+    def test_aigc_off_clicks_switch_without_dialog(self):
+        aigc = FakeToggleControl(True)
+        button = FakeDialogButton()
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        _install(video, _controls(aigc=aigc))
+
+        asyncio.run(video.apply_options(FakeAigcPage(button)))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(button.click_calls, 0)
+
+    def test_aigc_missing_control_fails_strictly(self):
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=None))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("aigc", message)
+        self.assertIn("True", message)
+        self.assertIn("control-not-found", message)
+        self.assertIn(_OptionPage.url, message)
+
+    def test_aigc_already_satisfied_but_disabled_succeeds(self):
+        aigc = FakeToggleControl(True, disabled=True)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.click_calls, 0)
+
+    def test_aigc_disabled_and_not_satisfied_fails_without_click(self):
+        aigc = FakeToggleControl(False, disabled=True)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("aigc", str(ctx.exception))
+        self.assertIn("disabled", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+
+    def test_aigc_mismatch_names_option_requested_and_actual(self):
+        aigc = FakeToggleControl(False, click_toggles=False)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("aigc", message)
+        self.assertIn("True", message)
+        self.assertIn("False", message)
+        self.assertIn(_OptionPage.url, message)
+        self.assertEqual(aigc.click_calls, 1)
+
+
+class TiktokBrandDisclosureTests(unittest.TestCase):
+    def test_your_brand_opens_master_and_sets_both_checkboxes(self):
+        master = FakeToggleControl(False)
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(True)
+        video = _uploader(TiktokPublishOptions(your_brand=True))
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertTrue(master.checked)
+        self.assertEqual(master.click_calls, 1)
+        self.assertTrue(your_brand.checked)
+        self.assertEqual(your_brand.click_calls, 1)
+        self.assertFalse(branded.checked)
+        self.assertEqual(branded.click_calls, 1)
+
+    def test_branded_content_opens_master_and_unchecks_the_other_box(self):
+        master = FakeToggleControl(False)
+        your_brand = FakeToggleControl(True)
+        branded = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(branded_content=True))
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertTrue(master.checked)
+        self.assertEqual(master.click_calls, 1)
+        self.assertFalse(your_brand.checked)
+        self.assertEqual(your_brand.click_calls, 1)
+        self.assertTrue(branded.checked)
+        self.assertEqual(branded.click_calls, 1)
+
+    def test_both_brand_flags_can_be_true(self):
+        master = FakeToggleControl(True)
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(False)
+        video = _uploader(
+            TiktokPublishOptions(your_brand=True, branded_content=True)
+        )
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertTrue(your_brand.checked)
+        self.assertTrue(branded.checked)
+        self.assertEqual(master.click_calls, 0)
+
+    def test_brand_readback_mismatch_names_option_values_and_url(self):
+        master = FakeToggleControl(False)
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(False, click_toggles=False)
+        video = _uploader(TiktokPublishOptions(branded_content=True))
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("branded_content", message)
+        self.assertIn("True", message)
+        self.assertIn("False", message)
+        self.assertIn(_OptionPage.url, message)
+
+    def test_brand_missing_control_fails_strictly(self):
+        master = FakeToggleControl(False)
+        your_brand = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(your_brand=True))
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=None,
+            ),
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("branded_content", message)
+        self.assertIn("control-not-found", message)
+        self.assertIn(_OptionPage.url, message)
+
+    def test_master_switch_mismatch_fails(self):
+        master = FakeToggleControl(False, click_toggles=False)
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(your_brand=True))
+        _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("brand_switch", message)
+        self.assertIn("True", message)
+        self.assertIn("False", message)
+        self.assertIn(_OptionPage.url, message)
+        self.assertEqual(your_brand.click_calls, 0)
+        self.assertEqual(branded.click_calls, 0)
+
+    def test_explicit_false_brand_flags_do_not_touch_brand_controls(self):
+        master = FakeToggleControl(False)
+        your_brand = FakeToggleControl(False)
+        branded = FakeToggleControl(False)
+        video = _uploader(
+            TiktokPublishOptions(your_brand=False, branded_content=False)
+        )
+        resolver = _install(
+            video,
+            _controls(
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        asyncio.run(video.apply_options(_OptionPage()))
+
+        resolver.assert_not_awaited()
+        self.assertEqual(master.checked_reads, 0)
+        self.assertEqual(master.click_calls, 0)
+        self.assertEqual(your_brand.checked_reads, 0)
+        self.assertEqual(your_brand.click_calls, 0)
+        self.assertEqual(branded.checked_reads, 0)
+        self.assertEqual(branded.click_calls, 0)
+
+
 class _AsyncCM:
     def __init__(self, value=None) -> None:
         self.value = value
@@ -716,6 +1197,29 @@ class TiktokOptionCliFlowTests(unittest.TestCase):
                 allow_reuse=False,
             ),
         )
+
+    def test_cli_aigc_and_brand_flags_reach_the_request(self):
+        code, _, _, builder = self._run_upload(
+            ["--aigc", "--your-brand", "--branded-content"]
+        )
+        self.assertEqual(code, 0)
+        request = builder.call_args.args[0]
+        self.assertEqual(
+            request.options,
+            TiktokPublishOptions(
+                aigc=True,
+                your_brand=True,
+                branded_content=True,
+            ),
+        )
+
+    def test_cli_no_aigc_reaches_the_request_as_false(self):
+        code, _, _, builder = self._run_upload(["--no-aigc"])
+        self.assertEqual(code, 0)
+        request = builder.call_args.args[0]
+        self.assertIs(request.options.aigc, False)
+        self.assertIsNone(request.options.your_brand)
+        self.assertIsNone(request.options.branded_content)
 
 
 if __name__ == "__main__":

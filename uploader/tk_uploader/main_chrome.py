@@ -87,6 +87,18 @@ _COVER_SAVE_CANDIDATES = (
      )),
 )
 
+# First-run AIGC guidance dialog.  It is top-level (outside the upload iframe),
+# so these candidates run against ``page`` rather than ``locator_base``.
+_AIGC_TURN_ON_CANDIDATES = (
+    ('get_by_role("button", name="Turn on")',
+     lambda page: page.get_by_role("button", name="Turn on")),
+    ('[role="dialog"] button:has-text("Turn on")',
+     lambda page: page.locator('[role="dialog"] button:has-text("Turn on")')),
+    ('.TUXModal button:has-text("Turn on")',
+     lambda page: page.locator('.TUXModal button:has-text("Turn on")')),
+)
+_AIGC_DIALOG_TIMEOUT_MS = 5_000
+
 
 async def _find_candidate(scope, candidates):
     """Return ``(locator, index, description)`` for the first present candidate."""
@@ -146,6 +158,9 @@ class TiktokPublishOptions:
     privacy: str | None = None          # public / friends / followers / only-me
     allow_comments: bool | None = None
     allow_reuse: bool | None = None
+    aigc: bool | None = None
+    your_brand: bool | None = None
+    branded_content: bool | None = None
 
 
 # Page copy -> CLI/API semantic value.  ``Only you`` and ``Private`` are the
@@ -288,6 +303,10 @@ class TiktokSettingsControls:
     privacy: TiktokOptionControl | None = None
     comments: TiktokOptionControl | None = None
     reuse: TiktokOptionControl | None = None
+    aigc: TiktokOptionControl | None = None
+    brand_switch: TiktokOptionControl | None = None
+    your_brand: TiktokOptionControl | None = None
+    branded_content: TiktokOptionControl | None = None
 
 
 def _page_url(page) -> str:
@@ -321,6 +340,14 @@ async def _read_toggle_state(control: TiktokOptionControl) -> bool:
         return str(aria).lower() == "true"
 
 
+async def _read_switch_state(control: TiktokOptionControl) -> bool:
+    """Read an ARIA switch state (``aria-checked``) with a native fallback."""
+    aria = await control.get_attribute("aria-checked")
+    if aria is not None:
+        return str(aria).lower() == "true"
+    return bool(await control.is_checked())
+
+
 async def _set_toggle_option(
     control: TiktokOptionControl,
     requested: bool,
@@ -344,6 +371,40 @@ async def _set_toggle_option(
         )
     await control.click()
     actual = await _read_toggle_state(control)
+    if actual != requested:
+        raise _option_error(
+            option=option,
+            stage="readback",
+            requested=requested,
+            actual=actual,
+            control=control,
+            url=url,
+        )
+
+
+async def _set_switch_option(
+    control: TiktokOptionControl,
+    requested: bool,
+    *,
+    option: str,
+    url: str,
+) -> None:
+    """Set an ARIA switch via ``aria-checked`` readback."""
+    current = await _read_switch_state(control)
+    if current == requested:
+        # Already satisfied, even when the platform disabled the switch.
+        return
+    if await control.is_disabled():
+        raise _option_error(
+            option=option,
+            stage="disabled",
+            requested=requested,
+            actual=current,
+            control=control,
+            url=url,
+        )
+    await control.click()
+    actual = await _read_switch_state(control)
     if actual != requested:
         raise _option_error(
             option=option,
@@ -717,6 +778,8 @@ class TiktokBaseUploader(BaseVideoUploader):
             options.privacy is None
             and options.allow_comments is None
             and options.allow_reuse is None
+            and options.aigc is None
+            and not self._brand_requested()
         ):
             return
 
@@ -740,6 +803,136 @@ class TiktokBaseUploader(BaseVideoUploader):
                 option="allow_reuse",
                 url=url,
             )
+        if options.aigc is not None:
+            self._require_option_control(
+                controls.aigc, "aigc", options.aigc, url
+            )
+            await self._set_aigc_option(controls.aigc, options.aigc, page=page, url=url)
+        if self._brand_requested():
+            await self._apply_brand_options(controls, url=url)
+
+    def _brand_requested(self) -> bool:
+        options = getattr(self, "options", None)
+        if options is None:
+            return False
+        return options.your_brand is True or options.branded_content is True
+
+    @staticmethod
+    def _require_option_control(control, option, requested, url) -> None:
+        if control is None:
+            raise _option_error(
+                option=option,
+                stage="resolve",
+                requested=requested,
+                actual="control-not-found",
+                control=None,
+                url=url,
+            )
+
+    async def _set_aigc_option(
+        self,
+        control: TiktokOptionControl,
+        requested: bool,
+        *,
+        page,
+        url: str,
+    ) -> None:
+        current = await _read_switch_state(control)
+        if current == requested:
+            # Already satisfied, even when the account-level setting disabled
+            # the switch: no click and no dialog.
+            return
+        if await control.is_disabled():
+            raise _option_error(
+                option="aigc",
+                stage="disabled",
+                requested=requested,
+                actual=current,
+                control=control,
+                url=url,
+            )
+        await control.click()
+        if requested:
+            await self._confirm_aigc_turn_on(page)
+        actual = await _read_switch_state(control)
+        if actual != requested:
+            raise _option_error(
+                option="aigc",
+                stage="readback",
+                requested=requested,
+                actual=actual,
+                control=control,
+                url=url,
+            )
+
+    async def _confirm_aigc_turn_on(self, page) -> None:
+        """Click the first-run ``Labeling AI-generated content`` -> ``Turn on``.
+
+        The dialog is optional (``localStorage`` remembers it was seen), so a
+        missing button is not an error; the caller's readback still decides
+        success.
+        """
+        found = await _find_candidate(page, _AIGC_TURN_ON_CANDIDATES)
+        if found is None:
+            return
+        button, index, description = found
+        tiktok_logger.info(
+            f"[+] TikTok options: aigc dialog candidate #{index} "
+            f"({description}) matched"
+        )
+        try:
+            await button.click()
+            await button.wait_for(
+                state="detached", timeout=_AIGC_DIALOG_TIMEOUT_MS
+            )
+        except Exception:
+            # Let the explicit aria-checked readback report the real failure.
+            return
+
+    async def _apply_brand_options(
+        self, controls: TiktokSettingsControls, *, url: str
+    ) -> None:
+        """Open the master switch, then explicitly set both checkboxes.
+
+        The checkbox that was not requested is normalized to ``False`` so a
+        stale selection from the page/previous post can never leak through.
+        Both may be ``True`` at the same time.
+        """
+        options = self.options
+        your_brand = options.your_brand is True
+        branded_content = options.branded_content is True
+
+        self._require_option_control(
+            controls.brand_switch, "brand_switch", True, url
+        )
+        await _set_switch_option(
+            controls.brand_switch,
+            True,
+            option="brand_switch",
+            url=url,
+        )
+
+        self._require_option_control(
+            controls.your_brand, "your_brand", your_brand, url
+        )
+        self._require_option_control(
+            controls.branded_content,
+            "branded_content",
+            branded_content,
+            url,
+        )
+        await _set_toggle_option(
+            controls.your_brand,
+            your_brand,
+            option="your_brand",
+            url=url,
+        )
+        await _set_toggle_option(
+            controls.branded_content,
+            branded_content,
+            option="branded_content",
+            url=url,
+        )
 
     def _requested_option_names(self) -> list[str]:
         options = getattr(self, "options", None)
@@ -752,14 +945,23 @@ class TiktokBaseUploader(BaseVideoUploader):
             names.append("comments")
         if options.allow_reuse is not None:
             names.append("reuse")
+        if options.aigc is not None:
+            names.append("aigc")
+        if self._brand_requested():
+            names.extend(("brand_switch", "your_brand", "branded_content"))
         return names
 
     def _option_request_value(self, name: str):
         options = self.options
+        if name in ("brand_switch",):
+            return True
+        if name in ("your_brand", "branded_content"):
+            return getattr(options, name) is True
         return {
             "privacy": options.privacy,
             "comments": options.allow_comments,
             "reuse": options.allow_reuse,
+            "aigc": options.aigc,
         }[name]
 
     def _option_candidate_factories(self, name: str):
@@ -849,6 +1051,63 @@ class TiktokBaseUploader(BaseVideoUploader):
                             'label:has-text("Allow reuse of content") '
                             'input[type="checkbox"]'
                         ).first
+                    ),
+                ),
+            )
+
+        if name == "aigc":
+            aigc_container = base.locator(
+                '[data-e2e="aigc_container"]'
+            )
+            return (
+                (
+                    'data-e2e=aigc_container+role=switch',
+                    lambda: _LocatorControl(
+                        aigc_container.locator('[role="switch"]').first
+                    ),
+                ),
+                (
+                    'data-e2e=aigc_container+.Switch__content',
+                    lambda: _LocatorControl(
+                        aigc_container.locator('.Switch__content').first
+                    ),
+                ),
+            )
+
+        if name == "brand_switch":
+            disclose = base.locator(
+                '[data-e2e="disclose_content_container"]'
+            )
+            return (
+                (
+                    'data-e2e=disclose_content_container+role=switch',
+                    lambda: _LocatorControl(
+                        disclose.locator('[role="switch"]').first
+                    ),
+                ),
+                (
+                    'data-e2e=disclose_content_container+.Switch__content',
+                    lambda: _LocatorControl(
+                        disclose.locator('.Switch__content').first
+                    ),
+                ),
+            )
+
+        if name in ("your_brand", "branded_content"):
+            label = (
+                "Your brand" if name == "your_brand" else "Branded content"
+            )
+            return (
+                (
+                    f'role=checkbox[name="{label}"]',
+                    lambda: _LocatorControl(
+                        base.get_by_role("checkbox", name=label).first
+                    ),
+                ),
+                (
+                    f'text="{label}"',
+                    lambda: _LocatorControl(
+                        base.get_by_text(label, exact=True).first
                     ),
                 ),
             )
@@ -955,6 +1214,10 @@ class TiktokBaseUploader(BaseVideoUploader):
             privacy=resolved.get("privacy"),
             comments=resolved.get("comments"),
             reuse=resolved.get("reuse"),
+            aigc=resolved.get("aigc"),
+            brand_switch=resolved.get("brand_switch"),
+            your_brand=resolved.get("your_brand"),
+            branded_content=resolved.get("branded_content"),
         )
 
     async def apply_cover(self, page) -> None:
