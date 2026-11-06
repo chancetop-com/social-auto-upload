@@ -146,9 +146,10 @@ def register(platform_parsers):
             help=TIKTOK_ACCOUNT_HELP,
         )
         add_runtime_flags(action_parser)
-        # Both local and MLX modes accept the Profile flags.  Local mode
-        # ignores them; MLX mode rejects ``login`` regardless.
-        add_multilogin_flags(action_parser)
+        # Repo-wide contract: ``login`` never accepts Profile flags.  They are
+        # only meaningful for check/upload actions.
+        if action_name == "check":
+            add_multilogin_flags(action_parser)
 
     upload_video_parser = tiktok_actions.add_parser(
         "upload-video", help="Upload one video to TikTok"

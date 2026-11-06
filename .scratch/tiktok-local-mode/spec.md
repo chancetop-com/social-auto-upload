@@ -30,7 +30,7 @@
   3. 保存 `storage_state` 到 `cookies/tiktok_<account>.json`。
   4. 再用 `cookie_auth` 复核一次；无效则退出 `1`。
 - 非交互式终端（`stdin` 不是 TTY）→ 明确报错退出 `1`，不静默挂起。
-- `--folder-id` / `--profile-id` 在本地 `login` 中被接受但忽略；MLX 下 `login` 仍拒绝退出 `1`。
+- `login` 不注册 `--folder-id` / `--profile-id`（仓库跨平台契约）；传了会由 argparse 退出 `2`。这两个参数只用于 `check` / `upload-*`。MLX 下 `login` 仍拒绝退出 `1`。
 - 不实现 QR / 无头登录；这不是本次目标。
 
 ## 4. 本地 check
