@@ -1277,6 +1277,15 @@ class UploadNoteMetadataTests(unittest.TestCase):
         self.assertEqual(page.title_text, "")
         self.assertFalse(any(event[0] == "fill" for event in page.events))
 
+    def test_caption_clear_uses_control_or_meta(self):
+        page = self._page()
+        note = self._note(note="hello")
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertIn(("press", "ControlOrMeta+A"), page.events)
+
     def test_description_and_tags_follow_the_note_text(self):
         page = self._page()
         note = self._note(note="hello world", tags=("one", "two"))

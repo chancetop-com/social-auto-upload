@@ -1705,9 +1705,9 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         await page.keyboard.press("End")
 
-        # macOS uses Cmd+A for select-all; Control+A leaves the old caption.
-        select_all = "Meta+A" if sys.platform == "darwin" else "Control+A"
-        await page.keyboard.press(select_all)
+        # Playwright maps ControlOrMeta to Cmd on macOS and Ctrl elsewhere;
+        # Control+A alone leaves the old caption on macOS.
+        await page.keyboard.press("ControlOrMeta+A")
 
         await page.keyboard.press("Delete")
 
