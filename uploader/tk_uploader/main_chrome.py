@@ -357,10 +357,16 @@ class _LocatorPrivacyControl(TiktokOptionControl):
     """Visibility combobox adapter: trigger text plus its option list."""
 
     def __init__(
-        self, trigger, option_scope, *, candidates: tuple[str, ...] = ()
+        self,
+        trigger,
+        option_scope,
+        *,
+        candidates: tuple[str, ...] = (),
+        fallback_scope=None,
     ) -> None:
         self._trigger = trigger
         self._option_scope = option_scope
+        self._fallback_scope = fallback_scope
         self.candidates = candidates
 
     async def is_checked(self) -> bool:
@@ -385,8 +391,14 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         return (await self._trigger.inner_text()).strip()
 
     async def options(self) -> list[TiktokOptionControl]:
-        locator = self._option_scope.locator('li[role="option"]')
+        # Current Studio renders options as ``div[role="option"]`` in a portal
+        # outside the visibility container.  Try the container first, then the
+        # page/frame root.  Match by role, not tag.
+        locator = self._option_scope.locator('[role="option"]')
         count = await locator.count()
+        if count == 0 and self._fallback_scope is not None:
+            locator = self._fallback_scope.locator('[role="option"]')
+            count = await locator.count()
         return [_LocatorControl(locator.nth(i)) for i in range(count)]
 
     async def count(self) -> int:
@@ -1306,7 +1318,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                     'div[data-e2e="video_visibility_container"]'
                 )
                 return _LocatorPrivacyControl(
-                    scope.locator('button[role="combobox"]'), scope
+                    scope.locator('button[role="combobox"]'),
+                    scope,
+                    fallback_scope=base,
                 )
 
             def from_role():
@@ -1691,7 +1705,9 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         await page.keyboard.press("End")
 
-        await page.keyboard.press("Control+A")
+        # macOS uses Cmd+A for select-all; Control+A leaves the old caption.
+        select_all = "Meta+A" if sys.platform == "darwin" else "Control+A"
+        await page.keyboard.press(select_all)
 
         await page.keyboard.press("Delete")
 
@@ -2060,12 +2076,24 @@ class TiktokVideo(TiktokBaseUploader):
         await page.wait_for_timeout(3000)  # wait 3s, fix it later
 
     async def read_result(self, page):
-        await page.wait_for_selector('div[data-tt="components_PostTable_Container"]')
-        video_list_locator = self.locator_base.locator('div[data-tt="components_PostTable_Container"] div[data-tt="components_PostInfoCell_Container"] a')
-        if await video_list_locator.count():
-            first_video_obj = await video_list_locator.nth(0).get_attribute('href')
-            video_id = re.search(r'video/(\d+)', first_video_obj).group(1) if first_video_obj else None
-            return video_id
+        selector = 'a[href*="/video/"]'
+        try:
+            await page.wait_for_selector(selector, timeout=30_000)
+        except Exception as exc:
+            raise RuntimeError(
+                "TikTok 视频发布结果读取失败：Content 列表未出现 video 链接；"
+                "先核查 Content 列表，避免重复发布。"
+            ) from exc
+        links = page.locator(selector)
+        if await links.count():
+            href = await links.nth(0).get_attribute("href")
+            match = re.search(r"/video/(\d+)", href or "")
+            if match:
+                return match.group(1)
+        raise RuntimeError(
+            "TikTok 视频发布结果读取失败：未找到 /@user/video/<id> 链接；"
+            "先核查 Content 列表，避免重复发布。"
+        )
 
     async def wait_media_ready(self, page, *, deadline: float | None = None, multilogin: bool = False):
         while True:
@@ -2352,23 +2380,29 @@ class TiktokNote(TiktokBaseUploader):
             await asyncio.sleep(2)
 
     async def read_result(self, page):
-        try:
-            await page.wait_for_selector(self._CONTENT_CONTAINER_SELECTOR)
-        except Exception as exc:
-            raise RuntimeError(
-                "TikTok 图片帖发布结果读取失败（按现有契约退出 1；先核查 Content 列表，避免重复发布）：未找到内容列表容器。"
-            ) from exc
-
-        photo_links = page.locator(self._PHOTO_LINK_SELECTOR)
-        if await photo_links.count():
-            href = await photo_links.nth(0).get_attribute("href")
-            match = re.search(r"item_id=(\d+)", href or "")
-            if match:
-                return match.group(1)
+        combined = 'a[href*="/photo"], a[href*="/video/"]'
+        selectors = (combined, self._PHOTO_LINK_SELECTOR)
+        for selector in selectors:
+            try:
+                await page.wait_for_selector(selector, timeout=30_000)
+            except Exception:
+                continue
+            links = page.locator(selector)
+            if not await links.count():
+                continue
+            href = await links.nth(0).get_attribute("href")
+            for pattern in (
+                r"item_id=(\d+)",
+                r"/photo/(\d+)",
+                r"/video/(\d+)",
+            ):
+                match = re.search(pattern, href or "")
+                if match:
+                    return match.group(1)
 
         raise RuntimeError(
             "TikTok 图片帖发布结果读取失败（按现有契约退出 1；先核查 Content 列表，避免重复发布）：未找到 "
-            '/post/photo?item_id= 链接。'
+            "Content 列表中的图片/视频链接。"
         )
 
     async def upload(

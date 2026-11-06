@@ -30,6 +30,64 @@ from uploader.tk_uploader.main_chrome import (
 TOKEN = "SENTINEL-MLX-TOKEN-ticket12"
 
 
+class PrivacyOptionLocatorTests(unittest.TestCase):
+    def test_options_are_matched_by_role_not_li_tag(self):
+        class _Options:
+            async def count(self):
+                return 3
+
+            def nth(self, index):
+                return object()
+
+        class _Scope:
+            def __init__(self):
+                self.selector = None
+
+            def locator(self, selector):
+                self.selector = selector
+                return _Options()
+
+        scope = _Scope()
+        control = tk_main._LocatorPrivacyControl(object(), scope)
+
+        options = asyncio.run(control.options())
+
+        self.assertEqual(scope.selector, '[role="option"]')
+        self.assertEqual(len(options), 3)
+
+    def test_options_fall_back_to_the_page_scope_for_portals(self):
+        class _Options:
+            def __init__(self, count):
+                self._count = count
+
+            async def count(self):
+                return self._count
+
+            def nth(self, index):
+                return object()
+
+        class _Scope:
+            def __init__(self, count):
+                self.count = count
+                self.selector = None
+
+            def locator(self, selector):
+                self.selector = selector
+                return _Options(self.count)
+
+        container = _Scope(0)
+        page = _Scope(3)
+        control = tk_main._LocatorPrivacyControl(
+            object(), container, fallback_scope=page
+        )
+
+        options = asyncio.run(control.options())
+
+        self.assertEqual(container.selector, '[role="option"]')
+        self.assertEqual(page.selector, '[role="option"]')
+        self.assertEqual(len(options), 3)
+
+
 def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | None = None):
     for item in parser._actions:
         if isinstance(item, argparse._SubParsersAction):
