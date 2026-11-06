@@ -97,7 +97,7 @@ _COVER_SAVE_CANDIDATES = (
     ('get_by_role("button", name=re.compile(r"^(Save|Confirm)$"))',
      lambda scope: scope.get_by_role(
          "button", name=re.compile(r"^(Save|Confirm)$")
-     )),
+     ).first),
 )
 
 # First-run AIGC guidance dialog.  It is top-level (outside the upload iframe),
@@ -1742,60 +1742,192 @@ class TiktokBaseUploader(BaseVideoUploader):
             return
 
         publish_date = self.publish_date
-        schedule_input_element = self.locator_base.get_by_label('Schedule')
-        await schedule_input_element.wait_for(state='visible')  # 确保按钮可见
+        scope = self.locator_base if self.locator_base is not None else page
 
-        await schedule_input_element.click(force=True)
-        if await self.locator_base.locator('div.TUXButton-content >> text=Allow').count():
-            await self.locator_base.locator('div.TUXButton-content >> text=Allow').click()
+        # only-me can disable scheduling on private accounts; fail clearly
+        # instead of retrying a disabled radio for tens of seconds.
+        schedule_input = scope.locator(
+            'input[name="postSchedule"][value="schedule"]'
+        )
+        schedule_label = scope.locator(
+            'label:has(input[name="postSchedule"][value="schedule"])'
+        )
+        try:
+            disabled = await schedule_input.first.is_disabled()
+            classes = (
+                await schedule_label.first.get_attribute("class")
+            ) or ""
+            aria_disabled = await schedule_label.first.get_attribute(
+                "aria-disabled"
+            )
+            if (
+                disabled
+                or str(aria_disabled).lower() == "true"
+                or "disabled-true" in classes.casefold()
+            ):
+                raise RuntimeError(
+                    "TikTok 定时发布不可用：当前隐私级别（如 only-me）或"
+                    "账号设置禁用了 Schedule；请改用 followers/friends "
+                    "或立即发布。"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
 
-        scheduled_picker = self.locator_base.locator('div.scheduled-picker')
-        await scheduled_picker.locator('div.TUXInputBox').nth(1).click()
+        date_cb = page.get_by_role("combobox", name="Select date")
+        for _attempt in range(3):
+            # Clicking the radio label is idempotent; do not trust the input's
+            # DOM ``checked`` property, which React can leave stale.
+            for selector in (
+                'label:has(input[name="postSchedule"][value="schedule"])',
+                'input[name="postSchedule"][value="schedule"]',
+                'label:has-text("Schedule")',
+            ):
+                for target in (scope, page):
+                    try:
+                        await target.locator(selector).first.click(force=True)
+                    except Exception:
+                        pass
 
-        calendar_month = await self.locator_base.locator(
-            'div.calendar-wrapper span.month-title').inner_text()
-
-        n_calendar_month = datetime.strptime(calendar_month, '%B').month
-
-        schedule_month = publish_date.month
-
-        if n_calendar_month != schedule_month:
-            if n_calendar_month < schedule_month:
-                arrow = self.locator_base.locator('div.calendar-wrapper span.arrow').nth(-1)
-            else:
-                arrow = self.locator_base.locator('div.calendar-wrapper span.arrow').nth(0)
-            await arrow.click()
-
-        # day set
-        valid_days_locator = self.locator_base.locator(
-            'div.calendar-wrapper span.day.valid')
-        valid_days = await valid_days_locator.count()
-        for i in range(valid_days):
-            day_element = valid_days_locator.nth(i)
-            text = await day_element.inner_text()
-            if text.strip() == str(publish_date.day):
-                await day_element.click()
+            # The first schedule on an account opens an Allow permission
+            # modal; wait for either the date picker or that button.
+            for _ in range(12):
+                date_count = await date_cb.count()
+                date_visible = (
+                    bool(date_count) and await date_cb.first.is_visible()
+                )
+                allow = page.get_by_role("button", name="Allow")
+                if await allow.count() == 0:
+                    allow = page.locator('button:has-text("Allow")')
+                allow_visible = (
+                    bool(await allow.count()) and await allow.first.is_visible()
+                )
+                tiktok_logger.info(
+                    "[+] schedule probe: "
+                    f"date_count={date_count} date_visible={date_visible} "
+                    f"allow_visible={allow_visible}"
+                )
+                if date_visible:
+                    break
+                if allow_visible:
+                    await allow.first.click()
+                await page.wait_for_timeout(500)
+            if await date_cb.count() and await date_cb.first.is_visible():
                 break
-        # time set
-        await scheduled_picker.locator('div.TUXInputBox').nth(0).click()
+        await date_cb.first.wait_for(state="visible", timeout=10000)
 
+        # Date picker: navigate months, then click the exact day.
+        await date_cb.first.click()
+        await page.wait_for_timeout(500)
+        target_month = publish_date.strftime("%B")
+        target_year = str(publish_date.year)
+        for _ in range(24):
+            current_month = (
+                await page.locator(".DatePicker__titleMonth").first.inner_text()
+            ).strip()
+            current_year = (
+                await page.locator(".DatePicker__titleYear").first.inner_text()
+            ).strip()
+            if (current_month, current_year) == (target_month, target_year):
+                break
+            current_month_no = datetime.strptime(
+                current_month, "%B"
+            ).month
+            if (int(current_year), current_month_no) < (
+                publish_date.year,
+                publish_date.month,
+            ):
+                await page.get_by_role(
+                    "button", name="Next month"
+                ).first.click()
+            else:
+                await page.get_by_role(
+                    "button", name="Previous month"
+                ).first.click()
+            await page.wait_for_timeout(250)
+
+        day_pattern = re.compile(
+            rf"{target_month} {publish_date.day}"
+            rf"(st|nd|rd|th), {target_year}"
+        )
+        day_button = page.get_by_role("button", name=day_pattern)
+        if await day_button.count():
+            await day_button.first.click()
+        else:
+            days = page.locator(
+                '.DatePicker__day[data-outside="false"]:not([disabled])'
+            )
+            clicked = False
+            for index in range(await days.count()):
+                if (await days.nth(index).inner_text()).strip() == str(
+                    publish_date.day
+                ):
+                    await days.nth(index).click()
+                    clicked = True
+                    break
+            if not clicked:
+                raise RuntimeError(
+                    "TikTok 定时设置失败：日期选择器中找不到 "
+                    f"{target_month} {publish_date.day}, {target_year}。"
+                )
+        await page.wait_for_timeout(300)
+        await page.keyboard.press("Escape")
+
+        # Time picker: 5-minute granularity, matching the Studio picker.
         hour_str = publish_date.strftime("%H")
-        correct_minute = int(publish_date.minute / 5)
-        minute_str = f"{correct_minute:02d}"
+        minute_str = f"{(publish_date.minute // 5) * 5:02d}"
+        await page.get_by_role(
+            "combobox", name="Select time"
+        ).first.click()
+        await page.wait_for_timeout(500)
+        hour_option = page.get_by_role("option", name=f"Hours {hour_str}")
+        if await hour_option.count():
+            await hour_option.first.click()
+        else:
+            raise RuntimeError(
+                f"TikTok 定时设置失败：时间选择器中没有 {hour_str} 时。"
+            )
+        minute_option = page.get_by_role(
+            "option", name=f"Minutes {minute_str}"
+        )
+        if await minute_option.count():
+            await minute_option.first.click()
+        else:
+            minutes = page.locator(
+                '[aria-label="Minutes"] [role="option"]'
+            )
+            clicked = False
+            for index in range(await minutes.count()):
+                if (await minutes.nth(index).inner_text()).strip() == minute_str:
+                    await minutes.nth(index).click()
+                    clicked = True
+                    break
+            if not clicked:
+                raise RuntimeError(
+                    "TikTok 定时设置失败：时间选择器中没有 "
+                    f"{minute_str} 分。"
+                )
+        await page.wait_for_timeout(300)
+        await page.keyboard.press("Escape")
 
-        hour_selector = f"span.tiktok-timepicker-left:has-text('{hour_str}')"
-        minute_selector = f"span.tiktok-timepicker-right:has-text('{minute_str}')"
-
-        # pick hour first
-        await page.wait_for_timeout(1000)  # 等待500毫秒
-        await self.locator_base.locator(hour_selector).click()
-        # click time button again
-        await page.wait_for_timeout(1000)  # 等待500毫秒
-        # pick minutes after
-        await self.locator_base.locator(minute_selector).click()
-
-        # click title to remove the focus.
-        # await self.locator_base.locator("h1:has-text('Upload video')").click()
+        # Verify the picker values, not just the clicks.
+        values = page.locator(
+            ".Picker__root.schedule-picker .Picker__value"
+        )
+        actual_date = (await values.nth(0).inner_text()).strip()
+        actual_time = (await values.nth(1).inner_text()).strip()
+        expected_date = (
+            f"{publish_date.strftime('%b')} {publish_date.day}, "
+            f"{publish_date.year}"
+        )
+        expected_time = f"{hour_str}:{minute_str}"
+        if actual_date != expected_date or actual_time != expected_time:
+            raise RuntimeError(
+                "TikTok 定时设置失败："
+                f"requested={publish_date.isoformat()} "
+                f"actual_date={actual_date!r} actual_time={actual_time!r}"
+            )
 
     async def dismiss_blocking_overlays(self, page) -> None:
         """Close TikTok's first-run overlays that intercept pointer events.
@@ -1949,7 +2081,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                     continue
 
             try:
-                await page.wait_for_url("https://www.tiktok.com/tiktokstudio/content",  timeout=3000)
+                await page.wait_for_url(
+                    re.compile(r".*tiktokstudio/content.*"), timeout=3000
+                )
             except (PlaywrightTimeoutError, TimeoutError):
                 # Photo posts may show a "Post now" confirmation instead of
                 # navigating.  Attempt it at most once: mark the attempt before
@@ -2163,35 +2297,51 @@ class TiktokVideo(TiktokBaseUploader):
                     detail=f"set_input_files failed: {exc}",
                 ) from exc
 
-        save_button = await _resolve_candidate(
-            control_scope,
-            _COVER_SAVE_CANDIDATES,
-            control="Save",
-            stage="save cover",
-            page=page,
-        )
+        # The Save button is a page-level header button in the current Studio;
+        # older editors kept it inside the editor scope.  Try all scopes.
+        save_button = None
+        save_error = None
+        for scope in (control_scope, base, page):
+            try:
+                save_button = await _resolve_candidate(
+                    scope,
+                    _COVER_SAVE_CANDIDATES,
+                    control="Save",
+                    stage="save cover",
+                    page=page,
+                )
+                break
+            except RuntimeError as exc:
+                save_error = exc
+        if save_button is None:
+            raise save_error
 
         # The upload must produce the editor's preview before the save is
         # meaningful.  Waiting for it is the only proof the page accepted the
         # file; an enabled Save button is not an equivalent signal.
+        preview = None
+        for scope in (control_scope, base, page):
+            preview = await _find_candidate(
+                scope, _COVER_PREVIEW_CANDIDATES
+            )
+            if preview is not None:
+                break
         preview_error = None
         preview_visible = False
-        for index, (description, factory) in enumerate(_COVER_PREVIEW_CANDIDATES):
-            try:
-                preview_locator = factory(control_scope).first
-                await preview_locator.wait_for(
-                    state="visible", timeout=_COVER_PREVIEW_TIMEOUT_MS
-                )
-            except Exception as exc:
-                preview_error = exc
-                continue
+        if preview is not None:
+            preview_locator, index, description = preview
             tiktok_logger.info(
                 "[+] cover wait for cover preview: Uploaded cover image "
                 f"candidate {index + 1}/{len(_COVER_PREVIEW_CANDIDATES)}"
                 f" matched ({description})"
             )
-            preview_visible = True
-            break
+            try:
+                await preview_locator.wait_for(
+                    state="visible", timeout=_COVER_PREVIEW_TIMEOUT_MS
+                )
+                preview_visible = True
+            except Exception as exc:
+                preview_error = exc
 
         if not preview_visible:
             raise _cover_error(
@@ -2246,6 +2396,13 @@ class TiktokVideo(TiktokBaseUploader):
         await page.wait_for_timeout(3000)  # wait 3s, fix it later
 
     async def read_result(self, page):
+        if self.publish_date != 0:
+            # A scheduled item has no published video URL yet; the Scheduled
+            # list is the source of truth for acceptance.
+            tiktok_logger.info(
+                "[+] scheduled post: published video link is not available yet"
+            )
+            return None
         selector = 'a[href*="/video/"]'
         try:
             await page.wait_for_selector(selector, timeout=30_000)
@@ -2550,6 +2707,11 @@ class TiktokNote(TiktokBaseUploader):
             await asyncio.sleep(2)
 
     async def read_result(self, page):
+        if self.publish_date != 0:
+            tiktok_logger.info(
+                "[+] scheduled post: published photo link is not available yet"
+            )
+            return None
         combined = 'a[href*="/photo"], a[href*="/video/"]'
         selectors = (combined, self._PHOTO_LINK_SELECTOR)
         for selector in selectors:

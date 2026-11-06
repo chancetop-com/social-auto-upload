@@ -234,8 +234,9 @@ class _StudioPage:
 
     async def wait_for_url(self, url: str, **kwargs):
         self.wait_for_url_calls.append((url, kwargs))
-        if "tiktokstudio/content" in url:
-            self.url = url
+        # Production accepts a regex/glob now; the fake simply lands on the
+        # content page.
+        self.url = "https://www.tiktok.com/tiktokstudio/content"
 
     async def wait_for_selector(self, selector: str, **kwargs):
         return object()

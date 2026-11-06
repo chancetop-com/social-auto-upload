@@ -32,7 +32,7 @@
 | 互动/复用/AIGC/品牌组合 | `--privacy only-me --no-comments --disable-reuse --aigc --your-brand` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956309300382989` | 评论关闭、复用控件未渲染（已禁用视为满足）、AIGC Turn on、Your brand 已勾选；待 Content/帖子核对 |
 | branded-content + friends | `--branded-content --privacy friends` | `0` | `https://www.tiktok.com/@lukechen95/video/7704956629594279182` | 私有账号支持该组合；待帖子/Content 核对 Paid partnership |
 | 自定义封面 | `--thumbnail videos/demo.png --privacy only-me` | 待跑 | — | — |
-| 定时发布 | `--schedule <近未来> --privacy only-me` | 待跑 | — | 到点/Content 核对 |
+| 定时发布 | `--schedule 2026-11-06 22:00 --privacy followers` | `0` | Scheduled 列表待核对 | 日期/时间选择与回读通过；only-me 下 Schedule 被 TikTok 禁用（已补明确报错） |
 | 图文多图 | `upload-note --images videos/demo.png videos/demo1.png videos/demo2.png --title ... --note ... --tags ... --privacy only-me` | 待跑 | — | 顺序/封面/文案 |
 | 图片帖设置项 | `upload-note ... --no-comments --aigc --your-brand` | 待跑 | — | 页面渲染则核对 |
 
@@ -53,3 +53,6 @@
 13. 品牌复选框的 label 没有可访问名，文本在 label 外层兄弟节点 → 用 XPath 从文本 span 反查同级 label。
 14. Playwright 应用 storage_state 时偶发导航竞态 → 本地 context 创建重试 3 次。
 15. `change_language` / 上传页 `goto` 等 `load` 会超时 → 改 `domcontentloaded`，语言切换 best-effort。
+16. 定时首次点击 `Schedule` 会弹 `Allow` 权限；日期/时间控件是 `Select date` / `Select time` combobox + `DatePicker__day` / `role=option`，已重写 `apply_schedule` 并回读日期/时间。
+17. 私有账号 `only-me` 下 TikTok 禁用 Schedule → 明确报错退出 `1`，不再 30s 轮询。
+18. 定时帖没有即时发布链接 → `read_result` 对定时帖返回 `None`，以 Scheduled 列表为验收依据。
