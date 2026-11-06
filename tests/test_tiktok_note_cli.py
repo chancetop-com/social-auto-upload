@@ -24,11 +24,18 @@ import sau_cli
 from sau_commands import tiktok as tiktok_command
 from sau_commands.arguments import existing_file_path
 from uploader.tk_uploader import main_chrome as tk_main
-from uploader.tk_uploader.main_chrome import TiktokBaseUploader, TiktokNote
+from uploader.tk_uploader.main_chrome import (
+    TiktokBaseUploader,
+    TiktokNote,
+    TiktokPublishOptions,
+)
 from uploader.tk_uploader.tk_config import (
     TIKTOK_IMAGE_SUFFIXES,
+    TIKTOK_MAX_DESCRIPTION_LENGTH,
+    TIKTOK_MAX_HASHTAG_COUNT,
     TIKTOK_MAX_IMAGE_BYTES,
     TIKTOK_MAX_IMAGE_COUNT,
+    TIKTOK_MAX_TITLE_LENGTH,
     TIKTOK_PHOTO_UPLOAD_URL,
     TIKTOK_UPLOAD_URL,
 )
@@ -155,6 +162,25 @@ class _Locator:
         self.page.events.append(("set_input_files", tuple(files)))
         self.page.input_files = list(files)
 
+    async def fill(self, text: str) -> None:
+        self.page.events.append(("fill", self.selector, text))
+        if "catchy" in self.selector:
+            self.page.title_text = text
+
+
+class _Keyboard:
+    """Minimal keyboard double used by the shared Draft.js caption path."""
+
+    def __init__(self, page) -> None:
+        self.page = page
+
+    async def insert_text(self, text: str) -> None:
+        self.page.events.append(("insert_text", text))
+        self.page.caption_text += text
+
+    async def press(self, key: str) -> None:
+        self.page.events.append(("press", key))
+
 
 class _TextTab:
     def __init__(self, page) -> None:
@@ -188,6 +214,9 @@ class _StudioPage:
             f"?item_id={ITEM_ID}&lang=en"
         )
         self.publish_clicked = False
+        self.title_text = ""
+        self.caption_text = ""
+        self.keyboard = _Keyboard(self)
 
     async def goto(self, url: str, **kwargs):
         self.goto_calls.append((url, kwargs))
@@ -201,6 +230,9 @@ class _StudioPage:
 
     async def wait_for_selector(self, selector: str, **kwargs):
         return object()
+
+    async def wait_for_timeout(self, ms: int) -> None:
+        return None
 
     def get_by_text(self, text: str, exact: bool = False):
         if text == "Photos":
@@ -217,6 +249,10 @@ class _StudioPage:
             'input[placeholder*="catchy"]',
             'input[type="file"][accept*="image"]',
         ):
+            return _Locator(self, selector, count=1 if self.photo_mode else 0)
+        if selector == 'input[placeholder="Add a catchy title"]':
+            return _Locator(self, selector, count=1 if self.photo_mode else 0)
+        if selector.endswith("div.public-DraftEditor-content"):
             return _Locator(self, selector, count=1 if self.photo_mode else 0)
         if selector == 'input[type="file"][multiple]':
             return _Locator(self, selector, count=1 if self.photo_mode else 0)
@@ -278,19 +314,15 @@ class UploadNoteParserTests(unittest.TestCase):
             with self.subTest(option=expected):
                 self.assertIn(expected, options)
 
-    def test_metadata_and_cover_options_are_absent(self):
+    def test_metadata_and_publish_options_are_present(self):
         options = _option_strings(
             _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
         )
-        for forbidden in (
+        for expected in (
             "--title",
             "--note",
             "--notef",
             "--tags",
-            "--disable-reuse",
-            "--thumbnail",
-            "--cover-index",
-            "--bgm",
             "--privacy",
             "--no-comments",
             "--aigc",
@@ -298,8 +330,82 @@ class UploadNoteParserTests(unittest.TestCase):
             "--your-brand",
             "--branded-content",
         ):
+            with self.subTest(option=expected):
+                self.assertIn(expected, options)
+
+    def test_cover_and_reuse_options_are_still_absent(self):
+        options = _option_strings(
+            _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
+        )
+        for forbidden in (
+            "--disable-reuse",
+            "--thumbnail",
+            "--cover-index",
+            "--bgm",
+        ):
             with self.subTest(option=forbidden):
                 self.assertNotIn(forbidden, options)
+
+    def test_note_and_notef_are_mutually_exclusive(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            note_file = Path(tmp_dir) / "note.txt"
+            note_file.write_text("from file", encoding="utf-8")
+            image = Path(tmp_dir) / "image.png"
+            image.write_bytes(b"x")
+            with redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    sau_cli.build_parser().parse_args(
+                        [
+                            "tiktok",
+                            "upload-note",
+                            "--images",
+                            str(image),
+                            "--note",
+                            "inline",
+                            "--notef",
+                            str(note_file),
+                        ]
+                    )
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_aigc_and_no_aigc_are_mutually_exclusive(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "image.png"
+            image.write_bytes(b"x")
+            with redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    sau_cli.build_parser().parse_args(
+                        [
+                            "tiktok",
+                            "upload-note",
+                            "--images",
+                            str(image),
+                            "--aigc",
+                            "--no-aigc",
+                        ]
+                    )
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_metadata_defaults_are_none_not_empty_strings(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "image.png"
+            image.write_bytes(b"x")
+            args = sau_cli.build_parser().parse_args(
+                [
+                    "tiktok",
+                    "upload-note",
+                    "--images",
+                    str(image),
+                ]
+            )
+        self.assertIsNone(args.title)
+        self.assertIsNone(args.note)
+        self.assertIsNone(args.notef)
+        self.assertEqual(args.tags, "")
+        self.assertIsNone(args.aigc)
+        self.assertIsNone(args.your_brand)
+        self.assertIsNone(args.branded_content)
+        self.assertIsNone(args.privacy)
 
     def test_parse_upload_note_keeps_image_order(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -348,9 +454,13 @@ class UploadNoteValidationTests(unittest.TestCase):
     def _assert_exit_2_without_browser(self, argv):
         playwright = MagicMock()
         session = MagicMock()
+        target = MagicMock()
         with (
             patch.object(tiktok_command, "async_playwright", playwright),
             patch.object(tiktok_command, "browser_session", session),
+            patch.object(
+                tiktok_command, "resolve_multilogin_target", target
+            ),
         ):
             code, out, err = _run(argv)
         self.assertEqual(code, 2)
@@ -358,13 +468,15 @@ class UploadNoteValidationTests(unittest.TestCase):
         self.assertTrue(err.strip())
         playwright.assert_not_called()
         session.assert_not_called()
+        target.assert_not_called()
 
-    def _argv(self, images: list[str]) -> list[str]:
+    def _argv(self, images: list[str], *extra: str) -> list[str]:
         return [
             "tiktok",
             "upload-note",
             "--images",
             *images,
+            *extra,
         ]
 
     def test_zero_images_exits_2_without_browser(self):
@@ -440,6 +552,92 @@ class UploadNoteValidationTests(unittest.TestCase):
                 handle.truncate(TIKTOK_MAX_IMAGE_BYTES + 1)
             self._assert_exit_2_without_browser(self._argv([str(huge)]))
 
+    def test_title_over_90_characters_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            self._assert_exit_2_without_browser(
+                self._argv(images, "--title", "x" * 91)
+            )
+
+    def test_description_over_4000_characters_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            self._assert_exit_2_without_browser(
+                self._argv(images, "--note", "x" * 4001)
+            )
+
+    def test_description_length_includes_expanded_tags(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            self._assert_exit_2_without_browser(
+                self._argv(
+                    images,
+                    "--note",
+                    "x" * 3990,
+                    "--tags",
+                    "0123456789",
+                )
+            )
+
+    def test_more_than_50_hashtags_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            tags = ",".join(f"tag{index}" for index in range(51))
+            self._assert_exit_2_without_browser(
+                self._argv(images, "--tags", tags)
+            )
+
+    def test_missing_notef_file_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            missing = str(Path(tmp_dir) / "missing.txt")
+            playwright = MagicMock()
+            session = MagicMock()
+            with (
+                patch.object(tiktok_command, "async_playwright", playwright),
+                patch.object(tiktok_command, "browser_session", session),
+                redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    sau_cli.main(
+                        self._argv(images, "--notef", missing)
+                    )
+        self.assertEqual(ctx.exception.code, 2)
+        playwright.assert_not_called()
+        session.assert_not_called()
+
+    def test_unreadable_notef_file_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            unreadable = Path(tmp_dir) / "notes.txt"
+            unreadable.mkdir()
+            playwright = MagicMock()
+            session = MagicMock()
+            with (
+                patch.object(tiktok_command, "async_playwright", playwright),
+                patch.object(tiktok_command, "browser_session", session),
+                redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    sau_cli.main(
+                        self._argv(images, "--notef", str(unreadable))
+                    )
+        self.assertEqual(ctx.exception.code, 2)
+        playwright.assert_not_called()
+        session.assert_not_called()
+
+    def test_branded_content_with_only_me_exits_2_without_browser(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir, 1)
+            self._assert_exit_2_without_browser(
+                self._argv(
+                    images,
+                    "--privacy",
+                    "only-me",
+                    "--branded-content",
+                )
+            )
+
 
 # ---------------------------------------------------------------------------
 # Mapping and builder
@@ -491,6 +689,65 @@ class UploadNoteBuilderTests(unittest.TestCase):
         self.assertIsNone(app.options)
         # The first image is the cover: no cover step is overridden.
         self.assertIs(TiktokNote.apply_cover, TiktokBaseUploader.apply_cover)
+
+    def test_builder_carries_metadata_and_publish_options(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "first.png"
+            image.write_bytes(b"one")
+            options = TiktokPublishOptions(
+                privacy="friends",
+                allow_comments=False,
+                aigc=True,
+                your_brand=True,
+            )
+            request = tiktok_command.TiktokNoteUploadRequest(
+                account_label="profile",
+                image_files=[image],
+                note="hello",
+                tags=["one", "two"],
+                publish_date=0,
+                title="My title",
+                options=options,
+            )
+            app = tiktok_command._build_note_uploader(request)
+
+        self.assertEqual(app.title, "My title")
+        self.assertEqual(app.note, "hello")
+        self.assertEqual(app.tags, ["one", "two"])
+        self.assertEqual(app.options, options)
+        self.assertIsNone(app.options.allow_reuse)
+
+    def test_note_publish_options_never_request_reuse(self):
+        args = SimpleNamespace(
+            privacy="followers",
+            no_comments=True,
+            aigc=False,
+            your_brand=True,
+            branded_content=None,
+        )
+        options = tiktok_command._build_publish_options(args)
+        self.assertEqual(
+            options,
+            TiktokPublishOptions(
+                privacy="followers",
+                allow_comments=False,
+                allow_reuse=None,
+                aigc=False,
+                your_brand=True,
+                branded_content=None,
+            ),
+        )
+        self.assertIsNone(options.allow_reuse)
+
+    def test_note_publish_options_without_flags_stays_none(self):
+        args = SimpleNamespace(
+            privacy=None,
+            no_comments=False,
+            aigc=None,
+            your_brand=None,
+            branded_content=None,
+        )
+        self.assertIsNone(tiktok_command._build_publish_options(args))
 
     def test_upload_urls_are_media_specific(self):
         self.assertEqual(TiktokBaseUploader.upload_url, TIKTOK_UPLOAD_URL)
@@ -557,6 +814,152 @@ class UploadNoteCliTests(unittest.TestCase):
         self.assertEqual(
             [str(path) for path in request.image_files], images
         )
+
+    def test_cli_maps_metadata_and_publish_options(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir)
+            _, _, factory = _fake_session(object())
+            app = MagicMock()
+            app.upload = AsyncMock()
+            builder = MagicMock(return_value=app)
+            with (
+                patch.object(
+                    tiktok_command, "async_playwright", lambda: _AsyncCM(object())
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_note_uploader", new=builder
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-note",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--images",
+                        *images,
+                        "--title",
+                        "Photo title",
+                        "--note",
+                        "Photo body",
+                        "--tags",
+                        "one, two",
+                        "--privacy",
+                        "friends",
+                        "--no-comments",
+                        "--aigc",
+                        "--your-brand",
+                    ]
+                )
+
+        self.assertEqual(code, 0, err)
+        request = builder.call_args.args[0]
+        self.assertEqual(request.title, "Photo title")
+        self.assertEqual(request.note, "Photo body")
+        self.assertEqual(request.tags, ["one", "two"])
+        self.assertEqual(
+            request.options,
+            TiktokPublishOptions(
+                privacy="friends",
+                allow_comments=False,
+                allow_reuse=None,
+                aigc=True,
+                your_brand=True,
+                branded_content=None,
+            ),
+        )
+        self.assertIsNone(request.options.allow_reuse)
+
+    def test_cli_notef_reads_the_file_as_description(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir)
+            note_file = Path(tmp_dir) / "note.md"
+            note_file.write_text("from a markdown file", encoding="utf-8")
+            _, _, factory = _fake_session(object())
+            app = MagicMock()
+            app.upload = AsyncMock()
+            builder = MagicMock(return_value=app)
+            with (
+                patch.object(
+                    tiktok_command, "async_playwright", lambda: _AsyncCM(object())
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_note_uploader", new=builder
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-note",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--images",
+                        *images,
+                        "--notef",
+                        str(note_file),
+                    ]
+                )
+
+        self.assertEqual(code, 0, err)
+        request = builder.call_args.args[0]
+        self.assertEqual(request.note, "from a markdown file")
+
+    def test_cli_without_metadata_keeps_none_and_empty_tags(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            images = self._images(tmp_dir)
+            _, _, factory = _fake_session(object())
+            app = MagicMock()
+            app.upload = AsyncMock()
+            builder = MagicMock(return_value=app)
+            with (
+                patch.object(
+                    tiktok_command, "async_playwright", lambda: _AsyncCM(object())
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_note_uploader", new=builder
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-note",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--images",
+                        *images,
+                    ]
+                )
+
+        self.assertEqual(code, 0, err)
+        request = builder.call_args.args[0]
+        self.assertIsNone(request.title)
+        self.assertIsNone(request.note)
+        self.assertEqual(request.tags, [])
+        self.assertIsNone(request.options)
 
     def test_local_mode_exits_1_without_reaching_the_builder(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -739,6 +1142,384 @@ class UploadNoteFlowTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Photo metadata (Title / Description / tags)
+# ---------------------------------------------------------------------------
+
+
+class UploadNoteMetadataTests(unittest.TestCase):
+    def _note(
+        self,
+        *,
+        title=None,
+        note=None,
+        tags=(),
+    ) -> TiktokNote:
+        return TiktokNote(
+            ["/tmp/cover.png"],
+            note,
+            list(tags),
+            0,
+            None,
+            title=title,
+        )
+
+    def _page(self) -> _StudioPage:
+        return _StudioPage()
+
+    def test_title_is_filled_only_when_provided(self):
+        page = self._page()
+        note = self._note(title="My photo title")
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertEqual(page.title_text, "My photo title")
+        self.assertEqual(page.caption_text, "")
+        self.assertFalse(
+            any(event[0] == "insert_text" for event in page.events)
+        )
+
+    def test_absent_title_leaves_the_page_empty(self):
+        page = self._page()
+        note = self._note(note="hello")
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertEqual(page.title_text, "")
+        self.assertFalse(any(event[0] == "fill" for event in page.events))
+
+    def test_empty_title_never_overwrites_the_page(self):
+        page = self._page()
+        note = self._note(title="", note="hello")
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertEqual(page.title_text, "")
+        self.assertFalse(any(event[0] == "fill" for event in page.events))
+
+    def test_description_and_tags_follow_the_note_text(self):
+        page = self._page()
+        note = self._note(note="hello world", tags=("one", "two"))
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertTrue(page.caption_text.startswith("hello world"))
+        self.assertIn("#one", page.caption_text)
+        self.assertIn("#two", page.caption_text)
+        self.assertLess(
+            page.caption_text.index("#one"), page.caption_text.index("#two")
+        )
+
+    def test_tags_only_still_reach_the_editor(self):
+        page = self._page()
+        note = self._note(tags=("only",))
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertIn("#only", page.caption_text)
+
+    def test_no_note_and_no_tags_makes_zero_editor_interactions(self):
+        page = self._page()
+        note = self._note()
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        touched = [
+            event
+            for event in page.events
+            if event[0] in ("fill", "insert_text", "press")
+        ]
+        self.assertEqual(touched, [])
+        self.assertEqual(page.caption_text, "")
+        self.assertEqual(page.title_text, "")
+
+    def test_metadata_fill_does_not_touch_images(self):
+        page = self._page()
+        note = self._note(title="T", note="hello", tags=("one",))
+        note.locator_base = page.locator("body")
+
+        asyncio.run(note.fill_metadata(page))
+
+        self.assertFalse(
+            any(event[0] == "set_input_files" for event in page.events)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Photo publish options (reuse the shared ticket 12/13 steps)
+# ---------------------------------------------------------------------------
+
+
+class _FakeToggle:
+    def __init__(self, checked: bool, *, click_toggles: bool = True) -> None:
+        self.checked = checked
+        self.click_toggles = click_toggles
+        self.checked_reads = 0
+        self.disabled_reads = 0
+        self.click_calls = 0
+        self.candidates = ("fake-toggle",)
+
+    async def is_checked(self) -> bool:
+        self.checked_reads += 1
+        return self.checked
+
+    async def is_disabled(self) -> bool:
+        self.disabled_reads += 1
+        return False
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        if self.click_toggles:
+            self.checked = not self.checked
+
+    async def get_attribute(self, name: str) -> str | None:
+        if name == "aria-checked":
+            return "true" if self.checked else "false"
+        return None
+
+    async def read_text(self) -> str:
+        return "checked" if self.checked else "unchecked"
+
+    async def options(self):
+        return []
+
+
+class _FakePrivacyOption:
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.on_click = None
+
+    async def read_text(self) -> str:
+        return self.label
+
+    async def is_disabled(self) -> bool:
+        return False
+
+    async def click(self) -> None:
+        if self.on_click is not None:
+            self.on_click(self)
+
+    async def get_attribute(self, name: str) -> str | None:
+        return "true" if name == "aria-selected" else None
+
+
+class _FakePrivacy:
+    def __init__(self, label: str, labels) -> None:
+        self.label = label
+        self.open_calls = 0
+        self.candidates = ("fake-privacy",)
+        self._options = []
+        for item in labels:
+            option = _FakePrivacyOption(item)
+            option.on_click = self._select
+            self._options.append(option)
+
+    def _select(self, option: _FakePrivacyOption) -> None:
+        self.label = option.label
+
+    async def read_text(self) -> str:
+        return self.label
+
+    async def is_disabled(self) -> bool:
+        return False
+
+    async def click(self) -> None:
+        self.open_calls += 1
+
+    async def options(self):
+        return list(self._options)
+
+    async def is_checked(self) -> bool:
+        return False
+
+    async def get_attribute(self, name: str) -> str | None:
+        return None
+
+
+def _note_controls(
+    *,
+    privacy=None,
+    comments=None,
+    reuse=None,
+    aigc=None,
+    brand_switch=None,
+    your_brand=None,
+    branded_content=None,
+):
+    return tk_main.TiktokSettingsControls(
+        privacy=privacy,
+        comments=comments,
+        reuse=reuse,
+        aigc=aigc,
+        brand_switch=brand_switch,
+        your_brand=your_brand,
+        branded_content=branded_content,
+    )
+
+
+class UploadNoteOptionTests(unittest.TestCase):
+    def _note(self, options) -> TiktokNote:
+        return TiktokNote(
+            ["/tmp/cover.png"],
+            None,
+            [],
+            0,
+            None,
+            title=None,
+            options=options,
+        )
+
+    def _install(self, note, controls):
+        resolver = AsyncMock(return_value=controls)
+        note.resolve_option_controls = resolver
+        return resolver
+
+    def test_privacy_comments_aigc_and_brand_are_applied_and_read_back(self):
+        privacy = _FakePrivacy("Everyone", ["Everyone", "Friends", "Only you"])
+        comments = _FakeToggle(True)
+        aigc = _FakeToggle(False)
+        master = _FakeToggle(False)
+        your_brand = _FakeToggle(False)
+        branded = _FakeToggle(False)
+        note = self._note(
+            TiktokPublishOptions(
+                privacy="friends",
+                allow_comments=False,
+                aigc=True,
+                your_brand=True,
+                branded_content=True,
+            )
+        )
+        self._install(
+            note,
+            _note_controls(
+                privacy=privacy,
+                comments=comments,
+                aigc=aigc,
+                brand_switch=master,
+                your_brand=your_brand,
+                branded_content=branded,
+            ),
+        )
+
+        asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertEqual(privacy.label, "Friends")
+        self.assertFalse(comments.checked)
+        self.assertTrue(aigc.checked)
+        self.assertTrue(master.checked)
+        self.assertTrue(your_brand.checked)
+        self.assertTrue(branded.checked)
+
+    def test_reuse_control_is_never_requested_or_touched(self):
+        reuse = _FakeToggle(True)
+        note = self._note(TiktokPublishOptions(allow_reuse=False))
+        resolver = self._install(
+            note, _note_controls(reuse=reuse)
+        )
+
+        asyncio.run(note.apply_options(_StudioPage()))
+
+        resolver.assert_not_awaited()
+        self.assertEqual(reuse.checked_reads, 0)
+        self.assertEqual(reuse.disabled_reads, 0)
+        self.assertEqual(reuse.click_calls, 0)
+
+    def test_reuse_stays_untouched_even_with_other_options(self):
+        reuse = _FakeToggle(True)
+        comments = _FakeToggle(True)
+        note = self._note(
+            TiktokPublishOptions(allow_reuse=True, allow_comments=False)
+        )
+        self._install(note, _note_controls(reuse=reuse, comments=comments))
+
+        asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertFalse(comments.checked)
+        self.assertEqual(reuse.checked_reads, 0)
+        self.assertEqual(reuse.click_calls, 0)
+
+    def test_missing_aigc_control_fails_with_request_context(self):
+        note = self._note(TiktokPublishOptions(aigc=True))
+        self._install(note, _note_controls(aigc=None))
+        page = _StudioPage()
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(note.apply_options(page))
+
+        message = str(ctx.exception)
+        self.assertIn("option=aigc", message)
+        self.assertIn("requested=True", message)
+        self.assertIn("actual='control-not-found'", message)
+
+    def test_missing_brand_control_fails_with_request_context(self):
+        note = self._note(TiktokPublishOptions(your_brand=True))
+        self._install(
+            note,
+            _note_controls(
+                brand_switch=_FakeToggle(False),
+                your_brand=None,
+                branded_content=_FakeToggle(False),
+            ),
+        )
+        page = _StudioPage()
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(note.apply_options(page))
+
+        self.assertIn("your_brand", str(ctx.exception))
+        self.assertIn("control-not-found", str(ctx.exception))
+
+    def test_cli_missing_aigc_control_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "cover.png"
+            image.write_bytes(b"x")
+            session, session_cm, factory = _fake_session(
+                _StudioContext(_StudioPage())
+            )
+            with (
+                patch.object(
+                    tiktok_command, "async_playwright", lambda: _AsyncCM(object())
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    TiktokNote,
+                    "resolve_option_controls",
+                    new=AsyncMock(return_value=_note_controls(aigc=None)),
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-note",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--images",
+                        str(image),
+                        "--aigc",
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("submitted", out)
+        self.assertIn("aigc", err)
+        self.assertIn("control-not-found", err)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+
+# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -747,6 +1528,9 @@ class UploadNoteConstantsTests(unittest.TestCase):
     def test_web_ui_limits(self):
         self.assertEqual(TIKTOK_MAX_IMAGE_COUNT, 35)
         self.assertEqual(TIKTOK_MAX_IMAGE_BYTES, 50 * 1024 * 1024)
+        self.assertEqual(TIKTOK_MAX_TITLE_LENGTH, 90)
+        self.assertEqual(TIKTOK_MAX_DESCRIPTION_LENGTH, 4000)
+        self.assertEqual(TIKTOK_MAX_HASHTAG_COUNT, 50)
         self.assertEqual(
             TIKTOK_IMAGE_SUFFIXES, {".jpg", ".jpeg", ".png", ".webp"}
         )
@@ -763,6 +1547,9 @@ class UploadNoteConstantsTests(unittest.TestCase):
         self.assertEqual(
             tk_main.TIKTOK_MAX_IMAGE_BYTES, 50 * 1024 * 1024
         )
+        self.assertEqual(tk_main.TIKTOK_MAX_TITLE_LENGTH, 90)
+        self.assertEqual(tk_main.TIKTOK_MAX_DESCRIPTION_LENGTH, 4000)
+        self.assertEqual(tk_main.TIKTOK_MAX_HASHTAG_COUNT, 50)
         self.assertEqual(
             tk_main.TIKTOK_IMAGE_SUFFIXES,
             {".jpg", ".jpeg", ".png", ".webp"},

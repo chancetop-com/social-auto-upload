@@ -5,6 +5,7 @@ Multilogin Profile 的界面语言必须为 English (US)。
 """
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -31,8 +32,11 @@ from uploader.tk_uploader.main_chrome import (
     TIKTOK_IMAGE_SUFFIXES,
     TIKTOK_INIT_SCRIPT,
     TIKTOK_LAUNCH_KWARGS,
+    TIKTOK_MAX_DESCRIPTION_LENGTH,
+    TIKTOK_MAX_HASHTAG_COUNT,
     TIKTOK_MAX_IMAGE_BYTES,
     TIKTOK_MAX_IMAGE_COUNT,
+    TIKTOK_MAX_TITLE_LENGTH,
     TiktokNote,
     TiktokPublishOptions,
     TiktokVideo,
@@ -51,6 +55,80 @@ TIKTOK_LOGIN_REJECTED_MESSAGE = (
     "Multilogin 模式不支持 CLI 登录；"
     "请在 Multilogin 应用中登录 Profile 后重试。"
 )
+
+
+def _read_note_file(value: str) -> str:
+    """Read ``--notef`` (txt/md) at parse time, before any browser work."""
+    path = Path(value)
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise argparse.ArgumentTypeError(
+            f"无法读取文案文件: {value}（{exc}）"
+        ) from exc
+
+
+def _add_publish_option_flags(parser, *, include_reuse: bool) -> None:
+    """Register the shared privacy/interaction/AIGC/brand flags."""
+    parser.add_argument(
+        "--privacy",
+        choices=("public", "friends", "followers", "only-me"),
+        help=(
+            "Set post privacy (public/friends/followers/only-me); "
+            "omit to leave the page default"
+        ),
+    )
+    parser.add_argument(
+        "--no-comments",
+        action="store_true",
+        help="Turn off Allow comments; omit to leave the page default",
+    )
+    if include_reuse:
+        parser.add_argument(
+            "--disable-reuse",
+            action="store_true",
+            help=(
+                "Turn off Allow reuse of content (also affects Duet, Stitch, "
+                "Stickers and Story); omit to leave the page default"
+            ),
+        )
+    aigc_group = parser.add_mutually_exclusive_group()
+    aigc_group.add_argument(
+        "--aigc",
+        dest="aigc",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "Turn on AI-generated content labeling; omit to leave the page "
+            "default"
+        ),
+    )
+    aigc_group.add_argument(
+        "--no-aigc",
+        dest="aigc",
+        action="store_const",
+        const=False,
+        help="Turn off AI-generated content labeling",
+    )
+    parser.add_argument(
+        "--your-brand",
+        action="store_true",
+        default=None,
+        help=(
+            "Disclose the post as promoting your own brand; opens "
+            "Disclose post content automatically"
+        ),
+    )
+    parser.add_argument(
+        "--branded-content",
+        action="store_true",
+        default=None,
+        help=(
+            "Disclose the post as paid branded content; cannot be combined "
+            "with --privacy only-me"
+        ),
+    )
 
 
 def register(platform_parsers):
@@ -95,69 +173,10 @@ def register(platform_parsers):
     upload_video_parser.add_argument(
         "--thumbnail", type=existing_file_path, help="Optional thumbnail path"
     )
-    upload_video_parser.add_argument(
-        "--privacy",
-        choices=("public", "friends", "followers", "only-me"),
-        help=(
-            "Set video privacy (public/friends/followers/only-me); "
-            "omit to leave the page default"
-        ),
-    )
-    upload_video_parser.add_argument(
-        "--no-comments",
-        action="store_true",
-        help="Turn off Allow comments; omit to leave the page default",
-    )
-    upload_video_parser.add_argument(
-        "--disable-reuse",
-        action="store_true",
-        help=(
-            "Turn off Allow reuse of content (also affects Duet, Stitch, "
-            "Stickers and Story); omit to leave the page default"
-        ),
-    )
-    aigc_group = upload_video_parser.add_mutually_exclusive_group()
-    aigc_group.add_argument(
-        "--aigc",
-        dest="aigc",
-        action="store_const",
-        const=True,
-        default=None,
-        help=(
-            "Turn on AI-generated content labeling; omit to leave the page "
-            "default"
-        ),
-    )
-    aigc_group.add_argument(
-        "--no-aigc",
-        dest="aigc",
-        action="store_const",
-        const=False,
-        help="Turn off AI-generated content labeling",
-    )
-    upload_video_parser.add_argument(
-        "--your-brand",
-        action="store_true",
-        default=None,
-        help=(
-            "Disclose the post as promoting your own brand; opens "
-            "Disclose post content automatically"
-        ),
-    )
-    upload_video_parser.add_argument(
-        "--branded-content",
-        action="store_true",
-        default=None,
-        help=(
-            "Disclose the post as paid branded content; cannot be combined "
-            "with --privacy only-me"
-        ),
-    )
+    _add_publish_option_flags(upload_video_parser, include_reuse=True)
     add_runtime_flags(upload_video_parser)
     add_multilogin_flags(upload_video_parser)
 
-    # Ticket 15: core photo post only.  Title/Description/options arrive in
-    # ticket 16, so those flags are deliberately absent here.
     upload_note_parser = tiktok_actions.add_parser(
         "upload-note", help="Upload one photo post to TikTok"
     )
@@ -174,8 +193,31 @@ def register(platform_parsers):
         help="1-35 image file paths, in display order (first is the cover)",
     )
     upload_note_parser.add_argument(
+        "--title",
+        default=None,
+        help="Optional photo Title (up to 90 characters); omit to leave it empty",
+    )
+    note_group = upload_note_parser.add_mutually_exclusive_group()
+    note_group.add_argument(
+        "--note",
+        default=None,
+        help="Photo Description text; omit to leave it empty",
+    )
+    note_group.add_argument(
+        "--notef",
+        default=None,
+        type=_read_note_file,
+        help="Read the Description from a local txt/md file",
+    )
+    upload_note_parser.add_argument(
+        "--tags", default="", help="Comma-separated tags, such as tag1,tag2"
+    )
+    upload_note_parser.add_argument(
         "--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}"
     )
+    # Photo posts have no content-reuse control, so ``--disable-reuse`` is not
+    # registered here.  The first image is the cover: no thumbnail/cover flag.
+    _add_publish_option_flags(upload_note_parser, include_reuse=False)
     add_runtime_flags(upload_note_parser)
     add_multilogin_flags(upload_note_parser)
 
@@ -260,12 +302,58 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
 class TiktokNoteUploadRequest:
     account_label: str | None
     image_files: list[Path]
-    note: str
+    note: str | None
     tags: list[str]
     publish_date: datetime | int
     title: str | None = None
     debug: bool = True
     headless: bool = True
+    options: TiktokPublishOptions | None = None
+
+
+def _note_text(args) -> str | None:
+    """Resolve the Description from ``--note`` or ``--notef`` (already read)."""
+    note = getattr(args, "note", None)
+    if note is not None:
+        return note
+    return getattr(args, "notef", None)
+
+
+def _render_description(note: str | None, tags: list[str]) -> str:
+    """Text the page will hold after tags are expanded to ``#tag`` chips."""
+    text = note or ""
+    if not tags:
+        return text
+    hashtags = " ".join(f"#{tag}" for tag in tags)
+    return f"{text}\n{hashtags}" if text else hashtags
+
+
+def _validate_note_metadata(
+    title: str | None, note: str | None, tags: list[str]
+) -> None:
+    """Reject over-limit Title/Description/hashtags before any browser work.
+
+    Values are never truncated; each failure is a usage error (exit 2).
+    """
+    if title is not None and len(title) > TIKTOK_MAX_TITLE_LENGTH:
+        raise UsageError(
+            f"图文帖 Title 过长：{len(title)} 字符，"
+            f"上限 {TIKTOK_MAX_TITLE_LENGTH} 字符（不会截断）。"
+        )
+
+    description = _render_description(note, tags)
+    if len(description) > TIKTOK_MAX_DESCRIPTION_LENGTH:
+        raise UsageError(
+            f"图文帖 Description 过长：{len(description)} 字符，"
+            f"上限 {TIKTOK_MAX_DESCRIPTION_LENGTH} 字符（不会截断）。"
+        )
+
+    if len(tags) > TIKTOK_MAX_HASHTAG_COUNT:
+        raise UsageError(
+            f"图文帖 hashtag 过多：{len(tags)} 个，"
+            f"上限 {TIKTOK_MAX_HASHTAG_COUNT} 个。"
+        )
+
 
 
 def _validate_note_images(image_files: list[Path]) -> None:
@@ -315,6 +403,7 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
         request.publish_date,
         None,
         title=request.title,
+        options=request.options,
         debug=request.debug,
         headless=request.headless,
     )
@@ -330,6 +419,18 @@ async def run(args):
     # touching any browser/session state (exit 2).
     _validate_branded_content_privacy(args)
 
+    note_inputs = None
+    if args.action == "upload-note":
+        # Validate the whole photo-post input before resolving the Profile or
+        # touching any browser state so bad input never opens a session.
+        image_files = [Path(path) for path in args.images]
+        title = getattr(args, "title", None)
+        note = _note_text(args)
+        tags = parse_tags(getattr(args, "tags", ""))
+        _validate_note_images(image_files)
+        _validate_note_metadata(title, note, tags)
+        note_inputs = (image_files, title, note, tags)
+
     if not multilogin_enabled():
         raise RuntimeError(TIKTOK_LOCAL_MODE_MESSAGE)
 
@@ -338,18 +439,17 @@ async def run(args):
         raise RuntimeError(TIKTOK_LOGIN_REJECTED_MESSAGE)
 
     if args.action == "upload-note":
-        # Validate before resolving the Profile or touching any browser state
-        # so bad input never opens a session (exit 2).
-        image_files = [Path(path) for path in args.images]
-        _validate_note_images(image_files)
+        image_files, title, note, tags = note_inputs
         request = TiktokNoteUploadRequest(
             account_label=resolve_account_label(args),
             image_files=image_files,
-            note="",
-            tags=[],
+            note=note,
+            tags=tags,
             publish_date=args.schedule or 0,
+            title=title,
             debug=args.debug,
             headless=args.headless,
+            options=_build_publish_options(args),
         )
         app = _build_note_uploader(request)
         target = resolve_multilogin_target(args)

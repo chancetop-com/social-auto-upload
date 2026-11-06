@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 # Multilogin runs on the same Patchright client as every other uploader.
@@ -20,8 +20,11 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_URL,
     TIKTOK_LOGIN_FORM_SELECTOR,
+    TIKTOK_MAX_DESCRIPTION_LENGTH,
+    TIKTOK_MAX_HASHTAG_COUNT,
     TIKTOK_MAX_IMAGE_BYTES,
     TIKTOK_MAX_IMAGE_COUNT,
+    TIKTOK_MAX_TITLE_LENGTH,
     TIKTOK_PHOTO_UPLOAD_URL,
     TIKTOK_PUBLISH_TIMEOUT_SECONDS,
     TIKTOK_UPLOAD_ENTRY_SELECTOR,
@@ -1283,9 +1286,13 @@ class TiktokBaseUploader(BaseVideoUploader):
         # click title to remove the focus.
         # await self.locator_base.locator("h1:has-text('Upload video')").click()
 
-    async def fill_caption(self, page, text, tags) -> None:
+    async def fill_caption(self, page, text, tags, *, editor=None) -> None:
 
-        editor_locator = self.locator_base.locator('div.public-DraftEditor-content')
+        editor_locator = (
+            editor
+            if editor is not None
+            else self.locator_base.locator('div.public-DraftEditor-content')
+        )
         await editor_locator.click()
 
         await page.keyboard.press("End")
@@ -1637,6 +1644,14 @@ class TiktokNote(TiktokBaseUploader):
     upload_url = TIKTOK_PHOTO_UPLOAD_URL
 
     _PHOTO_TITLE_SELECTOR = 'input[placeholder*="catchy"]'
+    _PHOTO_TITLE_CANDIDATES = (
+        'input[placeholder*="catchy"]',
+        'input[placeholder="Add a catchy title"]',
+    )
+    _PHOTO_CAPTION_CANDIDATES = (
+        "div.caption-textarea div.public-DraftEditor-content",
+        "div.public-DraftEditor-content",
+    )
     _PHOTO_INPUT_SELECTOR = 'input[type="file"][accept*="image"]'
     _MULTI_INPUT_SELECTOR = 'input[type="file"][multiple]'
     _POST_BUTTON_SELECTOR = 'div.button-group > button >> text=Post'
@@ -1740,8 +1755,75 @@ class TiktokNote(TiktokBaseUploader):
         # ``image_paths`` order is the display order; the first one is the cover.
         await page.locator(selector).first.set_input_files(list(self.image_paths))
 
+    async def _resolve_photo_scope(self, page):
+        return self.locator_base if self.locator_base is not None else page
+
+    async def _fill_title(self, page) -> None:
+        scope = await self._resolve_photo_scope(page)
+        for selector in self._PHOTO_TITLE_CANDIDATES:
+            locator = scope.locator(selector)
+            try:
+                if await locator.count() > 0:
+                    await locator.first.fill(self.title)
+                    return
+            except Exception:
+                continue
+        raise RuntimeError(
+            "TikTok 图文帖 Title 输入框未找到："
+            f"tried={list(self._PHOTO_TITLE_CANDIDATES)!r} "
+            f"url={_page_url(page)!r}"
+        )
+
+    async def _resolve_caption_editor(self, page):
+        scope = await self._resolve_photo_scope(page)
+        for selector in self._PHOTO_CAPTION_CANDIDATES:
+            locator = scope.locator(selector)
+            try:
+                if await locator.count() > 0:
+                    return locator
+            except Exception:
+                continue
+        raise RuntimeError(
+            "TikTok 图文帖 Description 编辑器未找到："
+            f"tried={list(self._PHOTO_CAPTION_CANDIDATES)!r} "
+            f"url={_page_url(page)!r}"
+        )
+
     async def fill_metadata(self, page) -> None:
-        """Title/Description/tags land in ticket 16."""
+        """Fill the photo Title and Description; images are never touched here.
+
+        An absent Title/Description is left exactly as the page rendered it: no
+        empty-string write and no editor interaction at all.
+        """
+        if self.title:
+            await self._fill_title(page)
+
+        note_text = self.note or ""
+        tags = list(self.tags or [])
+        if not note_text and not tags:
+            return
+
+        editor = await self._resolve_caption_editor(page)
+        await self.fill_caption(page, note_text, tags, editor=editor)
+
+    async def apply_options(self, page) -> None:
+        """Reuse the shared option steps, minus the content-reuse control.
+
+        Photo posts do not render ``Allow reuse of content``; even a stray
+        ``allow_reuse`` value must never resolve, read or click that control.
+        """
+        options = getattr(self, "options", None)
+        if options is None:
+            await super().apply_options(page)
+            return
+
+        sanitized = replace(options, allow_reuse=None)
+        original = self.options
+        try:
+            self.options = sanitized
+            await super().apply_options(page)
+        finally:
+            self.options = original
 
     async def wait_media_ready(
         self,
