@@ -45,7 +45,11 @@ from utils.log import tiktok_logger
 
 # Golden local-mode browser options.  The Multilogin branch ignores them, but
 # locking them here keeps the legacy Chromium path byte-equivalent.
-TIKTOK_LAUNCH_KWARGS = {"executable_path": LOCAL_CHROME_PATH}
+# An empty LOCAL_CHROME_PATH means "use the Chromium bundled with Patchright";
+# passing executable_path="" makes Playwright try to spawn ``.`` and fail.
+TIKTOK_LAUNCH_KWARGS = (
+    {"executable_path": LOCAL_CHROME_PATH} if LOCAL_CHROME_PATH else {}
+)
 TIKTOK_CONTEXT_KWARGS: dict = {}
 TIKTOK_INIT_SCRIPT = False
 

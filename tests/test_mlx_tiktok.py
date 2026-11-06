@@ -767,9 +767,12 @@ class UploaderSeamTests(unittest.TestCase):
         self.assertIsNone(video.options)
 
     def test_golden_legacy_browser_constants(self):
-        self.assertEqual(
-            TIKTOK_LAUNCH_KWARGS, {"executable_path": LOCAL_CHROME_PATH}
+        expected_launch = (
+            {"executable_path": LOCAL_CHROME_PATH}
+            if LOCAL_CHROME_PATH
+            else {}
         )
+        self.assertEqual(TIKTOK_LAUNCH_KWARGS, expected_launch)
         self.assertEqual(TIKTOK_CONTEXT_KWARGS, {})
         self.assertIs(TIKTOK_INIT_SCRIPT, False)
 
