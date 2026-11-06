@@ -146,8 +146,9 @@ def register(platform_parsers):
             help=TIKTOK_ACCOUNT_HELP,
         )
         add_runtime_flags(action_parser)
-        if action_name == "check":
-            add_multilogin_flags(action_parser)
+        # Both local and MLX modes accept the Profile flags.  Local mode
+        # ignores them; MLX mode rejects ``login`` regardless.
+        add_multilogin_flags(action_parser)
 
     upload_video_parser = tiktok_actions.add_parser(
         "upload-video", help="Upload one video to TikTok"
@@ -413,11 +414,6 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
     )
 
 
-def _local_account_file(args):
-    """Resolve the local cookie path; local mode requires ``--account``."""
-    return resolve_account_file("tiktok", args.account)
-
-
 async def _require_local_cookie(account_file, account_label: str, headless: bool) -> None:
     """Fail with a human-actionable message when the local cookie is invalid."""
     ready = await tiktok_setup(str(account_file), handle=False, headless=headless)
@@ -428,9 +424,18 @@ async def _require_local_cookie(account_file, account_label: str, headless: bool
         )
 
 
-async def _upload_note(request: TiktokNoteUploadRequest, target) -> None:
-    """Run the photo upload in MLX (session) or local (own browser) mode."""
-    app = _build_note_uploader(request)
+async def _prepare_account_file(args, target, account_label):
+    """Resolve and validate the local cookie; ``None`` in MLX mode."""
+    if target is not None:
+        return None
+    account_file = resolve_account_file("tiktok", args.account)
+    await _require_local_cookie(account_file, account_label, args.headless)
+    return account_file
+
+
+async def _upload_media(request, target, builder) -> None:
+    """Run any TikTok upload in MLX (session) or local (own browser) mode."""
+    app = builder(request)
     if target is not None:
         async with async_playwright() as playwright:
             async with browser_session(
@@ -449,29 +454,14 @@ async def _upload_note(request: TiktokNoteUploadRequest, target) -> None:
 
     async with async_playwright() as playwright:
         await app.upload(playwright)
+
+
+async def _upload_note(request: TiktokNoteUploadRequest, target) -> None:
+    await _upload_media(request, target, _build_note_uploader)
 
 
 async def _upload_video(request: TiktokVideoUploadRequest, target) -> None:
-    """Run the video upload in MLX (session) or local (own browser) mode."""
-    app = _build_video_uploader(request)
-    if target is not None:
-        async with async_playwright() as playwright:
-            async with browser_session(
-                playwright,
-                headless=request.headless,
-                account_file=None,
-                multilogin=target,
-                launch_kwargs=TIKTOK_LAUNCH_KWARGS,
-                context_kwargs=TIKTOK_CONTEXT_KWARGS,
-                init_script=TIKTOK_INIT_SCRIPT,
-            ) as session:
-                if not await is_logged_in(session.context):
-                    _raise_login_required(target)
-                await app.upload(None, session=session)
-        return
-
-    async with async_playwright() as playwright:
-        await app.upload(playwright)
+    await _upload_media(request, target, _build_video_uploader)
 
 
 def _raise_login_required(target) -> None:
@@ -500,7 +490,7 @@ async def run(args):
         # Multilogin profiles are logged in through the Multilogin app.
         reject_multilogin_login("tiktok", args)
         require_local_account(args)
-        account_file = _local_account_file(args)
+        account_file = resolve_account_file("tiktok", args.account)
         ready = await tiktok_setup(
             str(account_file), handle=True, headless=False, force=True
         )
@@ -529,7 +519,7 @@ async def run(args):
             print("valid")
             return 0
 
-        account_file = _local_account_file(args)
+        account_file = resolve_account_file("tiktok", args.account)
         is_valid = await tiktok_setup(
             str(account_file), handle=False, headless=args.headless
         )
@@ -538,12 +528,9 @@ async def run(args):
 
     if args.action == "upload-note":
         image_files, title, note, tags = note_inputs
-        account_file = None
-        if target is None:
-            account_file = _local_account_file(args)
-            await _require_local_cookie(
-                account_file, account_label, args.headless
-            )
+        account_file = await _prepare_account_file(
+            args, target, account_label
+        )
         request = TiktokNoteUploadRequest(
             account_label=account_label,
             image_files=image_files,
@@ -563,12 +550,9 @@ async def run(args):
         return 0
 
     if args.action == "upload-video":
-        account_file = None
-        if target is None:
-            account_file = _local_account_file(args)
-            await _require_local_cookie(
-                account_file, account_label, args.headless
-            )
+        account_file = await _prepare_account_file(
+            args, target, account_label
+        )
         request = TiktokVideoUploadRequest(
             account_label=account_label,
             video_file=args.file,

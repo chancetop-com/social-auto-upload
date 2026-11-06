@@ -31,7 +31,7 @@
 
 | 渠道 | 上架方式 | 状态与限制 |
 | --- | --- | --- |
-| GitHub 源仓库 | 以公开仓库的 `skills/` 为源；按目录安装 | 已发布到 `main`；当前 Skill 更新提交为 [`7023053`](https://github.com/dreammis/social-auto-upload/commit/7023053) |
+| GitHub 源仓库 | 以公开仓库的 `skills/` 为源；按目录安装 | 已发布到 `main`；Skill 源以本仓库 `skills/` 为准，最近更新见 `git log -- skills/` |
 | GitHub Skills CLI | `gh skill publish skills --tag <version>` | Preview CLI；Release [`v1.0.0-skills.2`](https://github.com/dreammis/social-auto-upload/releases/tag/v1.0.0-skills.2) 已发布，仓库已有 `agent-skills` topic。安装命令：`gh skill install dreammis/social-auto-upload` |
 | skills.sh | 直接从 GitHub 安装：`npx skills add dreammis/social-auto-upload --skill <skill-name>` | GitHub 源自动索引，无单独上传表单。已确认[抖音 Skill 页面](https://www.skills.sh/dreammis/social-auto-upload/douyin-upload)；其余入口的索引状态以站点查询为准。安装统计来自 Skills CLI，维护者不应通过自装制造安装量 |
 | SkillsMP | 从公开 GitHub 仓库索引 `SKILL.md` | 无独立上传。本仓库创作者页于 2026-10-12 显示已收录 4 个 Skill，源活动显示为 2026-03-25；索引明显落后于当前仓库，尚未确认其余入口收录。见[创作者页](https://skillsmp.com/zh/creators/dreammis/social-auto-upload) |

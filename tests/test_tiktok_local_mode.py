@@ -36,6 +36,74 @@ class AbsolutePathTests(unittest.TestCase):
         )
 
 
+class _AsyncCM:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _BoomChromium:
+    async def launch(self, **kwargs):
+        raise OSError("no browser binary")
+
+
+class _BoomPlaywright:
+    def __init__(self, chromium):
+        self.chromium = chromium
+
+
+class _UnreadableCookieBrowser:
+    async def new_context(self, **kwargs):
+        raise ValueError("malformed storage state")
+
+    async def close(self):
+        pass
+
+
+class _UnreadableCookieChromium:
+    async def launch(self, **kwargs):
+        return _UnreadableCookieBrowser()
+
+
+class _BoomCM:
+    async def __aenter__(self):
+        raise OSError("playwright driver missing")
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class CookieAuthTests(unittest.TestCase):
+    def test_playwright_start_failure_returns_false(self):
+        with patch.object(tk_main, "async_playwright", lambda: _BoomCM()):
+            self.assertFalse(
+                asyncio.run(tk_main.cookie_auth("/tmp/tiktok_creator.json"))
+            )
+
+    def test_launch_failure_returns_false(self):
+        playwright = _BoomPlaywright(_BoomChromium())
+        with patch.object(
+            tk_main, "async_playwright", lambda: _AsyncCM(playwright)
+        ):
+            self.assertFalse(
+                asyncio.run(tk_main.cookie_auth("/tmp/tiktok_creator.json"))
+            )
+
+    def test_unreadable_cookie_returns_false(self):
+        playwright = _BoomPlaywright(_UnreadableCookieChromium())
+        with patch.object(
+            tk_main, "async_playwright", lambda: _AsyncCM(playwright)
+        ):
+            self.assertFalse(
+                asyncio.run(tk_main.cookie_auth("/tmp/tiktok_creator.json"))
+            )
+
+
 class TiktokSetupTests(unittest.TestCase):
     def test_missing_cookie_without_handle_skips_auth(self):
         with (

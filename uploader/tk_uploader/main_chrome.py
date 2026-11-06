@@ -8,6 +8,7 @@ from datetime import datetime
 # Multilogin runs on the same Patchright client as every other uploader.
 # ``main.py`` (Firefox) intentionally stays on upstream Playwright and is not
 # wired into the CLI.
+from patchright.async_api import Error as PlaywrightError
 from patchright.async_api import Playwright, async_playwright
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 import os
@@ -742,22 +743,38 @@ async def is_logged_in(context) -> bool:
 async def cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) -> bool:
     """Validate a local cookie file against TikTok Studio.
 
-    The browser and context are always closed, including on navigation errors.
-    Any network/5xx/unrecognised page is reported as invalid rather than raising
-    so ``check`` can map it to exit ``1``.
+    Any Playwright/launch/read error is reported as invalid rather than raised,
+    so ``check`` always prints ``invalid`` and exits ``1``.
     """
+    try:
+        return await _cookie_auth(account_file, headless=headless)
+    except (PlaywrightError, OSError, ValueError) as exc:
+        tiktok_logger.error(f"[+] cookie check failed: {exc}")
+        return False
+
+
+async def _cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) -> bool:
     async with async_playwright() as playwright:
         try:
             browser = await playwright.chromium.launch(
                 headless=headless, **TIKTOK_LAUNCH_KWARGS
             )
-        except Exception as exc:
+        except (PlaywrightError, OSError) as exc:
             tiktok_logger.error(f"[+] cookie check failed to launch: {exc}")
             return False
         try:
-            context = await browser.new_context(storage_state=str(account_file))
             try:
-                context = await set_init_script(context)
+                context = await browser.new_context(
+                    storage_state=str(account_file)
+                )
+            except (PlaywrightError, OSError, ValueError) as exc:
+                tiktok_logger.error(
+                    f"[+] cookie check failed: unreadable cookie ({exc})"
+                )
+                return False
+            try:
+                if TIKTOK_INIT_SCRIPT:
+                    context = await set_init_script(context)
                 page = await context.new_page()
                 response = await page.goto(
                     "https://www.tiktok.com/tiktokstudio/upload?lang=en",
@@ -785,7 +802,7 @@ async def cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) -
                     return True
                 tiktok_logger.error("[+] cookie check failed: upload entry not found")
                 return False
-            except Exception as exc:
+            except (PlaywrightError, OSError, ValueError) as exc:
                 tiktok_logger.error(f"[+] cookie check failed: {exc}")
                 return False
             finally:
@@ -844,7 +861,8 @@ async def get_tiktok_cookie(account_file) -> str:
         try:
             context = await browser.new_context()
             try:
-                context = await set_init_script(context)
+                if TIKTOK_INIT_SCRIPT:
+                    context = await set_init_script(context)
                 page = await context.new_page()
                 await page.goto("https://www.tiktok.com/login?lang=en")
                 tiktok_logger.info(

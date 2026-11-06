@@ -4,7 +4,7 @@ description: 使用 `sau tiktok` 在本地 cookie 模式或 Multilogin X Profile
 license: MIT-0
 slug: social-auto-upload-tiktok-upload
 displayName: TikTok 视频与图文发布
-version: 1.1.0
+version: 1.2.0
 summary: 使用 sau tiktok 在本地模式或 Multilogin Profile 下检查登录并发布视频与图文。
 ---
 

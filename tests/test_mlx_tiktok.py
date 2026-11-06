@@ -150,11 +150,18 @@ class TiktokParserTests(unittest.TestCase):
                 self.assertIn(expected, options)
         self.assertNotIn("--file", options)
 
-    def test_login_does_not_accept_multilogin_flags(self):
+    def test_login_accepts_multilogin_flags_but_ignores_them_locally(self):
         options = _option_strings(_subparser(sau_cli.build_parser(), "tiktok", "login"))
-        self.assertIn("--account", options)
-        self.assertNotIn("--folder-id", options)
-        self.assertNotIn("--profile-id", options)
+        for expected in (
+            "--account",
+            "--headless",
+            "--headed",
+            "--debug",
+            "--folder-id",
+            "--profile-id",
+        ):
+            with self.subTest(option=expected):
+                self.assertIn(expected, options)
 
     def test_parse_upload_video(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -554,14 +561,32 @@ class LocalModeTests(unittest.TestCase):
 
 class MlxLoginRejectionTests(unittest.TestCase):
     def test_login_in_mlx_exits_1_with_placeholder(self):
-        # ``login`` deliberately does not register MLX flags, so the CLI can
-        # only show the generic profile placeholder.
         playwright = MagicMock()
         with patch.object(tiktok_command, "async_playwright", playwright):
             code, _, err = _run(["tiktok", "login", "--account", "creator"])
         self.assertEqual(code, 1)
         self.assertIn("Multilogin 模式不支持 CLI 登录", err)
         self.assertIn("指定 Profile", err)
+        playwright.assert_not_called()
+
+    def test_login_in_mlx_with_profile_flags_still_exits_1(self):
+        playwright = MagicMock()
+        with patch.object(tiktok_command, "async_playwright", playwright):
+            code, _, err = _run(
+                [
+                    "tiktok",
+                    "login",
+                    "--account",
+                    "creator",
+                    "--folder-id",
+                    "folder",
+                    "--profile-id",
+                    "profile",
+                ]
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("Multilogin 模式不支持 CLI 登录", err)
+        self.assertIn("profile", err)
         playwright.assert_not_called()
 
 

@@ -30,6 +30,7 @@
   3. 保存 `storage_state` 到 `cookies/tiktok_<account>.json`。
   4. 再用 `cookie_auth` 复核一次；无效则退出 `1`。
 - 非交互式终端（`stdin` 不是 TTY）→ 明确报错退出 `1`，不静默挂起。
+- `--folder-id` / `--profile-id` 在本地 `login` 中被接受但忽略；MLX 下 `login` 仍拒绝退出 `1`。
 - 不实现 QR / 无头登录；这不是本次目标。
 
 ## 4. 本地 check
@@ -37,7 +38,7 @@
 - `sau tiktok check --account <name>`：
   - 使用本地 cookie 文件校验 TikTok Studio 上传页。
   - 有效 → stdout `valid`，退出 `0`。
-  - 无效/缺失/登录页/5xx/网络错误/浏览器启动失败 → stdout `invalid`，退出 `1`。
+  - 无效/缺失/登录页/5xx/网络错误/浏览器启动失败/cookie 文件不可读（损坏 JSON）→ stdout `invalid`，退出 `1`。
   - 缺失 `--account` → 退出 `2`。
 - MLX `check` 保持 `0` / `10` / `1` / `2` 语义不变。
 
