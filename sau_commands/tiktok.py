@@ -29,9 +29,6 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
-# Legacy patch point used by validation tests; the run path calls the
-# provider-aware name above.
-resolve_multilogin_target = resolve_managed_provider
 
 from uploader.tk_uploader.main_chrome import (
     TIKTOK_CONTEXT_KWARGS,

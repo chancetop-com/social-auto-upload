@@ -98,6 +98,7 @@ class AdspowerLifecycleTests(unittest.TestCase):
         self.assertIn(PROFILE, rendered)
         self.assertIn("127.0.0.1:9222", rendered)
         self.assertNotIn("/devtools/browser", rendered)
+        self.assertNotIn("Multilogin", rendered)
 
     def test_start_incomplete_stops_profile_before_reraising(self):
         events: list[str] = []
@@ -255,6 +256,32 @@ class AdspowerLifecycleTests(unittest.TestCase):
         self.assertEqual(client.status_calls, [PROFILE])
         self.assertEqual(client.stop_calls, [PROFILE])
         self.assertEqual(events[-1], "stop")
+
+    def test_connect_failure_status_query_failure_degrades_to_query_failed(self):
+        events: list[str] = []
+        client = FakeAdspowerClient(
+            events=events, status_error=RuntimeError("status boom")
+        )
+        playwright = FakePlaywright(events=events)
+        for _ in range(3):
+            playwright.chromium.queue_connect_error(ConnectionError("refused"))
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=_provider(client)
+            ):
+                pass
+
+        with patch("utils.browser_session.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(RuntimeError) as caught:
+                run(scenario())
+
+        message = str(caught.exception)
+        self.assertIn("查询失败", message)
+        self.assertIn("status boom", message)
+        self.assertIn("adspower", message.lower())
+        self.assertNotIn("Multilogin", message)
+        self.assertEqual(client.stop_calls, [PROFILE])
 
     def test_stop_failure_after_success_only_warns(self):
         events: list[str] = []

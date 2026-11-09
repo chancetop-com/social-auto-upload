@@ -69,6 +69,17 @@ class MultiloginClientProbeTests(unittest.TestCase):
 
         self.assertIn("503", str(caught.exception))
 
+    def test_probe_429_raises_the_shared_rate_limited_error(self):
+        http_get = FakeHttpGet(
+            [FakeResponse(429, {"status": {"message": "rate limited"}})]
+        )
+        client = MultiloginClient(TOKEN, http_get=http_get)
+
+        with self.assertRaises(RateLimitedError) as caught:
+            client.probe()
+
+        self.assertIn("429", str(caught.exception))
+
 
 class MultiloginClientStartTests(unittest.TestCase):
     def _client(self, *outcomes: object) -> tuple[MultiloginClient, FakeHttpGet]:

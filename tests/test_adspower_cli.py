@@ -29,7 +29,12 @@ from tests.fakes import (
     FakePlaywright,
 )
 from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
-from utils.errors import RateLimitedError, StartIncompleteError, UsageError
+from utils.errors import (
+    PublishResultUnknownError,
+    RateLimitedError,
+    StartIncompleteError,
+    UsageError,
+)
 from utils.multilogin import MultiloginProvider
 
 KEY = "SENTINEL-ADSPOWER-KEY-9c1f2a"
@@ -552,6 +557,26 @@ class CheckAndExitCodeTests(unittest.TestCase):
             )
         self.assertEqual(code, 11)
         self.assertIn("429", err)
+
+    def test_publish_result_unknown_error_maps_to_9(self):
+        with patch(
+            "sau_cli.dispatch",
+            new=AsyncMock(side_effect=PublishResultUnknownError("publish unknown")),
+        ):
+            code, _, err = _run(
+                ["douyin", "check", "--profile-id", PROFILE],
+                env={"ADSPOWER_API_KEY": KEY},
+            )
+        self.assertEqual(code, 9)
+        self.assertIn("publish unknown", err)
+
+    def test_keyboard_interrupt_is_not_caught(self):
+        with patch("sau_cli.dispatch", new=AsyncMock(side_effect=KeyboardInterrupt)):
+            with self.assertRaises(KeyboardInterrupt):
+                _run(
+                    ["douyin", "check", "--profile-id", PROFILE],
+                    env={"ADSPOWER_API_KEY": KEY},
+                )
 
     def test_rate_limited_on_probe_exits_11_without_start_or_stop(self):
         fake = FakeAdspowerClient(probe_error=RateLimitedError("probe 429"))

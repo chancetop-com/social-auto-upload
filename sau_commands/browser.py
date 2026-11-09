@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
@@ -42,31 +43,39 @@ INVALID_ADSPOWER_BASE_MESSAGE = (
 )
 MISSING_ACCOUNT_MESSAGE = "本地模式需要 --account。"
 
-_LOGIN_REJECTED_TEMPLATES = {
-    "multilogin": (
-        "Multilogin 模式不支持 CLI 登录；"
-        "请在 Multilogin 应用中登录 {profile} 后重试。"
-    ),
-    "adspower": (
-        "AdsPower 模式不支持 CLI 登录；"
-        "请在 AdsPower 中登录 {profile} 后重试。"
-    ),
-}
 
-_PLATFORM_REJECTED_TEMPLATES = {
-    "multilogin": (
-        "Multilogin 模式不支持 {platform}；"
-        "请在本地模式（不设置 MLX_API_TOKEN）下重试。"
-    ),
-    "adspower": (
-        "AdsPower 模式不支持 {platform}；"
-        "请在本地模式（不设置 ADSPOWER_API_KEY）下重试。"
-    ),
-}
+@dataclass(frozen=True, slots=True)
+class _ProviderWording:
+    """All user-facing product wording for one managed provider."""
 
-_APP_LABELS = {
-    "multilogin": "Multilogin",
-    "adspower": "AdsPower",
+    label: str
+    login_rejected: str
+    platform_rejected: str
+
+
+_PROVIDER_WORDINGS = {
+    "multilogin": _ProviderWording(
+        label="Multilogin",
+        login_rejected=(
+            "Multilogin 模式不支持 CLI 登录；"
+            "请在 Multilogin 应用中登录 {profile} 后重试。"
+        ),
+        platform_rejected=(
+            "Multilogin 模式不支持 {platform}；"
+            "请在本地模式（不设置 MLX_API_TOKEN）下重试。"
+        ),
+    ),
+    "adspower": _ProviderWording(
+        label="AdsPower",
+        login_rejected=(
+            "AdsPower 模式不支持 CLI 登录；"
+            "请在 AdsPower 中登录 {profile} 后重试。"
+        ),
+        platform_rejected=(
+            "AdsPower 模式不支持 {platform}；"
+            "请在本地模式（不设置 ADSPOWER_API_KEY）下重试。"
+        ),
+    ),
 }
 
 
@@ -257,7 +266,8 @@ def require_account(args: argparse.Namespace) -> None:
 def managed_app_label(mode: ProviderMode | None = None) -> str:
     """Return the product name used in user-facing managed-mode wording."""
     resolved = mode or active_mode() or "multilogin"
-    return _APP_LABELS.get(resolved, resolved)
+    wording = _PROVIDER_WORDINGS.get(resolved)
+    return wording.label if wording is not None else resolved
 
 
 def login_required_error(
@@ -306,7 +316,9 @@ def reject_managed_login(platform: str, args: argparse.Namespace) -> None:
     if mode is None:
         return
     raise RuntimeError(
-        _LOGIN_REJECTED_TEMPLATES[mode].format(profile=_profile_placeholder(args))
+        _PROVIDER_WORDINGS[mode].login_rejected.format(
+            profile=_profile_placeholder(args)
+        )
     )
 
 
@@ -316,7 +328,7 @@ def reject_managed_platform(platform: str, args: argparse.Namespace) -> None:
     if mode is None:
         return
     raise RuntimeError(
-        _PLATFORM_REJECTED_TEMPLATES[mode].format(platform=platform)
+        _PROVIDER_WORDINGS[mode].platform_rejected.format(platform=platform)
     )
 
 
@@ -325,7 +337,7 @@ def reject_multilogin_login(platform: str, args: argparse.Namespace) -> None:
     if not multilogin_enabled():
         return
     raise RuntimeError(
-        _LOGIN_REJECTED_TEMPLATES["multilogin"].format(
+        _PROVIDER_WORDINGS["multilogin"].login_rejected.format(
             profile=_profile_placeholder(args)
         )
     )
@@ -336,7 +348,7 @@ def reject_multilogin_platform(platform: str, args: argparse.Namespace) -> None:
     if not multilogin_enabled():
         return
     raise RuntimeError(
-        _PLATFORM_REJECTED_TEMPLATES["multilogin"].format(platform=platform)
+        _PROVIDER_WORDINGS["multilogin"].platform_rejected.format(platform=platform)
     )
 
 

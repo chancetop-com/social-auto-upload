@@ -104,6 +104,16 @@ class AdspowerClientProbeTests(unittest.TestCase):
         self.assertIn("500", message)
         self.assertIn("down", message)
 
+    def test_probe_non_2xx_always_formats_a_code_field(self):
+        client, _ = self._client(FakeResponse(500, {"msg": "down"}))
+
+        with self.assertRaises(RuntimeError) as caught:
+            client.probe()
+
+        message = str(caught.exception)
+        self.assertIn("code=?", message)
+        self.assertIn("msg=down", message)
+
     def test_probe_429_raises_rate_limited_error_without_retry_or_sleep(self):
         client, http = self._client(FakeResponse(429, {"msg": "too many requests"}))
 
@@ -263,6 +273,7 @@ class AdspowerClientStartTests(unittest.TestCase):
 
         message = str(caught.exception)
         self.assertIn("500", message)
+        self.assertIn("code=?", message)
         self.assertIn("upstream exploded", message)
 
     def test_start_429_raises_rate_limited_error_without_retry_or_sleep(self):
@@ -415,12 +426,41 @@ class AdspowerClientStatusTests(unittest.TestCase):
 
         self.assertEqual(client.status(PROFILE_ID), "unknown")
 
-    def test_status_invalid_json_returns_unknown(self):
+    def test_status_invalid_json_raises_runtime_error(self):
         client, _ = self._client(
             FakeResponse(200, None, text="not json", json_error=ValueError())
         )
 
-        self.assertEqual(client.status(PROFILE_ID), "unknown")
+        with self.assertRaises(RuntimeError) as caught:
+            client.status(PROFILE_ID)
+
+        message = str(caught.exception)
+        self.assertIn("HTTP 200", message)
+        self.assertIn("code=?", message)
+
+    def test_status_missing_code_raises_runtime_error(self):
+        client, _ = self._client(FakeResponse(200, {"data": {"status": "Active"}}))
+
+        with self.assertRaises(RuntimeError) as caught:
+            client.status(PROFILE_ID)
+
+        message = str(caught.exception)
+        self.assertIn("HTTP 200", message)
+        self.assertIn("code=?", message)
+
+    def test_status_business_error_raises_runtime_error(self):
+        client, _ = self._client(
+            FakeResponse(200, {"code": 10003, "msg": "profile not found"})
+        )
+
+        with self.assertRaises(RuntimeError) as caught:
+            client.status(PROFILE_ID)
+
+        message = str(caught.exception)
+        self.assertIn("HTTP 200", message)
+        self.assertIn("code=10003", message)
+        self.assertIn("msg=profile not found", message)
+        self.assertNotIn(KEY, message)
 
     def test_status_non_2xx_raises_runtime_error(self):
         client, _ = self._client(
