@@ -458,7 +458,7 @@ class WeiBoVideo(BaseVideoUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         page = await session.context.new_page()
         await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
         await page.wait_for_timeout(3000)

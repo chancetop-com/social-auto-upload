@@ -17,12 +17,13 @@ from unittest.mock import AsyncMock, Mock, patch
 from tests.fakes import (
     FakeBrowser,
     FakeContext,
+    FakeManagedProvider,
     FakeMultiloginClient,
     FakePlaywright,
     ForbiddenApiError,
 )
-from utils.browser_session import browser_session
-from utils.multilogin import MultiloginTarget
+from utils.browser_session import BrowserSession, browser_session
+from utils.multilogin import MultiloginProvider, MultiloginTarget
 
 TOKEN = "ticket15-secret-token"
 FOLDER_ID = "22222222-2222-4222-8222-222222222222"
@@ -229,11 +230,6 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
 
-    def _patch_client(self, client):
-        patcher = patch("utils.browser_session.MultiloginClient", return_value=client)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     def _browser(self, events, contexts=None):
         browser = FakeBrowser(
             contexts if contexts is not None else [FakeContext(events=events)],
@@ -249,7 +245,6 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         context = FakeContext(events=events)
         browser = self._browser(events, [context])
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
         context_setup = Mock()
 
         async def scenario():
@@ -257,7 +252,7 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
                 playwright,
                 headless=True,
                 account_file="/tmp/must-not-be-read.json",
-                multilogin=self.target,
+                managed=MultiloginProvider(self.target, client),
                 launch_kwargs={"channel": "chromium"},
                 context_kwargs={"permissions": ["geolocation"]},
                 init_script=True,
@@ -288,11 +283,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
     def test_start_failure_does_not_stop_someone_elses_profile(self):
         client = FakeMultiloginClient(start_error=RuntimeError("HTTP 500 can't lock profile"))
         playwright = FakePlaywright()
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -306,11 +300,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
     def test_probe_failure_does_not_start_or_stop(self):
         client = FakeMultiloginClient(probe_error=RuntimeError("launcher unavailable"))
         playwright = FakePlaywright()
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -328,11 +321,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright.chromium.queue_connect_error(ConnectionError("refused"))
         playwright.chromium.queue_connect_error(TimeoutError("timed out"))
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -350,11 +342,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright = FakePlaywright(events=events)
         for _ in range(3):
             playwright.chromium.queue_connect_error(ConnectionError("refused"))
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -378,11 +369,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright = FakePlaywright(events=events)
         browser = self._browser(events, [])
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -401,11 +391,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
             events, [FakeContext(events=events), FakeContext(events=events)]
         )
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -421,11 +410,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright = FakePlaywright(events=events)
         browser = self._browser(events)
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 raise ValueError("upload blew up")
 
@@ -441,11 +429,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright = FakePlaywright(events=events)
         browser = self._browser(events)
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -462,11 +449,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright = FakePlaywright(events=events)
         browser = self._browser(events)
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 raise ValueError("original failure")
 
@@ -484,11 +470,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         browser = self._browser(events)
         browser.close_error = RuntimeError("disconnect failed")
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 pass
 
@@ -505,11 +490,10 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         playwright = FakePlaywright(events=events)
         browser = self._browser(events)
         playwright.chromium.queue_connect_browser(browser)
-        self._patch_client(client)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
             ):
                 entered.set()
                 await asyncio.sleep(60)
@@ -530,24 +514,28 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         shield.assert_called_once()
         self.assertEqual(client.stop_calls, [PROFILE_ID])
 
-    def test_missing_token_fails_before_starting_profile(self):
-        playwright = FakePlaywright()
-        client = FakeMultiloginClient()
-        self._patch_client(client)
+    def test_injected_provider_runs_without_reading_token_environment(self):
+        events: list[str] = []
+        client = FakeMultiloginClient(events=events)
+        playwright = FakePlaywright(events=events)
+        browser = self._browser(events)
+        playwright.chromium.queue_connect_browser(browser)
 
         async def scenario():
             async with browser_session(
-                playwright, headless=True, multilogin=self.target
-            ):
-                pass
+                playwright,
+                headless=True,
+                managed=MultiloginProvider(self.target, client),
+            ) as session:
+                self.assertEqual(session.mode, "multilogin")
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("MLX_API_TOKEN", None)
-            with self.assertRaisesRegex(RuntimeError, "MLX_API_TOKEN"):
-                run(scenario())
+            run(scenario())
 
-        self.assertEqual(client.probe_calls, 0)
-        self.assertEqual(client.start_calls, [])
+        self.assertEqual(client.probe_calls, 1)
+        self.assertEqual(client.start_calls, [(FOLDER_ID, PROFILE_ID, True)])
+        self.assertEqual(client.stop_calls, [PROFILE_ID])
 
     def test_forbidden_apis_raise_loudly_if_mlx_touches_them(self):
         context = FakeContext()
@@ -556,6 +544,47 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
             asyncio.run(context.add_cookies([]))
         with self.assertRaises(ForbiddenApiError):
             asyncio.run(FakeBrowser().new_context())
+
+
+class ManagedSessionSeamTests(unittest.TestCase):
+    def test_managed_property_truth_table(self):
+        for mode, expected in (
+            ("local", False),
+            ("multilogin", True),
+            ("adspower", True),
+        ):
+            with self.subTest(mode=mode):
+                session = BrowserSession(browser=object(), context=object(), mode=mode)
+                self.assertIs(session.managed, expected)
+
+    def test_generic_provider_endpoint_is_passed_to_connect_over_cdp_verbatim(self):
+        ws_url = "ws://127.0.0.1:9222/devtools/browser/abc"
+        events: list[str] = []
+        provider = FakeManagedProvider(
+            mode="adspower", profile_id="profile-1", connect_url=ws_url, events=events
+        )
+        playwright = FakePlaywright(events=events)
+        browser = FakeBrowser(
+            [FakeContext(events=events)], allow_new_context=False, events=events
+        )
+        playwright.chromium.queue_connect_browser(browser)
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=provider
+            ) as session:
+                self.assertEqual(session.mode, "adspower")
+                self.assertIs(session.managed, True)
+
+        run(scenario())
+
+        self.assertEqual(playwright.chromium.connect_calls[0]["url"], ws_url)
+        self.assertEqual(
+            events,
+            ["probe", "start", "connect", "browser.close", "stop"],
+        )
+        self.assertEqual(provider.start_calls, [True])
+        self.assertEqual(provider.stop_calls, 1)
 
 
 if __name__ == "__main__":

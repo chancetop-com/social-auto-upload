@@ -35,14 +35,16 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
+    identity_unverified_format,
     login_required_error,
-    reject_multilogin_login,
+    managed_timezone_hint,
+    reject_managed_login,
     require_account,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 
 
@@ -58,7 +60,7 @@ def register(platform_parsers):
     dayu_check = dayu_actions.add_parser("check", help="Check login and bound Dayu identity")
     dayu_check.add_argument("--account", required=False)
     add_runtime_flags(dayu_check)
-    add_multilogin_flags(dayu_check)
+    add_browser_flags(dayu_check)
     dayu_upload = dayu_actions.add_parser("upload-video", help="Publish a video; succeed when Dayu confirms submission")
     dayu_upload.add_argument("--account", required=False)
     dayu_upload.add_argument("--file", required=True, type=existing_file_path)
@@ -74,7 +76,7 @@ def register(platform_parsers):
     dayu_upload.add_argument("--prepare-only", action="store_true", help="Upload and fill only; do not click publish")
     dayu_upload.add_argument("--upload-timeout", type=int, default=600, help="Upload/processing timeout in seconds")
     add_runtime_flags(dayu_upload)
-    add_multilogin_flags(dayu_upload)
+    add_browser_flags(dayu_upload)
     dayu_article = dayu_actions.add_parser("upload-article", help="从正文文件发表图文，平台确认发表后返回成功")
     dayu_article.add_argument("--account", required=False, help="已登录的本地账号名称")
     dayu_article.add_argument("--title", required=True, help="图文标题，5–50字")
@@ -89,7 +91,7 @@ def register(platform_parsers):
     dayu_article.add_argument("--prepare-only", action="store_true", help="上传和填写后结束，不发表")
     dayu_article.add_argument("--upload-timeout", type=int, default=600, help="每张图片上传等待秒数")
     add_runtime_flags(dayu_article)
-    add_multilogin_flags(dayu_article)
+    add_browser_flags(dayu_article)
     dayu_verify = dayu_actions.add_parser("verify", help="Check an existing publication without uploading again")
     dayu_verify.add_argument("--account", required=False)
     dayu_verify.add_argument("--type", choices=("video", "article"), help="作品类型；使用结果文件时自动识别，其余情况默认为video")
@@ -103,22 +105,20 @@ def register(platform_parsers):
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("大鱼号", target.profile_id)
+    raise login_required_error("大鱼号", target.profile_id, mode=target.mode)
 
 
 def _log_identity_unverified(target) -> None:
     dayu_logger.info(
-        "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
+        identity_unverified_format(mode=target.mode),
         target.profile_id,
     )
 
 
 def _log_profile_identity(target) -> None:
     _log_identity_unverified(target)
-    # MLX 不写 timezone_id；发布时区由 Profile 决定。
-    dayu_logger.info(
-        "Multilogin 模式不写入时区；建议在 Profile 设置中将时区设为 Asia/Shanghai"
-    )
+    # 托管模式不写 timezone_id；发布时区由 Profile 决定。
+    dayu_logger.info(managed_timezone_hint(target.mode))
 
 
 async def _run_mlx_upload(app, *, target, headless: bool):
@@ -127,7 +127,7 @@ async def _run_mlx_upload(app, *, target, headless: bool):
             playwright,
             headless=headless,
             account_file=None,
-            multilogin=target,
+            managed=target,
             launch_kwargs=DAYU_LAUNCH_KWARGS,
             context_kwargs=DAYU_CONTEXT_KWARGS,
             init_script=DAYU_INIT_SCRIPT,
@@ -141,12 +141,12 @@ async def _run_mlx_upload(app, *, target, headless: bool):
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("dayu", args)
+        reject_managed_login("dayu", args)
         require_local_account(args)
         target = None
         account = args.account
     elif args.action in {"check", "upload-video", "upload-article"}:
-        target = resolve_multilogin_target(args)
+        target = resolve_managed_provider(args)
         require_local_account(args)
         account = resolve_account_label(args)
     else:
@@ -161,7 +161,7 @@ async def run(args):
                     playwright,
                     headless=args.headless,
                     account_file=None,
-                    multilogin=target,
+                    managed=target,
                 ) as session:
                     _log_identity_unverified(target)
                     valid = await is_logged_in(session.context)

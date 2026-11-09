@@ -24,14 +24,14 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_account,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
@@ -72,7 +72,7 @@ def register(platform_parsers):
             action_parser.set_defaults(headless=False)
         else:
             add_runtime_flags(action_parser)
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
 
     facebook_upload_video_parser = facebook_actions.add_parser(
         "upload-video", help="Upload one video to a Facebook personal post"
@@ -88,7 +88,7 @@ def register(platform_parsers):
         help="浏览器代理地址；不传时直连，传空字符串可覆盖环境变量并直连",
     )
     add_runtime_flags(facebook_upload_video_parser)
-    add_multilogin_flags(facebook_upload_video_parser)
+    add_browser_flags(facebook_upload_video_parser)
 
     facebook_note = facebook_actions.add_parser("upload-note", help="向个人主页发布图片及正文")
     facebook_note.add_argument("--account", required=False)
@@ -98,7 +98,7 @@ def register(platform_parsers):
     facebook_note.add_argument("--tags", default="")
     facebook_note.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
     add_runtime_flags(facebook_note)
-    add_multilogin_flags(facebook_note)
+    add_browser_flags(facebook_note)
     facebook_note.set_defaults(headless=False)
 
 
@@ -137,7 +137,7 @@ async def check_facebook_account(
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("Facebook", target.profile_id)
+    raise login_required_error("Facebook", target.profile_id, mode=target.mode)
 
 
 async def _upload_facebook_mlx(
@@ -162,7 +162,7 @@ async def _upload_facebook_mlx(
             playwright,
             headless=headless,
             account_file=None,
-            multilogin=target,
+            managed=target,
             launch_kwargs=FACEBOOK_LAUNCH_KWARGS,
             context_kwargs=FACEBOOK_CONTEXT_KWARGS,
             init_script=FACEBOOK_INIT_SCRIPT,
@@ -214,7 +214,7 @@ async def upload_facebook_video(
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("facebook", args)
+        reject_managed_login("facebook", args)
         require_local_account(args)
         result = await login_facebook_account(
             args.account, headless=args.headless, proxy=args.proxy
@@ -239,7 +239,7 @@ async def run(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -249,7 +249,7 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                     launch_kwargs=FACEBOOK_LAUNCH_KWARGS,
                     context_kwargs=FACEBOOK_CONTEXT_KWARGS,
                     init_script=FACEBOOK_INIT_SCRIPT,

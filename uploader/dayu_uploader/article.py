@@ -278,7 +278,7 @@ class DayuArticle:
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Publish on the injected session; Multilogin never touches identity files."""
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         expected = None if multilogin else load_dayu_identity(self.account_file)
         results_dir = dayu_results_dir(self.account_file)
         results_dir.mkdir(exist_ok=True)

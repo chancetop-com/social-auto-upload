@@ -16,6 +16,7 @@ from unittest.mock import patch
 from utils.multilogin import (
     LAUNCHER_BASE_URL,
     MultiloginClient,
+    MultiloginProvider,
     MultiloginTarget,
 )
 
@@ -302,6 +303,39 @@ class MultiloginClientStatusTests(unittest.TestCase):
             client.status(PROFILE_ID)
 
         self.assertIn("connection refused", str(caught.exception))
+
+
+class MultiloginProviderTests(unittest.TestCase):
+    def test_provider_normalizes_start_port_to_http_cdp_url(self):
+        http_get = FakeHttpGet(
+            [FakeResponse(200, load_fixture("start_ok.json"))]
+        )
+        target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)
+        provider = MultiloginProvider(target, MultiloginClient(TOKEN, http_get=http_get))
+
+        url = provider.start(headless=True)
+
+        self.assertEqual(url, "http://127.0.0.1:55513")
+        self.assertEqual(provider.mode, "multilogin")
+        self.assertEqual(provider.profile_id, PROFILE_ID)
+
+    def test_provider_drops_folder_id_from_status_and_stop(self):
+        http_get = FakeHttpGet(
+            [
+                FakeResponse(200, {"data": {"status": "browser_running"}}),
+                FakeResponse(200, {"status": {"message": "ok"}}),
+            ]
+        )
+        target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)
+        provider = MultiloginProvider(target, MultiloginClient(TOKEN, http_get=http_get))
+
+        self.assertEqual(provider.status(), "browser_running")
+        provider.stop()
+
+        self.assertIn(f"/p/{PROFILE_ID}", http_get.calls[0]["url"])
+        self.assertIn(f"/p/{PROFILE_ID}", http_get.calls[1]["url"])
+        self.assertNotIn(FOLDER_ID, http_get.calls[0]["url"])
+        self.assertNotIn(FOLDER_ID, http_get.calls[1]["url"])
 
 
 class MultiloginSanitisationTests(unittest.TestCase):

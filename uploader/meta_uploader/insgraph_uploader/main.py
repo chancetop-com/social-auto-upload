@@ -443,7 +443,7 @@ class InstagramUploader:
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
         await page.goto(INSTAGRAM_HOME_URL, wait_until='domcontentloaded', timeout=120_000)
-        if session.mode == 'multilogin':
+        if session.managed:
             _raise_if_login_required(page)
             if await _is_instagram_logged_out(
                 page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS
@@ -453,7 +453,7 @@ class InstagramUploader:
                 )
         try:
             self.stage = 'identity'
-            if session.mode == 'multilogin':
+            if session.managed:
                 identity = await _multilogin_identity(page, session.context)
             else:
                 identity = await instagram_identity(page, self.account_file)

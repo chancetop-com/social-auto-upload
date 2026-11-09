@@ -25,14 +25,14 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_account,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
@@ -67,7 +67,7 @@ def register(platform_parsers):
                 action_parser.set_defaults(headless=False)
             else:
                 add_runtime_flags(action_parser)
-                add_multilogin_flags(action_parser)
+                add_browser_flags(action_parser)
 
         upload_video_parser = meta_actions.add_parser("upload-video", help=f"Upload a video to {meta_platform}")
         upload_video_parser.add_argument("--account", required=False)
@@ -80,7 +80,7 @@ def register(platform_parsers):
         upload_video_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_video_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_runtime_flags(upload_video_parser)
-        add_multilogin_flags(upload_video_parser)
+        add_browser_flags(upload_video_parser)
         upload_video_parser.set_defaults(headless=False)
 
         upload_note_parser = meta_actions.add_parser("upload-note", help=f"Upload images to {meta_platform}")
@@ -94,7 +94,7 @@ def register(platform_parsers):
         upload_note_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_note_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_runtime_flags(upload_note_parser)
-        add_multilogin_flags(upload_note_parser)
+        add_browser_flags(upload_note_parser)
         upload_note_parser.set_defaults(headless=False)
 
 
@@ -149,7 +149,7 @@ def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUpl
 
 
 def _raise_login_required(platform: str, target) -> None:
-    raise login_required_error(f"{platform} ", target.profile_id)
+    raise login_required_error(f"{platform} ", target.profile_id, mode=target.mode)
 
 
 async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dict:
@@ -161,7 +161,7 @@ async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dic
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
                 context_kwargs=FACEBOOK_PAGE_CONTEXT_KWARGS,
                 init_script=FACEBOOK_PAGE_INIT_SCRIPT,
@@ -183,7 +183,7 @@ async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dic
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login(args.platform, args)
+        reject_managed_login(args.platform, args)
         require_local_account(args)
         result = await login_meta_account(args.platform, args.account, headless=args.headless, proxy=args.proxy)
         if not result["success"]:
@@ -204,7 +204,7 @@ async def run(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -214,7 +214,7 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                     launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
                     context_kwargs=FACEBOOK_PAGE_CONTEXT_KWARGS,
                     init_script=FACEBOOK_PAGE_INIT_SCRIPT,

@@ -22,29 +22,28 @@ from sau_commands.arguments import (
     existing_file_path,
     resolve_account_file,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
+    identity_unverified_format,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_account,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
-IDENTITY_UNVERIFIED_MESSAGE = (
-    "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}），"
-    "请调度侧确保 profile_id 与目标账号匹配。"
-)
-
 
 def _log_identity_unverified(target) -> None:
-    logger.info(IDENTITY_UNVERIFIED_MESSAGE, target.profile_id)
+    logger.info(
+        identity_unverified_format(mode=target.mode, detailed=True),
+        target.profile_id,
+    )
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("雪球", target.profile_id)
+    raise login_required_error("雪球", target.profile_id, mode=target.mode)
 
 
 async def _run_multilogin(args, target):
@@ -57,7 +56,7 @@ async def _run_multilogin(args, target):
                 playwright,
                 headless=headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
             ) as session:
                 _log_identity_unverified(target)
                 is_valid = await is_logged_in(session.context)
@@ -77,7 +76,7 @@ async def _run_multilogin(args, target):
             playwright,
             headless=headless,
             account_file=None,
-            multilogin=target,
+            managed=target,
             launch_kwargs=XUEQIU_LAUNCH_KWARGS,
             context_kwargs=XUEQIU_CONTEXT_KWARGS,
         ) as session:
@@ -101,7 +100,7 @@ def register(platform_parsers):
     xueqiu_login.add_argument("--timeout", type=int, default=600, help="登录等待秒数")
     xueqiu_check = xueqiu_actions.add_parser("check", help="检查登录状态及绑定用户 ID")
     xueqiu_check.add_argument("--account", required=False)
-    add_multilogin_flags(xueqiu_check)
+    add_browser_flags(xueqiu_check)
     add_runtime_flags(xueqiu_check)
     xueqiu_check.set_defaults(headless=False)
     xueqiu_verify = xueqiu_actions.add_parser("verify", help="根据结果文件查询原作品，不重复发表")
@@ -118,7 +117,7 @@ def register(platform_parsers):
     xueqiu_article.add_argument("--declaration", choices=XUEQIU_DECLARATIONS, required=True, help="按实际创作方式选择")
     xueqiu_article.add_argument("--prepare-only", action="store_true", help="检查预览后结束；雪球会自动保存远端草稿")
     add_runtime_flags(xueqiu_article)
-    add_multilogin_flags(xueqiu_article)
+    add_browser_flags(xueqiu_article)
     # 本机真实验收使用可见 Chrome；headless 访问曾触发下载/访问拦截，用户可显式选择。
     xueqiu_article.set_defaults(headless=False)
 
@@ -126,11 +125,11 @@ def register(platform_parsers):
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("xueqiu", args)
+        reject_managed_login("xueqiu", args)
         require_local_account(args)
         account = args.account
     elif args.action in {"check", "upload-article"}:
-        target = resolve_multilogin_target(args)
+        target = resolve_managed_provider(args)
         require_local_account(args)
         account = resolve_account_label(args)
         if target is not None:

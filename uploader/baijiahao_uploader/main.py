@@ -440,7 +440,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         page = await session.context.new_page()
         await page.goto(BAIJIAHAO_PUBLISH_URL, timeout=120000, wait_until="domcontentloaded")
         if multilogin:

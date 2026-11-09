@@ -615,7 +615,7 @@ class ZhihuMlxCliCheckTests(_CliMixin, unittest.TestCase):
         self.assertIn("valid", out)
         factory.assert_called_once()
         self.assertIsNone(factory.call_args.kwargs["account_file"])
-        self.assertEqual(factory.call_args.kwargs["multilogin"].profile_id, "profile")
+        self.assertEqual(factory.call_args.kwargs["managed"].target.profile_id, "profile")
         probe.assert_awaited_once_with(session.context)
         resolve_account.assert_not_called()
         self.assertEqual(session_cm.enter_calls, 1)

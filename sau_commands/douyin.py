@@ -26,16 +26,15 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -49,7 +48,7 @@ def register(platform_parsers):
         action_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
         add_runtime_flags(action_parser)
         if action_name == "check":
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
 
     upload_video_parser = douyin_actions.add_parser("upload-video", help="Upload one video to Douyin")
     upload_video_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
@@ -69,7 +68,7 @@ def register(platform_parsers):
     )
     upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(upload_video_parser)
-    add_multilogin_flags(upload_video_parser)
+    add_browser_flags(upload_video_parser)
 
     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
     upload_note_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
@@ -81,7 +80,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(upload_note_parser)
-    add_multilogin_flags(upload_note_parser)
+    add_browser_flags(upload_note_parser)
 
 
 @dataclass(slots=True)
@@ -170,7 +169,7 @@ def _build_note_uploader(request: DouyinNoteUploadRequest, account_file) -> DouY
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("抖音", target.profile_id)
+    raise login_required_error("抖音", target.profile_id, mode=target.mode)
 
 
 async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Path | None:
@@ -181,7 +180,7 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=DOUYIN_LAUNCH_KWARGS,
                 context_kwargs=DOUYIN_CONTEXT_KWARGS,
                 init_script=DOUYIN_INIT_SCRIPT,
@@ -211,7 +210,7 @@ async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path 
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=DOUYIN_LAUNCH_KWARGS,
                 context_kwargs=DOUYIN_CONTEXT_KWARGS,
                 init_script=DOUYIN_INIT_SCRIPT,
@@ -236,7 +235,7 @@ async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("douyin", args)
+        reject_managed_login("douyin", args)
         require_local_account(args)
         result = await login_douyin_account(args.account, headless=args.headless)
         if not result["success"]:
@@ -244,7 +243,7 @@ async def run(args):
         print(f"Douyin login flow completed: {result['account_file']}")
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -254,14 +253,11 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
             if not is_valid:
-                raise LoginRequiredError(
-                    f"抖音登录态无效：profile_id={target.profile_id}。"
-                    "请在 Multilogin 应用中登录 Profile 后重试。"
-                )
+                _raise_login_required(target)
             print("valid")
             return 0
 
