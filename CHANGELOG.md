@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 托管浏览器（AdsPower）
+
+- 新增 AdsPower 托管浏览器模式：设置非空 `ADSPOWER_API_KEY` 后，`sau <platform> check|upload-*` 通过 AdsPower Local API V2 启动 `--profile-id` 指定的 Chromium Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 接管现有上下文，复用 Profile 登录态并在结束时停止本次启动的 Profile；不再读写 `cookies/*.json`。
+- `--profile-id` 映射 AdsPower 的 `user_id`（V2 请求体字段 `profile_id`），必填；`--folder-id` 注册但静默忽略；`--account` 可选，仅日志/结果标签，缺省为 `profile_id`。`login` 在 AdsPower 模式下拒绝并退出 `1`，Bilibili 同样拒绝；`verify` / `delete` / `article` 仍本地执行。
+- 新增 `ADSPOWER_API_BASE`（默认 `http://127.0.0.1:50325`，只允许 `http/https` + host + 可选端口；非法值退出 `2` 且不发请求）。同时设置 `MLX_API_TOKEN` 与 `ADSPOWER_API_KEY` 时退出 `1`。只支持 V2，不做 V1 fallback / 双栈 / 版本探测。
+- 新增退出码 `11`（HTTP 429，MLX 与 AdsPower 共用）。**MLX 的 429 已由 `1` 改为 `11`**，这是本次唯一改变 MLX 可观察行为的地方；调度层应改为退避重试。CLI 不 sleep、不自动重试；stop 阶段 429 只 warning，不覆盖主结果。
+- 文档与 Skills 同步：`GLOSSARY.md` 泛化 Profile 并新增托管浏览器/AdsPower 术语，`docs/CLI.md` 拆为本地 / Multilogin X / AdsPower 三层并保留旧锚点，README、`docs/skill-distribution.md` 与 18 个 Skill 统一两种托管模式说明，Bilibili 明确不支持。
+- 验证范围：离线测试覆盖激活矩阵、双 key 冲突、base 校验、参数矩阵、生命周期、429 → `11` 与 key 脱敏。**真实 AdsPower 冒烟未执行（ticket 09）**：本机未安装 AdsPower、50325 未监听，以下仍未验证——已运行 Profile 的 start 返回形状、重复 stop、429 真实形状、`contexts` 是否恒为 1、超过 30s 的冷启动、旧客户端 V2 状态码、`/status` 是否鉴权、最低 V2 版本。
+- 已知限制：命令级登录检测与身份日志已是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin，待后续统一。
+
 ### 依赖
 
 - patchright 精确升级到 `1.64.4`，对应 Chromium 156（与 Multilogin Mimic 156 对齐）；`uv.lock` 同步更新。

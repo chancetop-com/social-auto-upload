@@ -2,7 +2,12 @@
 
 ## 目录约定
 
-`skills/` 是 Skills 的源目录，包含一个跨平台总入口和每个平台一个独立入口。CLI 平台的 Skill 使用仓库中的 `sau` 命令；TikTok 使用 `sau tiktok`，默认本地模式；设置 `MLX_API_TOKEN` 后为 Multilogin X 模式。
+`skills/` 是 Skills 的源目录，包含一个跨平台总入口和每个平台一个独立入口。CLI 平台的 Skill 使用仓库中的 `sau` 命令。
+
+所有平台 Skill 都说明两种运行方式：
+
+- **本地模式**（默认）：不设置任何托管凭据，上传器使用本地 Chromium 与 `cookies/<platform>_<account>.json`。
+- **托管浏览器模式**：设置 `MLX_API_TOKEN`（Multilogin X 模式）或 `ADSPOWER_API_KEY`（AdsPower 模式），由桌面应用提供 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 cookie 文件。Bilibili 是明确特例，不支持托管浏览器模式（`biliup` 没有浏览器上下文）。
 
 | 平台 | Skill 目录 | CLI 入口 |
 | --- | --- | --- |
@@ -17,13 +22,22 @@
 | 支付宝生活号 | `alipay-upload` | `sau alipay` |
 | 微博 | `weibo-upload` | `sau weibo` |
 | 虎扑 | `hupu-upload` | `sau hupu` |
-| TikTok | `tiktok-upload` | `sau tiktok`（本地或 Multilogin X 模式） |
+| TikTok | `tiktok-upload` | `sau tiktok`（本地或托管浏览器模式） |
 | 雪球 | `xueqiu-upload` | `sau xueqiu` |
 | YouTube | `youtube-upload` | `sau youtube` |
 | 知乎 | `zhihu-upload` | `sau zhihu` |
 | Facebook 个人主页 | `facebook-upload` | `sau facebook` |
 | Facebook Page | `meta-upload` | `sau facebook-page` |
 | Instagram | `instagram-upload` | `sau instagram` |
+
+## 托管浏览器模式与 Skill
+
+| 子模式 | 激活变量 | 必填参数 | 说明 |
+| --- | --- | --- | --- |
+| Multilogin X（MLX） | `MLX_API_TOKEN` | `--folder-id` + `--profile-id` | 通过本机 Launcher 启动 Mimic Profile |
+| AdsPower | `ADSPOWER_API_KEY` | `--profile-id`（映射 `user_id`） | 通过 V2 Local API 启动 Chromium Profile；`--folder-id` 忽略 |
+
+Skill 不复制共同契约：退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明统一指向 `docs/CLI.md` 的“托管浏览器模式（通用）”。Bilibili Skill 只声明不支持，不套用该模板；`login` 在两种托管模式下都拒绝。
 
 ## 分发渠道
 

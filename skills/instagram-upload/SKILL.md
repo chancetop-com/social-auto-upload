@@ -36,6 +36,15 @@ sau instagram delete --account creator --post-url "原作品链接" --expected-t
 
 完整参数和能力边界以 `sau instagram upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。失败时根据结果文件中的错误及本地证据分析；不得把账号状态、截图或页面记录提交到 Git。
 
+## 托管浏览器模式（可选）
+
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。`verify` / `delete` 仍为本地模式。
+
+- MLX：`--folder-id` 与 `--profile-id` 必填。
+- AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
+- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+
 ## 示例脚本
 
 `scripts/examples/` 下的文件是复制用示例，不是运行时依赖。执行前先查看当前 CLI 的 `--help`，替换账号、素材和正文；这些命令可能创建真实作品。
