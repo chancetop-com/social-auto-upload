@@ -51,6 +51,23 @@ _XHS_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
 )
 
+# 平台明确拒绝发布时的 toast/弹窗关键词。命中后立即失败，不再重试。
+_XHS_PUBLISH_FAILURE_KEYWORDS = (
+    "禁止发笔记",
+    "违反社区规范",
+    "发布失败",
+    "账号异常",
+    "操作频繁",
+    "请稍后再试",
+    "内容违规",
+    "审核不通过",
+    "无法发布",
+)
+
+
+class XhsPublishRejectedError(RuntimeError):
+    """平台明确拒绝发布（账号或内容受限），区别于结果未知。"""
+
 # 「添加内容类型声明」下拉里的选项。来源声明是二级菜单，其余是顶层选项。
 XHS_CONTENT_TYPE_LABELS = {
     "fiction": "虚构演绎，仅供娱乐",
@@ -638,6 +655,68 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             )
         return RuntimeError(_XHS_PRE_PUBLISH_TIMEOUT_MESSAGE)
 
+    @staticmethod
+    async def _find_publish_failure(page: Page) -> str | None:
+        """查找平台明确拒绝发布的 toast/弹窗，返回命中的文案。"""
+        for selector in (
+            "[class*='toast']",
+            "[class*='message']",
+            "[role='alert']",
+            "[role='dialog']",
+            ".d-toast",
+            ".d-message",
+            ".d-modal",
+        ):
+            try:
+                locator = page.locator(selector)
+                count = await locator.count()
+            except Exception:
+                continue
+
+            for index in range(min(count, 12)):
+                item = locator.nth(index)
+                try:
+                    if not await item.is_visible():
+                        continue
+                    text = (await item.inner_text()).strip()
+                except Exception:
+                    continue
+                if text and any(
+                    keyword in text
+                    for keyword in _XHS_PUBLISH_FAILURE_KEYWORDS
+                ):
+                    return text
+        return None
+
+    async def _wait_publish_outcome(
+        self, page: Page, *, timeout_ms: int = 3000
+    ) -> str:
+        """轮询成功页和失败提示，返回 success 或 timeout。
+
+        平台明确拒绝发布时立即抛 :class:`XhsPublishRejectedError`，
+        不进入结果未知分支，也不重试。
+        """
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            if "publish/success" in str(getattr(page, "url", "")):
+                return "success"
+
+            failure = await self._find_publish_failure(page)
+            if failure:
+                if self.debug:
+                    try:
+                        await page.screenshot(full_page=True)
+                    except Exception:
+                        pass
+                raise XhsPublishRejectedError(
+                    f"小红书拒绝发布：{failure}。账号或内容受限，"
+                    "本次未发布；请先到创作服务平台确认账号状态。"
+                )
+
+            await asyncio.sleep(0.3)
+
+        return "timeout"
+
     async def apply_declarations(self, page: Page) -> None:
         """按需设置「原创声明」和「添加内容类型声明」。
 
@@ -1097,19 +1176,24 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 else:
                     await page.locator('button:has-text("发布")').click()
                 publish_clicked = True
-                await page.wait_for_url(
-                    XHS_PUBLISH_SUCCESS_URL_PATTERN,
-                    timeout=3000
+                outcome = await self._wait_publish_outcome(
+                    page, timeout_ms=3000
                 )
-                xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
-                break
+                if outcome == "success":
+                    xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
+                    break
+                xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
+            except XhsPublishRejectedError:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise
             except Exception:
                 if multilogin:
                     _raise_if_login_required(page)
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
                 if self.debug:
                     await page.screenshot(full_page=True)
-                await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:
@@ -1268,19 +1352,24 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 else:
                     await page.locator('button:has-text("发布")').click()
                 publish_clicked = True
-                await page.wait_for_url(
-                    XHS_PUBLISH_SUCCESS_URL_PATTERN,
-                    timeout=3000
+                outcome = await self._wait_publish_outcome(
+                    page, timeout_ms=3000
                 )
-                xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
-                break
+                if outcome == "success":
+                    xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
+                    break
+                xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
+            except XhsPublishRejectedError:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise
             except Exception:
                 if multilogin:
                     _raise_if_login_required(page)
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 if self.debug:
                     await page.screenshot(full_page=True)
-                await asyncio.sleep(0.5)
+            await asyncio.sleep(0.5)
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:

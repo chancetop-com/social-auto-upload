@@ -317,6 +317,109 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         self.assertIn("15 分钟", str(ctx.exception))
         self.assertIn("尚未点击发布", str(ctx.exception))
 
+    def test_find_publish_failure_detects_community_rule_toast(self):
+        class FakeItem:
+            def __init__(self, text):
+                self.text = text
+
+            async def is_visible(self):
+                return True
+
+            async def inner_text(self):
+                return self.text
+
+        class FakeLocator:
+            def __init__(self, items):
+                self.items = items
+
+            async def count(self):
+                return len(self.items)
+
+            def nth(self, index):
+                return self.items[index]
+
+        class FakePage:
+            url = "https://creator.xiaohongshu.com/publish/publish?target=image"
+
+            def locator(self, selector):
+                if selector == "[class*='toast']":
+                    return FakeLocator(
+                        [FakeItem("因违反社区规范禁止发笔记")]
+                    )
+                return FakeLocator([])
+
+        app = xhs_main.XiaoHongShuNote(
+            image_paths=["a.png"],
+            note="正文",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+            title="标题",
+        )
+
+        text = asyncio.run(app._find_publish_failure(FakePage()))
+
+        self.assertEqual(text, "因违反社区规范禁止发笔记")
+
+    def test_wait_publish_outcome_fails_fast_on_rejection(self):
+        class FakeItem:
+            async def is_visible(self):
+                return True
+
+            async def inner_text(self):
+                return "因违反社区规范禁止发笔记"
+
+        class FakeLocator:
+            async def count(self):
+                return 1
+
+            def nth(self, index):
+                return FakeItem()
+
+        class FakePage:
+            url = "https://creator.xiaohongshu.com/publish/publish?target=image"
+
+            def locator(self, selector):
+                if selector == "[class*='toast']":
+                    return FakeLocator()
+                return FakeLocator()
+
+            async def screenshot(self, **kwargs):
+                return None
+
+        app = xhs_main.XiaoHongShuNote(
+            image_paths=["a.png"],
+            note="正文",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+            title="标题",
+            debug=False,
+        )
+
+        with self.assertRaises(xhs_main.XhsPublishRejectedError):
+            asyncio.run(app._wait_publish_outcome(FakePage(), timeout_ms=500))
+
+    def test_wait_publish_outcome_returns_success_on_success_url(self):
+        class FakePage:
+            url = "https://creator.xiaohongshu.com/publish/success?target=image"
+
+            def locator(self, selector):
+                raise AssertionError("success URL should return before DOM checks")
+
+        app = xhs_main.XiaoHongShuNote(
+            image_paths=["a.png"],
+            note="正文",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+            title="标题",
+        )
+
+        outcome = asyncio.run(app._wait_publish_outcome(FakePage(), timeout_ms=500))
+
+        self.assertEqual(outcome, "success")
+
     def test_publish_timeout_error_distinguishes_click_state(self):
         app = xhs_main.XiaoHongShuVideo(
             title="标题",
