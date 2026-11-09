@@ -755,13 +755,13 @@ class KSVideo(KSBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
         await page.goto(KUAISHOU_UPLOAD_URL)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
         kuaishou_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         kuaishou_logger.info(_msg("🧭", "小人正在赶往快手上传主页"))
         await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
         await self._upload_video_on_page(
-            page, multilogin=session.mode == "multilogin"
+            page, multilogin=session.managed
         )
 
     async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
@@ -1039,12 +1039,12 @@ class KSNote(KSBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
         await page.goto(KUAISHOU_UPLOAD_URL)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
         kuaishou_logger.info(_msg("🧭", "小人正在赶往快手图文发布页"))
         await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
         await self.upload_note_content(
-            page, multilogin=session.mode == "multilogin"
+            page, multilogin=session.managed
         )
 
     async def main(self, *, session: BrowserSession | None = None):

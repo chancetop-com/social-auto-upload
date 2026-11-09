@@ -20,13 +20,13 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
@@ -42,7 +42,7 @@ def register(platform_parsers):
         action_parser.add_argument("--account", required=False, help="Weibo user-defined account_name")
         add_runtime_flags(action_parser)
         if action_name == "check":
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
 
     weibo_upload_video_parser = weibo_actions.add_parser("upload-video", help="Upload one video to Weibo")
     weibo_upload_video_parser.add_argument("--account", required=False, help="Weibo user-defined account_name")
@@ -53,7 +53,7 @@ def register(platform_parsers):
     weibo_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path (<5MB)")
     weibo_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name")
     add_runtime_flags(weibo_upload_video_parser)
-    add_multilogin_flags(weibo_upload_video_parser)
+    add_browser_flags(weibo_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -98,7 +98,7 @@ def _build_weibo_uploader(
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("微博", target.profile_id)
+    raise login_required_error("微博", target.profile_id, mode=target.mode)
 
 
 async def upload_weibo_video(
@@ -111,7 +111,7 @@ async def upload_weibo_video(
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=WEIBO_LAUNCH_KWARGS,
                 # Multilogin must not assume the local 2000px viewport; the
                 # publisher scrolls the publish button into view instead.
@@ -138,7 +138,7 @@ async def upload_weibo_video(
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("weibo", args)
+        reject_managed_login("weibo", args)
         require_local_account(args)
         result = await login_weibo_account(args.account, headless=args.headless)
         if not result["success"]:
@@ -146,7 +146,7 @@ async def run(args):
         print(f"Weibo login flow completed: {result['account_file']}")
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -156,7 +156,7 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
             if not is_valid:

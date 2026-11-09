@@ -1119,7 +1119,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         # Ticket 13 §3: reuse a URL-matching page, then pages[0], and only
         # create a page when the context has none.
         page, _owned = await _select_probe_page(session.context)
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         deadline = (
             time.monotonic() + TIKTOK_PUBLISH_TIMEOUT_SECONDS
             if multilogin

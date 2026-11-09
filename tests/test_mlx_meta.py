@@ -857,7 +857,7 @@ class FacebookCliTests(_CliBase):
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
         kwargs = factory.call_args.kwargs
-        self.assertEqual(kwargs["multilogin"], MultiloginTarget(FOLDER, PROFILE))
+        self.assertEqual(kwargs["managed"].target, MultiloginTarget(FOLDER, PROFILE))
         self.assertEqual(kwargs["launch_kwargs"], FACEBOOK_LAUNCH_KWARGS)
         self.assertEqual(kwargs["context_kwargs"], FACEBOOK_CONTEXT_KWARGS)
         self.assertFalse(kwargs["init_script"])
@@ -1124,7 +1124,7 @@ class FacebookPageCliTests(_CliBase):
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
         kwargs = factory.call_args.kwargs
-        self.assertEqual(kwargs["multilogin"], MultiloginTarget(FOLDER, PROFILE))
+        self.assertEqual(kwargs["managed"].target, MultiloginTarget(FOLDER, PROFILE))
         self.assertEqual(kwargs["launch_kwargs"], FACEBOOK_PAGE_LAUNCH_KWARGS)
         self.assertEqual(kwargs["context_kwargs"], FACEBOOK_PAGE_CONTEXT_KWARGS)
         self.assertFalse(kwargs["init_script"])
@@ -1290,7 +1290,7 @@ class InstagramCliTests(_CliBase):
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
         kwargs = factory.call_args.kwargs
-        self.assertEqual(kwargs["multilogin"], MultiloginTarget(FOLDER, PROFILE))
+        self.assertEqual(kwargs["managed"].target, MultiloginTarget(FOLDER, PROFILE))
         self.assertEqual(kwargs["launch_kwargs"], INSTAGRAM_LAUNCH_KWARGS)
         self.assertEqual(kwargs["context_kwargs"], INSTAGRAM_CONTEXT_KWARGS)
         self.assertFalse(kwargs["init_script"])

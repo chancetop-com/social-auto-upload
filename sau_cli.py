@@ -12,7 +12,13 @@ from sau_commands import (
     tiktok,
 )
 from sau_commands.arguments import resolve_account_file
-from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, credentials_conflict
+from utils.errors import (
+    LoginRequiredError,
+    PublishResultUnknownError,
+    RateLimitedError,
+    UsageError,
+)
 
 
 PLATFORMS = {
@@ -67,10 +73,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
+        # Conflict detection lives after argparse and before dispatch so that
+        # ``--help`` / unknown subcommands keep their argparse semantics, while
+        # a dual-credential setup wins over command-level rejections.
+        if credentials_conflict():
+            raise RuntimeError(DUAL_CREDENTIALS_MESSAGE)
         return asyncio.run(dispatch(args))
     except LoginRequiredError as exc:
         print(str(exc), file=sys.stderr)
         return 10
+    except RateLimitedError as exc:
+        print(str(exc), file=sys.stderr)
+        return 11
     except UsageError as exc:
         parser.print_usage(sys.stderr)
         print(str(exc), file=sys.stderr)

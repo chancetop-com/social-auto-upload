@@ -1,12 +1,14 @@
 """Hand-written async test doubles for ``utils.browser_session``.
 
 The fakes deliberately fail loudly (``AssertionError``) when production code
-touches an API that the Multilogin branch must never use.  They also record the
-calls that *are* allowed so tests can assert exact parameters and ordering.
+touches an API that the managed (Multilogin X / AdsPower) branch must never
+use.  They also record the calls that *are* allowed so tests can assert exact
+parameters and ordering.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -199,6 +201,126 @@ class FakePlaywright:
         self.chromium = FakeBrowserType(events=self.events)
 
 
+class FakeManagedProvider:
+    """Duck-typed ``ManagedBrowserProvider`` for lifecycle tests."""
+
+    def __init__(
+        self,
+        *,
+        mode: str = "multilogin",
+        profile_id: str = "profile",
+        connect_url: str = "http://127.0.0.1:55513",
+        probe_error: BaseException | None = None,
+        start_error: BaseException | None = None,
+        status_error: BaseException | None = None,
+        status_value: str = "running",
+        stop_error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.mode = mode
+        self.profile_id = profile_id
+        self.connect_url = connect_url
+        self.probe_error = probe_error
+        self.start_error = start_error
+        self.status_error = status_error
+        self.status_value = status_value
+        self.stop_error = stop_error
+        self.events = events if events is not None else []
+        self.probe_calls = 0
+        self.start_calls: list[bool] = []
+        self.status_calls = 0
+        self.stop_calls = 0
+
+    def probe(self) -> None:
+        self.probe_calls += 1
+        self.events.append("probe")
+        if self.probe_error is not None:
+            raise self.probe_error
+
+    def start(self, headless: bool) -> str:
+        self.start_calls.append(headless)
+        self.events.append("start")
+        if self.start_error is not None:
+            raise self.start_error
+        return self.connect_url
+
+    def status(self) -> str:
+        self.status_calls += 1
+        self.events.append("status")
+        if self.status_error is not None:
+            raise self.status_error
+        return self.status_value
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+        self.events.append("stop")
+        if self.stop_error is not None:
+            raise self.stop_error
+
+
+class FakeAdspowerClient:
+    """Synchronous ``AdspowerClient`` double used by AdsPower tests.
+
+    Mirrors the real client's public primitives but never touches HTTP.  Every
+    call is recorded in ``calls`` and ``events`` so lifecycle ordering can be
+    asserted without reaching into the session template.
+    """
+
+    def __init__(
+        self,
+        *,
+        ws_url: str = "ws://127.0.0.1:9222/devtools/browser/ticket13",
+        probe_error: BaseException | None = None,
+        start_error: BaseException | None = None,
+        status_error: BaseException | None = None,
+        status_value: str = "Active",
+        stop_error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.ws_url = ws_url
+        self.probe_error = probe_error
+        self.start_error = start_error
+        self.status_error = status_error
+        self.status_value = status_value
+        self.stop_error = stop_error
+        self.events = events if events is not None else []
+        self.calls: list[str] = []
+        self.probe_calls = 0
+        self.start_calls: list[tuple[str, bool]] = []
+        self.status_calls: list[str] = []
+        self.stop_calls: list[str] = []
+
+    def probe(self) -> None:
+        self.probe_calls += 1
+        self.calls.append("probe")
+        self.events.append("probe")
+        if self.probe_error is not None:
+            raise self.probe_error
+
+    def start(self, profile_id: str, headless: bool) -> str:
+        self.calls.append("start")
+        self.events.append("start")
+        self.start_calls.append((profile_id, headless))
+        if self.start_error is not None:
+            raise self.start_error
+        return self.ws_url
+
+    def status(self, profile_id: str) -> str:
+        self.calls.append("status")
+        self.events.append("status")
+        self.status_calls.append(profile_id)
+        if self.status_error is not None:
+            raise self.status_error
+        return self.status_value
+
+    def stop(self, profile_id: str) -> None:
+        self.calls.append("stop")
+        self.events.append("stop")
+        self.stop_calls.append(profile_id)
+        if self.stop_error is not None:
+            raise self.stop_error
+
+
 class FakeMultiloginClient:
     """Synchronous ``MultiloginClient`` double used by browser-session tests."""
 
@@ -255,3 +377,83 @@ class FakeMultiloginClient:
         self.stop_calls.append(profile_id)
         if self.stop_error is not None:
             raise self.stop_error
+
+
+class FakeResponse:
+    """Minimal ``requests.Response`` double used by HTTP client tests."""
+
+    def __init__(
+        self,
+        status_code: int,
+        payload: dict | None = None,
+        *,
+        text: str | None = None,
+        json_error: BaseException | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.payload = payload
+        self._text = text
+        self._json_error = json_error
+
+    def json(self) -> dict:
+        if self._json_error is not None:
+            raise self._json_error
+        return self.payload if self.payload is not None else {}
+
+    @property
+    def text(self) -> str:
+        if self._text is not None:
+            return self._text
+        return json.dumps(self.payload or {}, ensure_ascii=False)
+
+
+class FakeHttpGet:
+    """Legacy GET-only fake retained for the Multilogin client tests."""
+
+    def __init__(self, outcomes: list[object] | None = None) -> None:
+        self.outcomes = list(outcomes or [])
+        self.calls: list[dict] = []
+
+    def __call__(self, url: str, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        if not self.outcomes:
+            raise AssertionError("http_get called with no queued outcome")
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class FakeHttp:
+    """Injectable ``http_get`` / ``http_post`` pair with ordered call recording."""
+
+    def __init__(
+        self,
+        get_outcomes: list[object] | None = None,
+        post_outcomes: list[object] | None = None,
+    ) -> None:
+        self.get_outcomes = list(get_outcomes or [])
+        self.post_outcomes = list(post_outcomes or [])
+        self.get_calls: list[dict] = []
+        self.post_calls: list[dict] = []
+        self.calls: list[dict] = []
+
+    def _pop(self, outcomes: list[object], method: str) -> object:
+        if not outcomes:
+            raise AssertionError(f"http_{method} called with no queued outcome")
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    def get(self, url: str, **kwargs):
+        call = {"method": "GET", "url": url, **kwargs}
+        self.get_calls.append(call)
+        self.calls.append(call)
+        return self._pop(self.get_outcomes, "get")
+
+    def post(self, url: str, **kwargs):
+        call = {"method": "POST", "url": url, **kwargs}
+        self.post_calls.append(call)
+        self.calls.append(call)
+        return self._pop(self.post_outcomes, "post")

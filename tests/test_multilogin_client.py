@@ -13,9 +13,12 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.fakes import FakeHttpGet, FakeResponse
+from utils.errors import RateLimitedError
 from utils.multilogin import (
     LAUNCHER_BASE_URL,
     MultiloginClient,
+    MultiloginProvider,
     MultiloginTarget,
 )
 
@@ -28,47 +31,6 @@ PROFILE_ID = "33333333-3333-4333-8333-333333333333"
 def load_fixture(name: str) -> dict:
     with (FIXTURES / name).open(encoding="utf-8") as file_obj:
         return json.load(file_obj)
-
-
-class FakeResponse:
-    def __init__(
-        self,
-        status_code: int,
-        payload: dict | None = None,
-        *,
-        text: str | None = None,
-        json_error: BaseException | None = None,
-    ) -> None:
-        self.status_code = status_code
-        self.payload = payload
-        self._text = text
-        self._json_error = json_error
-
-    def json(self) -> dict:
-        if self._json_error is not None:
-            raise self._json_error
-        return self.payload if self.payload is not None else {}
-
-    @property
-    def text(self) -> str:
-        if self._text is not None:
-            return self._text
-        return json.dumps(self.payload or {}, ensure_ascii=False)
-
-
-class FakeHttpGet:
-    def __init__(self, outcomes: list[object] | None = None) -> None:
-        self.outcomes = list(outcomes or [])
-        self.calls: list[dict] = []
-
-    def __call__(self, url: str, **kwargs):
-        self.calls.append({"url": url, **kwargs})
-        if not self.outcomes:
-            raise AssertionError("http_get called with no queued outcome")
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, BaseException):
-            raise outcome
-        return outcome
 
 
 class MultiloginClientProbeTests(unittest.TestCase):
@@ -106,6 +68,17 @@ class MultiloginClientProbeTests(unittest.TestCase):
             client.probe()
 
         self.assertIn("503", str(caught.exception))
+
+    def test_probe_429_raises_the_shared_rate_limited_error(self):
+        http_get = FakeHttpGet(
+            [FakeResponse(429, {"status": {"message": "rate limited"}})]
+        )
+        client = MultiloginClient(TOKEN, http_get=http_get)
+
+        with self.assertRaises(RateLimitedError) as caught:
+            client.probe()
+
+        self.assertIn("429", str(caught.exception))
 
 
 class MultiloginClientStartTests(unittest.TestCase):
@@ -171,6 +144,14 @@ class MultiloginClientStartTests(unittest.TestCase):
 
         self.assertIn("429", str(caught.exception))
         self.assertEqual(len(http_get.calls), 1)
+
+    def test_start_429_raises_the_shared_rate_limited_error(self):
+        client, _ = self._client(
+            FakeResponse(429, {"status": {"message": "rate limited"}})
+        )
+
+        with self.assertRaises(RateLimitedError):
+            client.start(FOLDER_ID, PROFILE_ID, headless=True)
 
     def test_start_missing_port_is_contract_error(self):
         client, _ = self._client(FakeResponse(200, {"data": {}, "status": {"http_code": 200}}))
@@ -302,6 +283,39 @@ class MultiloginClientStatusTests(unittest.TestCase):
             client.status(PROFILE_ID)
 
         self.assertIn("connection refused", str(caught.exception))
+
+
+class MultiloginProviderTests(unittest.TestCase):
+    def test_provider_normalizes_start_port_to_http_cdp_url(self):
+        http_get = FakeHttpGet(
+            [FakeResponse(200, load_fixture("start_ok.json"))]
+        )
+        target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)
+        provider = MultiloginProvider(target, MultiloginClient(TOKEN, http_get=http_get))
+
+        url = provider.start(headless=True)
+
+        self.assertEqual(url, "http://127.0.0.1:55513")
+        self.assertEqual(provider.mode, "multilogin")
+        self.assertEqual(provider.profile_id, PROFILE_ID)
+
+    def test_provider_drops_folder_id_from_status_and_stop(self):
+        http_get = FakeHttpGet(
+            [
+                FakeResponse(200, {"data": {"status": "browser_running"}}),
+                FakeResponse(200, {"status": {"message": "ok"}}),
+            ]
+        )
+        target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)
+        provider = MultiloginProvider(target, MultiloginClient(TOKEN, http_get=http_get))
+
+        self.assertEqual(provider.status(), "browser_running")
+        provider.stop()
+
+        self.assertIn(f"/p/{PROFILE_ID}", http_get.calls[0]["url"])
+        self.assertIn(f"/p/{PROFILE_ID}", http_get.calls[1]["url"])
+        self.assertNotIn(FOLDER_ID, http_get.calls[0]["url"])
+        self.assertNotIn(FOLDER_ID, http_get.calls[1]["url"])
 
 
 class MultiloginSanitisationTests(unittest.TestCase):

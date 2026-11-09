@@ -827,7 +827,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
         await self.upload_video_content(
-            page, multilogin=session.mode == "multilogin"
+            page, multilogin=session.managed
         )
 
     async def xiaohongshu_upload_video(self, *, session: BrowserSession | None = None):
@@ -972,7 +972,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
         await self.upload_note_content(
-            page, multilogin=session.mode == "multilogin"
+            page, multilogin=session.managed
         )
 
     async def xiaohongshu_upload_note(self, *, session: BrowserSession | None = None):

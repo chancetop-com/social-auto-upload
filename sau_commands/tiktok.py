@@ -21,14 +21,15 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
+
 from uploader.tk_uploader.main_chrome import (
     TIKTOK_CONTEXT_KWARGS,
     TIKTOK_IMAGE_SUFFIXES,
@@ -149,7 +150,7 @@ def register(platform_parsers):
         # Repo-wide contract: ``login`` never accepts Profile flags.  They are
         # only meaningful for check/upload actions.
         if action_name == "check":
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
 
     upload_video_parser = tiktok_actions.add_parser(
         "upload-video", help="Upload one video to TikTok"
@@ -174,7 +175,7 @@ def register(platform_parsers):
     )
     _add_publish_option_flags(upload_video_parser, include_reuse=True)
     add_runtime_flags(upload_video_parser)
-    add_multilogin_flags(upload_video_parser)
+    add_browser_flags(upload_video_parser)
 
     upload_note_parser = tiktok_actions.add_parser(
         "upload-note", help="Upload one photo post to TikTok"
@@ -218,7 +219,7 @@ def register(platform_parsers):
     # registered here.  The first image is the cover: no thumbnail/cover flag.
     _add_publish_option_flags(upload_note_parser, include_reuse=False)
     add_runtime_flags(upload_note_parser)
-    add_multilogin_flags(upload_note_parser)
+    add_browser_flags(upload_note_parser)
 
 
 @dataclass(slots=True)
@@ -453,7 +454,7 @@ async def _upload_media(request, target, builder) -> None:
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=TIKTOK_LAUNCH_KWARGS,
                 context_kwargs=TIKTOK_CONTEXT_KWARGS,
                 init_script=TIKTOK_INIT_SCRIPT,
@@ -476,7 +477,7 @@ async def _upload_video(request: TiktokVideoUploadRequest, target) -> None:
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("TikTok", target.profile_id)
+    raise login_required_error("TikTok", target.profile_id, mode=target.mode)
 
 
 async def run(args):
@@ -501,7 +502,7 @@ async def run(args):
 
     if args.action == "login":
         # Multilogin profiles are logged in through the Multilogin app.
-        reject_multilogin_login("tiktok", args)
+        reject_managed_login("tiktok", args)
         require_local_account(args)
         account_file = resolve_account_file("tiktok", args.account)
         ready = await tiktok_setup(
@@ -514,7 +515,7 @@ async def run(args):
         print(f"TikTok login flow completed: {account_file}")
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -524,7 +525,7 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
             if not is_valid:

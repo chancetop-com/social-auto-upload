@@ -101,7 +101,7 @@ class _AsyncCM:
 
 
 def _fake_session(context):
-    session = SimpleNamespace(context=context, mode="multilogin")
+    session = SimpleNamespace(context=context, mode="multilogin", managed=True)
     session_cm = _AsyncCM(session)
     factory = MagicMock(return_value=session_cm)
     return session, session_cm, factory
@@ -491,7 +491,7 @@ class UploadNoteValidationTests(unittest.TestCase):
             patch.object(tiktok_command, "async_playwright", playwright),
             patch.object(tiktok_command, "browser_session", session),
             patch.object(
-                tiktok_command, "resolve_multilogin_target", target
+                tiktok_command, "resolve_managed_provider", target
             ),
         ):
             code, out, err = _run(argv)

@@ -355,7 +355,7 @@ class YouTubeVideo(BaseVideoUploader):
         youtube_logger.info(_msg("🎬", f"开始上传: {Path(self.file_path).name}"))
         await page.goto(UPLOAD_URL, wait_until="domcontentloaded")
         await page.wait_for_timeout(3000)
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         if multilogin:
             _raise_if_login_required(page)
         if "accounts.google.com" in page.url or "signin" in page.url.lower():

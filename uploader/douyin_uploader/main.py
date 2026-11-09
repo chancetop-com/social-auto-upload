@@ -1083,7 +1083,7 @@ class DouYinVideo(DouYinBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
         await page.goto(DOUYIN_UPLOAD_URL, wait_until="domcontentloaded", timeout=90000)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
         douyin_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         douyin_logger.info(_msg("🧭", "小人正在赶往上传主页"))
@@ -1092,7 +1092,7 @@ class DouYinVideo(DouYinBaseUploader):
         # ── 进入页面后可能弹身份验证（短信验证码）或被踢到登录页 ──
         await page.wait_for_timeout(2000)
         await self._upload_video_on_page(
-            page, multilogin=session.mode == "multilogin"
+            page, multilogin=session.managed
         )
 
     async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
@@ -1371,7 +1371,7 @@ class DouYinNote(DouYinBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
         await page.goto(DOUYIN_UPLOAD_URL, wait_until="domcontentloaded", timeout=90000)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
         douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
         await page.wait_for_url(DOUYIN_UPLOAD_URL, timeout=90000)

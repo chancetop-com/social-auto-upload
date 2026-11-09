@@ -23,15 +23,15 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
-    reject_multilogin_login,
+from sau_commands.browser import (
+    add_browser_flags,
+    login_required_error,
+    reject_managed_login,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
-from utils.errors import LoginRequiredError
 
 
 def register(platform_parsers):
@@ -45,7 +45,7 @@ def register(platform_parsers):
         action_parser.add_argument("--account", required=False, help="Tencent user-defined account_name")
         add_runtime_flags(action_parser)
         if action_name == "check":
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
 
     tencent_upload_video_parser = tencent_actions.add_parser("upload-video", help="Upload one video to WeChat Channels")
     tencent_upload_video_parser.add_argument("--account", required=False, help="Tencent user-defined account_name")
@@ -62,7 +62,7 @@ def register(platform_parsers):
     tencent_upload_video_parser.add_argument("--draft", action="store_true", help="Save as draft instead of publishing")
     tencent_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(tencent_upload_video_parser)
-    add_multilogin_flags(tencent_upload_video_parser)
+    add_browser_flags(tencent_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -126,16 +126,13 @@ async def upload_tencent_video(request: TencentVideoUploadRequest, *, target=Non
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=TENCENT_LAUNCH_KWARGS,
                 context_kwargs=TENCENT_CONTEXT_KWARGS,
                 init_script=TENCENT_INIT_SCRIPT,
             ) as session:
                 if not await is_logged_in(session.context):
-                    raise LoginRequiredError(
-                        f"视频号登录态无效：profile_id={target.profile_id}。"
-                        "请在 Multilogin 应用中登录 Profile 后重试。"
-                    )
+                    raise login_required_error("视频号", target.profile_id, mode=target.mode)
                 await app.tencent_upload_video(session=session)
         return None
 
@@ -176,7 +173,7 @@ async def upload_tencent_video(request: TencentVideoUploadRequest, *, target=Non
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("tencent", args)
+        reject_managed_login("tencent", args)
         require_local_account(args)
         result = await login_tencent_account(args.account, headless=args.headless)
         if not result["success"]:
@@ -184,7 +181,7 @@ async def run(args):
         print(f"Tencent/WeChat Channels login flow completed: {result['account_file']}")
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -194,14 +191,11 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
             if not is_valid:
-                raise LoginRequiredError(
-                    f"视频号登录态无效：profile_id={target.profile_id}。"
-                    "请在 Multilogin 应用中登录 Profile 后重试。"
-                )
+                raise login_required_error("视频号", target.profile_id, mode=target.mode)
             print("valid")
             return 0
 

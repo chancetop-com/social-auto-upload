@@ -246,7 +246,7 @@ class ZhihuArticle:
             result["schedule"] = self.schedule.isoformat()
         result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         page = None
         submitted = False
         try:

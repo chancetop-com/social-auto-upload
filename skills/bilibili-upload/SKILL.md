@@ -46,6 +46,10 @@ summary: 登录哔哩哔哩并发布视频，支持分区选择。
 - 正确做法是让用户自己在本地终端执行 `sau bilibili login --account <name>`
 - 如果终端里的二维码显示不完整，提醒用户直接打开当前目录下的 `qrcode.png` 扫码
 
+## 托管浏览器模式
+
+**不支持托管浏览器模式**（`biliup` 没有浏览器上下文）。设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`sau bilibili login` / `check` / `upload-video` 都会退出 `1`；如需发布 Bilibili，请取消对应环境变量并继续使用本地模式。`verify` / `delete` 等本地操作不受影响，但仍需 `--account`。
+
 ## 参考文档
 
 - 运行前提：`references/runtime-requirements.md`

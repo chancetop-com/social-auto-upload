@@ -1,7 +1,7 @@
 """instagram 的命令参数与执行逻辑。"""
 from __future__ import annotations
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from loguru import logger
 from patchright.async_api import async_playwright
@@ -24,14 +24,15 @@ from sau_commands.arguments import (
     parse_tags,
     resolve_account_file,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
+    identity_unverified_format,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_account,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
@@ -50,7 +51,7 @@ def register(platform_parsers):
             action_parser.set_defaults(headless=False)
         else:
             add_runtime_flags(action_parser)
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
     instagram_video = instagram_actions.add_parser("upload-video", help="向 Instagram 发布视频/Reel")
     instagram_video.add_argument("--account", required=False)
     instagram_video.add_argument("--file", required=True, type=existing_file_path)
@@ -61,7 +62,7 @@ def register(platform_parsers):
     instagram_video.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_video.add_argument("--result", type=Path)
     add_runtime_flags(instagram_video)
-    add_multilogin_flags(instagram_video)
+    add_browser_flags(instagram_video)
     instagram_video.set_defaults(headless=False)
     instagram_note = instagram_actions.add_parser("upload-note", help="向 Instagram 发布图片或轮播")
     instagram_note.add_argument("--account", required=False)
@@ -72,7 +73,7 @@ def register(platform_parsers):
     instagram_note.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_note.add_argument("--result", type=Path)
     add_runtime_flags(instagram_note)
-    add_multilogin_flags(instagram_note)
+    add_browser_flags(instagram_note)
     instagram_note.set_defaults(headless=False)
     for action_name in ("verify", "delete"):
         action_parser = instagram_actions.add_parser(action_name, help="核对 Instagram 原作品" if action_name == "verify" else "核对后将 Instagram 原作品移至最近删除")
@@ -125,7 +126,7 @@ def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramU
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("Instagram", target.profile_id)
+    raise login_required_error("Instagram", target.profile_id, mode=target.mode)
 
 
 async def upload_instagram_content(
@@ -133,14 +134,15 @@ async def upload_instagram_content(
 ) -> dict:
     if target is not None:
         # No cookie path, no .identity.json read, no account-id comparison:
-        # the Multilogin Profile is the identity.
-        app = _build_uploader(request, None)
+        # the Profile is the identity.  ``--proxy`` / the environment proxy are
+        # not forwarded either; the Profile owns the egress IP.
+        app = _build_uploader(replace(request, proxy=None), None)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=INSTAGRAM_LAUNCH_KWARGS,
                 context_kwargs=INSTAGRAM_CONTEXT_KWARGS,
                 init_script=INSTAGRAM_INIT_SCRIPT,
@@ -148,7 +150,7 @@ async def upload_instagram_content(
                 if not await is_logged_in(session.context):
                     _raise_login_required(target)
                 logger.info(
-                    "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
+                    identity_unverified_format(mode=target.mode),
                     target.profile_id,
                 )
                 return await app.upload(session=session)
@@ -161,7 +163,7 @@ async def upload_instagram_content(
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("instagram", args)
+        reject_managed_login("instagram", args)
         require_local_account(args)
         result = await login_instagram_account(args.account, headless=args.headless, proxy=args.proxy)
         if not result["success"]:
@@ -183,7 +185,7 @@ async def run(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -193,13 +195,13 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                     launch_kwargs=INSTAGRAM_LAUNCH_KWARGS,
                     context_kwargs=INSTAGRAM_CONTEXT_KWARGS,
                     init_script=INSTAGRAM_INIT_SCRIPT,
                 ) as session:
                     logger.info(
-                        "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）",
+                        identity_unverified_format(mode=target.mode),
                         target.profile_id,
                     )
                     is_valid = await is_logged_in(session.context)

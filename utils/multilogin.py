@@ -14,6 +14,9 @@ from urllib.parse import quote
 
 import requests
 
+from utils.errors import RateLimitedError
+from utils.managed_browser import ProviderMode
+
 LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
 
 PROBE_TIMEOUT_SECONDS = 3
@@ -93,7 +96,8 @@ class MultiloginClient:
         error_code = str(status.get("error_code") or "").strip()
         message = str(status.get("message") or "").strip()
 
-        parts = [f"{action}失败：HTTP {getattr(response, 'status_code', '?')}"]
+        status_code = getattr(response, "status_code", "?")
+        parts = [f"{action}失败：HTTP {status_code}"]
         if error_code:
             parts.append(f"error_code={error_code}")
         if message:
@@ -102,6 +106,9 @@ class MultiloginClient:
             body = self._response_text(response).strip()
             if body:
                 parts.append(body[:500])
+        if status_code == 429:
+            # Shared rate-limit contract: the CLI maps this to exit code 11.
+            return RateLimitedError("；".join(parts))
         return RuntimeError("；".join(parts))
 
     # ------------------------------------------------------------- Endpoints
@@ -118,6 +125,10 @@ class MultiloginClient:
 
         if getattr(response, "status_code", None) != 200:
             detail = self._http_error("探活 Multilogin Launcher", response)
+            if isinstance(detail, RateLimitedError):
+                # Shared rate-limit contract: do not bury the 429 inside the
+                # unreachable hint, or the CLI cannot map it to exit code 11.
+                raise detail
             raise RuntimeError(f"{_LAUNCHER_UNREACHABLE_MESSAGE}\n{detail}") from None
 
     def start(self, folder_id: str, profile_id: str, headless: bool) -> str:
@@ -188,8 +199,60 @@ class MultiloginClient:
         return str(value) if value is not None else "unknown"
 
 
+class MultiloginProvider:
+    """Compose a Multilogin profile identity with its launcher client.
+
+    ``start`` is the only place that normalizes the launcher's raw port into a
+    URL that can be handed to ``connect_over_cdp``.
+    """
+
+    mode: ProviderMode = "multilogin"
+
+    __slots__ = ("_target", "_client")
+
+    def __init__(self, target: MultiloginTarget, client: MultiloginClient) -> None:
+        self._target = target
+        self._client = client
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(target={self._target!r}, "
+            f"client={self._client!r})"
+        )
+
+    @property
+    def target(self) -> MultiloginTarget:
+        return self._target
+
+    @property
+    def folder_id(self) -> str:
+        return self._target.folder_id
+
+    @property
+    def profile_id(self) -> str:
+        return self._target.profile_id
+
+    def probe(self) -> None:
+        self._client.probe()
+
+    def start(self, headless: bool) -> str:
+        port = self._client.start(
+            self._target.folder_id,
+            self._target.profile_id,
+            headless,
+        )
+        return f"http://127.0.0.1:{port}"
+
+    def stop(self) -> None:
+        self._client.stop(self._target.profile_id)
+
+    def status(self) -> str:
+        return self._client.status(self._target.profile_id)
+
+
 __all__ = [
     "LAUNCHER_BASE_URL",
     "MultiloginClient",
+    "MultiloginProvider",
     "MultiloginTarget",
 ]

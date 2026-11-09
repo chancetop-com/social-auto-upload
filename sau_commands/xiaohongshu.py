@@ -26,13 +26,13 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
@@ -48,7 +48,7 @@ def register(platform_parsers):
         action_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
         add_runtime_flags(action_parser)
         if action_name == "check":
-            add_multilogin_flags(action_parser)
+            add_browser_flags(action_parser)
 
     xiaohongshu_upload_video_parser = xiaohongshu_actions.add_parser("upload-video", help="Upload one video to Xiaohongshu")
     xiaohongshu_upload_video_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
@@ -59,7 +59,7 @@ def register(platform_parsers):
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     add_runtime_flags(xiaohongshu_upload_video_parser)
-    add_multilogin_flags(xiaohongshu_upload_video_parser)
+    add_browser_flags(xiaohongshu_upload_video_parser)
 
     xiaohongshu_upload_note_parser = xiaohongshu_actions.add_parser("upload-note", help="Upload one note to Xiaohongshu")
     xiaohongshu_upload_note_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
@@ -69,7 +69,7 @@ def register(platform_parsers):
     xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     add_runtime_flags(xiaohongshu_upload_note_parser)
-    add_multilogin_flags(xiaohongshu_upload_note_parser)
+    add_browser_flags(xiaohongshu_upload_note_parser)
 
 
 @dataclass(slots=True)
@@ -142,7 +142,7 @@ def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) ->
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("小红书", target.profile_id)
+    raise login_required_error("小红书", target.profile_id, mode=target.mode)
 
 
 async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest, *, target=None) -> Path | None:
@@ -153,7 +153,7 @@ async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest, *, ta
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=XHS_LAUNCH_KWARGS,
                 context_kwargs=XHS_CONTEXT_KWARGS,
                 init_script=XHS_INIT_SCRIPT,
@@ -183,7 +183,7 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest, *, targ
                 playwright,
                 headless=request.headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
                 launch_kwargs=XHS_LAUNCH_KWARGS,
                 context_kwargs=XHS_CONTEXT_KWARGS,
                 init_script=XHS_INIT_SCRIPT,
@@ -208,7 +208,7 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest, *, targ
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("xiaohongshu", args)
+        reject_managed_login("xiaohongshu", args)
         require_local_account(args)
         result = await login_xiaohongshu_account(args.account, headless=args.headless)
         if not result["success"]:
@@ -216,7 +216,7 @@ async def run(args):
         print(f"Xiaohongshu login flow completed: {result['account_file']}")
         return 0
 
-    target = resolve_multilogin_target(args)
+    target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
 
@@ -226,7 +226,7 @@ async def run(args):
                 async with browser_session(
                     playwright,
                     headless=args.headless,
-                    multilogin=target,
+                    managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
             if not is_valid:

@@ -813,7 +813,7 @@ class AlipayCliTests(unittest.TestCase):
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
         self.assertIsNone(factory.call_args.kwargs.get("account_file"))
-        self.assertEqual(factory.call_args.kwargs["multilogin"], _target())
+        self.assertEqual(factory.call_args.kwargs["managed"].target, _target())
 
     def test_check_logged_out_returns_10(self):
         playwright_cm, _, _, factory, probe = self._check_patches(logged_in=False)
@@ -893,7 +893,7 @@ class AlipayCliTests(unittest.TestCase):
         self.assertIn("Alipay video upload submitted", out)
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
-        self.assertEqual(kwargs["multilogin"], _target())
+        self.assertEqual(kwargs["managed"].target, _target())
         self.assertEqual(kwargs["launch_kwargs"], ALIPAY_LAUNCH_KWARGS)
         self.assertIsNone(kwargs["context_kwargs"])
         self.assertFalse(kwargs["init_script"])
@@ -1059,7 +1059,7 @@ class AlipayCliTests(unittest.TestCase):
                     new=MagicMock(return_value=fake_app),
                 ),
                 patch(
-                    "utils.browser_session.MultiloginClient",
+                    "sau_commands.browser.MultiloginClient",
                     return_value=client,
                 ),
             ):
@@ -1196,7 +1196,7 @@ class WeiboCliTests(unittest.TestCase):
         self.assertIn("Weibo video upload submitted", out)
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
-        self.assertEqual(kwargs["multilogin"], _target())
+        self.assertEqual(kwargs["managed"].target, _target())
         self.assertEqual(kwargs["launch_kwargs"], WEIBO_LAUNCH_KWARGS)
         self.assertIsNone(kwargs["context_kwargs"])
         self.assertNotIn("viewport", kwargs["context_kwargs"] or {})

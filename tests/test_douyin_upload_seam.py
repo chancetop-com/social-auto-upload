@@ -432,7 +432,7 @@ class DouyinMlxCliUploadTests(unittest.TestCase):
         session_factory.assert_called_once()
         kwargs = session_factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
-        self.assertEqual(kwargs["multilogin"], target)
+        self.assertEqual(kwargs["managed"].target, target)
         self.assertEqual(kwargs["launch_kwargs"], DOUYIN_LAUNCH_KWARGS)
         self.assertEqual(kwargs["context_kwargs"], DOUYIN_CONTEXT_KWARGS)
         self.assertTrue(kwargs["init_script"])

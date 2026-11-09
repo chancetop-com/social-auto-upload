@@ -50,7 +50,7 @@ from uploader.hupu_uploader.main import (
 )
 from utils.browser_session import BrowserSession, browser_session
 from utils.errors import LoginRequiredError
-from utils.multilogin import MultiloginTarget
+from utils.multilogin import MultiloginProvider, MultiloginTarget
 
 TOKEN = "SENTINEL-MLX-TOKEN-ticket21"
 PROFILE = "profile-21"
@@ -402,7 +402,7 @@ class HupuMultiloginUploadTests(unittest.TestCase):
                 playwright,
                 headless=True,
                 account_file="/tmp/must-not-read.json",
-                multilogin=target,
+                managed=MultiloginProvider(target, client),
                 launch_kwargs=HUPU_LAUNCH_KWARGS,
                 context_kwargs=HUPU_CONTEXT_KWARGS,
                 init_script=HUPU_INIT_SCRIPT,
@@ -410,10 +410,7 @@ class HupuMultiloginUploadTests(unittest.TestCase):
             ) as session:
                 self.assertEqual(session.mode, "multilogin")
 
-        with (
-            patch.dict(os.environ, {"MLX_API_TOKEN": TOKEN}),
-            patch("utils.browser_session.MultiloginClient", return_value=client),
-        ):
+        with patch.dict(os.environ, {"MLX_API_TOKEN": TOKEN}):
             asyncio.run(scenario())
 
         setup.assert_not_called()
@@ -450,7 +447,7 @@ class HupuCliTests(unittest.TestCase):
         self.assertIn("valid", out)
         self.assertIsNone(factory.call_args.kwargs.get("account_file"))
         self.assertEqual(
-            factory.call_args.kwargs["multilogin"],
+            factory.call_args.kwargs["managed"].target,
             MultiloginTarget(folder_id=FOLDER, profile_id=PROFILE),
         )
 
@@ -556,7 +553,7 @@ class HupuCliTests(unittest.TestCase):
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
         self.assertEqual(
-            kwargs["multilogin"],
+            kwargs["managed"].target,
             MultiloginTarget(folder_id=FOLDER, profile_id=PROFILE),
         )
         self.assertEqual(kwargs["launch_kwargs"], HUPU_LAUNCH_KWARGS)
@@ -726,7 +723,7 @@ class HupuCliTests(unittest.TestCase):
             app.upload = AsyncMock()
             with (
                 patch.dict(os.environ, {"MLX_API_TOKEN": TOKEN}),
-                patch("utils.browser_session.MultiloginClient", return_value=client),
+                patch("sau_commands.browser.MultiloginClient", return_value=client),
                 patch.object(
                     hupu_command, "async_playwright", lambda: _AsyncCM(playwright)
                 ),
@@ -1228,7 +1225,7 @@ class DayuCliTests(unittest.TestCase):
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
         self.assertEqual(
-            kwargs["multilogin"],
+            kwargs["managed"].target,
             MultiloginTarget(folder_id=FOLDER, profile_id=PROFILE),
         )
         self.assertEqual(kwargs["launch_kwargs"], DAYU_LAUNCH_KWARGS)
@@ -1414,7 +1411,7 @@ class DayuCliTests(unittest.TestCase):
             app = self._fake_app()
             with (
                 patch.dict(os.environ, {"MLX_API_TOKEN": TOKEN}),
-                patch("utils.browser_session.MultiloginClient", return_value=client),
+                patch("sau_commands.browser.MultiloginClient", return_value=client),
                 patch.object(
                     dayu_command, "async_playwright", lambda: _AsyncCM(playwright)
                 ),

@@ -255,7 +255,7 @@ class XueqiuArticle:
                   "content_file": str(self.content_file),
                   "identity": self.identity, "visibility": self.visibility, "declaration": self.declaration,
                   "result_file": str(result_file), "remote_draft_possible": False}
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         page = None
         try:
             page = await session.context.new_page()

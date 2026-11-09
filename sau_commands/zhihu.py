@@ -27,29 +27,28 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    add_multilogin_flags,
+from sau_commands.browser import (
+    add_browser_flags,
+    identity_unverified_format,
     login_required_error,
-    reject_multilogin_login,
+    reject_managed_login,
     require_account,
     require_local_account,
     resolve_account_label,
-    resolve_multilogin_target,
+    resolve_managed_provider,
 )
 from utils.browser_session import browser_session
 
-IDENTITY_UNVERIFIED_MESSAGE = (
-    "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}），"
-    "请调度侧确保 profile_id 与目标账号匹配。"
-)
-
 
 def _log_identity_unverified(target) -> None:
-    logger.info(IDENTITY_UNVERIFIED_MESSAGE, target.profile_id)
+    logger.info(
+        identity_unverified_format(mode=target.mode, detailed=True),
+        target.profile_id,
+    )
 
 
 def _raise_login_required(target) -> None:
-    raise login_required_error("知乎", target.profile_id)
+    raise login_required_error("知乎", target.profile_id, mode=target.mode)
 
 
 def register(platform_parsers):
@@ -62,7 +61,7 @@ def register(platform_parsers):
     zhihu_login.add_argument("--timeout", type=int, default=600, help="登录等待秒数")
     zhihu_check = zhihu_actions.add_parser("check", help="检查知乎登录态和页头账号绑定")
     zhihu_check.add_argument("--account", required=False, help="本地会话别名")
-    add_multilogin_flags(zhihu_check)
+    add_browser_flags(zhihu_check)
     add_runtime_flags(zhihu_check)
     zhihu_check.set_defaults(headless=False)
     zhihu_verify = zhihu_actions.add_parser("verify", help="按已保存的作品 URL 只读核对提交结果")
@@ -79,7 +78,7 @@ def register(platform_parsers):
     zhihu_article.add_argument("--prepare-only", action="store_true", help="填写并检查编辑器后结束，不点击发布")
     zhihu_article.add_argument("--upload-timeout", type=int, default=600, help="每张正文图片上传等待秒数")
     add_runtime_flags(zhihu_article)
-    add_multilogin_flags(zhihu_article)
+    add_browser_flags(zhihu_article)
     zhihu_article.set_defaults(headless=False)
     zhihu_video = zhihu_actions.add_parser("upload-video", help="上传并发布一个知乎视频")
     zhihu_video.add_argument("--account", required=False, help="本地会话别名")
@@ -98,7 +97,7 @@ def register(platform_parsers):
     zhihu_video.add_argument("--prepare-only", action="store_true", help="上传并填写后结束，不点击发布")
     zhihu_video.add_argument("--upload-timeout", type=int, default=1200, help="视频上传等待秒数")
     add_runtime_flags(zhihu_video)
-    add_multilogin_flags(zhihu_video)
+    add_browser_flags(zhihu_video)
     zhihu_video.set_defaults(headless=False)
 
 
@@ -112,7 +111,7 @@ async def _run_multilogin(args, target):
                 playwright,
                 headless=headless,
                 account_file=None,
-                multilogin=target,
+                managed=target,
             ) as session:
                 _log_identity_unverified(target)
                 is_valid = await is_logged_in(session.context)
@@ -142,7 +141,7 @@ async def _run_multilogin(args, target):
             playwright,
             headless=headless,
             account_file=None,
-            multilogin=target,
+            managed=target,
             launch_kwargs=ZHIHU_LAUNCH_KWARGS,
             context_kwargs=ZHIHU_CONTEXT_KWARGS,
         ) as session:
@@ -158,11 +157,11 @@ async def _run_multilogin(args, target):
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("zhihu", args)
+        reject_managed_login("zhihu", args)
         require_local_account(args)
         account = args.account
     elif args.action in {"check", "upload-article", "upload-video"}:
-        target = resolve_multilogin_target(args)
+        target = resolve_managed_provider(args)
         require_local_account(args)
         account = resolve_account_label(args)
         if target is not None:

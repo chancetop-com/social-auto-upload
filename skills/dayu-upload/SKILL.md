@@ -52,6 +52,15 @@ sau dayu verify --account <本地账号名> --result "本次结果文件.json" -
 
 只有用户明确要求核对公开内容/播放时才在查询命令添加 `--public`；主题或完整正文核对应使用原结果文件。公开检查可能等待审核或定时到点，不属于默认发表完成条件。
 
+## 托管浏览器模式（可选）
+
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下不写入时区，建议把 Profile 时区设为 `Asia/Shanghai`。
+
+- MLX：`--folder-id` 与 `--profile-id` 必填。
+- AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
+- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+
 ## 示例脚本
 
 `scripts/examples/` 下的文件是复制用示例，不是运行时依赖。执行前先查看当前 CLI 的 `--help`，替换账号、素材和正文；这些命令可能创建真实作品。

@@ -14,6 +14,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
+from sau_commands import browser as browser_command
 from sau_commands import dayu as dayu_command
 from sau_commands import douyin as douyin_command
 from sau_commands import facebook as facebook_command
@@ -22,10 +23,19 @@ from sau_commands import instagram as instagram_command
 from sau_commands import multilogin
 from sau_commands import xueqiu as xueqiu_command
 from sau_commands import zhihu as zhihu_command
-from utils.errors import LoginRequiredError, UsageError
+from tests.fakes import FakeMultiloginClient
+from utils.errors import LoginRequiredError, RateLimitedError, UsageError
 from utils.multilogin import MultiloginTarget
 
 SENTINEL_TOKEN = "SENTINEL-MLX-TOKEN-7f34d0"
+
+
+class _FakePlaywrightContext:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | None = None):
@@ -213,6 +223,22 @@ class HelperTests(unittest.TestCase):
                     with self.assertRaises(UsageError):
                         multilogin.require_account(Namespace(account=account))
 
+    def test_shim_reexports_legacy_symbols(self):
+        expected = (
+            "add_multilogin_flags",
+            "login_required_error",
+            "multilogin_enabled",
+            "reject_multilogin_login",
+            "reject_multilogin_platform",
+            "require_account",
+            "require_local_account",
+            "resolve_account_label",
+            "resolve_multilogin_target",
+        )
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(multilogin, name), name)
+
     def test_login_required_error_message(self):
         error = multilogin.login_required_error("抖音", "profile-1")
         self.assertIsInstance(error, LoginRequiredError)
@@ -274,6 +300,39 @@ class UsageAndExitCodeTests(unittest.TestCase):
             ["douyin", "check", "--folder-id", "folder"], SENTINEL_TOKEN
         )
         self.assertEqual(code, 2)
+
+    def test_mlx_probe_429_exits_11_without_start_or_stop(self):
+        fake = FakeMultiloginClient(probe_error=RateLimitedError("probe 429"))
+        with (
+            patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}),
+            patch.object(
+                douyin_command,
+                "async_playwright",
+                lambda: _FakePlaywrightContext(),
+            ),
+            patch.object(
+                browser_command,
+                "MultiloginClient",
+                return_value=fake,
+            ),
+        ):
+            with redirect_stdout(io.StringIO()), redirect_stderr(
+                io.StringIO()
+            ) as err:
+                code = sau_cli.main(
+                    [
+                        "douyin",
+                        "check",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                    ]
+                )
+        self.assertEqual(code, 11)
+        self.assertIn("429", err.getvalue())
+        self.assertEqual(fake.start_calls, [])
+        self.assertEqual(fake.stop_calls, [])
 
     def test_unknown_subcommand_exits_2_via_argparse(self):
         with patch.dict(os.environ, {"MLX_API_TOKEN": ""}):
@@ -375,6 +434,7 @@ class UsageAndExitCodeTests(unittest.TestCase):
         cases = (
             (LoginRequiredError("login"), 10),
             (UsageError("usage"), 2),
+            (RateLimitedError("rate limited"), 11),
             (RuntimeError("boom"), 1),
         )
         for error, expected in cases:
