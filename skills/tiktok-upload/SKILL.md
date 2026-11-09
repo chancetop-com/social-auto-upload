@@ -1,19 +1,20 @@
 ---
 name: tiktok-upload
-description: 使用 `sau tiktok` 在本地 cookie 模式或 Multilogin X Profile 下检查登录并发布 TikTok 视频与图文。Use when 用户要发布 TikTok 视频或图文。
+description: 使用 `sau tiktok` 在本地 cookie 模式或托管浏览器 Profile（Multilogin X / AdsPower）下检查登录并发布 TikTok 视频与图文。Use when 用户要发布 TikTok 视频或图文。
 license: MIT-0
 slug: social-auto-upload-tiktok-upload
 displayName: TikTok 视频与图文发布
 version: 1.2.0
-summary: 使用 sau tiktok 在本地模式或 Multilogin Profile 下检查登录并发布视频与图文。
+summary: 使用 sau tiktok 在本地模式或托管浏览器模式（MLX / AdsPower）下检查登录并发布视频与图文。
 ---
 
 # TikTok 视频与图文发布
 
-TikTok 支持两种模式，使用同一个 `sau tiktok` CLI：
+TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI：
 
-- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器上下文固定 `en-US`，无需改系统语言。
+- **本地模式**（默认）：不设置任一托管凭据，使用本地 Chromium 与 `cookies/tiktok_<account>.json`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器上下文固定 `en-US`，无需改系统语言。
 - **Multilogin X（MLX）模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`。
+- **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`（映射 AdsPower `user_id`）；`--folder-id` 忽略。
 
 ## 部署前提
 
@@ -25,8 +26,14 @@ TikTok 支持两种模式，使用同一个 `sau tiktok` CLI：
 **Multilogin 模式**
 - CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器，桌面应用已启动。
 - Profile 使用 Mimic 内核，已人工登录 TikTok，且没有待处理验证码或 2FA。
-- Profile 界面语言必须为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。
+- Profile 界面语言必须为 **English (US)**；托管模式会跳过 CLI 内的语言切换。
 - 图文（`upload-note`）还要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；没有入口时命令在选文件前退出 `1`。
+
+**AdsPower 模式**
+- AdsPower 付费版；桌面应用与 CLI 在同一台 macOS/Windows 机器，Local API 已开启，`50325` 未被占用。
+- Profile 为 Chromium 内核，已人工登录 TikTok，且没有待处理验证码或 2FA。
+- Profile 界面语言必须为 **English (US)**；`--folder-id` 忽略，`--profile-id` 映射 AdsPower `user_id`。
+- 同一 Profile 串行使用；客户端升级到最新 patch。
 
 ## 命令
 
@@ -38,7 +45,7 @@ sau tiktok check --account creator
 sau tiktok upload-video --account creator --file videos/demo.mp4 --title "标题"
 sau tiktok upload-note --account creator --images images/1.jpg images/2.png
 
-# Multilogin 模式
+# 托管浏览器模式（MLX）
 export MLX_API_TOKEN="<token>"
 
 # 0=已登录，10=需要人工登录
@@ -57,13 +64,28 @@ sau tiktok upload-note \
   --images images/1.jpg images/2.png \
   --title "图文标题" --note "图文正文" --tags 图文,测试 \
   --privacy friends --no-comments --aigc
+
+# AdsPower 模式（--folder-id 可省略）
+export ADSPOWER_API_KEY="$KEY"
+
+sau tiktok check --profile-id <profile_id>
+
+sau tiktok upload-video \
+  --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
+  --privacy public --no-comments --schedule "2026-10-21 10:30"
 ```
 
-- 本地模式必填 `--account`；MLX 模式 `--account` 可选，仅作日志标签，缺省为 `profile_id`。
-- 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，MLX 下退出 `1`。
-- 本地模式读写 `cookies/tiktok_<account>.json`；MLX 模式不读写 cookie 文件。
-- MLX 下登录页、验证码或 2FA 退出 `10`，本地模式按运行失败退出 `1`；两种模式的发布循环总超时均为 15 分钟。
+- 本地模式必填 `--account`；托管模式 `--account` 可选，仅作日志标签，缺省为 `profile_id`。
+- 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`。
+- 本地模式读写 `cookies/tiktok_<account>.json`；托管模式不读写 cookie 文件。
+- 托管模式下登录页、验证码或 2FA 退出 `10`，本地模式按运行失败退出 `1`；两种模式的发布循环总超时均为 15 分钟。
+- 退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 - 真实账号的本地登录与发布**待验收**；首次使用请先用测试账号验证。
+
+## 托管浏览器模式（可选）
+
+`check`、`upload-video` 和 `upload-note` 均可改用托管浏览器 Profile：MLX 需要 `--folder-id` + `--profile-id`，AdsPower 只需要 `--profile-id`（`--folder-id` 忽略）。两种模式都不读写 cookie 文件，`--account` 仅作日志标签，`login` 一律拒绝。退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ## 视频参数
 
@@ -93,6 +115,6 @@ sau tiktok upload-note \
 - 收到 `9` 时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关。
 
-定时发布使用 `--schedule "YYYY-MM-DD HH:MM"`；只有用户明确给出时间才传。MLX 只验证“已登录”，Profile 即身份，调度侧需确保 `profile_id` 与目标账号匹配；本地模式则由 `--account` 决定 cookie 文件。
+定时发布使用 `--schedule "YYYY-MM-DD HH:MM"`；只有用户明确给出时间才传。托管模式只验证“已登录”，Profile 即身份，调度侧需确保 `profile_id` 与目标账号匹配；本地模式则由 `--account` 决定 cookie 文件。命令级登录检测已是 provider-aware 文案；部分平台上传过程中的登录/验证码/2FA 错误仍可能提到 Multilogin，属于已知遗留。
 
 每次发布前让用户确认账号、单条视频或一组图片、标题、正文/标签及立即/定时方式。页面布局或登录状态不符合预期时停止并报告；只有平台页面确认提交后才报告成功，未知结果先核查 TikTok Studio，不能直接重发。

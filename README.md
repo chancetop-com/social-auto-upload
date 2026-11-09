@@ -88,7 +88,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | 支付宝生活号 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频发布 |
 | 微博 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题最多 30 字 |
 | 虎扑 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题 4–40 字 |
-| TikTok | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布；支持本地模式与 Multilogin 模式；MLX 下 Profile 界面需 English (US) |
+| TikTok | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布；支持本地模式与托管浏览器模式（MLX / AdsPower）；托管下 Profile 界面需 English (US) |
 | 雪球 | ✅ | - | ✅ | - | - | ✅ | ✅ | [长文与配图](./docs/xueqiu.md)：支持 HTML/Markdown/TXT、正文图片和封面 |
 | YouTube | ✅ | ✅ | - | - | 开发中 | ✅ | ✅ | 视频发布 |
 | 知乎 | ✅ | ✅ | ✅ | - | 实验性 | ✅ | ✅ | [文章与视频发布](./skills/zhihu-upload/SKILL.md)，文章支持正文位置配图 |
@@ -104,7 +104,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | --- | --- |
 | 视频 | 抖音、快手、小红书、Bilibili、视频号、百家号、大鱼号、知乎、YouTube 等；CLI 示例见下方和[CLI 使用说明](./docs/CLI.md) |
 | 文章 | 大鱼号[文章发布](./docs/dayu-article.md)、雪球[长文与配图](./docs/xueqiu.md)、知乎[文章发布](./skills/zhihu-upload/SKILL.md#文章) |
-| 图文 | 抖音、快手、小红书、TikTok（本地或 Multilogin X 模式）、Facebook、Facebook Page、Instagram；CLI 示例见[CLI 使用说明](./docs/CLI.md) |
+| 图文 | 抖音、快手、小红书、TikTok（本地或托管浏览器模式）、Facebook、Facebook Page、Instagram；CLI 示例见[CLI 使用说明](./docs/CLI.md) |
 
 文章主题预览及 Markdown 转 HTML：见 [文章文件与主题渲染](./docs/article.md)。内置 `default/grace/simple/modern/plain` 主题；大鱼号可直接接收 Markdown，并将主题转换为保留文字颜色、背景和近似字号的兼容排版，圆角和精确间距等效果可能与本地预览不同。
 
@@ -167,9 +167,11 @@ sau douyin check --account creator
 # 换成 dayu、xueqiu、zhihu 等平台名称即可；具体登录要求见对应文档。
 ```
 
-#### Multilogin X 模式（可选）
+#### 托管浏览器模式（可选）
 
-除 Bilibili 外，浏览器平台可以改由 Multilogin X（MLX）Profile 提供浏览器与登录态。设置环境变量 `MLX_API_TOKEN` 后，CLI 不再读写 `cookies/*.json`，而是通过本机 Multilogin Launcher 启动指定 Profile，并在结束时停止由本次调用启动的 Profile。
+除 Bilibili 外，浏览器平台可以改由托管浏览器 Profile 提供浏览器与登录态。设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，CLI 不再读写 `cookies/*.json`，而是通过对应桌面应用启动指定 Profile，并在结束时停止由本次调用启动的 Profile。两个凭据同时设置会退出 `1`。
+
+##### Multilogin X（MLX）
 
 ```bash
 export MLX_API_TOKEN="<token>"
@@ -182,18 +184,41 @@ sau douyin upload-video --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
 ```
 
-- `--folder-id` / `--profile-id` 在 MLX 模式必填，本地模式忽略。
-- MLX 下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验。
-- MLX 下 `login` 一律拒绝；请先在 Multilogin 应用中登录 Profile，并处理验证码/2FA。
-- 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录、`130` 用户中断。
-- 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
-- v1 部署前提：CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器；Profile 使用 Mimic 内核；Profile 已人工登录且无待处理验证码/2FA；TikTok 的 Profile 界面须为 English (US)。
-- 不支持：Docker launcher、跨机 launcher、Linux 无桌面、Bilibili、通过 CLI 在 MLX 中登录。
-- TikTok 也支持**本地模式**：不设置 `MLX_API_TOKEN` 时使用本地 Chromium 与 `cookies/tiktok_<account>.json`；需要 `--account`，并先运行 `sau tiktok login --account <name>`（有头浏览器登录后回终端按 Enter）。本地 context 固定 `en-US`，不需要改系统语言。`check` 返回 `0/1`；`upload-video` / `upload-note` 与 MLX 共用发布流程和退出码 `9`；`--folder-id` / `--profile-id` 在本地模式忽略。真实账号的本地登录与发布**待验收**，首次使用请先用测试账号验证。
-- 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 launcher。
-- MLX 只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号和 Instagram 的本地 `.identity.json` / 用户 ID 比对在 MLX 下不执行，账号错配风险由调度侧承担。
+MLX 通过本机 Multilogin Launcher 启动 Profile；`--folder-id` / `--profile-id` 必填，Profile 使用 Mimic 内核。
 
-完整参数、平台支持范围与实现差异见 [CLI 使用说明的 Multilogin X 模式](./docs/CLI.md#multilogin-x-模式)。
+##### AdsPower
+
+```bash
+export ADSPOWER_API_KEY="$KEY"
+
+# check：0=已登录，10=需要人工登录
+sau douyin check --profile-id <profile_id>
+
+# 上传：--folder-id 可省略；传了也会静默忽略
+sau douyin upload-video --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
+
+# 需要人工处理验证码时使用有头模式
+sau douyin upload-video --headed --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题"
+```
+
+AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Profile；`--profile-id` 映射 AdsPower 的 `user_id`，`--folder-id` 忽略。只支持 V2 API，客户端请升级到最新 patch。
+
+共同说明：
+
+- 托管模式下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验；本地模式仍要求 `--account` 并决定 cookie 文件。
+- 托管模式下 `login` 一律拒绝；请先在对应桌面应用中登录 Profile，并处理验证码/2FA。托管模式不提供 CLI 登录链路。
+- 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录、`11` 请求过于频繁（429）、`130` 用户中断。**MLX 的 429 已由 `1` 改为 `11`**，调度层需改为退避重试。
+- 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到平台后台（如 TikTok Studio → Content/Posts）按标题、素材与发布时间核对；已存在不要重发，不存在才可人工重试。
+- 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核。两者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
+- 不支持：Docker / 跨机 / Linux 无桌面、Bilibili、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
+- TikTok 也支持**本地模式**：不设置任一托管凭据时使用本地 Chromium 与 `cookies/tiktok_<account>.json`；需要 `--account`，并先运行 `sau tiktok login --account <name>`（有头浏览器登录后回终端按 Enter）。本地 context 固定 `en-US`，不需要改系统语言。`check` 返回 `0/1`；`upload-video` / `upload-note` 与托管模式共用发布流程和退出码 `9`；`--folder-id` / `--profile-id` 在本地模式忽略。真实账号的本地登录与发布**待验收**，首次使用请先用测试账号验证。
+- 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
+- 托管模式只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号和 Instagram 的本地 `.identity.json` / 用户 ID 比对在托管模式下不执行，账号错配风险由调度侧承担。
+- 已知限制：命令级登录检测已是 provider-aware 文案；但部分平台在上传过程中遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留。
+
+完整参数、平台支持范围、部署前提与安全说明见 [CLI 使用说明的托管浏览器模式](./docs/CLI.md#托管浏览器模式通用)；MLX 与 AdsPower 分别见 [Multilogin X 模式](./docs/CLI.md#multilogin-x-模式) 和 [AdsPower 模式](./docs/CLI.md#adspower-模式)。
 
 #### 视频
 
@@ -243,16 +268,16 @@ sau zhihu upload-article --account creator --title "文章标题" --content-file
 
 #### 图文
 
-图文指独立图片帖、轮播或图片笔记，使用 `upload-note`；支持抖音、快手、小红书、TikTok（本地或 Multilogin X 模式）、Facebook、Facebook Page 和 Instagram。
+图文指独立图片帖、轮播或图片笔记，使用 `upload-note`；支持抖音、快手、小红书、TikTok（本地或托管浏览器模式）、Facebook、Facebook Page 和 Instagram。
 
 ```bash
 sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
 sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
-# TikTok 本地模式（不设置 MLX_API_TOKEN）
+# TikTok 本地模式（不设置任一托管凭据）
 sau tiktok login --account creator
 sau tiktok upload-note --account creator --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
-# TikTok Multilogin 模式
+# TikTok 托管浏览器模式（MLX；AdsPower 只传 --profile-id）
 sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
 sau facebook-page upload-note --account <account_name> --images images/1.jpg --title "Page 图文" --note "正文" --page "我的 Page" --schedule "2026-10-21 10:30" --result .local/page-result.json
 sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图片帖" --note "正文"
@@ -287,7 +312,7 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 - 抖音视频发布若触发短信二次验证，程序会优先读取项目根目录下的 `verify_code.txt`；如果你是在本地交互式终端手动运行 CLI，也可以直接按终端提示输入验证码
 - 浏览器平台统一约定：
 - 视频使用 `title + desc + tags`
-- 抖音、快手、小红书、TikTok 的图片笔记使用 `title + note + tags`（TikTok 的 `title` / `note` 均可选，本地与 Multilogin 模式均支持）
+- 抖音、快手、小红书、TikTok 的图片笔记使用 `title + note + tags`（TikTok 的 `title` / `note` 均可选，本地与托管浏览器模式均支持）
 - 大鱼号文章使用 `title + content-file + source`，正文保存在 HTML、Markdown 或 TXT 文件中
 - Bilibili CLI 不要求用户手动安装 `biliup`
 - 首次运行相关命令时，程序会自动下载 `biliup`

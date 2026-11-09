@@ -11,7 +11,7 @@
 - `alipay`
 - `weibo`
 - `hupu`
-- `tiktok`：本地 cookie 模式或 Multilogin X 模式
+- `tiktok`：本地 cookie 模式或托管浏览器模式（MLX / AdsPower）
 - `youtube`
 - `facebook`：Facebook 个人主页视频/图文立即发布、查询和删除
 - `facebook-page`：Meta Business Suite 的 Facebook Page 视频/图文立即或定时发布
@@ -21,7 +21,7 @@
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
-面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地 cookie 模式；设置 `MLX_API_TOKEN` 后走 [Multilogin X 模式](#multilogin-x-模式)。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
+面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地 cookie 模式；设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 后走[托管浏览器模式](#托管浏览器模式通用)（[Multilogin X 模式](#multilogin-x-模式) / [AdsPower 模式](#adspower-模式)）。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
 
 实现说明：
 
@@ -66,6 +66,125 @@ Windows 下推荐先指定镜像，再安装 Chromium：
 $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
 ```
 
+## 托管浏览器模式（通用）
+
+设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用启动指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。
+
+未设置任一凭据时仍为本地模式；`verify` / `delete` / `article` 在托管模式下仍然本地执行，不受 Profile 影响。
+
+### 激活与优先级
+
+| `MLX_API_TOKEN`（strip 后） | `ADSPOWER_API_KEY`（strip 后） | 模式 |
+| --- | --- | --- |
+| 空 / 未设置 | 空 / 未设置 | 本地模式 |
+| 非空 | 空 / 未设置 | Multilogin X 模式（MLX） |
+| 空 / 未设置 | 非空 | AdsPower 模式 |
+| 非空 | 非空 | 冲突：退出 `1` |
+
+- 只按环境变量选择，没有 `--browser-provider` 之类的新 flag；空串、纯空白和未设置都视为未激活。
+- `ADSPOWER_API_BASE` **不参与激活**；单独设置不会改变模式，也不会告警。
+- 同时设置两个凭据时，固定输出 `MLX_API_TOKEN 与 ADSPOWER_API_KEY 不能同时设置；请只保留一个。` 并退出 `1`（不是用法错误 `2`）。该检查在参数解析之后、命令分发之前执行；`--help`、未知子命令和缺参仍保持 argparse 的原有语义。
+- 没有 key 的 AdsPower 安装不会被探测或警告，仍按本地 / MLX 的原有逻辑运行。
+
+### 参数矩阵
+
+| 参数 / 行为 | 本地 | MLX | AdsPower |
+| --- | --- | --- | --- |
+| `--account` | `login` / `check` / `upload-*` 必填；`verify` / `delete` 必填 | 可选；仅日志/结果标签，无身份或 cookie 语义 | 可选；纯兼容占位，仅日志/结果标签 |
+| `--folder-id` | 静默忽略 | 必填 | 注册但静默忽略；传值不报错、不告警 |
+| `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
+| 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
+| 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 |
+| `--headless` | 默认 True | 默认 True，传给 Launcher | 默认 True，V2 编码 `"1"` |
+| `--headed` | False | False | False，V2 编码 `"0"` |
+| `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower |
+| `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
+| `verify` / `delete` | 本地执行 | 本地执行 | 本地执行 |
+| `check` 未登录 | `invalid` + 退出 `1` | 退出 `10` | 退出 `10` |
+| Bilibili | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
+| `article` | 本地工具 | 本地工具 | 本地工具 |
+
+- `--profile-id` 只校验 strip 后非空，不猜格式；Profile 不存在、被占用或内核未就绪交给服务端，按运行失败退出 `1`。
+- 托管模式下 `--account` 缺省取 `profile_id`，不会变成 cookie 文件名；它不参与登录或身份校验。
+- 注册范围：除 `bilibili` 外，所有平台的 `check` 与 `upload-*` 都接受 `--profile-id` / `--folder-id`；`login`、`verify`、`delete`、`article` 不注册这组参数。
+- 托管模式下 `sau <platform> login` 不带 flag 进入 `run()` 后拒绝并退出 `1`；显式带 `--profile-id` 时因 `login` 解析器未注册该 flag，argparse 退出 `2`。
+- 不打印模式 banner；`check` 成功只输出 `valid`，保持 stdout 可解析。
+
+### 退出码
+
+| 码 | 含义 | 典型场景 |
+| --- | --- | --- |
+| `0` | 成功 | 上传已提交；check 已登录；Stop 失败但主操作成功（仅 warning） |
+| `1` | 运行失败 | Local API / Launcher 不可达、key 或 token 无效、Profile 不存在/被占用、CDP 连不上、上传失败、网络错误、双模式冲突、login/平台拒绝 |
+| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` 非法、本地缺 `--account`、未知子命令 |
+| `9` | 发布结果未知 | 发布点击已发出但未观察到成功页；**禁止自动重发**，需先人工核验 |
+| `10` | 需要登录 | 登录页、登录表单、验证码、2FA |
+| `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429；调度层退避重试 |
+| `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 |
+
+- `11` 是 MLX 与 AdsPower 共用契约。**MLX 的 429 已由 `1` 改为 `11`**，这是本次改动中唯一改变 MLX 可观察行为的地方；调度层需要同步改为退避重试。
+- CLI 不 sleep、不自动重试；429 由调度层处理。已成功的操作仅在 stop 阶段遇到 429 时只 warning，保持原退出码（通常 `0`）。
+- HTTP 200 + 业务 `code` 表示限流的情况官方未定义，暂按 `1`；待真实 AdsPower 冒烟（ticket 09）确认后再扩展。
+
+### 平台支持范围
+
+两种托管模式使用同一张平台表：
+
+| 平台 | 托管模式可用的 action | 说明 |
+| --- | --- | --- |
+| 抖音、快手、小红书 | `check`、`upload-video`、`upload-note` | |
+| 视频号、百家号、支付宝生活号、微博、虎扑、YouTube | `check`、`upload-video` | |
+| Facebook、Facebook Page、Instagram | `check`、`upload-video`、`upload-note` | `verify` / `delete` 仍为本地模式 |
+| 大鱼号 | `check`、`upload-video`、`upload-article` | `verify` 仍为本地模式 |
+| 知乎 | `check`、`upload-video`、`upload-article` | `verify` 仍为本地模式 |
+| 雪球 | `check`、`upload-article` | `verify` 仍为本地模式 |
+| TikTok | `check`、`upload-video`、`upload-note` | `login` 仅本地模式；图文依赖账号 Photos tab 灰度 |
+| Bilibili | 不支持 | `biliup` 没有浏览器上下文；托管模式下退出 `1` |
+
+共 16 个平台可走托管浏览器模式。`sau article` 是本地文件处理命令，不使用 Profile。`verify` / `delete` 始终本地执行，因此在托管模式下仍必须提供 `--account`（缺少时退出 `2`）。
+
+### 调度侧责任
+
+- 保证同一 Profile **不并发**；CLI 不加锁，也不做 active 预检。同一 Profile 的串行由调度 App 负责。
+- Profile 即身份；传错 `profile_id` 会直接操作另一个账号。CLI 只校验“已登录”，不校验账号是否匹配，调度侧承担该风险。
+- 收到退出码 `10` 时安排人工登录；托管模式不提供 CLI 登录。
+- 收到退出码 `9`（发布结果未知）时**禁止自动重发**；先到平台后台按标题、素材与发布时间核对原作品，已存在不要重发，不存在才可人工重试。
+- 收到退出码 `11`（429）时退避重试；CLI 自身不等待。
+- 收到退出码 `1` 时按运行失败处理，不要与登录失效或 429 混淆。
+- Stop 失败只 warning；主操作成功仍返回 `0`，调度侧负责清理可能残留的 Profile。
+- 跨机调度应在“桌面应用所在的那台机器”上远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
+
+### 账号一致性风险
+
+托管模式只验证平台页面“已登录”，**Profile 即身份**。知乎、雪球、大鱼号和 Instagram 在本地模式下会比对 `.identity.json` / 用户 ID；托管模式下这些比对会跳过，CLI 仅打印一条 INFO 说明“账号一致性未校验”。请确保 `profile_id` 与目标账号匹配。
+
+已知限制：命令级 `check` / 上传前登录检测已经是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留，不代表 AdsPower 模式需要 Multilogin。
+
+### 安全
+
+- API key / token 只从环境变量读取；不写入命令行、日志、异常文本、`repr` 或测试输出。文档示例只使用 `ADSPOWER_API_KEY="$KEY"`，不把 key 放进命令。
+- `Authorization` 永不记录；`AdspowerClient.__repr__` 只输出 `token=<redacted>`。
+- `ADSPOWER_API_BASE` 只允许 `http` / `https` + host + 可选端口；禁止 userinfo、path、query、fragment；末尾 `/` 归一化去掉；非法值退出 `2` 且不发出任何请求。
+- 默认只连本机；禁止远程/跨机 base。`delete_cache`、`cdp_mask`、`launch_args` 等危险参数不由用户传入，由 provider 固定为安全值。
+- 失败诊断脱敏：不含 API key，也不含真实账号或 Profile 名称。
+
+### 明确不支持
+
+- AdsPower 无 key 安装（关闭 API 安全校验）、V1 Local API、旧客户端 fallback / 双栈 / 运行时版本探测。
+- AdsPower Firefox Profile；Playwright/CDP 只支持 Chromium。
+- Docker、跨机、无桌面 Linux 部署。
+- Bilibili（`biliup` 子进程，无浏览器上下文）。
+- 通过 CLI 在托管模式登录；登录必须在对应桌面应用中完成。
+- 在桌面应用中创建/修改 Profile、管理代理或导入/导出 Cookie。
+
+### 与设计规格的差异
+
+设计规格中的部分历史决策与最终实现不同，**实现以 uploader 的 golden 常量和对应测试为准**：
+
+- 视频号：视频上传的 `init_script` 实际为 `False`，图文上传仍为 `True`（`TENCENT_INIT_SCRIPT=False`、`TENCENT_NOTE_INIT_SCRIPT=True`）。
+- TikTok：legacy 本地路径的 `set_init_script` 原本就未启用，`TIKTOK_INIT_SCRIPT=False`；托管分支同样不注入。
+- 托管分支会静默忽略 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
+
 ## Multilogin X 模式
 
 设置非空环境变量 `MLX_API_TOKEN` 后，`sau` 进入 Multilogin X（MLX）模式。CLI 通过本机 Multilogin Launcher（`https://launcher.mlx.yt:45001`）启动指定 Profile，经 CDP 接管该 Profile 的浏览器，并复用其中的登录态；不再读写 `cookies/*.json`。
@@ -85,54 +204,24 @@ sau douyin upload-video \
 sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 ```
 
-### 激活与参数
+### MLX 专属参数与行为
 
-- 仅当 `MLX_API_TOKEN` 非空（去除首尾空白后）时激活；未设置、空串或纯空白都保持本地模式。
-- 本地模式会**静默忽略** `--folder-id` / `--profile-id`，旧命令的解析与行为不变。
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下可选，只是日志/结果标签；缺省值为 `profile_id`。它不参与登录或身份校验，也不决定 cookie 文件。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；`--debug` 语义不变。所有平台的 `check` 都接受这组参数（包括文档中的 `sau xiaohongshu check ... --headed` 示例）。
-- 所有可在 MLX 运行的 `check` / `upload-*` 都接受上述参数；`login` 不接受。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
+- **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
 
-### 退出码
-
-| 码 | 含义 | 典型场景 |
-| --- | --- | --- |
-| `0` | 成功 | 上传已提交；check 已登录；Stop 失败但上传成功（仅 warning） |
-| `1` | 运行失败 | Launcher 不可达、token 无效、Profile 被占用、CDP 连不上、上传失败、网络错误、发布选项回读不一致、Photos tab 未覆盖 |
-| `2` | 用法错误 | 未知子命令、缺必填参数、MLX 缺 `--folder-id/--profile-id`、本地缺 `--account`、本地校验失败 |
-| `9` | 发布结果未知 | 发布点击已发出但未观察到成功页；**禁止自动重发**，需先人工核验 |
-| `10` | 需要登录 | 登录页、登录表单、验证码、2FA |
-| `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 |
-
-MLX 下 `login` 一律退出 `1`。TikTok 本地模式支持 `login`；本地模式下 `--folder-id` / `--profile-id` 被忽略，`--account` 必填。
-
-### 平台支持范围
-
-| 平台 | MLX 可用的 action | 说明 |
-| --- | --- | --- |
-| 抖音、快手、小红书 | `check`、`upload-video`、`upload-note` | |
-| 视频号、百家号、支付宝生活号、微博、虎扑、YouTube | `check`、`upload-video` | |
-| Facebook、Facebook Page、Instagram | `check`、`upload-video`、`upload-note` | `verify` / `delete` 仍为本地模式 |
-| 大鱼号 | `check`、`upload-video`、`upload-article` | |
-| 知乎 | `check`、`upload-article`、`upload-video` | |
-| 雪球 | `check`、`upload-article` | |
-| TikTok | `check`、`upload-video`、`upload-note`、`login`（仅本地） | 本地 cookie 模式或 MLX；图文依赖账号 Photos tab 灰度 |
-| Bilibili | 不支持 | `biliup` 没有浏览器上下文；MLX 下退出 `1` |
-
-`sau article` 是本地文件处理命令，不使用 MLX Profile。
-
-### 部署前提（v1）
+### MLX 部署前提
 
 1. CLI 与 Multilogin 桌面应用在**同一台 macOS/Windows 机器**上，桌面应用已启动，45001/45003 未被占用。
 2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
 3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
-4. TikTok 的 Multilogin 模式额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。本地模式会自动切换页面语言。
+4. TikTok 的 MLX 模式额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。本地模式会自动切换页面语言。
 5. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`（本地与 MLX 相同）。
 
-**明确不支持：**
+**MLX 明确不支持：**
 
 - Docker launcher（CDP 端口默认未映射到宿主机）
 - 跨机 launcher（官方只支持 `127.0.0.1`，不引导 SSH 隧道）
@@ -142,27 +231,88 @@ MLX 下 `login` 一律退出 `1`。TikTok 本地模式支持 `login`；本地模
 
 启动前 CLI 会探活 `GET /api/v1/version`；失败退出 `1`，并提示确认桌面应用、同机部署和 45001 端口。Start 成功但 CDP 连接连续 3 次失败时，错误信息会附带 Docker launcher 提示，并在退出前停止本次启动的 Profile。
 
-### 调度侧责任
+## AdsPower 模式
 
-- 保证同一 Profile **不并发**；CLI 不加锁。
-- 传错 `profile_id` 会直接操作另一个账号；CLI 只校验“已登录”，不校验账号是否匹配，调度侧承担该风险。
-- 收到退出码 `10` 时安排人工登录，再重试。
-- 收到退出码 `9`（发布结果未知）时**禁止自动重发**；先到 TikTok Studio → Content/Posts 按标题与发布时间核对，已存在不要重发，不存在才可人工重试。
-- Stop 失败但上传仍返回 `0` 时，调度侧负责清理残留 Profile。
-- 跨机调度应在“MLX 那台机器”上远程执行 CLI，而不是把 CLI 指向远程 launcher。
-- 429 限流不在 CLI 内等待，由调度侧重试。
+设置非空环境变量 `ADSPOWER_API_KEY` 后，`sau` 进入 AdsPower 模式。CLI 通过 AdsPower Local API（默认 `http://127.0.0.1:50325`）启动 `user_id` 指定的 Chromium Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 接管现有浏览器上下文，并复用 Profile 登录态；不再读写 `cookies/*.json`。
 
-### 账号一致性风险
+```bash
+export ADSPOWER_API_KEY="$KEY"
 
-MLX 模式只验证平台页面“已登录”，**Profile 即身份**。知乎、雪球、大鱼号和 Instagram 在本地模式下会比对 `.identity.json` / 用户 ID；MLX 下这些比对会跳过，CLI 仅打印一条 INFO 说明。请确保 `profile_id` 与目标账号匹配。
+# check：0=已登录，10=需要人工登录
+sau douyin check --profile-id <profile_id>
 
-### 与设计规格的差异
+# 上传：--account 可省略，缺省用 profile_id 作为日志标签
+sau douyin upload-video \
+  --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 
-设计规格中的部分历史决策与最终实现不同，**实现以 uploader 的 golden 常量和对应测试为准**：
+# 有头运行，便于人工处理验证码
+sau douyin upload-video --headed \
+  --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题"
 
-- 视频号：视频上传的 `init_script` 实际为 `False`，图文上传仍为 `True`（`TENCENT_INIT_SCRIPT=False`、`TENCENT_NOTE_INIT_SCRIPT=True`）。
-- TikTok：legacy 本地路径的 `set_init_script` 原本就未启用，`TIKTOK_INIT_SCRIPT=False`；MLX 分支同样不注入。
-- MLX 分支会静默忽略 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
+# login 拒绝（退出 1）
+sau douyin login --account creator
+
+# Bilibili 拒绝（退出 1）
+sau bilibili check --account creator
+
+# 自定义 Local API 地址（仅改端口或使用官方地址时设置）
+ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
+  sau douyin check --profile-id <profile_id>
+```
+
+### AdsPower 激活与 `ADSPOWER_API_BASE`
+
+- 仅当 `ADSPOWER_API_KEY` strip 后非空时激活；`ADSPOWER_API_BASE` 不激活模式。
+- 默认 `http://127.0.0.1:50325`；仅在改端口或使用 `http://local.adspower.net:50325` 等官方地址时设置。
+- 合法值：`http` / `https`、必须有 host、端口可选；禁止 userinfo、path、query、fragment；末尾 `/` 归一化。非法值退出 `2`，且不发出任何请求；合法但连不上属于运行期 `1`。
+- 禁止远程/跨机 base。
+
+### AdsPower 参数
+
+- `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
+- `--folder-id` 注册但静默忽略；传值不报错、不告警。
+- `--account` 可选，仅日志/结果标签，缺省为 `profile_id`；它不会决定 cookie 文件。
+- `--headless` 默认 True，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；`--debug` 不传给 AdsPower。
+- `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
+- 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
+- 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
+
+### AdsPower 部署前提
+
+1. **AdsPower 付费版**（Local API 仅付费版提供）。
+2. AdsPower 桌面应用与 CLI 在**同一台 macOS/Windows 机器**上；应用已启动；Local API 已开启；`50325` 未被占用。
+3. `ADSPOWER_API_KEY` 有效；请求带 `Authorization: Bearer`。
+4. Profile 为 **Chromium 内核**；Firefox 不支持。
+5. Profile 已**人工登录**目标平台，且没有待处理验证码/2FA；TikTok Profile 界面须为 **English (US)**。
+6. AdsPower 客户端升级到最新 patch（官方未给最低版本）。
+7. `ADSPOWER_API_BASE` 默认 `http://127.0.0.1:50325`；仅在改端口或使用官方地址时设置。
+8. 同一 Profile **串行使用**；CLI 不加锁、不做 active 预检。
+
+### Bearer 与 key 重置
+
+- 请求头为 `Authorization: Bearer <API Key>`（一个空格，key 无首尾空白）。API Key 在 AdsPower 客户端 **Automation → API** 页面生成/重置，不是登录密码。
+- 重置后旧 key 立即失效；必须停止调度服务、替换环境变量并重启。
+- 普通成员需要被授予 API 权限后才能生成/使用 key。
+- key 不写入命令行、日志、异常文本或 `repr`；示例只写 `ADSPOWER_API_KEY="$KEY"`。
+
+### 连不上时排查
+
+依次检查：1) AdsPower 桌面应用是否启动；2) Local API 是否开启；3) `50325` 是否被占用；4) `ADSPOWER_API_BASE` 是否指向本机或官方地址。
+
+### AdsPower 未知项（真实冒烟未执行）
+
+本机未安装 AdsPower，**真实 AdsPower 冒烟未执行（ticket 09）**。以下行为只有离线测试和设计依据，仍需真实设备验证：
+
+- 已运行 Profile 的 start 返回形状（成功 + 既有 ws，还是错误）。
+- 重复 stop / 已停止 Profile 的真实 `code` / `msg`。
+- 429 的真实形状（HTTP 429 还是 200 + 业务 `code`）与 `Retry-After`。
+- `contexts` 是否恒为 1（含 `last_opened_tabs=0`）。
+- 冷启动是否可能超过 30s；超时后不 stop 是否真的留下 Profile。
+- V2 在旧客户端上的真实状态码（404 还是 200 + `code != 0`）。
+- `/status` 是否要求鉴权、是否返回版本字段。
+- V2 最低可用版本；`active` 在 Inactive / 多设备模式下的 `data` 形状。
 
 ## 大鱼号 CLI 子命令
 
@@ -402,12 +552,13 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 虎扑当前支持登录、账号检查和视频上传；标题长度要求为 4–40 个字，暂不支持图文上传和 `--schedule`。虎扑登录可能需要在浏览器中完成 QQ 或手机号登录，需要人工查看页面时可以加 `--headed`。
 
-## TikTok CLI 子命令（本地模式或 Multilogin X 模式）
+## TikTok CLI 子命令（本地模式或托管浏览器模式）
 
-TikTok 支持两种模式：
+TikTok 支持本地与两种托管子模式：
 
-- **本地模式**（默认）：不设置 `MLX_API_TOKEN`，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。本地 context 固定 `en-US`，不需要改系统语言。
+- **本地模式**（默认）：不设置任一托管凭据，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。本地 context 固定 `en-US`，不需要改系统语言。
 - **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**。
+- **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`；`--folder-id` 忽略；Profile 界面须为 **English (US)**。
 
 ```bash
 # 本地模式：先交互式登录一次（打开有头浏览器，登录后回终端按 Enter）
@@ -434,13 +585,23 @@ sau tiktok upload-note \
   --images images/1.jpg images/2.png \
   --title "图文标题" --note "图文正文" --tags 图文,测试 \
   --privacy friends --no-comments --aigc
+
+# AdsPower 模式（--folder-id 可省略）
+export ADSPOWER_API_KEY="$KEY"
+
+sau tiktok check --profile-id <profile_id>
+
+sau tiktok upload-video \
+  --profile-id <profile_id> \
+  --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
+  --privacy public --no-comments --schedule "2026-10-21 10:30"
 ```
 
-- 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，MLX 下退出 `1`，请先在 Multilogin 应用中登录 Profile。
-- 本地 `check` 返回 `0`（有效）/ `1`（无效）；MLX `check` 返回 `0/10/1/2`。
-- 本地模式读写 `cookies/tiktok_<account>.json`；MLX 模式不读写 cookie 文件。
-- MLX 分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**；本地模式会自动切换页面语言。
-- 本地模式与 MLX 共用 15 分钟上传预算；登录页、验证码或 2FA 在 MLX 下退出 `10`，本地模式按运行失败退出 `1`。
+- 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`，请先在对应桌面应用中登录 Profile。
+- 本地 `check` 返回 `0`（有效）/ `1`（无效）；托管模式 `check` 返回 `0/10/1/2`。
+- 本地模式读写 `cookies/tiktok_<account>.json`；托管模式不读写 cookie 文件。
+- 托管分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**；本地模式会自动切换页面语言。
+- 本地模式与托管模式共用 15 分钟上传预算；登录页、验证码或 2FA 在托管模式下退出 `10`，本地模式按运行失败退出 `1`。
 - 真实账号的本地登录与发布**待验收**；未在真实账号验证前，不要把“命令已支持”当成“发布效果已验证”。
 - 未注册的子命令仍由 argparse 退出 `2`。
 
@@ -490,11 +651,11 @@ sau tiktok upload-note \
 - 对可操作本地文件的 agent 来说，不要只把图片路径告诉用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户
 - Bilibili 和 YouTube 当前不走这套本地二维码图片托管链路，登录按上面的平台说明处理即可
-- MLX 模式不提供 CLI 登录链路，也不会生成登录二维码；请在 Multilogin 应用中登录 Profile，收到退出码 `10` 时转人工处理
+- 托管浏览器模式不提供 CLI 登录链路，也不会生成登录二维码；请在对应桌面应用（Multilogin / AdsPower）中登录 Profile，收到退出码 `10` 时转人工处理
 
 ## 定时发布
 
-抖音、快手、小红书、视频号的图文或视频上传，TikTok（本地或 MLX）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
+抖音、快手、小红书、视频号的图文或视频上传，TikTok（本地或托管浏览器模式）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
 
 ```bash
 sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
@@ -583,6 +744,6 @@ Bilibili 额外要求：
 - 抖音：最多 35 张图片，不支持 GIF
 - 快手：支持多张图片，建议传真实不同文件，不要把同一路径重复多次
 - 小红书：支持多张图片，正文 `--note` 可选，但 `--title` 建议始终显式传入
-- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面；本地与 Multilogin X 模式均支持
+- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面；本地与托管浏览器模式均支持
 
 大鱼号文章使用 `--content-file` 提供 HTML、Markdown 或 TXT 正文文件，支持本地图片和图文混排，正文最多 2 万字；来源与封面等参数见 [大鱼号图文发布](./dayu-article.md)。
