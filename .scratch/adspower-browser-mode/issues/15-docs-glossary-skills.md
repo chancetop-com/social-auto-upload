@@ -1,6 +1,6 @@
 # 15 — 文档、术语、Skills、CHANGELOG 与验收清单
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 13, 14
 Assignee: —
@@ -30,3 +30,7 @@ Assignee: —
 
 - 规格：§11.5（文档验收）、§9（安全）、§10（部署与调度）、§2（书写规范）。
 - 设计裁决：ticket 06。
+
+## Answer
+
+已实现并合并（merge `c91421c`）。GLOSSARY、`docs/CLI.md`、README、`docs/skill-distribution.md`、18 个 Skill、CHANGELOG 与 `acceptance.md` 全部更新；旧锚点 `#multilogin-x-模式` 保留；真实 AdsPower 冒烟仍归 ticket 09（未执行）。

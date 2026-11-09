@@ -1,6 +1,6 @@
 # 13 — AdsPower 模式核心与视频平台端到端
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11, 12
 Assignee: —
@@ -32,3 +32,7 @@ Assignee: —
 
 - 规格：§3（激活）、§4（CLI 契约）、§5.2–5.3（provider/session）、§6（生命周期）、§7.1–7.2、§11.1（测试）。
 - 设计裁决：ticket 02（激活与退出码）、ticket 04（所有权）、ticket 10（client 原语）。
+
+## Answer
+
+已实现并合并（merge `f267978`）。AdsPower 激活、双 key 冲突→`1`、`ADSPOWER_API_BASE` 校验→`2`、`RateLimitedError`→`11`、`StartIncompleteError` 先 stop 再抛、取消/stop 失败语义、10 个视频平台覆盖，并新增 CLI / browser-session / 平台守卫 / 视频平台测试。Code review 修复见 merge `dfbdadc`。

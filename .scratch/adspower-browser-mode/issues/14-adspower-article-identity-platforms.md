@@ -1,6 +1,6 @@
 # 14 — AdsPower 模式文章/身份/Meta 平台端到端
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11, 12
 Assignee: —
@@ -29,3 +29,7 @@ Assignee: —
 
 - 规格：§7.4（平台特有约束）、§8（登录检测与身份）、§4.1（verify/delete 本地）、§11.1。
 - 设计裁决：ticket 06（术语）、ticket 07（身份绑定与代理事实）。
+
+## Answer
+
+已实现并合并（merge `769d6a8`）。dayu / zhihu / xueqiu / instagram / facebook / facebook-page 在 AdsPower 下的身份、cookie/identity 跳过、代理不转发、本地 verify/delete 与 bilibili 拒绝均有离线覆盖；Meta managed 分支不再携带 proxy。

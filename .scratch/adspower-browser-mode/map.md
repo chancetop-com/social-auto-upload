@@ -66,6 +66,13 @@
 - [07 — 逐平台迁移清单与能力对齐](./issues/07-platform-inventory.md) — 实测 17 个模块 import、41/16/17/33/7/17/1/14 个 helper 调用点、36 个 `browser_session` 调用点、28 处 `session.mode` 判定（含 insgraph 两处单引号）；16 个托管平台 + article/bilibili；发现 bilibili 在 AdsPower 下会静默回退本地的缺口，以及 2 个 `test_mlx_*` 直接调用 `browser_session(multilogin=)` 与“零改动”裁决的冲突。
 - [08 — 汇总 AdsPower 模式设计规格](./issues/08-assemble-spec.md) — 最终交付物 [spec.md](./spec.md) 完成：15 节覆盖激活/CLI/Provider 架构/V2 client/生命周期/逐平台/身份/安全/部署/测试/三阶段实施/风险/兼容性；吸收 07 的实测迁移规模、bilibili 缺口与测试豁免；真实冒烟仍归 09 外部阻塞，不阻塞离线实现。
 
+- [11 — 托管浏览器 Provider 接缝宽重构](./issues/11-provider-seam-refactor.md) — 已实现并合并（`0d677cc`）：provider seam 泛化，36 个会话调用点与 28 处 `session.mode` 全部迁移，平台模块只看 `session.managed`。
+- [12 — AdsPower V2 client 与共享错误类型](./issues/12-adspower-client.md) — 已实现并合并（`779066b`）：V2 四原语、固定 start body、`RateLimitedError` / `StartIncompleteError` 与离线契约测试完成。
+- [13 — AdsPower 模式核心与视频平台端到端](./issues/13-adspower-core-video-platforms.md) — 已实现并合并（`f267978`）：激活/冲突/base 校验/退出码 11、生命周期所有权、10 个视频平台与三组新测试完成；review 修复 `dfbdadc`。
+- [14 — AdsPower 文章/身份/Meta 平台端到端](./issues/14-adspower-article-identity-platforms.md) — 已实现并合并（`769d6a8`）：6 个平台的身份/代理/本地 verify/delete 与 bilibili 拒绝均有离线覆盖。
+- [15 — 文档、术语、Skills、CHANGELOG 与验收清单](./issues/15-docs-glossary-skills.md) — 已实现并合并（`c91421c`）：文档与 18 个 Skill 全量更新，旧锚点保留，真实冒烟仍归 09。
+- [16 — Opt-in AdsPower smoke harness](./issues/16-adspower-smoke-harness.md) — 已实现并合并（`9a3c13f`）：默认 skip 的生命周期 harness 交付；真实执行仍归 09。
+
 ## Not yet specified
 
 <!-- 当前没有未成形的 fog：已知问题都已进入 decision ticket。若后续 smoke 暴露新的未知，再在这里登记。 -->

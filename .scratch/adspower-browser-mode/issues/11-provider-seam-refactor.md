@@ -1,6 +1,6 @@
 # 11 — 托管浏览器 Provider 接缝宽重构（无行为变化）
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: —（设计 ticket 01–08、10 已 resolved）
 Assignee: —
@@ -30,3 +30,7 @@ Assignee: —
 - 规格：`.scratch/adspower-browser-mode/spec.md` §5、§12 阶段 1、§11.2。
 - 迁移清单与调用点：`.scratch/adspower-browser-mode/research/07-platform-inventory.md` §2–§8。
 - 设计裁决：ticket 03（provider 接缝）、ticket 05（测试策略）、ticket 07（逐平台清单）。
+
+## Answer
+
+已实现并合并（merge `0d677cc`）。新增 `ManagedBrowserProvider` Protocol 与 `MultiloginProvider`，`browser_session(managed=)` / `BrowserSession.managed` 收敛唯一生命周期模板，`sau_commands/browser.py` 成为 canonical helper、`multilogin.py` 降为 shim；36 个会话调用点与 28 处 `session.mode` 判定迁移完成。全量套件与基线一致（6 个既有失败），静态守卫通过。

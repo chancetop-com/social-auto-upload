@@ -1,6 +1,6 @@
 # 16 — Opt-in AdsPower smoke harness（默认 skip）
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 13
 Assignee: —
@@ -26,3 +26,7 @@ Assignee: —
 
 - 规格：§12 阶段 3、§13.2（未知项）、ticket 09。
 - 参考：`tests/test_mlx_smoke.py` 的 opt-in 结构。
+
+## Answer
+
+已实现并合并（merge `9a3c13f`）。`SAU_ADSPOWER_SMOKE=1` opt-in 生命周期 harness 默认 skip，顺序为 probe → start → `connect_over_cdp(ws)` 原样 → URL/title → disconnect → shield stop；失败诊断脱敏。真实执行归 ticket 09，仍保持 open。

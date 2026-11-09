@@ -1,6 +1,6 @@
 # 12 — AdsPower V2 client 与共享错误类型
 
-Status: ready-for-agent
+Status: resolved
 Type: task
 Blocked by: 11（provider 协议由 11 提供）
 Assignee: —
@@ -31,3 +31,7 @@ Assignee: —
 - 规格：§5.4（client 契约）、§5.5（错误分层）、§6.4（幂等）、§9（安全）。
 - 设计裁决：ticket 04（`StartIncompleteError`）、ticket 10（只做 V2、四原语、429）。
 - 现有 MLX client 是结构参照：`utils/multilogin.py`。
+
+## Answer
+
+已实现并合并（merge `779066b`）。新增 `utils/adspower.py`（`AdspowerTarget` / `AdspowerClient` / `AdspowerProvider`）与 `RateLimitedError` / `StartIncompleteError`；V2 端点、固定 start body、envelope、3s/30s 超时、429 不重试、ws 原样返回与 key 脱敏均由 `tests/test_adspower_client.py` 锁定。
