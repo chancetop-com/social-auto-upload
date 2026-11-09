@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The single browser lifecycle seam for local and Multilogin modes.
+"""The single browser lifecycle seam for local and managed modes.
 
 Callers only ever acquire a browser through :func:`browser_session`.  Ownership
 and teardown live here: the returned :class:`BrowserSession` intentionally has no
@@ -10,7 +10,6 @@ or stop it before the work is finished.
 from __future__ import annotations
 
 import asyncio
-import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,11 +22,12 @@ from typing import (
     Literal,
     Mapping,
 )
+from urllib.parse import urlsplit
 
 from loguru import logger
 
 from utils.base_social_media import set_init_script
-from utils.multilogin import MultiloginClient, MultiloginTarget
+from utils.managed_browser import ManagedBrowserProvider
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps imports light
     from patchright.async_api import Browser, BrowserContext, Playwright
@@ -41,12 +41,36 @@ _DOCKER_HINT = (
     "v1 请改用 Multilogin 桌面应用。"
 )
 
+_PROVIDER_LABELS = {
+    "multilogin": "Multilogin",
+    "adspower": "AdsPower",
+}
+
+
+def _provider_label(mode: str) -> str:
+    return _PROVIDER_LABELS.get(mode, mode)
+
+
+def _endpoint_display(url: str) -> str:
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    port = parts.port
+    if host and port is not None:
+        return f"{host}:{port}"
+    if host:
+        return host
+    return url
+
 
 @dataclass(slots=True)
 class BrowserSession:
     browser: "Browser"
     context: "BrowserContext"
-    mode: Literal["local", "multilogin"]
+    mode: Literal["local", "multilogin", "adspower"]
+
+    @property
+    def managed(self) -> bool:
+        return self.mode != "local"
 
 
 @asynccontextmanager
@@ -55,7 +79,7 @@ async def browser_session(
     *,
     headless: bool,
     account_file: str | Path | None = None,
-    multilogin: MultiloginTarget | None = None,
+    managed: ManagedBrowserProvider | None = None,
     launch_kwargs: Mapping[str, Any] | None = None,
     context_kwargs: Mapping[str, Any] | None = None,
     init_script: bool = False,
@@ -64,14 +88,14 @@ async def browser_session(
     ]
     | None = None,
 ) -> AsyncIterator[BrowserSession]:
-    """Acquire a browser context for either local or Multilogin mode.
+    """Acquire a browser context for either local or managed browser mode.
 
-    ``multilogin is None`` → existing local ``launch`` / ``new_context`` /
-    ``storage_state`` behaviour.  Otherwise the profile is started through the
-    local Multilogin Launcher, attached over CDP, and stopped on exit.
+    ``managed is None`` → existing local ``launch`` / ``new_context`` /
+    ``storage_state`` behaviour.  Otherwise the provider starts its profile,
+    the session attaches over CDP, and the profile is stopped on exit.
     """
 
-    if multilogin is None:
+    if managed is None:
         async with _local_session(
             playwright,
             headless=headless,
@@ -84,10 +108,10 @@ async def browser_session(
             yield session
         return
 
-    async with _multilogin_session(
+    async with _managed_session(
         playwright,
         headless=headless,
-        target=multilogin,
+        provider=managed,
     ) as session:
         yield session
 
@@ -149,70 +173,57 @@ async def _local_session(
 
 
 @asynccontextmanager
-async def _multilogin_session(
+async def _managed_session(
     playwright: "Playwright",
     *,
     headless: bool,
-    target: MultiloginTarget,
+    provider: ManagedBrowserProvider,
 ) -> AsyncIterator[BrowserSession]:
-    token = os.environ.get("MLX_API_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError(
-            "未设置 MLX_API_TOKEN，无法使用 Multilogin 模式。"
-        )
-
-    client = MultiloginClient(token)
-
     # Probe and Start happen before the try block on purpose: if Start fails the
     # profile may belong to somebody else, so we must never Stop it.
-    await asyncio.to_thread(client.probe)
-    port = await asyncio.to_thread(
-        client.start,
-        target.folder_id,
-        target.profile_id,
-        headless,
-    )
+    await asyncio.to_thread(provider.probe)
+    connect_url = await asyncio.to_thread(provider.start, headless)
     logger.info(
-        "Multilogin Profile 已启动：profile_id={} folder_id={} port={}",
-        target.profile_id,
-        target.folder_id,
-        port,
+        "{} Profile 已启动：profile_id={} endpoint={}",
+        _provider_label(provider.mode),
+        provider.profile_id,
+        _endpoint_display(connect_url),
     )
 
     browser: "Browser | None" = None
     try:
-        browser = await _connect_over_cdp(playwright, client, target, port)
+        browser = await _connect_over_cdp(playwright, provider, connect_url)
         contexts = browser.contexts
         if len(contexts) != 1:
             raise RuntimeError(
-                "Multilogin Profile 的浏览器上下文数量异常"
-                f"（期望 1，实际 {len(contexts)}）：profile_id={target.profile_id}"
+                "托管浏览器上下文数量异常"
+                f"（期望 1，实际 {len(contexts)}）："
+                f"mode={provider.mode}，profile_id={provider.profile_id}"
             )
         yield BrowserSession(
             browser=browser,
             context=contexts[0],
-            mode="multilogin",
+            mode=provider.mode,
         )
     finally:
         try:
             if browser is not None:
-                await _disconnect(browser)
+                await _disconnect(browser, provider.mode)
         finally:
-            await _stop_profile(client, target.profile_id)
+            await _stop_profile(provider)
 
 
 async def _connect_over_cdp(
     playwright: "Playwright",
-    client: MultiloginClient,
-    target: MultiloginTarget,
-    port: str,
+    provider: ManagedBrowserProvider,
+    connect_url: str,
 ) -> "Browser":
     last_error: BaseException | None = None
 
     for attempt in range(CONNECT_ATTEMPTS):
         try:
             return await playwright.chromium.connect_over_cdp(
-                f"http://127.0.0.1:{port}",
+                connect_url,
                 timeout=CONNECT_TIMEOUT_MS,
                 no_defaults=True,
             )
@@ -223,48 +234,56 @@ async def _connect_over_cdp(
             if attempt < len(CONNECT_BACKOFF_SECONDS):
                 await asyncio.sleep(CONNECT_BACKOFF_SECONDS[attempt])
 
-    # Enrich the error once with the launcher's last-known profile state.
+    # Enrich the error once with the provider's last-known profile state.
     status_text = "未知"
     try:
-        status_text = await asyncio.to_thread(client.status, target.profile_id)
+        status_text = await asyncio.to_thread(provider.status)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         status_text = f"查询失败（{exc}）"
 
+    label = _provider_label(provider.mode)
     raise RuntimeError(
-        "无法通过 CDP 连接 Multilogin Profile"
-        f"（profile_id={target.profile_id}，port={port}，"
+        f"无法通过 CDP 连接 {label} Profile"
+        f"（mode={provider.mode}，profile_id={provider.profile_id}，"
+        f"endpoint={_endpoint_display(connect_url)}，"
         f"已尝试 {CONNECT_ATTEMPTS} 次）：{last_error}；"
         f"Profile 状态：{status_text}。{_DOCKER_HINT}"
     )
 
 
-async def _disconnect(browser: "Browser") -> None:
+async def _disconnect(browser: "Browser", mode: str) -> None:
     try:
         await browser.close()
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.warning(
-            "断开 Multilogin 浏览器连接失败：{}；已上传结果不受影响。",
+            "断开 {} 浏览器连接失败：{}；已上传结果不受影响。",
+            _provider_label(mode),
             exc,
         )
 
 
-async def _stop_profile(client: MultiloginClient, profile_id: str) -> None:
-    logger.info("正在停止 Multilogin Profile：profile_id={}", profile_id)
+async def _stop_profile(provider: ManagedBrowserProvider) -> None:
+    logger.info(
+        "正在停止 {} Profile：profile_id={}",
+        _provider_label(provider.mode),
+        provider.profile_id,
+    )
     try:
-        # Shield the stop request so cancellation still sends it.  The client is
-        # synchronous (requests.get), so run it in a worker thread.
-        await asyncio.shield(asyncio.to_thread(client.stop, profile_id))
+        # Shield the stop request so cancellation still sends it.  Providers are
+        # synchronous (HTTP clients), so run them in a worker thread.
+        await asyncio.shield(asyncio.to_thread(provider.stop))
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.warning(
-            "停止 Multilogin Profile 失败（profile_id={}）：{}；"
+            "停止 {} Profile 失败（profile_id={}）：{}；"
             "Profile 可能仍在运行，需调度侧清理。",
-            profile_id,
+            _provider_label(provider.mode),
+            provider.profile_id,
             exc,
         )
 

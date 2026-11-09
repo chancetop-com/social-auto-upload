@@ -1127,7 +1127,7 @@ class TiktokCheckCliTests(unittest.TestCase):
         self.assertIn("valid", out)
         self.assertEqual(factory.call_args.kwargs["headless"], True)
         self.assertEqual(
-            factory.call_args.kwargs["multilogin"].profile_id, "profile"
+            factory.call_args.kwargs["managed"].target.profile_id, "profile"
         )
         probe.assert_awaited_once_with(session.context)
         self.assertEqual(session_cm.enter_calls, 1)
@@ -1505,7 +1505,7 @@ class StopOwnershipTests(unittest.TestCase):
             playwright.chromium.queue_connect_browser(browser)
 
             with (
-                patch("utils.browser_session.MultiloginClient", _FakeClient),
+                patch("sau_commands.browser.MultiloginClient", _FakeClient),
                 patch.object(tiktok_command, "async_playwright", lambda: _AsyncCM(playwright)),
                 patch.object(tiktok_command, "is_logged_in", new=AsyncMock(return_value=True)),
                 patch.object(TiktokVideo, "upload", new=AsyncMock()) as upload,

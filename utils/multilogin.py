@@ -14,6 +14,8 @@ from urllib.parse import quote
 
 import requests
 
+from utils.managed_browser import ProviderMode
+
 LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
 
 PROBE_TIMEOUT_SECONDS = 3
@@ -188,8 +190,60 @@ class MultiloginClient:
         return str(value) if value is not None else "unknown"
 
 
+class MultiloginProvider:
+    """Compose a Multilogin profile identity with its launcher client.
+
+    ``start`` is the only place that normalizes the launcher's raw port into a
+    URL that can be handed to ``connect_over_cdp``.
+    """
+
+    mode: ProviderMode = "multilogin"
+
+    __slots__ = ("_target", "_client")
+
+    def __init__(self, target: MultiloginTarget, client: MultiloginClient) -> None:
+        self._target = target
+        self._client = client
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(target={self._target!r}, "
+            f"client={self._client!r})"
+        )
+
+    @property
+    def target(self) -> MultiloginTarget:
+        return self._target
+
+    @property
+    def folder_id(self) -> str:
+        return self._target.folder_id
+
+    @property
+    def profile_id(self) -> str:
+        return self._target.profile_id
+
+    def probe(self) -> None:
+        self._client.probe()
+
+    def start(self, headless: bool) -> str:
+        port = self._client.start(
+            self._target.folder_id,
+            self._target.profile_id,
+            headless,
+        )
+        return f"http://127.0.0.1:{port}"
+
+    def stop(self) -> None:
+        self._client.stop(self._target.profile_id)
+
+    def status(self) -> str:
+        return self._client.status(self._target.profile_id)
+
+
 __all__ = [
     "LAUNCHER_BASE_URL",
     "MultiloginClient",
+    "MultiloginProvider",
     "MultiloginTarget",
 ]

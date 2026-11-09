@@ -101,7 +101,7 @@ class _AsyncCM:
 
 
 def _fake_session(context):
-    session = SimpleNamespace(context=context, mode="multilogin")
+    session = SimpleNamespace(context=context, mode="multilogin", managed=True)
     session_cm = _AsyncCM(session)
     factory = MagicMock(return_value=session_cm)
     return session, session_cm, factory

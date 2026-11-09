@@ -350,7 +350,11 @@ class MultiloginSmokeTests(unittest.TestCase):
         from patchright.async_api import async_playwright
 
         import utils.browser_session as browser_session_module
-        from utils.multilogin import MultiloginClient, MultiloginTarget
+        from utils.multilogin import (
+            MultiloginClient,
+            MultiloginProvider,
+            MultiloginTarget,
+        )
 
         config = self.config
         target = MultiloginTarget(
@@ -374,7 +378,9 @@ class MultiloginSmokeTests(unittest.TestCase):
                     async with browser_session_module.browser_session(
                         recorder,
                         headless=True,
-                        multilogin=target,
+                        managed=MultiloginProvider(
+                            target, client_factory(config.token)
+                        ),
                     ) as session:
                         self.assertEqual(session.mode, "multilogin")
                         self.assertEqual(len(session.browser.contexts), 1)

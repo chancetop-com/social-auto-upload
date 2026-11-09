@@ -199,6 +199,63 @@ class FakePlaywright:
         self.chromium = FakeBrowserType(events=self.events)
 
 
+class FakeManagedProvider:
+    """Duck-typed ``ManagedBrowserProvider`` for lifecycle tests."""
+
+    def __init__(
+        self,
+        *,
+        mode: str = "multilogin",
+        profile_id: str = "profile",
+        connect_url: str = "http://127.0.0.1:55513",
+        probe_error: BaseException | None = None,
+        start_error: BaseException | None = None,
+        status_error: BaseException | None = None,
+        status_value: str = "running",
+        stop_error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.mode = mode
+        self.profile_id = profile_id
+        self.connect_url = connect_url
+        self.probe_error = probe_error
+        self.start_error = start_error
+        self.status_error = status_error
+        self.status_value = status_value
+        self.stop_error = stop_error
+        self.events = events if events is not None else []
+        self.probe_calls = 0
+        self.start_calls: list[bool] = []
+        self.status_calls = 0
+        self.stop_calls = 0
+
+    def probe(self) -> None:
+        self.probe_calls += 1
+        self.events.append("probe")
+        if self.probe_error is not None:
+            raise self.probe_error
+
+    def start(self, headless: bool) -> str:
+        self.start_calls.append(headless)
+        self.events.append("start")
+        if self.start_error is not None:
+            raise self.start_error
+        return self.connect_url
+
+    def status(self) -> str:
+        self.status_calls += 1
+        self.events.append("status")
+        if self.status_error is not None:
+            raise self.status_error
+        return self.status_value
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+        self.events.append("stop")
+        if self.stop_error is not None:
+            raise self.stop_error
+
+
 class FakeMultiloginClient:
     """Synchronous ``MultiloginClient`` double used by browser-session tests."""
 

@@ -520,7 +520,7 @@ class MetaBusinessUploader(BaseVideoUploader):
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
         await page.goto(META_BUSINESS_URL, wait_until="domcontentloaded", timeout=120_000)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
             if await _is_business_logged_out(page):
                 raise LoginRequiredError(
@@ -528,7 +528,7 @@ class MetaBusinessUploader(BaseVideoUploader):
                 )
         try:
             await self._publish_on_page(page)
-            if session.mode == "multilogin":
+            if session.managed:
                 _raise_if_login_required(page)
             return self.result
         finally:

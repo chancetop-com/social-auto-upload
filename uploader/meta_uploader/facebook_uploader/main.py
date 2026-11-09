@@ -338,10 +338,10 @@ class FacebookPost:
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
         await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded", timeout=90_000)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
         await self._publish_on_page(page)
-        if session.mode == "multilogin":
+        if session.managed:
             _raise_if_login_required(page)
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:

@@ -477,7 +477,7 @@ class HuPuVideo(BaseVideoUploader):
 
     async def upload_in(self, session: BrowserSession, *, page: Page | None = None) -> None:
         """Run the publish flow on the provided session's context only."""
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         if page is None:
             page = await session.context.new_page()
         # 直接跳转到视频发布页（绕过首页点击）

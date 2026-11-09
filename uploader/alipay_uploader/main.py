@@ -817,7 +817,7 @@ class AlipayVideo(BaseVideoUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
-        multilogin = session.mode == "multilogin"
+        multilogin = session.managed
         page = await session.context.new_page()
         await self.open_upload_page(page, multilogin=multilogin)
         alipay_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))

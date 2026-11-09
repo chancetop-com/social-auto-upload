@@ -12,9 +12,9 @@ from sau_commands.arguments import (
     resolve_account_file,
     schedule_value,
 )
-from sau_commands.multilogin import (
-    reject_multilogin_login,
-    reject_multilogin_platform,
+from sau_commands.browser import (
+    reject_managed_login,
+    reject_managed_platform,
     require_local_account,
     resolve_account_label,
 )
@@ -118,9 +118,9 @@ async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
     if args.action == "login":
-        reject_multilogin_login("bilibili", args)
+        reject_managed_login("bilibili", args)
     else:
-        reject_multilogin_platform("bilibili", args)
+        reject_managed_platform("bilibili", args)
 
     require_local_account(args)
     account_label = resolve_account_label(args)
