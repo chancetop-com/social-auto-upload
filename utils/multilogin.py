@@ -125,6 +125,10 @@ class MultiloginClient:
 
         if getattr(response, "status_code", None) != 200:
             detail = self._http_error("探活 Multilogin Launcher", response)
+            if isinstance(detail, RateLimitedError):
+                # Shared rate-limit contract: do not bury the 429 inside the
+                # unreachable hint, or the CLI cannot map it to exit code 11.
+                raise detail
             raise RuntimeError(f"{_LAUNCHER_UNREACHABLE_MESSAGE}\n{detail}") from None
 
     def start(self, folder_id: str, profile_id: str, headless: bool) -> str:

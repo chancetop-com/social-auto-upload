@@ -73,6 +73,23 @@ def _endpoint_display(url: str) -> str:
     return url
 
 
+def _port_display(url: str) -> str:
+    """Return the port of a CDP URL as a string, or ``""`` when absent."""
+    port = urlsplit(url).port
+    return str(port) if port is not None else ""
+
+
+def _mlx_folder_id(provider: ManagedBrowserProvider) -> str:
+    """Read the MLX folder id back for its legacy lifecycle log line.
+
+    The generic protocol only guarantees ``profile_id``; MLX's provider also
+    exposes its target, and its pre-refactor log line included ``folder_id``.
+    """
+    target = getattr(provider, "target", None)
+    value = getattr(target, "folder_id", "")
+    return str(value) if value is not None else ""
+
+
 @dataclass(slots=True)
 class BrowserSession:
     browser: "Browser"
@@ -201,18 +218,32 @@ async def _managed_session(
     except StartIncompleteError:
         await _stop_profile(provider)
         raise
-    logger.info(
-        "{} Profile 已启动：profile_id={} endpoint={}",
-        _provider_label(provider.mode),
-        provider.profile_id,
-        _endpoint_display(connect_url),
-    )
+    if provider.mode == "multilogin":
+        logger.info(
+            "Multilogin Profile 已启动：profile_id={} folder_id={} port={}",
+            provider.profile_id,
+            _mlx_folder_id(provider),
+            _port_display(connect_url),
+        )
+    else:
+        logger.info(
+            "{} Profile 已启动：profile_id={} endpoint={}",
+            _provider_label(provider.mode),
+            provider.profile_id,
+            _endpoint_display(connect_url),
+        )
 
     browser: "Browser | None" = None
     try:
         browser = await _connect_over_cdp(playwright, provider, connect_url)
         contexts = browser.contexts
         if len(contexts) != 1:
+            if provider.mode == "multilogin":
+                raise RuntimeError(
+                    "Multilogin Profile 的浏览器上下文数量异常"
+                    f"（期望 1，实际 {len(contexts)}）："
+                    f"profile_id={provider.profile_id}"
+                )
             raise RuntimeError(
                 "托管浏览器上下文数量异常"
                 f"（期望 1，实际 {len(contexts)}）："
@@ -261,6 +292,15 @@ async def _connect_over_cdp(
     except Exception as exc:
         status_text = f"查询失败（{exc}）"
 
+    if provider.mode == "multilogin":
+        raise RuntimeError(
+            "无法通过 CDP 连接 Multilogin Profile"
+            f"（profile_id={provider.profile_id}，"
+            f"port={_port_display(connect_url)}，"
+            f"已尝试 {CONNECT_ATTEMPTS} 次）：{last_error}；"
+            f"Profile 状态：{status_text}。{_connection_hint(provider.mode)}"
+        )
+
     label = _provider_label(provider.mode)
     raise RuntimeError(
         f"无法通过 CDP 连接 {label} Profile"
@@ -277,19 +317,31 @@ async def _disconnect(browser: "Browser", mode: str) -> None:
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "断开 {} 浏览器连接失败：{}；已上传结果不受影响。",
-            _provider_label(mode),
-            exc,
-        )
+        if mode == "multilogin":
+            logger.warning(
+                "断开 Multilogin 浏览器连接失败：{}；已上传结果不受影响。",
+                exc,
+            )
+        else:
+            logger.warning(
+                "断开 {} 浏览器连接失败：{}；已上传结果不受影响。",
+                _provider_label(mode),
+                exc,
+            )
 
 
 async def _stop_profile(provider: ManagedBrowserProvider) -> None:
-    logger.info(
-        "正在停止 {} Profile：profile_id={}",
-        _provider_label(provider.mode),
-        provider.profile_id,
-    )
+    if provider.mode == "multilogin":
+        logger.info(
+            "正在停止 Multilogin Profile：profile_id={}",
+            provider.profile_id,
+        )
+    else:
+        logger.info(
+            "正在停止 {} Profile：profile_id={}",
+            _provider_label(provider.mode),
+            provider.profile_id,
+        )
     try:
         # Shield the stop request so cancellation still sends it.  Providers are
         # synchronous (HTTP clients), so run them in a worker thread.
@@ -297,13 +349,21 @@ async def _stop_profile(provider: ManagedBrowserProvider) -> None:
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "停止 {} Profile 失败（profile_id={}）：{}；"
-            "Profile 可能仍在运行，需调度侧清理。",
-            _provider_label(provider.mode),
-            provider.profile_id,
-            exc,
-        )
+        if provider.mode == "multilogin":
+            logger.warning(
+                "停止 Multilogin Profile 失败（profile_id={}）：{}；"
+                "Profile 可能仍在运行，需调度侧清理。",
+                provider.profile_id,
+                exc,
+            )
+        else:
+            logger.warning(
+                "停止 {} Profile 失败（profile_id={}）：{}；"
+                "Profile 可能仍在运行，需调度侧清理。",
+                _provider_label(provider.mode),
+                provider.profile_id,
+                exc,
+            )
 
 
 __all__ = ["BrowserSession", "browser_session"]

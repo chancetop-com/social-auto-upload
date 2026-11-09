@@ -136,9 +136,12 @@ class AdspowerClient:
         code = payload.get("code")
         message = str(payload.get("msg") or "").strip()
 
-        parts = [f"{action}失败：HTTP {cls._status_code(response)}"]
-        if code is not None:
-            parts.append(f"code={code}")
+        # Spec §5.5 fixes the shape ``HTTP <status>；code=<code>；msg=<msg>``:
+        # never let a missing envelope code drop the field entirely.
+        parts = [
+            f"{action}失败：HTTP {cls._status_code(response)}"
+            f"；code={cls._display_code(code)}"
+        ]
         if message:
             parts.append(f"msg={message}")
         else:
@@ -154,6 +157,10 @@ class AdspowerClient:
         return RuntimeError("；".join(parts))
 
     @staticmethod
+    def _display_code(code: Any) -> Any:
+        return "?" if code is None else code
+
+    @staticmethod
     def _rate_limited(action: str) -> RateLimitedError:
         return RateLimitedError(f"{action}失败：{_RATE_LIMITED_HINT}")
 
@@ -167,9 +174,24 @@ class AdspowerClient:
     ) -> RuntimeError:
         code = payload.get("code")
         message = str(payload.get("msg") or "").strip()
-        parts = [f"{action}失败：HTTP {status}；code={code}"]
+        parts = [
+            f"{action}失败：HTTP {status}；code={AdspowerClient._display_code(code)}"
+        ]
         if message:
             parts.append(f"msg={message}")
+        return RuntimeError("；".join(parts))
+
+    @classmethod
+    def _envelope_error(
+        cls, action: str, response: Any, reason: str
+    ) -> RuntimeError:
+        """Format an HTTP 2xx response whose envelope cannot be trusted."""
+        payload = cls._parse_json(response) or {}
+        message = str(payload.get("msg") or "").strip() or reason
+        status = cls._status_code(response)
+        code = payload.get("code")
+        parts = [f"{action}失败：HTTP {status}；code={cls._display_code(code)}"]
+        parts.append(f"msg={message}")
         return RuntimeError("；".join(parts))
 
     @staticmethod
@@ -276,7 +298,16 @@ class AdspowerClient:
 
         payload = self._parse_json(response)
         if payload is None:
-            return "unknown"
+            raise self._envelope_error(
+                STATUS_ACTION, response, "响应不是合法 JSON"
+            )
+        code = payload.get("code")
+        if not self._is_int_code(code):
+            raise self._envelope_error(STATUS_ACTION, response, "响应缺少 code")
+        if code != 0:
+            raise self._business_error(
+                STATUS_ACTION, payload, self._status_code(response)
+            )
         data = payload.get("data")
         if not isinstance(data, dict):
             return "unknown"

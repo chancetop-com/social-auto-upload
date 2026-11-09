@@ -463,6 +463,128 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         warning.assert_called_once()
         self.assertEqual(client.stop_calls, [PROFILE_ID])
 
+    def test_start_log_matches_legacy_mlx_wording(self):
+        events: list[str] = []
+        client = FakeMultiloginClient(events=events)
+        playwright = FakePlaywright(events=events)
+        browser = self._browser(events)
+        playwright.chromium.queue_connect_browser(browser)
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
+            ):
+                pass
+
+        with patch("utils.browser_session.logger.info") as info:
+            run(scenario())
+
+        self.assertEqual(
+            info.call_args_list[0].args,
+            (
+                "Multilogin Profile 已启动：profile_id={} folder_id={} port={}",
+                PROFILE_ID,
+                FOLDER_ID,
+                "55513",
+            ),
+        )
+
+    def test_contexts_error_matches_legacy_mlx_wording(self):
+        events: list[str] = []
+        client = FakeMultiloginClient(events=events)
+        playwright = FakePlaywright(events=events)
+        browser = self._browser(events, [])
+        playwright.chromium.queue_connect_browser(browser)
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
+            ):
+                pass
+
+        with self.assertRaises(RuntimeError) as caught:
+            run(scenario())
+
+        self.assertEqual(
+            str(caught.exception),
+            "Multilogin Profile 的浏览器上下文数量异常"
+            f"（期望 1，实际 0）：profile_id={PROFILE_ID}",
+        )
+
+    def test_cdp_failure_matches_legacy_mlx_wording_and_port(self):
+        events: list[str] = []
+        client = FakeMultiloginClient(events=events, status_value="download_core_error")
+        playwright = FakePlaywright(events=events)
+        for _ in range(3):
+            playwright.chromium.queue_connect_error(ConnectionError("refused"))
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
+            ):
+                pass
+
+        with patch("utils.browser_session.asyncio.sleep", new=AsyncMock()):
+            with self.assertRaises(RuntimeError) as caught:
+                run(scenario())
+
+        self.assertEqual(
+            str(caught.exception),
+            "无法通过 CDP 连接 Multilogin Profile"
+            f"（profile_id={PROFILE_ID}，port=55513，"
+            "已尝试 3 次）：refused；"
+            "Profile 状态：download_core_error。"
+            "若你使用 Docker launcher，CDP 端口默认未映射到宿主机；"
+            "v1 请改用 Multilogin 桌面应用。",
+        )
+
+    def test_disconnect_warning_matches_legacy_mlx_wording(self):
+        events: list[str] = []
+        client = FakeMultiloginClient(events=events)
+        playwright = FakePlaywright(events=events)
+        browser = self._browser(events)
+        browser.close_error = RuntimeError("disconnect failed")
+        playwright.chromium.queue_connect_browser(browser)
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
+            ):
+                pass
+
+        with patch("utils.browser_session.logger.warning") as warning:
+            run(scenario())
+
+        self.assertEqual(
+            warning.call_args.args[0],
+            "断开 Multilogin 浏览器连接失败：{}；已上传结果不受影响。",
+        )
+        self.assertEqual(str(warning.call_args.args[1]), "disconnect failed")
+
+    def test_stop_log_matches_legacy_mlx_wording(self):
+        events: list[str] = []
+        client = FakeMultiloginClient(events=events)
+        playwright = FakePlaywright(events=events)
+        browser = self._browser(events)
+        playwright.chromium.queue_connect_browser(browser)
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=MultiloginProvider(self.target, client)
+            ):
+                pass
+
+        with patch("utils.browser_session.logger.info") as info:
+            run(scenario())
+
+        stop_calls = [
+            call
+            for call in info.call_args_list
+            if call.args[0] == "正在停止 Multilogin Profile：profile_id={}"
+        ]
+        self.assertEqual(len(stop_calls), 1)
+        self.assertEqual(stop_calls[0].args[1], PROFILE_ID)
+
     def test_browser_close_failure_warns_and_still_stops(self):
         events: list[str] = []
         client = FakeMultiloginClient(events=events)

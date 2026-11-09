@@ -1,8 +1,9 @@
 """Hand-written async test doubles for ``utils.browser_session``.
 
 The fakes deliberately fail loudly (``AssertionError``) when production code
-touches an API that the Multilogin branch must never use.  They also record the
-calls that *are* allowed so tests can assert exact parameters and ordering.
+touches an API that the managed (Multilogin X / AdsPower) branch must never
+use.  They also record the calls that *are* allowed so tests can assert exact
+parameters and ordering.
 """
 
 from __future__ import annotations
