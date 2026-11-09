@@ -7,6 +7,7 @@ calls that *are* allowed so tests can assert exact parameters and ordering.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 
@@ -312,3 +313,83 @@ class FakeMultiloginClient:
         self.stop_calls.append(profile_id)
         if self.stop_error is not None:
             raise self.stop_error
+
+
+class FakeResponse:
+    """Minimal ``requests.Response`` double used by HTTP client tests."""
+
+    def __init__(
+        self,
+        status_code: int,
+        payload: dict | None = None,
+        *,
+        text: str | None = None,
+        json_error: BaseException | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self.payload = payload
+        self._text = text
+        self._json_error = json_error
+
+    def json(self) -> dict:
+        if self._json_error is not None:
+            raise self._json_error
+        return self.payload if self.payload is not None else {}
+
+    @property
+    def text(self) -> str:
+        if self._text is not None:
+            return self._text
+        return json.dumps(self.payload or {}, ensure_ascii=False)
+
+
+class FakeHttpGet:
+    """Legacy GET-only fake retained for the Multilogin client tests."""
+
+    def __init__(self, outcomes: list[object] | None = None) -> None:
+        self.outcomes = list(outcomes or [])
+        self.calls: list[dict] = []
+
+    def __call__(self, url: str, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        if not self.outcomes:
+            raise AssertionError("http_get called with no queued outcome")
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+
+class FakeHttp:
+    """Injectable ``http_get`` / ``http_post`` pair with ordered call recording."""
+
+    def __init__(
+        self,
+        get_outcomes: list[object] | None = None,
+        post_outcomes: list[object] | None = None,
+    ) -> None:
+        self.get_outcomes = list(get_outcomes or [])
+        self.post_outcomes = list(post_outcomes or [])
+        self.get_calls: list[dict] = []
+        self.post_calls: list[dict] = []
+        self.calls: list[dict] = []
+
+    def _pop(self, outcomes: list[object], method: str) -> object:
+        if not outcomes:
+            raise AssertionError(f"http_{method} called with no queued outcome")
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    def get(self, url: str, **kwargs):
+        call = {"method": "GET", "url": url, **kwargs}
+        self.get_calls.append(call)
+        self.calls.append(call)
+        return self._pop(self.get_outcomes, "get")
+
+    def post(self, url: str, **kwargs):
+        call = {"method": "POST", "url": url, **kwargs}
+        self.post_calls.append(call)
+        self.calls.append(call)
+        return self._pop(self.post_outcomes, "post")

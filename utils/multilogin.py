@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 import requests
 
+from utils.errors import RateLimitedError
 from utils.managed_browser import ProviderMode
 
 LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
@@ -95,7 +96,8 @@ class MultiloginClient:
         error_code = str(status.get("error_code") or "").strip()
         message = str(status.get("message") or "").strip()
 
-        parts = [f"{action}失败：HTTP {getattr(response, 'status_code', '?')}"]
+        status_code = getattr(response, "status_code", "?")
+        parts = [f"{action}失败：HTTP {status_code}"]
         if error_code:
             parts.append(f"error_code={error_code}")
         if message:
@@ -104,6 +106,9 @@ class MultiloginClient:
             body = self._response_text(response).strip()
             if body:
                 parts.append(body[:500])
+        if status_code == 429:
+            # Shared rate-limit contract: the CLI maps this to exit code 11.
+            return RateLimitedError("；".join(parts))
         return RuntimeError("；".join(parts))
 
     # ------------------------------------------------------------- Endpoints
