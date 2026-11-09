@@ -1,7 +1,7 @@
 """instagram 的命令参数与执行逻辑。"""
 from __future__ import annotations
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from loguru import logger
 from patchright.async_api import async_playwright
@@ -134,8 +134,9 @@ async def upload_instagram_content(
 ) -> dict:
     if target is not None:
         # No cookie path, no .identity.json read, no account-id comparison:
-        # the Multilogin Profile is the identity.
-        app = _build_uploader(request, None)
+        # the Profile is the identity.  ``--proxy`` / the environment proxy are
+        # not forwarded either; the Profile owns the egress IP.
+        app = _build_uploader(replace(request, proxy=None), None)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
