@@ -65,3 +65,9 @@ uv run sau xiaohongshu --help
 - 使用 `--headed` 表示有头模式
 - 如果用户明确要求无头登录，也要预期 CLI 会通过控制台输出或临时图片路径提供二维码相关提示
 - 如果登录过程中已经生成了本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，不要只告诉用户图片路径
+
+## 界面语言
+
+- 小红书创作后台的按钮、弹窗和输入框选择器都是中文，页面必须保持中文；
+- 本地模式固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`，不依赖操作系统语言；
+- 托管模式（Multilogin / AdsPower）不会应用 CLI 的 context 语言设置，Profile 界面必须人工设为**中文**，不要设成 English (US)。

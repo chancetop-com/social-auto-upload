@@ -219,7 +219,8 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
 3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
 4. TikTok 的 MLX 模式额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。本地模式会自动切换页面语言。
-5. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`（本地与 MLX 相同）。
+5. 小红书的托管 Profile 界面语言必须为**中文**；CLI 不切换托管 Profile 的语言，中文选择器依赖中文界面。本地模式固定 `zh-CN`。
+6. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`（本地与 MLX 相同）。
 
 **MLX 明确不支持：**
 
@@ -285,7 +286,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 2. AdsPower 桌面应用与 CLI 在**同一台 macOS/Windows 机器**上；应用已启动；Local API 已开启；`50325` 未被占用。
 3. `ADSPOWER_API_KEY` 有效；请求带 `Authorization: Bearer`。
 4. Profile 为 **Chromium 内核**；Firefox 不支持。
-5. Profile 已**人工登录**目标平台，且没有待处理验证码/2FA；TikTok Profile 界面须为 **English (US)**。
+5. Profile 已**人工登录**目标平台，且没有待处理验证码/2FA；TikTok Profile 界面须为 **English (US)**，小红书 Profile 界面须为**中文**。
 6. AdsPower 客户端升级到最新 patch（官方未给最低版本）。
 7. `ADSPOWER_API_BASE` 默认 `http://127.0.0.1:50325`；仅在改端口或使用官方地址时设置。
 8. 同一 Profile **串行使用**；CLI 不加锁、不做 active 预检。
@@ -395,6 +396,8 @@ sau xiaohongshu upload-note --account <account_name> --images videos/1.png video
 ```bash
 SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --account <account_name>
 ```
+
+本地模式的浏览器 context 固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`，不依赖操作系统语言；托管模式不会应用该设置，Multilogin / AdsPower 的 Profile 界面必须保持**中文**。若 RedNote 后台实际为英文 UI，当前中文选择器不适用。
 
 ### 小红书发布声明
 
@@ -621,8 +624,8 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 TikTok 支持本地与两种托管子模式：
 
 - **本地模式**（默认）：不设置任一托管凭据，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。本地 context 固定 `en-US`，不需要改系统语言。
-- **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**。
-- **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`；`--folder-id` 忽略；Profile 界面须为 **English (US)**。
+- **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**（小红书须为中文）。
+- **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`；`--folder-id` 忽略；Profile 界面须为 **English (US)**（小红书须为中文）。
 
 ```bash
 # 本地模式：先交互式登录一次（打开有头浏览器，登录后回终端按 Enter）

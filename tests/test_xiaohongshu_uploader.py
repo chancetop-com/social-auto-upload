@@ -127,6 +127,13 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         self.assertIn("Chrome/156.0.0.0", user_agent)
         self.assertTrue(browser.contexts[0].closed)
 
+    def test_local_context_is_pinned_to_chinese(self):
+        self.assertEqual(xhs_main.XHS_CONTEXT_KWARGS["locale"], "zh-CN")
+        accept_language = xhs_main.XHS_CONTEXT_KWARGS["extra_http_headers"][
+            "Accept-Language"
+        ]
+        self.assertIn("zh-CN", accept_language)
+
     def test_creator_urls_keep_xiaohongshu_domain_by_default(self):
         with patch.dict(os.environ, {"SAU_XHS_CREATOR_BASE_URL": ""}):
             self.assertEqual(

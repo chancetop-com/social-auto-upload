@@ -90,7 +90,13 @@ XHS_LOGIN_CHECK_SETTLE_MS = 3_000
 # drift.  Geolocation is a local-only context option: the Multilogin branch must
 # never call ``grant_permissions`` (spec §8).
 XHS_LAUNCH_KWARGS = {"channel": "chromium"}
-XHS_CONTEXT_KWARGS = {"permissions": ["geolocation"]}
+# 本地模式固定中文：创作后台的按钮/弹窗/placeholder 都是中文选择器。
+# 托管模式不会应用 context_kwargs，Profile 界面必须由人工保持中文。
+XHS_CONTEXT_KWARGS = {
+    "permissions": ["geolocation"],
+    "locale": "zh-CN",
+    "extra_http_headers": {"Accept-Language": "zh-CN,zh;q=0.9"},
+}
 XHS_INIT_SCRIPT = True
 
 _LOGIN_URL_MARKERS = ("login", "captcha", "verify", "two-factor", "2fa")
@@ -340,6 +346,7 @@ async def cookie_auth(account_file):
             context = await browser.new_context(
                 storage_state=account_file,
                 user_agent=await _xhs_user_agent(browser),
+                **XHS_CONTEXT_KWARGS,
             )
             context = await set_init_script(context)
             page = await context.new_page()
@@ -410,7 +417,10 @@ async def xiaohongshu_cookie_gen(
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=headless, channel="chromium")
-        context = await browser.new_context(user_agent=await _xhs_user_agent(browser))
+        context = await browser.new_context(
+            user_agent=await _xhs_user_agent(browser),
+            **XHS_CONTEXT_KWARGS,
+        )
         context = await set_init_script(context)
         qrcode_path = None
         qrcode_info = None
