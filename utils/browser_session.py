@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 from loguru import logger
 
 from utils.base_social_media import set_init_script
+from utils.errors import StartIncompleteError
 from utils.managed_browser import ManagedBrowserProvider
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps imports light
@@ -36,19 +37,29 @@ CONNECT_TIMEOUT_MS = 10_000
 CONNECT_ATTEMPTS = 3
 CONNECT_BACKOFF_SECONDS = (2, 4)
 
-_DOCKER_HINT = (
-    "若你使用 Docker launcher，CDP 端口默认未映射到宿主机；"
-    "v1 请改用 Multilogin 桌面应用。"
-)
-
 _PROVIDER_LABELS = {
     "multilogin": "Multilogin",
     "adspower": "AdsPower",
 }
 
+_CONNECTION_HINTS = {
+    "multilogin": (
+        "若你使用 Docker launcher，CDP 端口默认未映射到宿主机；"
+        "v1 请改用 Multilogin 桌面应用。"
+    ),
+    "adspower": (
+        "请确认 AdsPower 桌面应用与 CLI 运行在同一台机器；"
+        "AdsPower 不支持容器化或跨机部署。"
+    ),
+}
+
 
 def _provider_label(mode: str) -> str:
     return _PROVIDER_LABELS.get(mode, mode)
+
+
+def _connection_hint(mode: str) -> str:
+    return _CONNECTION_HINTS.get(mode, "")
 
 
 def _endpoint_display(url: str) -> str:
@@ -180,9 +191,16 @@ async def _managed_session(
     provider: ManagedBrowserProvider,
 ) -> AsyncIterator[BrowserSession]:
     # Probe and Start happen before the try block on purpose: if Start fails the
-    # profile may belong to somebody else, so we must never Stop it.
+    # profile may belong to somebody else, so we must never Stop it.  The one
+    # exception is ``StartIncompleteError``: the server confirmed a 2xx but the
+    # payload was unusable, so the profile was probably started and we do a
+    # best-effort stop before re-raising.
     await asyncio.to_thread(provider.probe)
-    connect_url = await asyncio.to_thread(provider.start, headless)
+    try:
+        connect_url = await asyncio.to_thread(provider.start, headless)
+    except StartIncompleteError:
+        await _stop_profile(provider)
+        raise
     logger.info(
         "{} Profile 已启动：profile_id={} endpoint={}",
         _provider_label(provider.mode),
@@ -249,7 +267,7 @@ async def _connect_over_cdp(
         f"（mode={provider.mode}，profile_id={provider.profile_id}，"
         f"endpoint={_endpoint_display(connect_url)}，"
         f"已尝试 {CONNECT_ATTEMPTS} 次）：{last_error}；"
-        f"Profile 状态：{status_text}。{_DOCKER_HINT}"
+        f"Profile 状态：{status_text}。{_connection_hint(provider.mode)}"
     )
 
 

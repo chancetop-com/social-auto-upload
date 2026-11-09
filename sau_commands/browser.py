@@ -5,28 +5,41 @@ This module never talks to a desktop app and never stores an API token.  The
 environment only decides which provider (if any) is active; the provider itself
 is constructed here and owns the credential for its lifetime.
 
-Stage 1 (ticket 11) keeps the observable behaviour of the existing Multilogin
-mode.  AdsPower activation is added in ticket 13 by changing :func:`active_mode`
-and the provider branch of :func:`resolve_managed_provider`; platform modules
-must not need to change again.
+Both managed providers (Multilogin X and AdsPower) are selected here by
+environment variable alone; platform modules only ever receive a provider and
+never branch on the product name.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+from urllib.parse import urlsplit
 
+from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
 from utils.errors import LoginRequiredError, UsageError
 from utils.managed_browser import ManagedBrowserProvider, ProviderMode
 from utils.multilogin import MultiloginClient, MultiloginProvider, MultiloginTarget
 
 MLX_TOKEN_ENV = "MLX_API_TOKEN"
 ADSPOWER_KEY_ENV = "ADSPOWER_API_KEY"
+ADSPOWER_BASE_ENV = "ADSPOWER_API_BASE"
 
+DEFAULT_ADSPOWER_BASE = "http://127.0.0.1:50325"
+
+DUAL_CREDENTIALS_MESSAGE = (
+    "MLX_API_TOKEN 与 ADSPOWER_API_KEY 不能同时设置；请只保留一个。"
+)
 MISSING_MLX_TARGET_MESSAGE = (
     "Multilogin 模式需要同时提供 --folder-id 与 --profile-id。"
 )
 MISSING_MLX_TOKEN_MESSAGE = "未设置 MLX_API_TOKEN，无法使用 Multilogin 模式。"
+MISSING_ADSPOWER_PROFILE_MESSAGE = "AdsPower 模式需要提供 --profile-id。"
+INVALID_ADSPOWER_BASE_MESSAGE = (
+    "ADSPOWER_API_BASE 不合法：{base}。"
+    "仅支持 http/https、主机名与可选端口，"
+    "且不得包含用户信息、路径、查询或片段。"
+)
 MISSING_ACCOUNT_MESSAGE = "本地模式需要 --account。"
 
 _LOGIN_REJECTED_TEMPLATES = {
@@ -68,13 +81,26 @@ def _adspower_key() -> str:
 def active_mode() -> ProviderMode | None:
     """Return the active managed provider mode, or ``None`` for local mode.
 
-    Ticket 11 is a pure refactor: only Multilogin activates the managed seam.
-    Ticket 13 adds the ``ADSPOWER_API_KEY`` branch here (and the conflict check
-    in ``sau_cli.main``).
+    Only the credential environment variables participate: a non-empty
+    ``MLX_API_TOKEN`` activates Multilogin, otherwise a non-empty
+    ``ADSPOWER_API_KEY`` activates AdsPower.  ``ADSPOWER_API_BASE`` never
+    activates anything and is only validated once AdsPower is active.
     """
     if _mlx_token():
         return "multilogin"
+    if _adspower_key():
+        return "adspower"
     return None
+
+
+def credentials_conflict() -> bool:
+    """Return ``True`` when both managed credentials are set.
+
+    ``sau_cli.main`` turns this into a runtime error (exit code 1) after
+    argument parsing and before dispatch, so argparse semantics for ``--help``
+    and unknown subcommands are preserved.
+    """
+    return bool(_mlx_token() and _adspower_key())
 
 
 def managed_enabled() -> bool:
@@ -123,6 +149,49 @@ def resolve_multilogin_target(
     return _resolve_mlx_target(args)
 
 
+def _resolve_adspower_base() -> str:
+    """Validate and normalise ``ADSPOWER_API_BASE`` for the active AdsPower mode.
+
+    Called only from the AdsPower provider branch, so an invalid value never
+    affects local or Multilogin runs and never issues an HTTP request.
+    """
+    raw = os.environ.get(ADSPOWER_BASE_ENV, "").strip()
+    if not raw:
+        return DEFAULT_ADSPOWER_BASE
+
+    try:
+        parts = urlsplit(raw)
+        # Accessing ``port`` raises ValueError for non-numeric / out-of-range
+        # ports; that is exactly the rejection we want.
+        parts.port
+    except ValueError:
+        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE.format(base=raw)) from None
+
+    invalid = (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.path not in ("", "/")
+        or bool(parts.query)
+        or bool(parts.fragment)
+        or parts.netloc.endswith(":")
+    )
+    if invalid:
+        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE.format(base=raw))
+
+    # Rebuild from the validated pieces so a single trailing ``/`` is dropped
+    # without touching the host or port spelling.
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _resolve_adspower_target(args: argparse.Namespace) -> AdspowerTarget:
+    profile_id = str(getattr(args, "profile_id", None) or "").strip()
+    if not profile_id:
+        raise UsageError(MISSING_ADSPOWER_PROFILE_MESSAGE)
+    return AdspowerTarget(profile_id=profile_id)
+
+
 def resolve_managed_provider(
     args: argparse.Namespace,
 ) -> ManagedBrowserProvider | None:
@@ -142,7 +211,14 @@ def resolve_managed_provider(
         target = _resolve_mlx_target(args)
         return MultiloginProvider(target, MultiloginClient(token))
 
-    # Ticket 13 adds the AdsPower branch here without touching platform modules.
+    if mode == "adspower":
+        key = _adspower_key()
+        if not key:
+            raise RuntimeError("未设置 ADSPOWER_API_KEY，无法使用 AdsPower 模式。")
+        target = _resolve_adspower_target(args)
+        base = _resolve_adspower_base()
+        return AdspowerProvider(target, AdspowerClient(key, base))
+
     raise RuntimeError(f"Unsupported managed browser provider: {mode}")
 
 
@@ -268,6 +344,7 @@ __all__ = [
     "add_browser_flags",
     "add_multilogin_flags",
     "active_mode",
+    "credentials_conflict",
     "identity_unverified_format",
     "login_required_error",
     "managed_app_label",

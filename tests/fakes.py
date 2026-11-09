@@ -257,6 +257,69 @@ class FakeManagedProvider:
             raise self.stop_error
 
 
+class FakeAdspowerClient:
+    """Synchronous ``AdspowerClient`` double used by AdsPower tests.
+
+    Mirrors the real client's public primitives but never touches HTTP.  Every
+    call is recorded in ``calls`` and ``events`` so lifecycle ordering can be
+    asserted without reaching into the session template.
+    """
+
+    def __init__(
+        self,
+        *,
+        ws_url: str = "ws://127.0.0.1:9222/devtools/browser/ticket13",
+        probe_error: BaseException | None = None,
+        start_error: BaseException | None = None,
+        status_error: BaseException | None = None,
+        status_value: str = "Active",
+        stop_error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.ws_url = ws_url
+        self.probe_error = probe_error
+        self.start_error = start_error
+        self.status_error = status_error
+        self.status_value = status_value
+        self.stop_error = stop_error
+        self.events = events if events is not None else []
+        self.calls: list[str] = []
+        self.probe_calls = 0
+        self.start_calls: list[tuple[str, bool]] = []
+        self.status_calls: list[str] = []
+        self.stop_calls: list[str] = []
+
+    def probe(self) -> None:
+        self.probe_calls += 1
+        self.calls.append("probe")
+        self.events.append("probe")
+        if self.probe_error is not None:
+            raise self.probe_error
+
+    def start(self, profile_id: str, headless: bool) -> str:
+        self.calls.append("start")
+        self.events.append("start")
+        self.start_calls.append((profile_id, headless))
+        if self.start_error is not None:
+            raise self.start_error
+        return self.ws_url
+
+    def status(self, profile_id: str) -> str:
+        self.calls.append("status")
+        self.events.append("status")
+        self.status_calls.append(profile_id)
+        if self.status_error is not None:
+            raise self.status_error
+        return self.status_value
+
+    def stop(self, profile_id: str) -> None:
+        self.calls.append("stop")
+        self.events.append("stop")
+        self.stop_calls.append(profile_id)
+        if self.stop_error is not None:
+            raise self.stop_error
+
+
 class FakeMultiloginClient:
     """Synchronous ``MultiloginClient`` double used by browser-session tests."""
 
