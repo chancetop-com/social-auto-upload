@@ -57,12 +57,12 @@ _XHS_PUBLISH_FAILURE_KEYWORDS = (
     "违反社区规范",
     "发布失败",
     "账号异常",
-    "操作频繁",
-    "请稍后再试",
     "内容违规",
     "审核不通过",
     "无法发布",
 )
+# 「操作频繁」「请稍后再试」属于可恢复的限流提示，保留原有重试逻辑，
+# 由 15 分钟总预算兜底。
 
 
 class XhsPublishRejectedError(RuntimeError):

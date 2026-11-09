@@ -361,6 +361,42 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
         self.assertEqual(text, "因违反社区规范禁止发笔记")
 
+    def test_find_publish_failure_ignores_rate_limit_toast(self):
+        class FakeItem:
+            async def is_visible(self):
+                return True
+
+            async def inner_text(self):
+                return "操作频繁，请稍后再试"
+
+        class FakeLocator:
+            async def count(self):
+                return 1
+
+            def nth(self, index):
+                return FakeItem()
+
+        class FakePage:
+            url = "https://creator.xiaohongshu.com/publish/publish?target=image"
+
+            def locator(self, selector):
+                if selector == "[class*='toast']":
+                    return FakeLocator()
+                return FakeLocator()
+
+        app = xhs_main.XiaoHongShuNote(
+            image_paths=["a.png"],
+            note="正文",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+            title="标题",
+        )
+
+        text = asyncio.run(app._find_publish_failure(FakePage()))
+
+        self.assertIsNone(text)
+
     def test_wait_publish_outcome_fails_fast_on_rejection(self):
         class FakeItem:
             async def is_visible(self):
