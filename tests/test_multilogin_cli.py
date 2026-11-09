@@ -22,7 +22,7 @@ from sau_commands import instagram as instagram_command
 from sau_commands import multilogin
 from sau_commands import xueqiu as xueqiu_command
 from sau_commands import zhihu as zhihu_command
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError, RateLimitedError, UsageError
 from utils.multilogin import MultiloginTarget
 
 SENTINEL_TOKEN = "SENTINEL-MLX-TOKEN-7f34d0"
@@ -213,6 +213,22 @@ class HelperTests(unittest.TestCase):
                     with self.assertRaises(UsageError):
                         multilogin.require_account(Namespace(account=account))
 
+    def test_shim_reexports_legacy_symbols(self):
+        expected = (
+            "add_multilogin_flags",
+            "login_required_error",
+            "multilogin_enabled",
+            "reject_multilogin_login",
+            "reject_multilogin_platform",
+            "require_account",
+            "require_local_account",
+            "resolve_account_label",
+            "resolve_multilogin_target",
+        )
+        for name in expected:
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(multilogin, name), name)
+
     def test_login_required_error_message(self):
         error = multilogin.login_required_error("抖音", "profile-1")
         self.assertIsInstance(error, LoginRequiredError)
@@ -375,6 +391,7 @@ class UsageAndExitCodeTests(unittest.TestCase):
         cases = (
             (LoginRequiredError("login"), 10),
             (UsageError("usage"), 2),
+            (RateLimitedError("rate limited"), 11),
             (RuntimeError("boom"), 1),
         )
         for error, expected in cases:
