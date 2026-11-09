@@ -87,6 +87,23 @@ def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 
 
+async def _xhs_user_agent(browser) -> str:
+    """返回不带 ``HeadlessChrome`` 标记的浏览器 UA。
+
+    小红书创作者中心的 SSO 会直接拒绝无头 Chromium 默认 UA：即使 cookie
+    完全有效，所有请求也会被重定向到 ``/login``（``service-ticket`` 返回
+    704 您已登出）。这里读取浏览器真实 UA 并把 ``HeadlessChrome`` 换成
+    ``Chrome``，让无头模式与有头模式使用同一套 UA。
+    """
+    probe_context = await browser.new_context()
+    try:
+        probe_page = await probe_context.new_page()
+        user_agent = await probe_page.evaluate("() => navigator.userAgent")
+    finally:
+        await probe_context.close()
+    return user_agent.replace("HeadlessChrome", "Chrome")
+
+
 async def _js_click_by_text(page: Page, text: str) -> bool:
     """用 JS 找到文字完全匹配的最内层元素并点击它及其祖先（绕过 span pointer-events:none / 遮罩拦截）。
 
@@ -276,7 +293,10 @@ async def cookie_auth(account_file):
         else:
             browser = await playwright.chromium.launch(headless=True, channel="chromium")
         try:
-            context = await browser.new_context(storage_state=account_file)
+            context = await browser.new_context(
+                storage_state=account_file,
+                user_agent=await _xhs_user_agent(browser),
+            )
             context = await set_init_script(context)
             page = await context.new_page()
             await page.goto(
@@ -346,7 +366,7 @@ async def xiaohongshu_cookie_gen(
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(headless=headless, channel="chromium")
-        context = await browser.new_context()
+        context = await browser.new_context(user_agent=await _xhs_user_agent(browser))
         context = await set_init_script(context)
         qrcode_path = None
         qrcode_info = None
@@ -810,6 +830,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         browser = await playwright.chromium.launch(headless=self.headless, **XHS_LAUNCH_KWARGS)
         context = await browser.new_context(
             storage_state=self.account_file,
+            user_agent=await _xhs_user_agent(browser),
             **XHS_CONTEXT_KWARGS,
         )
         context = await set_init_script(context)
@@ -955,6 +976,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         browser = await playwright.chromium.launch(headless=self.headless, **XHS_LAUNCH_KWARGS)
         context = await browser.new_context(
             storage_state=self.account_file,
+            user_agent=await _xhs_user_agent(browser),
             **XHS_CONTEXT_KWARGS,
         )
         context = await set_init_script(context)

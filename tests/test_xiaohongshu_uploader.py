@@ -90,6 +90,41 @@ class RecordingPage:
 
 
 class XiaohongshuUploaderTests(unittest.TestCase):
+    def test_headless_user_agent_drops_headless_marker(self):
+        class ProbePage:
+            async def evaluate(self, script):
+                return (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "HeadlessChrome/156.0.0.0 Safari/537.36"
+                )
+
+        class ProbeContext:
+            def __init__(self):
+                self.closed = False
+
+            async def new_page(self):
+                return ProbePage()
+
+            async def close(self):
+                self.closed = True
+
+        class FakeBrowser:
+            def __init__(self):
+                self.contexts = []
+
+            async def new_context(self):
+                context = ProbeContext()
+                self.contexts.append(context)
+                return context
+
+        browser = FakeBrowser()
+        user_agent = asyncio.run(xhs_main._xhs_user_agent(browser))
+
+        self.assertNotIn("HeadlessChrome", user_agent)
+        self.assertIn("Chrome/156.0.0.0", user_agent)
+        self.assertTrue(browser.contexts[0].closed)
+
     def test_creator_urls_keep_xiaohongshu_domain_by_default(self):
         with patch.dict(os.environ, {"SAU_XHS_CREATOR_BASE_URL": ""}):
             self.assertEqual(
