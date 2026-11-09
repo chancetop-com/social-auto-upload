@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
@@ -38,6 +39,17 @@ XHS_LOGIN_POSITIVE_SELECTORS = (
 )
 XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+XHS_PUBLISH_TIMEOUT_SECONDS = 15 * 60
+
+_XHS_PRE_PUBLISH_TIMEOUT_MESSAGE = (
+    "小红书发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
+)
+_XHS_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
+    "小红书发布结果未知：发布点击已发出，但未观察到成功页，"
+    "也未命中登录/验证码跳转；帖子可能已经发布。\n"
+    "禁止自动重发。请先到小红书创作服务平台 → 笔记管理，"
+    "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
+)
 
 # 「添加内容类型声明」下拉里的选项。来源声明是二级菜单，其余是顶层选项。
 XHS_CONTENT_TYPE_LABELS = {
@@ -607,6 +619,25 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         await self.fill_desc(page)
         await self.fill_tags(page)
 
+    @staticmethod
+    def _new_publish_deadline() -> float:
+        return time.monotonic() + XHS_PUBLISH_TIMEOUT_SECONDS
+
+    @staticmethod
+    def _check_publish_deadline(deadline: float) -> None:
+        """在「尚未点击发布」的阶段检查 15 分钟总预算。"""
+        if time.monotonic() >= deadline:
+            raise RuntimeError(_XHS_PRE_PUBLISH_TIMEOUT_MESSAGE)
+
+    @staticmethod
+    def _publish_timeout_error(publish_clicked: bool) -> Exception:
+        """点击发布前超时按失败处理，点击后超时按结果未知处理。"""
+        if publish_clicked:
+            return PublishResultUnknownError(
+                _XHS_PUBLISH_RESULT_UNKNOWN_MESSAGE
+            )
+        return RuntimeError(_XHS_PRE_PUBLISH_TIMEOUT_MESSAGE)
+
     async def apply_declarations(self, page: Page) -> None:
         """按需设置「原创声明」和「添加内容类型声明」。
 
@@ -986,6 +1017,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 pass
 
     async def upload_video_content(self, page: Page, *, multilogin: bool = False) -> None:
+        deadline = self._new_publish_deadline()
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往视频发布页"))
         publish_url = _build_xhs_creator_url(
@@ -998,6 +1030,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         await page.locator("div[class^='upload-content'] input[class='upload-input']").set_input_files(self.file_path)
 
         while True:
+            self._check_publish_deadline(deadline)
             try:
                 upload_input = await page.wait_for_selector('input.upload-input', timeout=3000)
                 preview_new = await upload_input.query_selector(
@@ -1051,12 +1084,19 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
             return
 
+        publish_clicked = False
         while True:
+            if time.monotonic() >= deadline:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise self._publish_timeout_error(publish_clicked)
+
             try:
                 if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
                     await page.locator('button:has-text("定时发布")').click()
                 else:
                     await page.locator('button:has-text("发布")').click()
+                publish_clicked = True
                 await page.wait_for_url(
                     XHS_PUBLISH_SUCCESS_URL_PATTERN,
                     timeout=3000
@@ -1173,6 +1213,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         self.image_paths = normalized_image_paths
 
     async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
+        deadline = self._new_publish_deadline()
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
         publish_url = _build_xhs_creator_url(
@@ -1192,6 +1233,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         await upload_input.set_input_files(self.image_paths)
 
         while True:
+            self._check_publish_deadline(deadline)
             try:
                 title_container = page.locator('input[placeholder*="填写标题"]').first
                 await title_container.wait_for(state="visible", timeout=3000)
@@ -1213,12 +1255,19 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
             return
 
+        publish_clicked = False
         while True:
+            if time.monotonic() >= deadline:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise self._publish_timeout_error(publish_clicked)
+
             try:
                 if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
                     await page.locator('button:has-text("定时发布")').click()
                 else:
                     await page.locator('button:has-text("发布")').click()
+                publish_clicked = True
                 await page.wait_for_url(
                     XHS_PUBLISH_SUCCESS_URL_PATTERN,
                     timeout=3000

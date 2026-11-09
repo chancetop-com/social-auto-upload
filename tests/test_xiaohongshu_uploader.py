@@ -1,11 +1,13 @@
 import asyncio
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import uploader.xiaohongshu_uploader.main as xhs_main
+from utils.errors import PublishResultUnknownError
 
 
 class FakeLocator:
@@ -299,6 +301,38 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         )
         self.assertNotIn(("type", "", None), page.keyboard.actions)
         self.assertIn(("type", "#话题1", 30), page.keyboard.actions)
+
+    def test_publish_deadline_raises_before_publish_click(self):
+        app = xhs_main.XiaoHongShuVideo(
+            title="标题",
+            file_path="demo.mp4",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+        )
+
+        with self.assertRaises(RuntimeError) as ctx:
+            app._check_publish_deadline(time.monotonic() - 1)
+
+        self.assertIn("15 分钟", str(ctx.exception))
+        self.assertIn("尚未点击发布", str(ctx.exception))
+
+    def test_publish_timeout_error_distinguishes_click_state(self):
+        app = xhs_main.XiaoHongShuVideo(
+            title="标题",
+            file_path="demo.mp4",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+        )
+
+        before = app._publish_timeout_error(False)
+        after = app._publish_timeout_error(True)
+
+        self.assertIsInstance(before, RuntimeError)
+        self.assertNotIsInstance(before, PublishResultUnknownError)
+        self.assertIsInstance(after, PublishResultUnknownError)
+        self.assertIn("禁止自动重发", str(after))
 
     def test_apply_declarations_is_noop_when_nothing_is_configured(self):
         app = xhs_main.XiaoHongShuVideo(
