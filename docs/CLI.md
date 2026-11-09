@@ -396,6 +396,57 @@ sau xiaohongshu upload-note --account <account_name> --images videos/1.png video
 SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --account <account_name>
 ```
 
+### 小红书发布声明
+
+`upload-video` / `upload-note` 支持两个独立的声明能力，**默认都不操作页面**，保持平台默认：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--original` | 开启「原创声明」开关 |
+| `--no-original` | 关闭「原创声明」开关 |
+| `--content-type fiction` | 虚构演绎，仅供娱乐 |
+| `--content-type ai` | 笔记含AI合成内容 |
+| `--content-type marketing` | 内容包含营销广告 |
+| `--content-type self-shot` | 内容来源声明 → 自主拍摄（必须同时提供 `--shoot-location` 与 `--shoot-date`） |
+| `--content-type repost` | 内容来源声明 → 来源转载（必须同时提供 `--repost-source`） |
+| `--repost-source <媒体名称>` | 来源转载的媒体名称，仅与 `repost` 搭配 |
+| `--shoot-location <地点>` | 自主拍摄的拍摄地点，仅与 `self-shot` 搭配 |
+| `--shoot-date <YYYY-MM-DD>` | 自主拍摄的拍摄日期，仅与 `self-shot` 搭配 |
+| `--no-publish` | 填完内容并设置声明后停止，不点击发布，用于回归测试 |
+
+```bash
+# 开启原创声明
+sau xiaohongshu upload-video --account <account_name> \
+  --file videos/demo.mp4 --title "原创视频" --original
+
+# 声明 AI 合成内容
+sau xiaohongshu upload-note --account <account_name> \
+  --images videos/1.png videos/2.png --title "图文标题" \
+  --content-type ai
+
+# 声明自主拍摄（地点和日期必填）
+sau xiaohongshu upload-note --account <account_name> \
+  --images videos/1.png videos/2.png --title "图文标题" \
+  --content-type self-shot \
+  --shoot-location "北京" --shoot-date "2026-11-09"
+
+# 声明来源转载并填写媒体名称
+sau xiaohongshu upload-video --account <account_name> \
+  --file videos/demo.mp4 --title "转载视频" \
+  --content-type repost --repost-source "某某媒体"
+```
+
+约束：
+
+- 不传 `--original` / `--no-original` / `--content-type` 时，页面完全保持默认；
+- `--original` 与 `--content-type repost` 互斥；
+- `--no-original` 不能与 `self-shot` / `repost` 组合；
+- `--repost-source` 只能与 `--content-type repost` 一起使用，且不能为空；
+- `--shoot-location` / `--shoot-date` 只能与 `--content-type self-shot` 一起使用，两者都必填，日期格式为 `YYYY-MM-DD`；
+- 以上组合错误会在启动浏览器前退出 `2`；
+- 声明设置失败只记 warning 并继续发布，不阻断上传；
+- 加 `--no-publish` 时，内容与声明设置完成后直接结束，不点击「发布」，适合有头回归验证。
+
 ## Bilibili CLI 子命令
 
 ```bash

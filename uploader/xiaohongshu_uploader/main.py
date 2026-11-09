@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +38,20 @@ XHS_LOGIN_POSITIVE_SELECTORS = (
 )
 XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+
+# 「添加内容类型声明」下拉里的选项。来源声明是二级菜单，其余是顶层选项。
+XHS_CONTENT_TYPE_LABELS = {
+    "fiction": "虚构演绎，仅供娱乐",
+    "ai": "笔记含AI合成内容",
+    "marketing": "内容包含营销广告",
+}
+XHS_SOURCE_DECLARATION_LABELS = {
+    "self-shot": "自主拍摄",
+    "repost": "来源转载",
+}
+XHS_CONTENT_TYPES = tuple(XHS_CONTENT_TYPE_LABELS) + tuple(
+    XHS_SOURCE_DECLARATION_LABELS
+)
 
 XHS_LOGIN_CHECK_TIMEOUT_MS = 20_000
 XHS_LOGIN_CHECK_SETTLE_MS = 3_000
@@ -426,6 +441,12 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
+        original_declaration: bool | None = None,
+        content_type: str | None = None,
+        repost_source: str | None = None,
+        shoot_location: str | None = None,
+        shoot_date: str | None = None,
+        no_publish: bool = False,
     ):
         self.publish_date = publish_date
         self.account_file = None if account_file is None else str(account_file)
@@ -434,6 +455,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         self.date_format = "%Y年%m月%d日 %H:%M"
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
+        # 两项声明默认都不操作页面：None / "" 表示保持平台默认。
+        self.original_declaration = original_declaration
+        self.content_type = content_type
+        self.repost_source = (repost_source or "").strip()
+        self.shoot_location = (shoot_location or "").strip()
+        self.shoot_date = (shoot_date or "").strip()
+        self.no_publish = no_publish
 
     async def validate_base_args(self, *, check_cookie: bool = True):
         if check_cookie:
@@ -579,59 +607,271 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         await self.fill_desc(page)
         await self.fill_tags(page)
 
-    async def check_original_declaration(self, page: Page) -> None:
-        """设置「来源转载」声明，填写转载来源。
+    async def apply_declarations(self, page: Page) -> None:
+        """按需设置「原创声明」和「添加内容类型声明」。
 
-        流程（对应 codegen 录制）：
-          点「添加内容类型声明」→ 点包含「来源转载」的 div
-          → 填 placeholder「请输入媒体名称」→ 点 button「确认」。
-        容错：任一步失败记 warning 跳过、继续发布，不中断。
+        两项能力默认都不操作页面（保持平台默认）：
+        - ``original_declaration`` 为 ``True``/``False`` 时才切换原创开关；
+        - ``content_type`` 非空时才打开内容类型声明下拉。
+
+        任一步失败只记 warning，不阻断发布。
         """
-        source = getattr(self, "repost_source", "") or ""
+        if self.original_declaration is None and not self.content_type:
+            return
+
+        if self.original_declaration is not None:
+            await self._set_original_declaration(page)
+
+        if self.content_type:
+            await self._add_content_declaration(page)
+
+    async def _set_original_declaration(self, page: Page) -> None:
+        enabled = bool(self.original_declaration)
         try:
-            # 1. 点「添加内容类型声明」
-            trigger = page.get_by_text("添加内容类型声明", exact=False).first
-            try:
-                await trigger.scroll_into_view_if_needed(timeout=5000)
-            except Exception:
-                pass
-            await trigger.click(force=True)
-            await page.wait_for_timeout(1500)
+            card = page.locator(".custom-switch-card").filter(
+                has_text="原创声明"
+            ).first
+            if not await card.count():
+                card = page.locator("div").filter(has_text="原创声明").last
+            switch = card.locator(".d-switch").first
+            if not await switch.count():
+                switch = card.locator(
+                    "[role='switch'], input[type='checkbox']"
+                ).first
 
-            # 2. 选「来源转载」选项
-            import re as _re
-            repost_option = page.locator("#publish-container div").filter(
-                has_text=_re.compile(r"^来源转载$")
-            ).last
-            if await repost_option.count():
-                await repost_option.click(force=True)
+            if not await switch.count():
+                # 最后兜底：直接点文字卡片，交给页面的点击事件切换。
+                if not await _js_click_by_text(page, "原创声明"):
+                    raise RuntimeError("未找到原创声明开关")
+                await page.wait_for_timeout(800)
+                if enabled:
+                    await self._confirm_original_declaration(page)
             else:
-                await _js_click_by_text(page, "来源转载")
-            await page.wait_for_timeout(1500)
+                current = await self._switch_is_on(switch)
+                if current is None:
+                    # 状态未知时只在“开启”场景点击；关闭场景默认页面已经是关的，
+                    # 盲目点击反而可能把开关打开。
+                    if enabled:
+                        xiaohongshu_logger.warning(
+                            _msg("⚠️", "无法确认原创声明开关状态，尝试点击开启")
+                        )
+                        await switch.click()
+                        await page.wait_for_timeout(800)
+                        await self._confirm_original_declaration(page)
+                    else:
+                        xiaohongshu_logger.warning(
+                            _msg("⚠️", "无法确认原创声明开关状态，跳过关闭")
+                        )
+                elif current is not enabled:
+                    await switch.click()
+                    await page.wait_for_timeout(800)
+                    if enabled:
+                        await self._confirm_original_declaration(page)
 
-            # 3. 填写媒体名称
-            source_input = page.get_by_placeholder("请输入媒体名称").first
-            await source_input.wait_for(state="visible", timeout=8000)
-            await source_input.click()
-            await source_input.fill(source)
-            await page.wait_for_timeout(500)
-
-            # 4. 点「确认」按钮
-            confirm = page.get_by_role("button", name="确认").first
-            try:
-                await confirm.wait_for(state="visible", timeout=5000)
-                await confirm.click()
-            except Exception:
-                await _js_click_by_text(page, "确认")
-
-            await page.wait_for_timeout(1000)
-            xiaohongshu_logger.success(_msg("🧾", f"来源转载已声明（来源：{source}）"))
+            xiaohongshu_logger.success(
+                _msg("🧾", f"原创声明已{'开启' if enabled else '关闭'}")
+            )
         except Exception as exc:
-            xiaohongshu_logger.warning(_msg("⚠️", f"设置来源转载失败，跳过继续发布: {exc}"))
-            try:
-                await page.keyboard.press("Escape")
-            except Exception:
-                pass
+            xiaohongshu_logger.warning(
+                _msg("⚠️", f"设置原创声明失败，跳过继续发布: {exc}")
+            )
+            await self._press_escape(page)
+
+    async def _add_content_declaration(self, page: Page) -> None:
+        content_type = self.content_type
+        label = XHS_CONTENT_TYPE_LABELS.get(content_type)
+        source_label = XHS_SOURCE_DECLARATION_LABELS.get(content_type)
+        if label is None and source_label is None:
+            xiaohongshu_logger.warning(
+                _msg("⚠️", f"未知的内容类型声明: {content_type}")
+            )
+            return
+
+        try:
+            await self._open_content_declaration_menu(page)
+            if source_label:
+                await self._click_declaration_option(page, "内容来源声明")
+                await page.wait_for_timeout(800)
+                await self._click_declaration_option(page, source_label)
+            else:
+                await self._click_declaration_option(page, label)
+            await page.wait_for_timeout(800)
+
+            if content_type == "self-shot":
+                await self._fill_self_shot(page)
+            elif content_type == "repost":
+                await self._fill_repost_source(page)
+
+            xiaohongshu_logger.success(
+                _msg("🧾", f"内容类型声明已设置：{source_label or label}")
+            )
+        except Exception as exc:
+            xiaohongshu_logger.warning(
+                _msg("⚠️", f"设置内容类型声明失败，跳过继续发布: {exc}")
+            )
+            await self._press_escape(page)
+
+    async def _open_content_declaration_menu(self, page: Page) -> None:
+        trigger = page.get_by_text("添加内容类型声明", exact=True).first
+        if not await trigger.count():
+            trigger = page.get_by_text("添加内容类型声明", exact=False).first
+        try:
+            await trigger.scroll_into_view_if_needed(timeout=5000)
+        except Exception:
+            pass
+        await trigger.click(force=True)
+        await page.wait_for_timeout(800)
+
+    async def _click_declaration_option(self, page: Page, label: str) -> None:
+        option = page.locator("#publish-container div").filter(
+            has_text=re.compile(rf"^{re.escape(label)}$")
+        ).last
+        if await option.count():
+            await option.click(force=True)
+            return
+        if not await _js_click_by_text(page, label):
+            raise RuntimeError(f"未找到声明选项: {label}")
+
+    async def _fill_self_shot(self, page: Page) -> None:
+        """填写「自主拍摄」弹窗的拍摄地点和拍摄日期并确认。"""
+        if not self.shoot_location or not self.shoot_date:
+            raise RuntimeError("自主拍摄缺少拍摄地点或拍摄日期")
+
+        modal = page.locator("[role='dialog'], .d-modal, .d-dialog").filter(
+            has_text="拍摄地点"
+        ).last
+        await modal.wait_for(state="visible", timeout=8000)
+
+        # 1. 拍摄地点：Element UI autocomplete，输入关键词后点第一条建议。
+        location = modal.locator('input[placeholder="下拉选择地点"]').first
+        if not await location.count():
+            raise RuntimeError("未找到「拍摄地点」输入框")
+        await location.click(force=True)
+        await location.fill(self.shoot_location)
+
+        suggestions = page.locator(".el-autocomplete-suggestion li").filter(
+            has_text=self.shoot_location
+        )
+        if not await suggestions.count():
+            suggestions = page.locator(".el-autocomplete-suggestion li").filter(
+                has_text=re.compile(r"\S")
+            )
+        suggestion = suggestions.first
+        await suggestion.wait_for(state="visible", timeout=10000)
+        await suggestion.click(force=True)
+        await page.wait_for_timeout(800)
+
+        # 2. 拍摄日期：日期选择器内置过滤输入框，输入 YYYY-MM-DD 后回车。
+        date_input = modal.locator('input[placeholder="下拉选择日期"]').first
+        if not await date_input.count():
+            raise RuntimeError("未找到「拍摄日期」输入框")
+        await date_input.click(force=True)
+        await page.wait_for_timeout(1000)
+
+        date_filter = page.locator(".d-datepicker-input-filter input").first
+        if not await date_filter.count():
+            raise RuntimeError("未找到拍摄日期选择器")
+        await date_filter.fill(self.shoot_date)
+        await page.wait_for_timeout(300)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(800)
+
+        # 3. 点弹窗内的「确认」。
+        confirm = modal.get_by_role("button", name="确认").first
+        if not await confirm.count():
+            confirm = modal.get_by_text("确认", exact=True).first
+        if not await confirm.count():
+            raise RuntimeError("未找到自主拍摄「确认」按钮")
+        await confirm.click(force=True)
+        await page.wait_for_timeout(1000)
+
+    async def _fill_repost_source(self, page: Page) -> None:
+        if not self.repost_source:
+            raise RuntimeError("来源转载缺少媒体名称")
+
+        source_input = page.get_by_placeholder("请输入媒体名称").first
+        await source_input.wait_for(state="visible", timeout=8000)
+        await source_input.click()
+        await source_input.fill(self.repost_source)
+        await page.wait_for_timeout(500)
+
+        confirm = page.get_by_role("button", name="确认").first
+        try:
+            await confirm.wait_for(state="visible", timeout=5000)
+            await confirm.click()
+        except Exception:
+            await _js_click_by_text(page, "确认")
+
+    async def _confirm_original_declaration(self, page: Page) -> None:
+        """确认「原创声明」弹窗：勾选须知并点击「声明原创」。
+
+        点击原创开关后小红书会弹出权益说明和《原创声明须知》勾选框；
+        不处理这个弹窗会一直挡住发布按钮。
+        """
+        modal = page.locator("[role='dialog'], .d-modal, .d-dialog").filter(
+            has_text="声明原创"
+        ).last
+        try:
+            await modal.wait_for(state="visible", timeout=5000)
+        except Exception:
+            # 有些场景（例如取消原创）点击开关后不弹窗，直接生效。
+            return
+
+        checkbox = modal.locator(".d-checkbox").first
+        if await checkbox.count():
+            await checkbox.click(force=True)
+        else:
+            agreement = modal.get_by_text("我已阅读并同意", exact=False).first
+            if await agreement.count():
+                await agreement.click(force=True)
+        await page.wait_for_timeout(500)
+
+        button = modal.get_by_role("button", name="声明原创").first
+        if not await button.count():
+            button = modal.get_by_text("声明原创", exact=True).first
+        if not await button.count():
+            raise RuntimeError("未找到「声明原创」按钮，无法完成原创声明")
+        await button.click()
+        await page.wait_for_timeout(1000)
+
+    @staticmethod
+    async def _switch_is_on(switch) -> bool | None:
+        # 小红书 d-switch 的真实状态在 .d-switch-simulator 的 class 上，
+        # 或者在内层 input[type=checkbox].checked 上。
+        try:
+            simulator = switch.locator(".d-switch-simulator").first
+            if await simulator.count():
+                classes = str(await simulator.get_attribute("class") or "")
+                if "unchecked" in classes:
+                    return False
+                if "checked" in classes:
+                    return True
+        except Exception:
+            pass
+
+        try:
+            checkbox = switch.locator("input[type='checkbox']").first
+            if await checkbox.count():
+                return await checkbox.is_checked()
+        except Exception:
+            pass
+
+        for attr in ("aria-checked", "data-checked"):
+            value = await switch.get_attribute(attr)
+            if value is not None:
+                return str(value).strip().lower() in {"true", "1", "on", "checked"}
+        return None
+
+    @staticmethod
+    async def _press_escape(page: Page) -> None:
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
+
+    async def check_original_declaration(self, page: Page) -> None:
+        """兼容旧调用名；实际行为见 :meth:`apply_declarations`。"""
+        await self.apply_declarations(page)
 
 
 class XiaoHongShuVideo(XiaoHongShuBaseUploader):
@@ -647,6 +887,12 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
+        original_declaration: bool | None = None,
+        content_type: str | None = None,
+        repost_source: str | None = None,
+        shoot_location: str | None = None,
+        shoot_date: str | None = None,
+        no_publish: bool = False,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -654,6 +900,12 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             publish_strategy=publish_strategy,
             debug=debug,
             headless=headless,
+            original_declaration=original_declaration,
+            content_type=content_type,
+            repost_source=repost_source,
+            shoot_location=shoot_location,
+            shoot_date=shoot_date,
+            no_publish=no_publish,
         )
         self.title = title
         self.file_path = file_path
@@ -790,10 +1042,14 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
         # await self.set_location(page, "青岛市")
 
-        await self.check_original_declaration(page)
+        await self.apply_declarations(page)
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)
+
+        if self.no_publish:
+            xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
+            return
 
         while True:
             try:
@@ -875,6 +1131,12 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = DEBUG_MODE,
         headless: bool = LOCAL_CHROME_HEADLESS,
+        original_declaration: bool | None = None,
+        content_type: str | None = None,
+        repost_source: str | None = None,
+        shoot_location: str | None = None,
+        shoot_date: str | None = None,
+        no_publish: bool = False,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -882,6 +1144,12 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             publish_strategy=publish_strategy,
             debug=debug,
             headless=headless,
+            original_declaration=original_declaration,
+            content_type=content_type,
+            repost_source=repost_source,
+            shoot_location=shoot_location,
+            shoot_date=shoot_date,
+            no_publish=no_publish,
         )
         self.image_paths = image_paths
         self.note = note or ""
@@ -936,10 +1204,14 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page)
 
-        await self.check_original_declaration(page)
+        await self.apply_declarations(page)
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)
+
+        if self.no_publish:
+            xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
+            return
 
         while True:
             try:

@@ -60,6 +60,21 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
 - 二维码图片本身就是给用户扫码的，优先直接把本地图片展示/发送给用户
 
+## 发布声明（可选）
+
+`upload-video` / `upload-note` 默认不操作任何声明，需要时再显式传参：
+
+- `--original` / `--no-original`：开启或关闭原创声明；
+- `--content-type`：`fiction`（虚构演绎）、`ai`（AI 合成）、`marketing`（营销广告）、`self-shot`（自主拍摄）、`repost`（来源转载）；
+- `--content-type repost` 必须同时提供 `--repost-source <媒体名称>`；
+- `--content-type self-shot` 必须同时提供 `--shoot-location <地点>` 与 `--shoot-date <YYYY-MM-DD>`；
+- 原创与来源转载互斥；组合错误会在启动浏览器前退出 `2`。
+
+```bash
+sau xiaohongshu upload-note --account <name> \
+  --images videos/1.png videos/2.png --title "图文标题" --content-type ai
+```
+
 ## 托管浏览器模式（可选）
 
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，小红书的 `check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。

@@ -42,6 +42,12 @@ sau xiaohongshu upload-video \
   [--tags tag1,tag2] \
   [--schedule "YYYY-MM-DD HH:MM"] \
   [--thumbnail <image-path>] \
+  [--original | --no-original] \
+  [--content-type fiction|ai|marketing|self-shot|repost] \
+  [--repost-source <media-name>] \
+  [--shoot-location <location>] \
+  [--shoot-date YYYY-MM-DD] \
+  [--no-publish] \
   [--debug] \
   [--headless | --headed]
 ```
@@ -55,6 +61,9 @@ sau xiaohongshu upload-video \
   - `--tags`
   - `--schedule`
   - `--thumbnail`
+  - `--original` / `--no-original`
+  - `--content-type`（`repost` 时必须同时传 `--repost-source`）
+  - `--repost-source`
   - `--debug`
   - `--headless`
   - `--headed`
@@ -69,6 +78,12 @@ sau xiaohongshu upload-note \
   [--note "<content>"] \
   [--tags tag1,tag2] \
   [--schedule "YYYY-MM-DD HH:MM"] \
+  [--original | --no-original] \
+  [--content-type fiction|ai|marketing|self-shot|repost] \
+  [--repost-source <media-name>] \
+  [--shoot-location <location>] \
+  [--shoot-date YYYY-MM-DD] \
+  [--no-publish] \
   [--debug] \
   [--headless | --headed]
 ```
@@ -81,6 +96,9 @@ sau xiaohongshu upload-note \
   - `--note`
   - `--tags`
   - `--schedule`
+  - `--original` / `--no-original`
+  - `--content-type`（`repost` 时必须同时传 `--repost-source`）
+  - `--repost-source`
   - `--debug`
   - `--headless`
   - `--headed`
@@ -94,6 +112,31 @@ sau xiaohongshu upload-note \
 ```text
 YYYY-MM-DD HH:MM
 ```
+
+## 发布声明
+
+`upload-video` 与 `upload-note` 都支持以下可选声明，默认全部不操作页面：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--original` | 开启原创声明 |
+| `--no-original` | 关闭原创声明 |
+| `--content-type fiction` | 虚构演绎，仅供娱乐 |
+| `--content-type ai` | 笔记含AI合成内容 |
+| `--content-type marketing` | 内容包含营销广告 |
+| `--content-type self-shot` | 内容来源声明 → 自主拍摄，需 `--shoot-location` + `--shoot-date` |
+| `--content-type repost` | 内容来源声明 → 来源转载，需 `--repost-source` |
+| `--repost-source <媒体名称>` | 来源转载的媒体名称 |
+| `--shoot-location <地点>` | 自主拍摄的拍摄地点 |
+| `--shoot-date <YYYY-MM-DD>` | 自主拍摄的拍摄日期 |
+
+- 不传这些参数时，页面保持平台默认；
+- `--original` 与 `--content-type repost` 互斥；
+- `--no-original` 不能与 `self-shot` / `repost` 组合；
+- `--repost-source` 必须与 `repost` 一起使用且不能为空；
+- `--shoot-location` / `--shoot-date` 必须与 `self-shot` 一起使用，日期格式 `YYYY-MM-DD`；
+- 组合错误在启动浏览器前退出 `2`；
+- `--no-publish` 完成填写和声明后停止，不点击发布，适合回归验证。
 
 ## 额外说明
 

@@ -14,6 +14,15 @@
 - 验证范围：离线测试覆盖激活矩阵、双 key 冲突、base 校验、参数矩阵、生命周期、429 → `11` 与 key 脱敏。**真实 AdsPower 冒烟未执行（ticket 09）**：本机未安装 AdsPower、50325 未监听，以下仍未验证——已运行 Profile 的 start 返回形状、重复 stop、429 真实形状、`contexts` 是否恒为 1、超过 30s 的冷启动、旧客户端 V2 状态码、`/status` 是否鉴权、最低 V2 版本。
 - 已知限制：命令级登录检测与身份日志已是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin，待后续统一。
 
+### 小红书
+
+- 重新设计发布声明能力：`upload-video` / `upload-note` 新增 `--original` / `--no-original`（原创声明开关）与 `--content-type`（`fiction` / `ai` / `marketing` / `self-shot` / `repost`，对应「添加内容类型声明」菜单）。两项声明默认都不操作页面，保持平台默认。
+- `--repost-source <媒体名称>` 仅在 `--content-type repost` 时使用并必填；修复此前每条内容都被默认声明为「来源转载」且来源为空的问题。
+- `--content-type self-shot` 会打开「自主拍摄」弹窗，新增 `--shoot-location <地点>` 与 `--shoot-date <YYYY-MM-DD>` 填写拍摄地点和日期后确认；两者在 self-shot 时必填。
+- 原创声明会弹出《原创声明须知》确认框，CLI 会自动勾选并点击「声明原创」，避免弹窗挡住发布。
+- 新增 `--no-publish`：完成内容填写、封面、声明和定时设置后停止，不点击发布，便于 `--headed --debug` 回归验证。
+- 声明参数组合在启动浏览器前校验：原创与来源转载互斥；`--no-original` 不可与 `self-shot` / `repost` 组合；缺少来源、缺少拍摄信息或来源与内容类型不匹配均退出 `2`。
+
 ### 依赖
 
 - patchright 精确升级到 `1.64.4`，对应 Chromium 156（与 Multilogin Mimic 156 对齐）；`uv.lock` 同步更新。

@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from patchright.async_api import async_playwright
 from uploader.xiaohongshu_uploader.main import (
+    XHS_CONTENT_TYPES,
     XHS_CONTEXT_KWARGS,
     XHS_INIT_SCRIPT,
     XHS_LAUNCH_KWARGS,
@@ -35,6 +36,116 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.errors import UsageError
+
+CONTENT_TYPE_CHOICES = tuple(XHS_CONTENT_TYPES)
+CONTENT_TYPE_HELP = (
+    "添加内容类型声明：fiction=虚构演绎，仅供娱乐；ai=笔记含AI合成内容；"
+    "marketing=内容包含营销广告；self-shot=内容来源声明/自主拍摄；"
+    "repost=内容来源声明/来源转载（需配合 --repost-source）"
+)
+
+
+def _add_declaration_flags(parser) -> None:
+    """注册原创声明与内容类型声明；默认两者都不操作页面。"""
+    original_group = parser.add_mutually_exclusive_group()
+    original_group.add_argument(
+        "--original",
+        dest="original",
+        action="store_const",
+        const=True,
+        default=None,
+        help="开启原创声明；不传则保持平台默认",
+    )
+    original_group.add_argument(
+        "--no-original",
+        dest="original",
+        action="store_const",
+        const=False,
+        help="关闭原创声明；不传则保持平台默认",
+    )
+    parser.add_argument(
+        "--content-type",
+        choices=CONTENT_TYPE_CHOICES,
+        default=None,
+        help=CONTENT_TYPE_HELP,
+    )
+    parser.add_argument(
+        "--repost-source",
+        default=None,
+        help="来源转载的媒体名称；仅在 --content-type repost 时使用",
+    )
+    parser.add_argument(
+        "--shoot-location",
+        default=None,
+        help="自主拍摄的拍摄地点；仅在 --content-type self-shot 时使用",
+    )
+    parser.add_argument(
+        "--shoot-date",
+        default=None,
+        help="自主拍摄的拍摄日期，格式 YYYY-MM-DD；仅在 self-shot 时使用",
+    )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="设置完内容和声明后停止，不点击发布（回归测试用）",
+    )
+
+
+def _validate_declarations(
+    args,
+) -> tuple[bool | None, str | None, str | None, str | None, str | None]:
+    """在任何浏览器操作前校验声明参数组合。"""
+    original = getattr(args, "original", None)
+    content_type = getattr(args, "content_type", None)
+    repost_source = (getattr(args, "repost_source", None) or "").strip()
+    shoot_location = (getattr(args, "shoot_location", None) or "").strip()
+    shoot_date = (getattr(args, "shoot_date", None) or "").strip()
+
+    if content_type == "repost":
+        if not repost_source:
+            raise UsageError(
+                "--content-type repost 需要同时提供 --repost-source <媒体名称>。"
+            )
+    elif repost_source:
+        raise UsageError(
+            "--repost-source 仅可与 --content-type repost 一起使用。"
+        )
+
+    if content_type == "self-shot":
+        if not shoot_location or not shoot_date:
+            raise UsageError(
+                "--content-type self-shot 需要同时提供 "
+                "--shoot-location <地点> 与 --shoot-date <YYYY-MM-DD>。"
+            )
+        try:
+            datetime.strptime(shoot_date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise UsageError(
+                f"--shoot-date 格式错误：{shoot_date}，应为 YYYY-MM-DD。"
+            ) from exc
+    elif shoot_location or shoot_date:
+        raise UsageError(
+            "--shoot-location / --shoot-date 仅可与 --content-type self-shot 一起使用。"
+        )
+
+    if original is True and content_type == "repost":
+        raise UsageError(
+            "--original 不能与 --content-type repost 同时使用："
+            "原创与来源转载互斥。"
+        )
+    if original is False and content_type in {"self-shot", "repost"}:
+        raise UsageError(
+            "--no-original 不能与 --content-type self-shot/repost 同时使用。"
+        )
+
+    return (
+        original,
+        content_type,
+        repost_source or None,
+        shoot_location or None,
+        shoot_date or None,
+    )
 
 
 def register(platform_parsers):
@@ -58,6 +169,7 @@ def register(platform_parsers):
     xiaohongshu_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
+    _add_declaration_flags(xiaohongshu_upload_video_parser)
     add_runtime_flags(xiaohongshu_upload_video_parser)
     add_browser_flags(xiaohongshu_upload_video_parser)
 
@@ -68,6 +180,7 @@ def register(platform_parsers):
     xiaohongshu_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    _add_declaration_flags(xiaohongshu_upload_note_parser)
     add_runtime_flags(xiaohongshu_upload_note_parser)
     add_browser_flags(xiaohongshu_upload_note_parser)
 
@@ -84,6 +197,12 @@ class XiaohongshuVideoUploadRequest:
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
     headless: bool = True
+    original_declaration: bool | None = None
+    content_type: str | None = None
+    repost_source: str | None = None
+    shoot_location: str | None = None
+    shoot_date: str | None = None
+    no_publish: bool = False
 
 
 @dataclass(slots=True)
@@ -97,6 +216,12 @@ class XiaohongshuNoteUploadRequest:
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
     headless: bool = True
+    original_declaration: bool | None = None
+    content_type: str | None = None
+    repost_source: str | None = None
+    shoot_location: str | None = None
+    shoot_date: str | None = None
+    no_publish: bool = False
 
 
 async def login_xiaohongshu_account(account_name: str, headless: bool = True) -> dict:
@@ -123,6 +248,12 @@ def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) 
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
+        original_declaration=request.original_declaration,
+        content_type=request.content_type,
+        repost_source=request.repost_source,
+        shoot_location=request.shoot_location,
+        shoot_date=request.shoot_date,
+        no_publish=request.no_publish,
     )
 
 
@@ -138,6 +269,12 @@ def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) ->
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
+        original_declaration=request.original_declaration,
+        content_type=request.content_type,
+        repost_source=request.repost_source,
+        shoot_location=request.shoot_location,
+        shoot_date=request.shoot_date,
+        no_publish=request.no_publish,
     )
 
 
@@ -216,6 +353,17 @@ async def run(args):
         print(f"Xiaohongshu login flow completed: {result['account_file']}")
         return 0
 
+    original_declaration = content_type = repost_source = None
+    shoot_location = shoot_date = None
+    if args.action in {"upload-video", "upload-note"}:
+        (
+            original_declaration,
+            content_type,
+            repost_source,
+            shoot_location,
+            shoot_date,
+        ) = _validate_declarations(args)
+
     target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
@@ -258,6 +406,12 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            original_declaration=original_declaration,
+            content_type=content_type,
+            repost_source=repost_source,
+            shoot_location=shoot_location,
+            shoot_date=shoot_date,
+            no_publish=getattr(args, "no_publish", False),
         )
         await upload_xiaohongshu_video(request, target=target)
         print(f"Xiaohongshu video upload submitted: {request.video_file}")
@@ -278,6 +432,12 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            original_declaration=original_declaration,
+            content_type=content_type,
+            repost_source=repost_source,
+            shoot_location=shoot_location,
+            shoot_date=shoot_date,
+            no_publish=getattr(args, "no_publish", False),
         )
         await upload_xiaohongshu_note(request, target=target)
         print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")
