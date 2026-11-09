@@ -1,7 +1,7 @@
 """facebook-page 的命令参数与执行逻辑。"""
 from __future__ import annotations
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from patchright.async_api import async_playwright
@@ -154,8 +154,9 @@ def _raise_login_required(platform: str, target) -> None:
 
 async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dict:
     if target is not None:
-        # Profile owns channel/proxy/fingerprint; no cookie file is resolved.
-        app = _build_uploader(request, None)
+        # Profile owns channel/proxy/fingerprint; no cookie file is resolved
+        # and ``--proxy`` / the environment proxy are not forwarded.
+        app = _build_uploader(replace(request, proxy=None), None)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
