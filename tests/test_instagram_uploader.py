@@ -679,6 +679,8 @@ _ALT_HTML = '''
 '''
 
 # 地点：候选是无 ARIA role 的普通 div，尺寸/位置才是判据。
+# 真实结构：联想列表由 portal 挂到 body，**不在** [role=dialog] 内；仍留在
+# dialog 里的 fixture 会让“回退到 dialog 作用域”的实现也通过。
 _LOCATION_HTML = '''
 <div role="dialog" id="compose">
   <div class="_ac76"><div role="heading">Create new post</div></div>
@@ -686,10 +688,10 @@ _LOCATION_HTML = '''
     <label><input aria-label="Add location" placeholder="Add location"
                   name="creation-location-input" autocomplete="off"></label>
   </div>
-  <!-- 真实结构：portal 滚动容器，候选行是它的直接子节点 -->
-  <div id="suggestions" style="overflow-y:auto; max-height:240px; width:320px"></div>
   <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
 </div>
+<!-- 真实结构：portal 滚动容器挂在页面根，候选行是它的直接子节点 -->
+<div id="suggestions" style="overflow-y:auto; max-height:240px; width:320px"></div>
 <script>
   const locationCandidates = ['Shanghai, China', 'Hangzhou', 'Shanghai'];
   const locationInput = document.querySelector('input[placeholder="Add location"]');
