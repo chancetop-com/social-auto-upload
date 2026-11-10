@@ -61,8 +61,8 @@ class SwitchControl:
     """配文弹窗内的一个 ARIA 开关（duck typed 满足 ``InstagramOptionControl``）。
 
     ``labels`` 是英文优先、中文回退的可见文案元组；``panel_labels`` 是可选折叠
-    入口文案（如 Advanced settings），只在开关缺席时按实例至多激活一次；
-    ``invert=True`` 时 ``read()`` 返回取反后的语义值（checked = 评论已关闭）。
+    入口文案（如 Advanced settings），只在开关缺席或只有隐藏节点时按实例至多
+    激活一次；``invert=True`` 时 ``read()`` 返回取反后的语义值（checked = 评论已关闭）。
     """
 
     def __init__(
@@ -135,9 +135,22 @@ class SwitchControl:
             return None
         return None
 
+    @staticmethod
+    async def _visible(switch: 'Locator') -> bool:
+        """开关是否真的可见；折叠面板收起时保留的隐藏节点不算可用。"""
+        try:
+            return bool(await switch.is_visible())
+        except Exception:
+            return False
+
     async def _panel_open_in_dom(self) -> bool:
-        """折叠面板是否已展开：内容（开关）出现，或 chevron 已朝上。"""
-        if await self._locate() is not None:
+        """折叠面板是否已展开：开关**可见**，或 chevron 已朝上。
+
+        实测收起的面板仍会在 DOM 里保留 switch 节点：只按“存在”判断会把未展开
+        误认为已展开，跳过激活后开关永远点不到，因此存在之外还必须可见。
+        """
+        switch = await self._locate()
+        if switch is not None and await self._visible(switch):
             return True
         row = await row_for(self._dialog(), self._panel_labels)
         if row is None:
@@ -161,9 +174,9 @@ class SwitchControl:
         )
 
     async def _ensure(self) -> 'Locator | None':
-        """返回开关；缺席且声明了折叠入口时展开一次再找。"""
+        """返回开关；缺席或只有隐藏节点且声明了折叠入口时展开一次再找。"""
         switch = await self._locate()
-        if switch is not None:
+        if switch is not None and await self._visible(switch):
             return switch
         if self._panel_labels:
             await self._expand_panel()

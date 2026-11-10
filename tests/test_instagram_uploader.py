@@ -565,6 +565,8 @@ _AI_LABEL_HTML = (
 )
 
 # Advanced settings：行内折叠，无 aria-expanded，chevron 表状态，行上有覆盖层。
+# 真实配文页收起面板时仍保留面板内的 switch 节点（只是不可见），因此这里用
+# display:none 收起、而不是清空 innerHTML——只看“DOM 里有 switch”的实现会误判。
 _ADVANCED_HTML = (
     '''
 <div role="dialog" id="compose">
@@ -582,35 +584,34 @@ _ADVANCED_HTML = (
     </div>
     <div id="advanced-overlay"
          style="position: absolute; left: 0; right: 0; top: 0; height: 44px; z-index: 10;"></div>
-    <div id="advanced-panel"></div>
+    <div id="advanced-panel" style="display: none">
+      <div class="row" id="comments-row">
+        <div>
+          <div><span dir="auto">Turn off commenting</span></div>
+          <div><span>You can change this later by going to the ··· menu at the top of your post.</span></div>
+        </div>
+        <div><div><div><div>
+          <input id="comments-switch" role="switch" type="checkbox" aria-checked="false">
+        </div></div></div></div>
+      </div>
+    </div>
   </div>
   <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
 </div>
 <script>
   const advancedRow = document.getElementById('advanced');
   const advancedPanel = document.getElementById('advanced-panel');
-  const commentingRow = `<div class="row" id="comments-row">
-      <div>
-        <div><span dir="auto">Turn off commenting</span></div>
-        <div><span>You can change this later by going to the ··· menu at the top of your post.</span></div>
-      </div>
-      <div><div><div><div>
-        <input id="comments-switch" role="switch" type="checkbox" aria-checked="false">
-      </div></div></div></div>
-    </div>`;
   let advancedOpen = false;
+  const commentsSwitch = document.getElementById('comments-switch');
+  commentsSwitch.addEventListener('click', () => {
+    commentsSwitch.setAttribute('aria-checked', String(commentsSwitch.checked));
+  });
   function toggleAdvanced() {
     advancedOpen = !advancedOpen;
     advancedRow.dataset.clicks = String(Number(advancedRow.dataset.clicks || 0) + 1);
     advancedRow.querySelector('svg').setAttribute(
       'aria-label', advancedOpen ? 'Up chevron icon' : 'Down chevron icon');
-    advancedPanel.innerHTML = advancedOpen ? commentingRow : '';
-    if (advancedOpen) {
-      const toggle = document.getElementById('comments-switch');
-      toggle.addEventListener('click', () => {
-        toggle.setAttribute('aria-checked', String(toggle.checked));
-      });
-    }
+    advancedPanel.style.display = advancedOpen ? '' : 'none';
   }
   advancedRow.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); toggleAdvanced(); }
@@ -866,7 +867,8 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
                 page = await browser.new_page()
                 try:
                     # 实测：折叠行无 aria-expanded，且行上有覆盖层拦截鼠标；
-                    # 开关在标签的兄弟列，checked 语义是“评论已关闭”，初始 false。
+                    # 开关在标签的兄弟列，checked 语义是“评论已关闭”，初始 false；
+                    # 面板收起时只 display:none，switch 节点仍在 DOM 里（不可见）。
                     await page.set_content(_ADVANCED_HTML)
                     page.set_default_timeout(2_000)
                     with tempfile.TemporaryDirectory() as folder:
