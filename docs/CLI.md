@@ -91,7 +91,7 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 
 - 等待时间使用**本地时区**的墙钟时间，格式固定为 `YYYY-MM-DD HH:MM`；
 - 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
-- 主动等待不计入平台原有的上传/发布超时预算；小红书与 TikTok 会把等待时长从发布阶段超时中扣除；
+- 主动等待不计入平台原有的上传/发布超时预算；小红书、Instagram 与 TikTok 会把等待时长从发布阶段超时中扣除；
 - 使用 `--no-publish` / `--prepare-only` / `--draft` 时不会等待，也不会点击发布；
 - Bilibili 由 `biliup` 一次性完成上传和提交，无法在「填好表」和「点发布」之间插入等待，因此 `--not-before` 在启动 `biliup` 前生效。
 
@@ -616,6 +616,17 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 当前账号的照片/Reels 发布页及高级设置中没有定时入口，因此此独立网页实现只支持立即发布，不提供 `--schedule`；这不代表所有 Instagram 账号和客户端都没有定时能力。页面还提供地点、协作者、AI 标签、隐藏点赞/播放数、关闭评论，照片提供替代文字与滤镜，视频提供裁剪和声音；上述选填功能当前未接入 CLI，保留页面默认设置。首次通知提示会自动选择稍后，视频上传时的 Reels 介绍会自动确认；没有提示则继续。登录、验证仍由用户在工程浏览器完成，未知弹窗或操作失败会明确报错。
 
 成功返回 `published`、`content_id`、`post_id`、`post_url` 和 `media_count`。Reels 可能先处于 `processing`，程序会等待本次提交的最终创建结果；超时后保留已观察状态。`submission_unknown` 表示已进入提交但未确认平台结果，`processing` 表示平台已受理且尚未取得最终作品，均不可直接重复上传。默认结果保存在 `.local/instagram-results/`；建议用 `--result` 指定路径。
+
+### Instagram 发布超时
+
+Instagram 的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（`INSTAGRAM_PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
+
+- 预算覆盖打开首页、身份核验、上传素材、裁剪/编辑、填写配文、封面设置以及点击发布；
+- **尚未点击发布**时超时：退出 `1`，确定没有发布任何内容；
+- **已经点击发布**后超时：退出 `9`，发布结果未知，禁止自动重发；先到 Instagram 个人主页按配文和发布时间核对；
+- 等待 Reels 最终创建响应也受同一 deadline 约束；仍为 `submission_unknown` 或 `processing` 时不能当成已发布，也不能直接重传；
+- `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；
+- 封面、裁剪和配文等长等待会按剩余预算收紧，不会因单个等待超时后继续无限挂起。
 
 如果已取得原作品链接：
 

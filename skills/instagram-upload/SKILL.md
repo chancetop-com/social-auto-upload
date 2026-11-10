@@ -27,6 +27,8 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 
+整条上传/发布流程与 TikTok 一样使用 15 分钟总预算。**尚未点击发布**时超时退出 `1`，确定没有发布；**点击发布后**等待最终创建响应超时退出 `9`，结果未知，禁止自动重发，先按配文和发布时间在账号主页核对。`--not-before` 的主动等待不计入预算，会从 deadline 中顺延。
+
 ```powershell
 sau instagram verify --account creator --post-url "原作品链接" --expected-text "原作品中的准确文字" --result .local/instagram-verify.json
 sau instagram delete --account creator --post-url "原作品链接" --expected-text "原作品中的准确文字" --result .local/instagram-delete.json

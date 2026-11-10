@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -17,6 +18,7 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     _dismiss_optional_prompt,
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_id, find_instagram_post
+from utils.errors import PublishResultUnknownError
 
 
 class InstagramContractTests(unittest.TestCase):
@@ -46,6 +48,86 @@ class InstagramContractTests(unittest.TestCase):
             InstagramUploader('unused.json', title='x' * 2201, image_files=['image.png'])
         with self.assertRaises(ValueError):
             InstagramUploader('unused.json', title='title', image_files=['image.png'], video_file='video.mp4')
+
+    def test_publish_deadline_raises_before_publish_click(self):
+        app = InstagramUploader('unused.json', title='caption', video_file='video.mp4')
+
+        with self.assertRaises(RuntimeError) as ctx:
+            app._check_publish_deadline(time.monotonic() - 1)
+
+        self.assertIn('15 分钟', str(ctx.exception))
+        self.assertIn('尚未点击发布', str(ctx.exception))
+        self.assertNotIsInstance(ctx.exception, PublishResultUnknownError)
+
+    def test_publish_timeout_error_distinguishes_click_state(self):
+        app = InstagramUploader('unused.json', title='caption', video_file='video.mp4')
+
+        before = app._publish_timeout_error(False)
+        after = app._publish_timeout_error(True)
+
+        self.assertIsInstance(before, RuntimeError)
+        self.assertNotIsInstance(before, PublishResultUnknownError)
+        self.assertIsInstance(after, PublishResultUnknownError)
+        self.assertIn('禁止自动重发', str(after))
+
+    def test_publish_result_unknown_keeps_exit_code_9_after_capture(self):
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / 'video.mp4'
+            video.touch()
+            result_file = Path(folder) / 'result.json'
+            app = InstagramUploader('unused.json', title='caption', video_file=video, result_file=result_file)
+            browser, context, page = AsyncMock(), AsyncMock(), AsyncMock()
+            unknown = PublishResultUnknownError('publish result unknown')
+            with patch(
+                'uploader.meta_uploader.insgraph_uploader.main._open_instagram_page',
+                AsyncMock(return_value=(browser, context, page)),
+            ), patch(
+                'uploader.meta_uploader.insgraph_uploader.main.instagram_identity',
+                AsyncMock(return_value={'user_id': '42', 'username': 'creator'}),
+            ), patch.object(
+                InstagramUploader, '_upload_steps', AsyncMock(side_effect=unknown)
+            ), patch.object(
+                InstagramUploader, '_capture_failure', AsyncMock()
+            ) as capture:
+                with self.assertRaises(PublishResultUnknownError):
+                    asyncio.run(app.upload())
+
+            self.assertEqual(capture.await_count, 1)
+
+    def test_publish_timeout_after_click_is_result_unknown(self):
+        """点击已发出但最终创建响应未到时，必须按结果未知退出，不能重发。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                release = asyncio.Event()
+                try:
+                    html = '''<div role="dialog"><div class="_ac76">
+                        <div role="button" onclick="fetch('/api/v1/media/configure_to_clips/', {method:'POST'})">任意语言</div>
+                        </div><div role="textbox" contenteditable="true" data-lexical-editor="true"></div></div>'''
+                    async def route(request):
+                        if '/configure_to_clips/' in request.request.url:
+                            await release.wait()
+                            await request.abort()
+                            return
+                        await request.fulfill(body=html, content_type='text/html')
+                    await page.route('https://www.instagram.com/**', route)
+                    await page.goto('https://www.instagram.com/')
+                    with tempfile.TemporaryDirectory() as folder:
+                        app = InstagramUploader(
+                            'unused.json', title='caption', video_file='video.mp4',
+                            result_file=Path(folder) / 'result.json',
+                        )
+                        with self.assertRaises(PublishResultUnknownError):
+                            await app._publish(
+                                page,
+                                {'user_id': '42', 'username': 'creator'},
+                                deadline=asyncio.get_running_loop().time() + 3,
+                            )
+                finally:
+                    release.set()
+                    await browser.close()
+        asyncio.run(scenario())
 
     def test_verify_and_delete_are_reachable_from_cli(self):
         for action in ('verify', 'delete'):

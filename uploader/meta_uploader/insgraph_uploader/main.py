@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -22,7 +23,7 @@ from patchright.async_api import (
 
 from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 
 INSTAGRAM_HOME_URL = "https://www.instagram.com/"
 # 未配置环境变量或 --proxy 时使用系统直连。
@@ -34,6 +35,18 @@ INSTAGRAM_PRIMARY_ACTION = '._ac76 [role="button"]:not(:has(svg))'
 
 INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS = 20_000
 INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS = 8_000
+# 与 TikTok 对齐：整条上传/发布流程共用 15 分钟总预算。
+INSTAGRAM_PUBLISH_TIMEOUT_SECONDS = 15 * 60
+
+_INSTAGRAM_PRE_PUBLISH_TIMEOUT_MESSAGE = (
+    "Instagram 发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
+)
+_INSTAGRAM_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
+    "Instagram 发布结果未知：发布点击已发出，但未等到最终作品创建响应；"
+    "帖子可能已经发布。\n"
+    "禁止自动重发。请先到 Instagram 个人主页按配文与发布时间核对；"
+    "已存在则不要重发，不存在才可人工重试。"
+)
 
 # Golden local-mode browser options.  Multilogin mode reuses the same values
 # only so the call sites stay symmetric; ``browser_session`` ignores them.
@@ -288,8 +301,38 @@ class InstagramUploader:
             parts.append(' '.join(f'#{t}' for t in self.tags))
         return '\n\n'.join(parts)
 
-    async def _upload_files(self, page: Page) -> None:
+    @staticmethod
+    def _new_publish_deadline() -> float:
+        return time.monotonic() + INSTAGRAM_PUBLISH_TIMEOUT_SECONDS
+
+    @staticmethod
+    def _check_publish_deadline(deadline: float | None) -> None:
+        """在「尚未点击发布」的阶段检查 15 分钟总预算。"""
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError(_INSTAGRAM_PRE_PUBLISH_TIMEOUT_MESSAGE)
+
+    @staticmethod
+    def _deadline_timeout_ms(deadline: float | None, default_ms: int) -> int:
+        """把剩余总预算收紧到本次等待，避免单个等待超出 deadline。"""
+        if deadline is None:
+            return default_ms
+        remaining_ms = int(max(0.0, deadline - time.monotonic()) * 1000)
+        if remaining_ms <= 0:
+            raise RuntimeError(_INSTAGRAM_PRE_PUBLISH_TIMEOUT_MESSAGE)
+        return min(default_ms, remaining_ms)
+
+    @staticmethod
+    def _publish_timeout_error(publish_clicked: bool) -> Exception:
+        """点击发布前超时按失败处理，点击后超时按结果未知处理。"""
+        if publish_clicked:
+            return PublishResultUnknownError(
+                _INSTAGRAM_PUBLISH_RESULT_UNKNOWN_MESSAGE
+            )
+        return RuntimeError(_INSTAGRAM_PRE_PUBLISH_TIMEOUT_MESSAGE)
+
+    async def _upload_files(self, page: Page, *, deadline: float | None = None) -> None:
         """打开创建入口并等待裁剪阶段就绪，拒绝用上传后固定延时推断完成。"""
+        self._check_publish_deadline(deadline)
         # 实际通知提示使用此固定图标及 _a9-z 动作区。两项依次为开启、稍后，
         # 取第二个直接子按钮；限定图标和局部动作区，避免按翻译文案或全页按钮点击。
         notifications = page.get_by_role('dialog').filter(
@@ -302,14 +345,20 @@ class InstagramUploader:
         # 再点击时才弹出造成竞态；没有提示时不会执行回调，也不添加固定等待。
         await page.add_locator_handler(notifications, lambda: _dismiss_optional_prompt(notifications, notification_buttons.nth(1)))
         try:
-            await expect(navigation_popups).to_have_count(4)
+            await expect(navigation_popups).to_have_count(
+                4, timeout=self._deadline_timeout_ms(deadline, 30_000)
+            )
             await navigation_popups.nth(1).click()
         finally:
             await page.remove_locator_handler(notifications)
         dialog = page.get_by_role('dialog')
-        await expect(dialog).to_have_count(1)
+        await expect(dialog).to_have_count(
+            1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+        )
         file_input = dialog.locator(INSTAGRAM_MEDIA_INPUT)
-        await expect(file_input).to_have_count(1)
+        await expect(file_input).to_have_count(
+            1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+        )
         paths = [self.video_file] if self.video_file else self.image_files
         await file_input.set_input_files([str(p.resolve()) for p in paths])
         if self.video_file:
@@ -319,24 +368,34 @@ class InstagramUploader:
                 has=page.locator('img[src^="/images/instagram/clips/reels_nux_icon.png"]'))
             await _dismiss_optional_prompt(reels_intro, reels_intro.locator('._a9-z div > button'))
         # 裁剪标题栏主动作实际出现，才可推进；上传失败或未知弹窗阻断会保留现场并报错。
-        await expect(dialog.locator(INSTAGRAM_PRIMARY_ACTION)).to_have_count(1, timeout=60_000)
+        await expect(dialog.locator(INSTAGRAM_PRIMARY_ACTION)).to_have_count(
+            1, timeout=self._deadline_timeout_ms(deadline, 60_000)
+        )
 
-    async def _advance_media_editor(self, page: Page) -> None:
+    async def _advance_media_editor(self, page: Page, *, deadline: float | None = None) -> None:
         """裁剪、编辑两步各等待标题改变，最终以 Lexical 配文输入框确认。"""
         # 同一个创建弹窗标题栏存在于三个阶段；局部主动作不含图标，排除返回和媒体工具按钮。
         dialog = page.get_by_role('dialog')
         heading = dialog.locator('._ac76 [role="heading"]')
         for step in range(2):
+            self._check_publish_deadline(deadline)
             if step == 1 and self.thumbnail:
                 # 实际视频编辑弹窗中，精确 JPEG/PNG accept 是独立封面入口，排除初始视频素材 input。
                 cover = dialog.locator('input[type="file"][accept="image/jpeg,image/png"]')
                 # 主预览的 video 紧邻封面背景层；右侧视频帧条也有背景图，不能拿帧条验证封面。
                 poster = dialog.locator('video + div[style*="background-image"]')
-                await expect(cover).to_have_count(1)
-                await expect(poster).to_have_count(1)
+                await expect(cover).to_have_count(
+                    1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+                )
+                await expect(poster).to_have_count(
+                    1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+                )
                 previous_style = await poster.get_attribute('style')
                 await cover.set_input_files(str(self.thumbnail.resolve()))
-                await expect(poster).not_to_have_attribute('style', previous_style, timeout=30_000)
+                await expect(poster).not_to_have_attribute(
+                    'style', previous_style,
+                    timeout=self._deadline_timeout_ms(deadline, 30_000),
+                )
                 # 已观察页面直接以原图 blob 替换封面。核对实际预览字节并解码，文件选中本身不代表生效。
                 preview = await asyncio.wait_for(poster.evaluate('''async element => {
                     const background = getComputedStyle(element).backgroundImage;
@@ -348,35 +407,58 @@ class InstagramUploader:
                         sha256: Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')};
                     bitmap.close();
                     return result;
-                }'''), timeout=30)
+                }'''), timeout=self._deadline_timeout_ms(deadline, 30_000) / 1000)
                 if not preview['width'] or not preview['height'] or preview['sha256'] != hashlib.sha256(self.thumbnail.read_bytes()).hexdigest():
                     raise RuntimeError('Instagram 封面主预览与指定图片不匹配')
-            await expect(heading).to_have_count(1)
+            await expect(heading).to_have_count(
+                1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+            )
             previous = await heading.inner_text()
             action = dialog.locator(INSTAGRAM_PRIMARY_ACTION)
-            await expect(action).to_have_count(1)
-            await expect(action).to_be_enabled()
+            await expect(action).to_have_count(
+                1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+            )
+            await expect(action).to_be_enabled(
+                timeout=self._deadline_timeout_ms(deadline, 30_000)
+            )
             await action.click()
-            await expect(heading).not_to_have_text(previous, timeout=60_000)
+            await expect(heading).not_to_have_text(
+                previous, timeout=self._deadline_timeout_ms(deadline, 60_000)
+            )
         # data-lexical-editor 标识真实正文编辑器，限定当前创建弹窗，排除评论输入框。
-        await expect(dialog.locator('[contenteditable="true"][role="textbox"][data-lexical-editor="true"]')).to_have_count(1)
+        await expect(dialog.locator('[contenteditable="true"][role="textbox"][data-lexical-editor="true"]')).to_have_count(
+            1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+        )
 
-    async def _publish(self, page: Page, identity: dict) -> None:
+    async def _publish(
+        self, page: Page, identity: dict, *, deadline: float | None = None
+    ) -> None:
         """先登记最终响应监听再分享，响应不明时记录 unknown 且不重发。"""
         # 配文页独有 Lexical 编辑器；标题栏唯一主动作此时是分享，不使用翻译后的按钮名称。
         dialog = page.get_by_role('dialog')
         editor = dialog.locator('[contenteditable="true"][role="textbox"][data-lexical-editor="true"]')
         caption = self._caption()
         await editor.fill(caption)
-        await expect(editor).to_have_text(caption)
+        await expect(editor).to_have_text(
+            caption, timeout=self._deadline_timeout_ms(deadline, 30_000)
+        )
         action = dialog.locator(INSTAGRAM_PRIMARY_ACTION)
-        await expect(action).to_have_count(1)
-        await expect(action).to_be_enabled()
+        await expect(action).to_have_count(
+            1, timeout=self._deadline_timeout_ms(deadline, 30_000)
+        )
+        await expect(action).to_be_enabled(
+            timeout=self._deadline_timeout_ms(deadline, 30_000)
+        )
+        wait_started = time.monotonic()
         await wait_until_publish_allowed(
             getattr(self, "publish_not_before", None),
             logger=logger,
             label="Instagram 发布",
         )
+        if deadline is not None:
+            # 主动等待不属于发布交互预算；把 deadline 顺延相同长度。
+            deadline += time.monotonic() - wait_started
+        self._check_publish_deadline(deadline)
         self.result.update(identity, status='submission_unknown')
         self.result_file.parent.mkdir(parents=True, exist_ok=True)
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -389,14 +471,31 @@ class InstagramUploader:
         page.on('response', on_response)
         try:
             await action.click()
-            deadline = asyncio.get_running_loop().time() + 180
+            # 点击成功后只等最终创建响应；未拿到响应即超时，按结果未知处理，绝不重发。
+            result_deadline = (
+                deadline
+                if deadline is not None
+                else asyncio.get_running_loop().time() + 180
+            )
             while True:
-                remaining = deadline - asyncio.get_running_loop().time()
+                remaining = result_deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
-                    raise TimeoutError('Instagram 已提交，但等待最终作品创建响应超时')
-                response = await asyncio.wait_for(responses.get(), timeout=remaining)
-                remaining = deadline - asyncio.get_running_loop().time()
-                payload = instagram_response_payload(await asyncio.wait_for(response.text(), timeout=max(remaining, 0)))
+                    raise self._publish_timeout_error(True)
+                try:
+                    response = await asyncio.wait_for(
+                        responses.get(), timeout=remaining
+                    )
+                    remaining = (
+                        result_deadline - asyncio.get_running_loop().time()
+                    )
+                    if remaining <= 0:
+                        raise self._publish_timeout_error(True)
+                    text = await asyncio.wait_for(
+                        response.text(), timeout=remaining
+                    )
+                except asyncio.TimeoutError:
+                    raise self._publish_timeout_error(True) from None
+                payload = instagram_response_payload(text)
                 body = payload.get('payload', payload)
                 if body.get('statusCode') == 202:
                     self.result['status'] = 'processing'
@@ -426,13 +525,18 @@ class InstagramUploader:
             if path.suffix.lower() not in allowed:
                 raise ValueError(f'Instagram 不支持的素材类型: {path.suffix}')
 
-    async def _upload_steps(self, page: Page, identity: dict) -> dict:
+    async def _upload_steps(
+        self, page: Page, identity: dict, *, deadline: float | None = None
+    ) -> dict:
+        self._check_publish_deadline(deadline)
         self.stage = 'upload'
-        await self._upload_files(page)
+        await self._upload_files(page, deadline=deadline)
+        self._check_publish_deadline(deadline)
         self.stage = 'edit'
-        await self._advance_media_editor(page)
+        await self._advance_media_editor(page, deadline=deadline)
+        self._check_publish_deadline(deadline)
         self.stage = 'publish'
-        await self._publish(page, identity)
+        await self._publish(page, identity, deadline=deadline)
         return self.result
 
     async def _capture_failure(self, page: Page, error: Exception) -> RuntimeError:
@@ -445,8 +549,17 @@ class InstagramUploader:
         (folder/'page.html').write_text(await page.content(), encoding='utf-8')
         return RuntimeError(f'Instagram {self.stage} 未完成；结果记录: {self.result_file}；原因: {error}')
 
+    async def _capture_failure_safely(self, page: Page, error: Exception) -> None:
+        """结果未知优先保留专用错误类型；现场保存失败不能覆盖退出码 9。"""
+        try:
+            await self._capture_failure(page, error)
+        except Exception as capture_error:
+            logger.warning(f"Instagram 失败现场保存失败: {capture_error}")
+
     async def upload_in(self, session: BrowserSession) -> dict:
         """Multilogin body: no cookie read/write, no identity-file comparison."""
+        # 预算从打开首页开始，覆盖登录检查、素材上传、编辑、配文与发布。
+        deadline = self._new_publish_deadline()
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
         await page.goto(INSTAGRAM_HOME_URL, wait_until='domcontentloaded', timeout=120_000)
@@ -464,8 +577,12 @@ class InstagramUploader:
                 identity = await _multilogin_identity(page, session.context)
             else:
                 identity = await instagram_identity(page, self.account_file)
-            return await self._upload_steps(page, identity)
+            return await self._upload_steps(page, identity, deadline=deadline)
         except LoginRequiredError:
+            raise
+        except PublishResultUnknownError as error:
+            # 结果未知必须保留专用错误类型（退出码 9），但先落盘现场证据。
+            await self._capture_failure_safely(page, error)
             raise
         except Exception as error:
             raise await self._capture_failure(page, error) from error
@@ -476,15 +593,20 @@ class InstagramUploader:
         if session is not None:
             return await self.upload_in(session)
 
+        deadline = self._new_publish_deadline()
         async with async_playwright() as p:
             browser, context, page = await _open_instagram_page(p, self.account_file, proxy=self.proxy, headless=self.headless)
             try:
                 self.stage = 'identity'
                 identity = await instagram_identity(page, self.account_file)
-                result = await self._upload_steps(page, identity)
+                result = await self._upload_steps(page, identity, deadline=deadline)
                 self.stage = 'save_session'
                 await context.storage_state(path=str(self.account_file))
                 return result
+            except PublishResultUnknownError as error:
+                # 结果未知必须保留专用错误类型（退出码 9），但先落盘现场证据。
+                await self._capture_failure_safely(page, error)
+                raise
             except Exception as error:
                 raise await self._capture_failure(page, error) from error
             finally:
