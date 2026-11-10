@@ -377,6 +377,199 @@ class InstagramLoginGuardTests(unittest.TestCase):
         guard.assert_awaited_once()
 
 
+
+# ---------------------------------------------------------------------------
+# C 层哨兵：DOM 结构一律按 2026-11-10 有头实测（real-dom-2026-11-10.md）构造。
+# 这些 fixture 故意复刻真实页面的“难用”之处：折叠行没有 aria-expanded、
+# 面板边缘有覆盖层拦截鼠标、开关在标签的兄弟列、Alt text 是行内折叠区、
+# 地点候选是无 ARIA role 的普通 div。旧选择器在这些结构上必须失败。
+# ---------------------------------------------------------------------------
+
+# 开关行：标签列 + 开关列是兄弟；开关自身与父元素 textContent 为空。
+_AI_ROW_HTML = '''
+  <div class="row" id="ai-row">
+    <div>
+      <div><span dir="auto">Add AI label</span></div>
+      <div><span>This label is required for realistic photos and videos made with AI.</span></div>
+    </div>
+    <div><div><div><div>
+      <input id="ai-switch" role="switch" type="checkbox" aria-checked="false">
+    </div></div></div></div>
+  </div>'''
+
+_AI_LABEL_HTML = (
+    '''
+<div role="dialog" id="compose">
+  <div class="_ac76"><div role="heading">Create new post</div></div>'''
+    + _AI_ROW_HTML
+    + '''
+  <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
+</div>
+<script>
+  const aiSwitch = document.getElementById('ai-switch');
+  aiSwitch.addEventListener('click', () => {
+    aiSwitch.dataset.clicks = String(Number(aiSwitch.dataset.clicks || 0) + 1);
+    aiSwitch.setAttribute('aria-checked', String(aiSwitch.checked));
+  });
+</script>
+'''
+)
+
+# Advanced settings：行内折叠，无 aria-expanded，chevron 表状态，行上有覆盖层。
+_ADVANCED_HTML = (
+    '''
+<div role="dialog" id="compose">
+  <div class="_ac76"><div role="heading">Create new post</div></div>'''
+    + _AI_ROW_HTML
+    + '''
+  <div style="position: relative">
+    <div id="advanced" role="button" tabindex="0" aria-disabled="false"
+         style="cursor: pointer;">
+      <span dir="auto">Advanced settings</span>
+      <span style="display: inline-block; transform: rotate(0deg);">
+        <svg aria-label="Down chevron icon" role="img" width="16" height="16">
+          <title>Down chevron icon</title></svg>
+      </span>
+    </div>
+    <div id="advanced-overlay"
+         style="position: absolute; left: 0; right: 0; top: 0; height: 44px; z-index: 10;"></div>
+    <div id="advanced-panel"></div>
+  </div>
+  <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
+</div>
+<script>
+  const advancedRow = document.getElementById('advanced');
+  const advancedPanel = document.getElementById('advanced-panel');
+  const commentingRow = `<div class="row" id="comments-row">
+      <div>
+        <div><span dir="auto">Turn off commenting</span></div>
+        <div><span>You can change this later by going to the ··· menu at the top of your post.</span></div>
+      </div>
+      <div><div><div><div>
+        <input id="comments-switch" role="switch" type="checkbox" aria-checked="false">
+      </div></div></div></div>
+    </div>`;
+  let advancedOpen = false;
+  function toggleAdvanced() {
+    advancedOpen = !advancedOpen;
+    advancedRow.dataset.clicks = String(Number(advancedRow.dataset.clicks || 0) + 1);
+    advancedRow.querySelector('svg').setAttribute(
+      'aria-label', advancedOpen ? 'Up chevron icon' : 'Down chevron icon');
+    advancedPanel.innerHTML = advancedOpen ? commentingRow : '';
+    if (advancedOpen) {
+      const toggle = document.getElementById('comments-switch');
+      toggle.addEventListener('click', () => {
+        toggle.setAttribute('aria-checked', String(toggle.checked));
+      });
+    }
+  }
+  advancedRow.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); toggleAdvanced(); }
+  });
+  advancedRow.addEventListener('click', toggleAdvanced);
+</script>
+'''
+)
+
+# Accessibility：行内折叠区；输入框展开时才挂载，折叠时移除但值保留。
+_ALT_HTML = '''
+<div role="dialog" id="compose">
+  <div class="_ac76"><div role="heading">Create new post</div></div>
+  <div style="position: relative">
+    <div id="accessibility" role="button" tabindex="0" aria-disabled="false"
+         style="cursor: pointer;">
+      <span dir="auto">Accessibility</span>
+      <span style="display: inline-block; transform: rotate(0deg);">
+        <svg aria-label="Down chevron icon" role="img" width="16" height="16">
+          <title>Down chevron icon</title></svg>
+      </span>
+    </div>
+    <div id="accessibility-overlay"
+         style="position: absolute; left: 0; right: 0; top: 0; height: 44px; z-index: 10;"></div>
+  </div>
+  <div id="alt-section"></div>
+  <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
+</div>
+<script>
+  const accessibilityRow = document.getElementById('accessibility');
+  const altSection = document.getElementById('alt-section');
+  const altValues = ['', ''];
+  let altOpen = false;
+  function renderAlt() {
+    altSection.innerHTML = '';
+    if (!altOpen) return;
+    altValues.forEach((value, index) => {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.setAttribute('aria-label', 'Alt text');
+      if (!value) input.setAttribute('placeholder', 'Alt text');
+      input.value = value;
+      input.addEventListener('input', () => {
+        altValues[index] = input.value;
+        if (input.value) input.removeAttribute('placeholder');
+        else input.setAttribute('placeholder', 'Alt text');
+      });
+      input.addEventListener('blur', () => {
+        altValues[index] = input.value;
+      });
+      altSection.appendChild(input);
+    });
+  }
+  function toggleAlt() {
+    altOpen = !altOpen;
+    accessibilityRow.querySelector('svg').setAttribute(
+      'aria-label', altOpen ? 'Up chevron icon' : 'Down chevron icon');
+    renderAlt();
+  }
+  accessibilityRow.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); toggleAlt(); }
+  });
+  accessibilityRow.addEventListener('click', toggleAlt);
+</script>
+'''
+
+# 地点：候选是无 ARIA role 的普通 div，尺寸/位置才是判据。
+_LOCATION_HTML = '''
+<div role="dialog" id="compose">
+  <div class="_ac76"><div role="heading">Create new post</div></div>
+  <div class="_abgh _aw1v">
+    <label><input aria-label="Add location" placeholder="Add location"
+                  name="creation-location-input" autocomplete="off"></label>
+  </div>
+  <div id="suggestions"></div>
+  <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
+</div>
+<script>
+  const locationCandidates = ['Shanghai, China', 'Hangzhou', 'Shanghai'];
+  const locationInput = document.querySelector('input[placeholder="Add location"]');
+  locationInput.addEventListener('input', () => {
+    const list = document.getElementById('suggestions');
+    list.innerHTML = '';
+    const wanted = locationInput.value.trim().toLowerCase();
+    if (!wanted) return;
+    setTimeout(() => {
+      const matches = locationCandidates.filter(
+        (label) => label.toLowerCase().includes(wanted));
+      document.body.dataset.candidates = matches.join('|');
+      list.innerHTML = '';
+      for (const label of matches) {
+        const row = document.createElement('div');
+        row.style.height = '60px';
+        row.style.width = '237px';
+        row.textContent = label;
+        row.addEventListener('click', () => {
+          locationInput.value = label;
+          document.body.dataset.clicked = label;
+          list.innerHTML = '';
+        });
+        list.appendChild(row);
+      }
+    }, 200);
+  });
+</script>
+'''
+
+
 class InstagramLocationOptionDomTests(unittest.TestCase):
     """C1：真实 Chrome 里驱动真实控件注册表完成 输入 → 联想 → 选中 → 回读。"""
 
@@ -393,47 +586,9 @@ class InstagramLocationOptionDomTests(unittest.TestCase):
                 browser = await p.chromium.launch(channel='chrome', headless=True)
                 page = await browser.new_page()
                 try:
-                    # 真实页面输入后异步（debounce）挂载联想项；候选按子串过滤，
-                    # 因此 "Shanghai, China" 会先于精确的 "Shanghai" 出现。
-                    # 点击候选才写入输入框值，回读值因此可观察。
-                    html = '''<div role="dialog"><div class="_ac76">
-                        <div role="heading">Create new post</div></div>
-                      <div class="row"><input placeholder="Add location" autocomplete="off"></div>
-                      <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
-                      <div id="suggestions"></div></div>
-                      <script>
-                        const candidates = ['Shanghai, China', 'Hangzhou', 'Shanghai'];
-                        const input = document.querySelector('input[placeholder="Add location"]');
-                        input.addEventListener('input', () => {
-                          const list = document.getElementById('suggestions');
-                          list.innerHTML = '';
-                          const wanted = input.value.trim().toLowerCase();
-                          if (!wanted) return;
-                          setTimeout(() => {
-                            const matches = candidates.filter(
-                              label => label.toLowerCase().includes(wanted));
-                            document.body.dataset.candidates = matches.join('|');
-                            list.innerHTML = '';
-                            // 真实列表可能夹带空文案项；下标漂移会让点击落到错误候选。
-                            const blank = document.createElement('div');
-                            blank.setAttribute('role', 'option');
-                            blank.textContent = '   ';
-                            list.appendChild(blank);
-                            for (const label of matches) {
-                              const option = document.createElement('div');
-                              option.setAttribute('role', 'option');
-                              option.textContent = label;
-                              option.onclick = () => {
-                                input.value = label;
-                                document.body.dataset.clicked = label;
-                                list.innerHTML = '';
-                              };
-                              list.appendChild(option);
-                            }
-                          }, 200);
-                        });
-                      </script>'''
-                    await page.set_content(html)
+                    # 候选按子串过滤，因此 "Shanghai, China" 会先于精确的 "Shanghai"
+                    # 出现；没有 role=option，只有尺寸与位置可辨。
+                    await page.set_content(_LOCATION_HTML)
                     with tempfile.TemporaryDirectory() as folder:
                         image = Path(folder) / 'image.png'
                         image.touch()
@@ -461,14 +616,17 @@ class InstagramLocationOptionDomTests(unittest.TestCase):
                             await page.locator('body').get_attribute('data-clicked'),
                             'Shanghai',
                         )
-                        # 输入框为空时回读已选地点 chip 文本。
+                        self.assertEqual(
+                            await page.locator('#suggestions > div').count(), 0
+                        )
+                        # 输入框为空时阅读地点区块文本（防御旧版 chip 结构）。
                         await page.evaluate('''() => {
                             const input = document.querySelector('input[placeholder="Add location"]');
                             input.value = '';
                             const chip = document.createElement('div');
                             chip.setAttribute('role', 'button');
                             chip.textContent = 'Shanghai, China';
-                            input.parentElement.appendChild(chip);
+                            input.closest('._abgh').appendChild(chip);
                         }''')
                         controls = resolve_instagram_option_controls(
                             page, image_count=1
@@ -491,30 +649,10 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
                 browser = await p.chromium.launch(channel='chrome', headless=True)
                 page = await browser.new_page()
                 try:
-                    # 结构按实测：折叠入口带 aria-expanded，开关是行内 input[role=switch]，
-                    # checked 语义是“评论已关闭”，初始 false。
-                    await page.set_content('''
-                      <div role="dialog">
-                        <div id="advanced" role="button" aria-expanded="false">Advanced settings</div>
-                        <div id="panel" hidden>
-                          <div class="row"><span>Turn off commenting</span>
-                            <input role="switch" type="checkbox" aria-checked="false"></div>
-                        </div>
-                      </div>
-                      <script>
-                        const advanced = document.getElementById('advanced');
-                        const panel = document.getElementById('panel');
-                        const toggle = document.querySelector('input[role="switch"]');
-                        advanced.addEventListener('click', () => {
-                          advanced.dataset.clicks = String(Number(advanced.dataset.clicks || 0) + 1);
-                          advanced.setAttribute('aria-expanded', 'true');
-                          panel.hidden = false;
-                        });
-                        toggle.addEventListener('click', () => {
-                          toggle.setAttribute('aria-checked', String(toggle.checked));
-                        });
-                      </script>
-                    ''')
+                    # 实测：折叠行无 aria-expanded，且行上有覆盖层拦截鼠标；
+                    # 开关在标签的兄弟列，checked 语义是“评论已关闭”，初始 false。
+                    await page.set_content(_ADVANCED_HTML)
+                    page.set_default_timeout(2_000)
                     with tempfile.TemporaryDirectory() as folder:
                         image = Path(folder) / 'image.png'
                         image.touch()
@@ -526,11 +664,15 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
                         await app._apply_options(
                             page=page, budget=app.start_publish_budget()
                         )
+                        # 折叠行不维护 aria-expanded，展开与否只能看内容/chevron。
+                        self.assertIsNone(
+                            await page.locator('#advanced').get_attribute('aria-expanded')
+                        )
                         self.assertEqual(
                             await page.locator('#advanced').get_attribute('data-clicks'), '1'
                         )
                         self.assertEqual(
-                            await page.locator('input[role=switch]').get_attribute('aria-checked'),
+                            await page.locator('#comments-switch').get_attribute('aria-checked'),
                             'true',
                         )
                         self.assertEqual(
@@ -548,7 +690,7 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
                             app.result['options']['comments']['status'], DEFAULT_OFF
                         )
                         self.assertEqual(
-                            await page.locator('input[role=switch]').get_attribute('aria-checked'),
+                            await page.locator('#comments-switch').get_attribute('aria-checked'),
                             'true',
                         )
                 finally:
@@ -557,9 +699,9 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
 
 
 class InstagramAltTextDomTests(unittest.TestCase):
-    """C2：真实 Chrome 中 Accessibility 模态框的填写、关闭与重开回读。"""
+    """C2：真实 Chrome 中 Accessibility 行内折叠区的填写、折叠与重开回读。"""
 
-    def test_alt_text_modal_roundtrip_sets_both_images(self):
+    def test_alt_text_accordion_roundtrip_sets_both_images(self):
         from uploader.meta_uploader.insgraph_uploader.options import (
             SET,
             InstagramPublishOptions,
@@ -570,26 +712,9 @@ class InstagramAltTextDomTests(unittest.TestCase):
                 browser = await p.chromium.launch(channel='chrome', headless=True)
                 page = await browser.new_page()
                 try:
-                    # 配文页本身是创建弹窗；无障碍模态框是它内部新开的另一个 dialog。
-                    # 实测结构：入口 Accessibility，模态框内每张图一个 Alt text 输入框。
-                    await page.set_content('''<div role="dialog" id="compose">
-                      <div class="_ac76"><div role="heading">Create new post</div></div>
-                      <div role="button" id="accessibility" aria-expanded="false"
-                           onclick="toggleAltModal()">Accessibility</div>
-                      <div role="dialog" id="alt-modal" style="display:none">
-                        <div role="heading">Accessibility</div>
-                        <label>Photo 1 <input type="text" placeholder="Alt text"></label>
-                        <label>Photo 2 <input type="text" placeholder="Alt text"></label>
-                        <div role="button" id="done" onclick="toggleAltModal()">Done</div>
-                      </div>
-                    </div>
-                    <script>function toggleAltModal() {
-                      const modal = document.getElementById('alt-modal');
-                      const open = modal.style.display === 'none';
-                      modal.style.display = open ? 'block' : 'none';
-                      document.getElementById('accessibility')
-                        .setAttribute('aria-expanded', String(open));
-                    }</script>''')
+                    # 实测：没有嵌套 dialog / Done 按钮；输入框随折叠区挂载与移除。
+                    await page.set_content(_ALT_HTML)
+                    page.set_default_timeout(2_000)
                     with tempfile.TemporaryDirectory() as folder:
                         images = [Path(folder) / f'{index}.png' for index in range(2)]
                         for image in images:
@@ -609,19 +734,26 @@ class InstagramAltTextDomTests(unittest.TestCase):
                             {'requested': list(requested), 'applied': list(requested),
                              'status': SET},
                         )
-                        # 两次填写按 --images 顺序落到对应输入框。
+                        # 结束时恢复为原先的收起状态：输入框从 DOM 移除。
                         self.assertEqual(
-                            await page.locator('input[placeholder="Alt text"]')
+                            await page.locator('#alt-section input').count(), 0
+                        )
+                        self.assertEqual(
+                            await page.locator('#accessibility')
+                            .locator('svg').get_attribute('aria-label'),
+                            'Down chevron icon',
+                        )
+                        # 值在折叠/重开后保留：重新展开即可读回。
+                        await page.locator('#accessibility').focus()
+                        await page.keyboard.press('Enter')
+                        self.assertEqual(
+                            await page.locator('input[aria-label="Alt text"]')
                             .evaluate_all('(inputs) => inputs.map((input) => input.value)'),
                             list(requested),
                         )
-                        # 回读确实重新打开了模态框：结束时已关闭且值仍在。
-                        self.assertFalse(await page.locator('#alt-modal').is_visible())
-                        self.assertEqual(
-                            await page.locator('#accessibility')
-                            .get_attribute('aria-expanded'),
-                            'false',
-                        )
+                        # 收回复起状态，避免影响后续断言。
+                        await page.locator('#accessibility').focus()
+                        await page.keyboard.press('Enter')
                         self.assertEqual(await page.get_by_role('dialog').count(), 1)
                 finally:
                     await browser.close()
@@ -638,22 +770,9 @@ class InstagramAiLabelDomTests(unittest.TestCase):
                 browser = await p.chromium.launch(channel='chrome', headless=True)
                 page = await browser.new_page()
                 try:
-                    # 结构按 06 实测：配文弹窗内的行内 input[role=switch]，
+                    # 实测：开关在标签的兄弟列，开关自身与父元素 textContent 为空；
                     # aria-checked 初始 false，点击后翻转。
-                    await page.set_content('''
-                      <div role="dialog">
-                        <div class="row"><span>Add AI label</span>
-                          <input role="switch" type="checkbox" aria-checked="false"></div>
-                      </div>
-                      <script>
-                        const toggle = document.querySelector('input[role="switch"]');
-                        toggle.addEventListener('click', () => {
-                          toggle.dataset.clicks =
-                            String(Number(toggle.dataset.clicks || 0) + 1);
-                          toggle.setAttribute('aria-checked', String(toggle.checked));
-                        });
-                      </script>
-                    ''')
+                    await page.set_content(_AI_LABEL_HTML)
                     with tempfile.TemporaryDirectory() as folder:
                         app = InstagramUploader(
                             'unused.json', title='caption', video_file='video.mp4',
@@ -668,7 +787,7 @@ class InstagramAiLabelDomTests(unittest.TestCase):
                             app.result['options']['ai_generated'],
                             {'requested': True, 'applied': True, 'status': SET},
                         )
-                        switch = page.locator('input[role=switch]')
+                        switch = page.locator('#ai-switch')
                         self.assertEqual(
                             await switch.get_attribute('aria-checked'), 'true'
                         )

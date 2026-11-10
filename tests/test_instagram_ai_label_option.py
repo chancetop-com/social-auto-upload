@@ -18,7 +18,11 @@ from unittest.mock import patch
 
 import sau_cli
 from sau_commands import instagram as instagram_command
-from uploader.meta_uploader.insgraph_uploader.controls.ai_label import ai_label_control
+from uploader.meta_uploader.insgraph_uploader.controls.ai_label import (
+    AI_LABEL_TEXTS,
+    ai_label_control,
+)
+from uploader.meta_uploader.insgraph_uploader.controls.toggles import SwitchControl
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
@@ -353,34 +357,15 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
 
 
 class _FakeSwitch:
-    """最小开关替身：行内文案、可见性与 ``aria-checked`` 均可观察。"""
+    """最小开关替身：``aria-checked``、禁用状态与点击次数均可观察。"""
 
-    def __init__(self, *, checked=False, row="Add AI label"):
+    def __init__(self, *, checked=False, disabled=False):
         self.checked = checked
-        self.row = row
+        self.disabled = disabled
         self.clicks = 0
 
-    @property
-    def first(self):
-        return self
-
-    def nth(self, index):
-        return self
-
-    def locator(self, selector):
-        return self
-
-    async def count(self):
-        return 1
-
-    async def evaluate(self, script):
-        return self.row
-
-    async def is_visible(self):
-        return True
-
     async def is_disabled(self):
-        return False
+        return self.disabled
 
     async def get_attribute(self, name):
         return ("true" if self.checked else "false") if name == "aria-checked" else None
@@ -388,28 +373,36 @@ class _FakeSwitch:
     async def is_checked(self):
         return self.checked
 
-    async def click(self):
+    async def scroll_into_view_if_needed(self):
+        return None
+
+    async def focus(self):
+        return None
+
+    async def click(self, timeout=None):
         self.clicks += 1
         self.checked = not self.checked
 
 
-class _FakeDialog:
-    def __init__(self, switch):
-        self.switch = switch
-
-    def locator(self, selector):
-        return self.switch
-
-    def get_by_text(self, label, exact=False):
-        return self.switch
+class _FakeKeyboard:
+    async def press(self, key):
+        return None
 
 
 class _FakePage:
-    def __init__(self, switch):
-        self.dialog = _FakeDialog(switch)
+    def __init__(self):
+        self.keyboard = _FakeKeyboard()
 
-    def get_by_role(self, role):
-        return self.dialog
+
+class _StubAiLabelControl(SwitchControl):
+    """替换页面定位：直接返回一个内存开关，验证语义与幂等。"""
+
+    def __init__(self, switch):
+        super().__init__(_FakePage(), labels=("Add AI label",))
+        self.switch = switch
+
+    async def _locate(self):
+        return self.switch
 
 
 class AiLabelControlTests(unittest.TestCase):
@@ -417,17 +410,24 @@ class AiLabelControlTests(unittest.TestCase):
 
     def test_control_reads_checked_as_ai_generated(self):
         switch = _FakeSwitch(checked=False)
-        control = ai_label_control(_FakePage(switch))
+        control = _StubAiLabelControl(switch)
         self.assertEqual(asyncio.run(control.resolve()), "present")
         self.assertIs(asyncio.run(control.read()), False)
         asyncio.run(control.set(True))
         self.assertEqual(switch.clicks, 1)
         self.assertIs(asyncio.run(control.read()), True)
 
-    def test_control_does_not_match_unrelated_rows(self):
-        switch = _FakeSwitch(checked=True, row="Turn off commenting")
-        control = ai_label_control(_FakePage(switch))
+    def test_control_does_not_fold_ai_label_into_comments(self):
+        """AI 文案不声明折叠入口：开关缺席就是 missing，不会去点高级设置。"""
+        control = _StubAiLabelControl(None)
         self.assertEqual(asyncio.run(control.resolve()), "missing")
+        self.assertFalse(control._panel_labels)
+
+    def test_factory_keeps_labels_and_never_inverts(self):
+        control = ai_label_control(_FakePage())
+        self.assertEqual(control._labels, tuple(AI_LABEL_TEXTS))
+        self.assertFalse(control._invert)
+        self.assertFalse(control._panel_labels)
 
 
 if __name__ == "__main__":

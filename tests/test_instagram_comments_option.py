@@ -210,32 +210,12 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
 
 
 class _FakeSwitch:
-    """最小开关替身：行内文案、可见性、aria-checked 与点击次数均可观察。"""
+    """最小开关替身：``aria-checked``、禁用状态与点击次数均可观察。"""
 
-    def __init__(self, *, revealed=False, checked=False, disabled=False):
-        self.revealed = revealed
+    def __init__(self, *, checked=False, disabled=False):
         self.checked = checked
         self.disabled = disabled
         self.clicks = 0
-
-    @property
-    def first(self):
-        return self
-
-    def nth(self, index):
-        return self
-
-    def locator(self, selector):
-        return self
-
-    async def count(self):
-        return 1
-
-    async def evaluate(self, script):
-        return "Turn off commenting"
-
-    async def is_visible(self):
-        return self.revealed
 
     async def is_disabled(self):
         return self.disabled
@@ -246,84 +226,95 @@ class _FakeSwitch:
     async def is_checked(self):
         return self.checked
 
-    async def click(self):
+    async def scroll_into_view_if_needed(self):
+        return None
+
+    async def focus(self):
+        return None
+
+    async def click(self, timeout=None):
         self.clicks += 1
         self.checked = not self.checked
 
 
-class _FakeDialog:
-    def __init__(self, switch):
-        self.switch = switch
-
-    def locator(self, selector):
-        return self.switch
-
-    def get_by_text(self, label, exact=False):
-        return self.switch
+class _FakeKeyboard:
+    async def press(self, key):
+        return None
 
 
 class _FakePage:
-    def __init__(self, switch):
-        self.dialog = _FakeDialog(switch)
+    def __init__(self):
+        self.keyboard = _FakeKeyboard()
 
-    def get_by_role(self, role):
-        return self.dialog
+
+class _StubCommentsControl(SwitchControl):
+    """替换页面定位：``hidden=True`` 模拟高级设置未展开时的开关缺席。"""
+
+    def __init__(self, switch, *, hidden=False):
+        super().__init__(
+            _FakePage(),
+            labels=("Turn off commenting",),
+            panel_labels=("Advanced settings",),
+            invert=True,
+        )
+        self.switch = switch
+        self.hidden = hidden
+        self.expands = 0
+
+    async def _locate(self):
+        return None if self.hidden else self.switch
+
+    async def _expand_panel(self):
+        self.expands += 1
+        self.hidden = False
 
 
 class InstagramCommentsSwitchControlTests(unittest.TestCase):
     """B10：折叠面板按实例只展开一次，开关读取按 invert 反转。"""
 
-    def _control(self, switch, panel=None):
-        return SwitchControl(
-            _FakePage(switch), labels=("Turn off commenting",),
-            panel=panel, invert=True,
-        )
-
     def test_panel_expands_at_most_once_per_instance(self):
-        switch = _FakeSwitch(revealed=False)
-        expands = []
-
-        async def panel():
-            expands.append(True)
-            switch.revealed = True
-
-        control = self._control(switch, panel)
+        control = _StubCommentsControl(_FakeSwitch(checked=False), hidden=True)
         self.assertEqual(asyncio.run(control.resolve()), "present")
         self.assertEqual(asyncio.run(control.resolve()), "present")
         self.assertIs(asyncio.run(control.read()), True)
-        self.assertEqual(len(expands), 1)
-        self.assertEqual(switch.clicks, 0)
+        self.assertEqual(control.expands, 1)
+        self.assertEqual(control.switch.clicks, 0)
 
     def test_visible_switch_skips_panel(self):
-        switch = _FakeSwitch(revealed=True)
-        expands = []
+        control = _StubCommentsControl(_FakeSwitch(checked=False), hidden=False)
+        self.assertEqual(asyncio.run(control.resolve()), "present")
+        self.assertEqual(control.expands, 0)
 
-        async def panel():
-            expands.append(True)
+    def test_missing_switch_after_expand_is_missing(self):
+        control = _StubCommentsControl(_FakeSwitch(), hidden=True)
 
-        self.assertEqual(asyncio.run(self._control(switch, panel).resolve()), "present")
-        self.assertEqual(expands, [])
+        async def expand_only():
+            control.expands += 1
+
+        control._expand_panel = expand_only
+        self.assertEqual(asyncio.run(control.resolve()), "missing")
+        self.assertEqual(control.expands, 1)
 
     def test_read_inverts_checked_into_comments_enabled(self):
-        control = self._control(_FakeSwitch(revealed=True, checked=False))
+        control = _StubCommentsControl(_FakeSwitch(checked=False))
         self.assertIs(asyncio.run(control.read()), True)
-        control = self._control(_FakeSwitch(revealed=True, checked=True))
+        control = _StubCommentsControl(_FakeSwitch(checked=True))
         self.assertIs(asyncio.run(control.read()), False)
 
     def test_set_clicks_once_and_waits_for_readback(self):
-        switch = _FakeSwitch(revealed=True, checked=False)
-        control = self._control(switch)
+        switch = _FakeSwitch(checked=False)
+        control = _StubCommentsControl(switch)
         asyncio.run(control.set(False))
         self.assertEqual(switch.clicks, 1)
         self.assertIs(asyncio.run(control.read()), False)
 
     def test_set_is_a_no_op_when_already_satisfied(self):
-        switch = _FakeSwitch(revealed=True, checked=True)
-        asyncio.run(self._control(switch).set(False))
+        switch = _FakeSwitch(checked=True)
+        asyncio.run(_StubCommentsControl(switch).set(False))
         self.assertEqual(switch.clicks, 0)
 
     def test_disabled_switch_resolves_ineligible(self):
-        control = self._control(_FakeSwitch(revealed=True, disabled=True))
+        control = _StubCommentsControl(_FakeSwitch(disabled=True))
         self.assertEqual(asyncio.run(control.resolve()), "ineligible")
 
 

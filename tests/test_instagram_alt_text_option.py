@@ -265,11 +265,12 @@ class InstagramAltTextPipelineTests(unittest.TestCase):
 
 
 class _FakeInput:
-    """``Locator.nth(...)`` 的最小替身：只关心值，不需要真实 DOM。"""
+    """``Locator.nth(...)`` 的最小替身：只关心值、填写与失焦次数。"""
 
     def __init__(self, value=''):
         self.value = value
         self.fills = []
+        self.blurs = 0
 
     async def fill(self, value):
         self.fills.append(value)
@@ -277,6 +278,9 @@ class _FakeInput:
 
     async def input_value(self):
         return self.value
+
+    async def evaluate(self, script):
+        self.blurs += 1
 
 
 class _FakeInputs:
@@ -291,30 +295,27 @@ class _FakeInputs:
 
 
 class _StubAltTextControl(AltTextControl):
-    """把模态框交互替换成内存替身，直接验证真实控件的数量与顺序决策。"""
+    """把折叠区交互替换成内存替身，直接验证真实控件的数量与顺序决策。"""
 
-    def __init__(self, inputs, *, image_count, close_error=None):
+    def __init__(self, inputs, *, image_count):
         super().__init__(page=None, image_count=image_count)
         self.inputs = _FakeInputs(inputs)
-        self.close_error = close_error
         self.opens = 0
         self.closes = 0
 
-    async def _open_modal(self):
+    async def _ensure_open(self):
         self.opens += 1
-        return object(), True
+        return True, True
 
-    async def _input_locator(self, modal):
+    async def _inputs(self):
         return self.inputs
 
-    async def _close_modal(self, modal, *, applied=None):
+    async def _close(self):
         self.closes += 1
-        if self.close_error is not None:
-            raise self.close_error
 
 
 class AltTextControlUnitTests(unittest.TestCase):
-    """真实控件的分支：0 个、1..N-1 个、N 个与关闭失败。"""
+    """真实控件的分支：0 个、1..N-1 个、N 个与失焦写入。"""
 
     def test_fills_every_input_in_order_without_truncation(self):
         inputs = [_FakeInput(), _FakeInput()]
@@ -322,6 +323,8 @@ class AltTextControlUnitTests(unittest.TestCase):
         long_text = '长' * 1000
         asyncio.run(control.set(['第一张图的描述', long_text]))
         self.assertEqual([item.value for item in inputs], ['第一张图的描述', long_text])
+        # 每张填写后必须失焦，否则折叠后值会丢。
+        self.assertEqual([item.blurs for item in inputs], [1, 1])
         self.assertEqual(control.closes, 1)
 
     def test_no_inputs_declares_zero_count_mismatch(self):
@@ -330,7 +333,7 @@ class AltTextControlUnitTests(unittest.TestCase):
             asyncio.run(control.set(['第一张图的描述', '第二张图的描述']))
         self.assertEqual(ctx.exception.applied, [])
         self.assertIn('0', str(ctx.exception))
-        # 已打开过模态框，失败后尽力关闭，避免遮挡后续选项。
+        # 已展开过折叠区，失败后尽力收起，避免遮挡后续选项。
         self.assertEqual(control.closes, 1)
 
     def test_partial_inputs_do_not_fill_and_report_existing_values(self):
@@ -344,13 +347,18 @@ class AltTextControlUnitTests(unittest.TestCase):
         # 数量不符时绝不填写，避免张冠李戴。
         self.assertEqual(inputs[0].fills, [])
 
-    def test_missing_close_affordance_is_mismatch(self):
-        close_error = OptionMismatchError('未找到关闭按钮', applied=['第一张图的描述'])
-        control = _StubAltTextControl(
-            [_FakeInput(), _FakeInput()], image_count=2, close_error=close_error
-        )
-        with self.assertRaisesRegex(OptionMismatchError, '未找到关闭按钮'):
+    def test_collapsed_section_reports_zero_without_toggling_again(self):
+        class _Closed(_StubAltTextControl):
+            async def _ensure_open(self):
+                self.opens += 1
+                return False, False
+
+        control = _Closed([], image_count=2)
+        with self.assertRaises(OptionMismatchError) as ctx:
             asyncio.run(control.set(['第一张图的描述', '第二张图的描述']))
+        self.assertEqual(ctx.exception.applied, [])
+        # 没能展开就不该再触发一次折叠点击。
+        self.assertEqual(control.closes, 0)
 
     def test_read_always_reopens_and_closes(self):
         inputs = [_FakeInput('一'), _FakeInput('二')]

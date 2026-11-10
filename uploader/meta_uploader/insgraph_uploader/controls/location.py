@@ -1,12 +1,15 @@
 """Instagram 地点控件：输入 → 等待联想 → 规范化精确匹配 → 回读（spec §4.3.1）。
 
-只做地点一项；所有定位限定在配文页的创建弹窗内，联想项按 ``role`` 匹配而
-不按标签名，绝不点击模糊候选。回读值以页面为准（Instagram 可能规范化成
-``Shanghai, China`` 之类的候选标签），因此比较对象始终是“被点候选的标签”，
-而不是原始请求值。
+实测结构（real-dom-2026-11-10）：地点联想列表挂在页面根、**没有任何 ARIA
+role**，是一列普通 ``div`` 行。因此候选只能按几何 + 精确文本定位：位于输入框
+下方 520px 内、高 40–80px、宽超过 200px、子元素不超过 2 个。点击用行元素的
+``.click()`` 派发；模糊候选永不点击。回读值以页面输入框为准，比较对象始终是
+“被点候选的标签”，而不是原始请求值。
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import TYPE_CHECKING
 
 from patchright.async_api import (
@@ -37,19 +40,49 @@ ENTRY_SELECTORS = (
     'input[placeholder*="地点"]',
     'input[aria-label*="location" i]',
 )
-# 联想列表可能是弹窗内的普通列表，也可能挂到 portal / 页面根：按 role 匹配。
-SUGGESTION_SELECTOR = '[role="option"]:visible'
 # 等待联想列表的建议窗口（spec §4.3.1）；有预算时按剩余预算收紧。
 ENTRY_TIMEOUT_MS = 5_000
 SUGGESTION_TIMEOUT_MS = 10_000
 # 联想列表可能分批挂载：出现后短暂静置，避免只看到第一条就判“无精确匹配”。
 SUGGESTION_SETTLE_MS = 250
+# 逐字符输入更接近人工操作，实测 fill() 不会触发联想列表。
+TYPE_DELAY_MS = 80
 MAX_REPORTED_CANDIDATES = 10
-MAX_SCANNED_CANDIDATES = 50
+_POLL_SECONDS = 0.1
+
+# 几何 + 文本探针：默认返回下方候选行；传入 click 参数时点击指定行。
+# 行结构是普通 div（无 role），所以不依赖类名，只看尺寸与位置。
+_SUGGESTION_JS = """(el, action) => {
+  const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const rect = el.getBoundingClientRect();
+  const rows = [];
+  for (const node of document.querySelectorAll('div')) {
+    const box = node.getBoundingClientRect();
+    if (box.height < 40 || box.height > 80) continue;
+    if (box.width <= 200) continue;
+    if (box.top < rect.bottom - 2 || box.top > rect.bottom + 520) continue;
+    if (node.children.length > 2) continue;
+    const flow = getComputedStyle(node).overflowY;
+    if (flow === 'auto' || flow === 'scroll') continue;
+    if (!norm(node.textContent)) continue;
+    rows.push(node);
+  }
+  if (action && action.click) {
+    const node = rows[action.index];
+    if (!node) return false;
+    if (norm(node.textContent).toLowerCase() !==
+        String(action.label || '').toLowerCase()) return false;
+    node.click();
+    return true;
+  }
+  return rows
+    .map((node, index) => ({index, label: norm(node.textContent)}))
+    .filter((row) => row.label);
+}"""
 
 
 class LocationControl:
-    """配文页地点输入框；``read()`` 返回输入框值或已选地点 chip 文本。"""
+    """配文页地点输入框；``read()`` 返回输入框值或已选地点区块文本。"""
 
     def __init__(
         self, page: 'Page', *, budget: 'PublishTimeoutBudget | None' = None
@@ -92,7 +125,7 @@ class LocationControl:
         return PRESENT
 
     async def read(self) -> str | None:
-        """输入框值；为空时回读同一行已选地点 chip 的文本。"""
+        """输入框值；为空时回读地点区块的文本（防御旧版 chip 结构）。"""
         entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
         if entry is None:
             return None
@@ -102,13 +135,12 @@ class LocationControl:
         return await self._chip_text(entry)
 
     async def set(self, requested: str) -> None:
-        """填入地点并点击规范化精确相等的第一个候选；否则列出候选并失败。"""
+        """逐字符输入并点击规范化精确相等的第一个候选；否则列出候选并失败。"""
         entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
         if entry is None:
             # resolve() 已断言入口存在；此处只防御竞态，避免误填其他输入框。
             raise RuntimeError('Instagram 地点入口不可用')
-        options = await self._type_and_wait(entry, requested)
-        entries = await self._entries(options)
+        entries = await self._type_and_wait(entry, requested)
         chosen = self._exact_entry(requested, entries)
         if chosen is None:
             raise OptionMismatchError(
@@ -116,7 +148,19 @@ class LocationControl:
                 applied=None,
             )
         index, label = chosen
-        await options.nth(index).click()
+        clicked = await self._click_entry(entry, index, label)
+        if not clicked:
+            raise OptionMismatchError(
+                self._mismatch_message(requested, [label for _, label in entries]),
+                applied=None,
+            )
+        if not await self._wait_for_dropdown_gone(entry):
+            # 列表仍在说明选择没生效：不让后续回读把输入框里的输入当成已选地点。
+            raise OptionMismatchError(
+                'Instagram 地点联想列表在选中后仍未消失：'
+                f'被选「{label}」',
+                applied=await self.read(),
+            )
         applied = await self.read()
         if not location_matches(label, applied):
             # 回读必须与被点候选规范化一致；不一致按实际回读值记 mismatch。
@@ -126,46 +170,64 @@ class LocationControl:
                 applied=applied,
             )
 
-    async def _type_and_wait(self, entry: Locator, requested: str) -> Locator | None:
-        """填入地点并等待联想；列表始终为空时清空重输一次，规避 debounce 竞态。"""
+    async def _type_and_wait(
+        self, entry: Locator, requested: str
+    ) -> list[tuple[int, str]]:
+        """逐字符输入并等待联想；列表始终为空时清空重输一次，规避 debounce 竞态。"""
         for attempt in range(2):
             if attempt:
                 await entry.fill('')
-            await entry.fill(requested)
-            options = await self._wait_for_suggestions()
-            if options is not None:
-                return options
-        return None
+            await entry.press_sequentially(requested, delay=TYPE_DELAY_MS)
+            entries = await self._wait_for_suggestions(entry)
+            if entries:
+                return entries
+        return []
 
-    async def _wait_for_suggestions(self) -> Locator | None:
-        """先等页面（含弹窗）出现可见联想项，再优先返回弹窗内的那一份。"""
-        page_options = self._page.locator(SUGGESTION_SELECTOR)
+    async def _suggestions(self, entry: Locator) -> list[tuple[int, str]]:
+        """按几何 + 文本枚举输入框下方的联想行（保留原始下标）。"""
         try:
-            await page_options.first.wait_for(
-                state='visible', timeout=self._timeout(SUGGESTION_TIMEOUT_MS)
-            )
-        except BrowserTimeoutError:
-            return None
-        await self._page.wait_for_timeout(SUGGESTION_SETTLE_MS)
-        dialog_options = self._dialog().locator(SUGGESTION_SELECTOR)
-        if await dialog_options.count():
-            return dialog_options
-        return page_options
-
-    async def _entries(self, options: Locator | None) -> list[tuple[int, str]]:
-        """按 DOM 顺序返回 ``(原始下标, 空白折叠标签)``，空标签项不参与匹配。
-
-        下标必须保留原始位置：``options.nth(i)`` 作用于未过滤的候选列表，若按
-        压缩后的下标点击，空标签候选会让点击落到错误的地点（spec §4.3.1）。
-        """
-        if options is None:
+            rows = await entry.evaluate(_SUGGESTION_JS)
+        except Exception:
             return []
-        entries: list[tuple[int, str]] = []
-        for index in range(min(await options.count(), MAX_SCANNED_CANDIDATES)):
-            label = ' '.join((await options.nth(index).inner_text()).split())
-            if label:
-                entries.append((index, label))
-        return entries
+        return [
+            (int(row.get('index', -1)), str(row.get('label', '')))
+            for row in rows or []
+            if row.get('label')
+        ]
+
+    async def _wait_for_suggestions(
+        self, entry: Locator
+    ) -> list[tuple[int, str]]:
+        """先等出现任意候选行，再短暂静置后重扫，避免只看到第一批。"""
+        deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
+        while True:
+            entries = await self._suggestions(entry)
+            if entries:
+                await self._page.wait_for_timeout(SUGGESTION_SETTLE_MS)
+                return await self._suggestions(entry) or entries
+            if time.monotonic() >= deadline:
+                return []
+            await asyncio.sleep(_POLL_SECONDS)
+
+    async def _click_entry(self, entry: Locator, index: int, label: str) -> bool:
+        """在行元素上派发 ``.click()``；文本在点击前再核对一次。"""
+        try:
+            return bool(await entry.evaluate(
+                _SUGGESTION_JS,
+                {'index': index, 'label': label, 'click': True},
+            ))
+        except Exception:
+            return False
+
+    async def _wait_for_dropdown_gone(self, entry: Locator) -> bool:
+        """选中后必须等列表真正消失，再读回输入框。"""
+        deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
+        while True:
+            if not await self._suggestions(entry):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(_POLL_SECONDS)
 
     @staticmethod
     def _exact_entry(
@@ -190,11 +252,29 @@ class LocationControl:
         return f'Instagram 地点没有精确匹配：请求「{requested}」；观察到的候选：{observed}'
 
     async def _chip_text(self, entry: Locator) -> str | None:
-        """输入框为空时读同一行 chip 文本；候选结构由真实 DOM 用例固定。"""
-        row = entry.locator('xpath=..')
-        chips = row.locator('[role="button"]')
-        for index in range(await chips.count()):
-            text = ' '.join((await chips.nth(index).inner_text()).split())
-            if text:
-                return text
-        return None
+        """输入框为空时读地点区块文本，剔除清除按钮的图标文本。
+
+        ``_abgh/_aw1v`` 是 Instagram 的旧版语义类名（非哈希类名），仅作防御性
+        兜底：实测选中后输入框保留标签值，走不到这里；若结构再变则退到最近的
+        祖先容器。
+        """
+        section = entry.locator(
+            'xpath=ancestor::div'
+            '[contains(concat(" ", normalize-space(@class), " "), " _abgh ")][1]'
+        )
+        if not await section.count():
+            section = entry.locator('xpath=ancestor::div[1]')
+        try:
+            text = await section.first.evaluate(
+                """(el) => {
+                  const clone = el.cloneNode(true);
+                  clone.querySelectorAll(
+                    '[aria-haspopup="menu"], [aria-label="Close"], button'
+                  ).forEach((node) => node.remove());
+                  return String(clone.textContent || '')
+                    .replace(/\\s+/g, ' ').trim();
+                }"""
+            )
+        except Exception:
+            return None
+        return str(text or '').strip() or None

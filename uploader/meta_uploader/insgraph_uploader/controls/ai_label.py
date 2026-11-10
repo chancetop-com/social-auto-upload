@@ -28,5 +28,5 @@ def ai_label_control(
     等待收紧到剩余发布预算。
     """
     return SwitchControl(
-        page, labels=AI_LABEL_TEXTS, panel=None, invert=False, budget=budget
+        page, labels=AI_LABEL_TEXTS, invert=False, budget=budget
     )
