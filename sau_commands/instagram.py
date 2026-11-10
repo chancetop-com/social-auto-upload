@@ -130,7 +130,22 @@ def _add_comments_flag(parser) -> None:
 
 
 def _add_ai_generated_flags(parser) -> None:
-    """AI 生成标识（工单 12）。"""
+    """AI 生成标识（工单 12）：互斥组保证同传由 argparse 退出 2。"""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--ai-generated",
+        dest="ai_generated",
+        action="store_const",
+        const=True,
+        help="Request the Add AI label switch be turned on; omit to leave the page default",
+    )
+    group.add_argument(
+        "--no-ai-generated",
+        dest="ai_generated",
+        action="store_const",
+        const=False,
+        help="Request the Add AI label switch be turned off; omit to leave the page default",
+    )
 
 
 def _add_alt_text_flag(parser) -> None:
