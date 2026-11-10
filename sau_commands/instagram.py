@@ -16,6 +16,11 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     instagram_setup,
     is_logged_in,
 )
+from uploader.meta_uploader.insgraph_uploader.options import (
+    InstagramPublishOptions,
+    instagram_caption,
+    validate_publish_options,
+)
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
@@ -103,6 +108,41 @@ class InstagramUploadRequest:
     headless: bool = False
     result_file: Path | None = None
     publish_not_before: datetime | None = None
+    options: InstagramPublishOptions | None = None
+
+
+def _build_publish_options(args) -> InstagramPublishOptions | None:
+    """把 CLI 三态参数映射为发布选项；全为 None 时保持 legacy 路径。
+
+    与 TikTok 的 ``_build_publish_options`` 同构：``None`` 表示不动页面默认，
+    显式 ``False``（``--no-comments`` / ``--no-ai-generated``）不能被压缩。
+    本工单尚未注册用户可见 flag，读取到的永远是 ``None``。
+    """
+    location = getattr(args, "location", None) or None
+    alt_texts = getattr(args, "alt_text", None) or None
+    comments = False if getattr(args, "no_comments", False) else None
+    ai_generated = getattr(args, "ai_generated", None)
+    if location is None and alt_texts is None and comments is None and ai_generated is None:
+        return None
+    return InstagramPublishOptions(
+        location=location,
+        alt_texts=tuple(alt_texts) if alt_texts is not None else None,
+        comments=comments,
+        ai_generated=ai_generated,
+    )
+
+
+def validate_instagram_publish_request(request: InstagramUploadRequest) -> None:
+    """在启动浏览器 / 托管 Profile 前完成 §3.3 静态校验（失败即退出码 2）。"""
+    validate_publish_options(
+        request.options,
+        image_count=len(request.image_files or []),
+        caption=instagram_caption(
+            request.title, request.description, request.tags
+        ),
+        has_video=bool(request.video_file),
+        has_thumbnail=bool(request.thumbnail),
+    )
 
 
 async def login_instagram_account(account_name: str, *, headless: bool = False, proxy: str | None = INSTAGRAM_PROXY) -> dict:
@@ -127,6 +167,7 @@ def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramU
         proxy=request.proxy,
         headless=request.headless,
         result_file=request.result_file,
+        options=request.options,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -234,7 +275,9 @@ async def run(args):
             headless=args.headless,
             result_file=args.result,
             publish_not_before=args.not_before,
+            options=_build_publish_options(args),
         )
+        validate_instagram_publish_request(request)
         result = await upload_instagram_content(request, target=target)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

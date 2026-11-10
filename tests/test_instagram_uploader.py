@@ -18,7 +18,7 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     _dismiss_optional_prompt,
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_id, find_instagram_post
-from utils.errors import PublishResultUnknownError
+from utils.errors import PublishResultUnknownError, UsageError
 
 
 class InstagramContractTests(unittest.TestCase):
@@ -44,9 +44,10 @@ class InstagramContractTests(unittest.TestCase):
                 instagram_post_id(url)
 
     def test_caption_limit_and_mutually_exclusive_media(self):
-        with self.assertRaises(ValueError):
+        # §3.3：同类静态错误统一 UsageError（退出码 2），与 TikTok / 小红书一致。
+        with self.assertRaises(UsageError):
             InstagramUploader('unused.json', title='x' * 2201, image_files=['image.png'])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(UsageError):
             InstagramUploader('unused.json', title='title', image_files=['image.png'], video_file='video.mp4')
 
     def test_publish_deadline_raises_before_publish_click(self):
@@ -159,7 +160,7 @@ class InstagramContractTests(unittest.TestCase):
                 constructor.return_value.upload = AsyncMock(return_value={})
                 asyncio.run(sau_commands.instagram.upload_instagram_content(request))
                 self.assertEqual(constructor.call_args.kwargs['thumbnail'], cover)
-            with self.assertRaisesRegex(ValueError, '仅用于视频'):
+            with self.assertRaisesRegex(UsageError, '仅用于视频'):
                 InstagramUploader('unused', title='caption', image_files=[cover], thumbnail=cover)
             for invalid in (Path(folder)/'missing.png', Path(folder)/'cover.gif'):
                 if invalid.suffix == '.gif':
