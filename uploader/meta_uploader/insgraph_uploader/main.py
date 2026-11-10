@@ -21,6 +21,24 @@ from patchright.async_api import (
     expect,
 )
 
+from uploader.meta_uploader.insgraph_uploader.controls import (
+    resolve_instagram_option_controls,
+)
+from uploader.meta_uploader.insgraph_uploader.options import (
+    APPLY_ORDER,
+    DEFAULT_OFF,
+    MISMATCH,
+    PRESENT,
+    SET,
+    InstagramPublishOptions,
+    empty_option_record,
+    instagram_caption,
+    option_failures,
+    option_kind,
+    option_status,
+    requested_option,
+    validate_publish_options,
+)
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError, PublishResultUnknownError
@@ -283,32 +301,48 @@ class InstagramUploader:
     def __init__(self, account_file: str | Path | None, *, title: str, description: str = '', tags: list[str] | None = None,
                  video_file: str | Path | None = None, image_files: list[str | Path] | None = None,
                  thumbnail: str | Path | None = None,
-                 proxy: str | None = None, headless: bool = False, result_file: str | Path | None = None):
+                 proxy: str | None = None, headless: bool = False, result_file: str | Path | None = None,
+                 options: InstagramPublishOptions | None = None):
         self.account_file = Path(account_file) if account_file is not None else None
         self.title, self.description = title.strip(), description.strip()
         self.tags = [t.strip().lstrip('#') for t in (tags or []) if t.strip().lstrip('#')]
         self.video_file = Path(video_file) if video_file else None
         self.image_files = [Path(p) for p in (image_files or [])]
         self.thumbnail = Path(thumbnail) if thumbnail else None
-        if self.thumbnail and not self.video_file:
-            raise ValueError('Instagram 自定义封面仅用于视频/Reel')
-        if bool(self.video_file) == bool(self.image_files):
-            raise ValueError('必须且只能传入视频或图片文件')
+        self.options = options
         if not self.title:
             raise ValueError('标题不能为空')
+        # 素材互斥 / 封面适用性 / 配文长度统一走共享纯函数（UsageError → 退出码 2）。
+        self._validate_publish_options()
         self.proxy, self.headless = proxy, headless
         self.result_file = Path(result_file) if result_file else Path('.local/instagram-results') / f'{uuid4().hex}.json'
-        self.result = {'platform': 'instagram', 'title': self.title, 'status': 'not_submitted'}
+        self.result = {
+            'platform': 'instagram',
+            'title': self.title,
+            'status': 'not_submitted',
+            # 四项始终存在；未请求写 not_requested，任何一次选项处理后落盘。
+            'options': empty_option_record(self.options),
+        }
         self.stage = 'validation'
-        if len(self._caption()) > 2200:
-            raise ValueError('Instagram 配文（标题、正文、标签合计）不能超过 2200 字符')
 
     def _caption(self) -> str:
         """Instagram 只有配文，将 CLI 标题、正文和标签合并。"""
-        parts = [p for p in (self.title, self.description) if p]
-        if self.tags:
-            parts.append(' '.join(f'#{t}' for t in self.tags))
-        return '\n\n'.join(parts)
+        return instagram_caption(self.title, self.description, self.tags)
+
+    def _validate_publish_options(self) -> None:
+        """spec §3.3 静态校验：构造与上传两处复用，避免绕过 CLI 时退回 ValueError。"""
+        validate_publish_options(
+            self.options,
+            image_count=len(self.image_files),
+            caption=self._caption(),
+            has_video=bool(self.video_file),
+            has_thumbnail=bool(self.thumbnail),
+        )
+
+    def _write_result(self) -> None:
+        """落盘当前结果；输出字节与既有内联写法一致，且不吞异常。"""
+        self.result_file.parent.mkdir(parents=True, exist_ok=True)
+        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
@@ -418,6 +452,78 @@ class InstagramUploader:
             1, timeout=budget.clamp_ms(30_000)
         )
 
+    def _record_option(
+        self, key: str, requested, applied, status: str, reason: str | None = None
+    ) -> None:
+        """写入单项结果；reason 仅在需要归因时出现。"""
+        record = {'requested': requested, 'applied': applied, 'status': status}
+        if reason is not None:
+            record['reason'] = reason
+        self.result['options'][key] = record
+
+    async def _apply_one_option(
+        self, key: str, requested, control, *, budget: PublishTimeoutBudget
+    ) -> None:
+        """解析入口、回读、必要时设置并再次回读；异常交由管线上报。"""
+        kind = option_kind(key)
+        if control is None:
+            status, reason = option_status(
+                requested, None, kind=kind, presence='missing'
+            )
+            self._record_option(key, requested, None, status, reason)
+            return
+        presence = await control.resolve()
+        if presence != PRESENT:
+            status, reason = option_status(
+                requested, None, kind=kind, presence=presence
+            )
+            self._record_option(key, requested, None, status, reason)
+            return
+        current = await control.read()
+        status, reason = option_status(requested, current, kind=kind)
+        if status in (SET, DEFAULT_OFF):
+            # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
+            self._record_option(key, requested, current, status, reason)
+            return
+        budget.check_pre_click()
+        await control.set(requested)
+        applied = await control.read()
+        status, reason = option_status(
+            requested, applied, kind=kind, presence=PRESENT, acted=True
+        )
+        self._record_option(key, requested, applied, status, reason)
+
+    async def _apply_options(
+        self, page: Page, *, budget: PublishTimeoutBudget, controls: dict | None = None
+    ) -> None:
+        """按 spec §4.2 顺序应用发布选项；未请求时零控件交互。"""
+        if self.options is None:
+            return
+        if controls is None:
+            controls = resolve_instagram_option_controls(
+                page, image_count=len(self.image_files), budget=budget
+            )
+        unexpected: list[str] = []
+        for key in APPLY_ORDER:
+            requested = requested_option(self.options, key)
+            if requested is None:
+                continue
+            budget.check_pre_click()
+            try:
+                await self._apply_one_option(
+                    key, requested, controls.get(key), budget=budget
+                )
+            except Exception as error:
+                # 预算耗尽等硬异常立即中止；其余控件异常记 mismatch 后继续下一项。
+                budget.check_pre_click()
+                self._record_option(key, requested, None, MISMATCH)
+                unexpected.append(str(error) or type(error).__name__)
+            finally:
+                self._write_result()
+        failures = option_failures(self.result['options']) + unexpected
+        if failures:
+            raise RuntimeError('Instagram 发布选项未生效: ' + '; '.join(failures))
+
     async def _publish(
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
     ) -> None:
@@ -430,6 +536,11 @@ class InstagramUploader:
         await expect(editor).to_have_text(
             caption, timeout=budget.clamp_ms(30_000)
         )
+        # 选项必须在点击 Share 之前完成；失败时尚未发布，按普通失败处理。
+        if self.options is not None:
+            # 未请求时保持既有 stage（legacy 失败证据不变）。
+            self.stage = 'options'
+        await self._apply_options(page, budget=budget)
         action = dialog.locator(INSTAGRAM_PRIMARY_ACTION)
         await expect(action).to_have_count(
             1, timeout=budget.clamp_ms(30_000)
@@ -444,8 +555,7 @@ class InstagramUploader:
         )
         budget.check_pre_click()
         self.result.update(identity, status='submission_unknown')
-        self.result_file.parent.mkdir(parents=True, exist_ok=True)
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        self._write_result()
         # Reel 首次返回 202，浏览器会继续请求同一创建接口，后续才返回正式 media。
         # 提交前安装队列监听，持续消费本次创建响应；只点击一次，不将上传响应或 202 视为发表成功。
         responses = asyncio.Queue()
@@ -478,7 +588,7 @@ class InstagramUploader:
                     body = payload.get('payload', payload)
                     if body.get('statusCode') == 202:
                         self.result['status'] = 'processing'
-                        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+                        self._write_result()
                         continue
                     media = instagram_created_media(
                         payload, owner_id=identity['user_id'], caption=caption
@@ -493,9 +603,10 @@ class InstagramUploader:
         self.result.update(status='published', content_id=media['id'], post_id=media['code'],
                            post_url=f"{INSTAGRAM_HOME_URL}{kind}/{media['code']}/", schedule=None,
                            media_count=len(media.get('carousel_media') or [media]))
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        self._write_result()
 
     def _validate_media(self) -> None:
+        self._validate_publish_options()
         if self.thumbnail:
             if not self.thumbnail.is_file():
                 raise FileNotFoundError(f'Instagram 封面不存在: {self.thumbnail}')
@@ -527,8 +638,7 @@ class InstagramUploader:
         folder = Path('.local/instagram-errors') / uuid4().hex
         folder.mkdir(parents=True)
         self.result.update(stage=self.stage, error=str(error), evidence_dir=str(folder))
-        self.result_file.parent.mkdir(parents=True, exist_ok=True)
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        self._write_result()
         await page.screenshot(path=str(folder/'page.png'))
         (folder/'page.html').write_text(await page.content(), encoding='utf-8')
         return RuntimeError(f'Instagram {self.stage} 未完成；结果记录: {self.result_file}；原因: {error}')
