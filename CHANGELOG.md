@@ -54,7 +54,7 @@
 - 选项设置与回读在点击 Share **之前**完成：任一项未生效退出 `1`、不点击发布，不会退化为 `9`；结果文件仍写入失败证据。既有退出码 `0/1/9/10/11` 含义不变。
 - 结果 JSON 新增顶层 `options`，固定含 `location`、`alt_text`、`comments`、`ai_generated`，每项 `{requested, applied, status[, reason]}`；`status` ∈ `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` ∈ `entry_missing` / `account_ineligible`。字段为新增，旧消费方可忽略。
 - 验证范围：离线 A/B/C/D 测试与真实 Chrome DOM 哨兵通过；2026-11-10 完成真实账号真发验收（English UI、Personal、本地 cookie）：两图轮播同时设置地点/两条替代文字/关闭评论/AI 标识，发布后 `img[alt]`、地点、`AI content` 与无评论输入框均回读一致；同日再发一条 Reel 验证 `--file` / `--thumbnail` / `--desc` / `--tags` 与两项开关，两条帖子随后均由 `delete` 确认删除。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。`--not-before`、`--proxy`、`--headless`、中文界面、专业账号与托管模式仍未验收。
-- 真实账号需求：Instagram 可能在点击创建后弹出 `Turn on Notifications`，已改为在等待素材入口期间主动关闭并在整个上传流程注册 handler；作品菜单新增项导致删帖下标漂移，已改为精确匹配 `Delete` 项。
+- 真机验收中发现的问题：Instagram 可能在点击创建后弹出 `Turn on Notifications`，已改为在等待素材入口期间主动关闭并在整个上传流程注册 handler；作品菜单新增项导致删帖下标漂移，已改为精确匹配 `Delete` 项。
 - 已知限制：选择器仅在 **English 界面 + Personal 账号**观察，中文标签为未验证回退，专业账号未验证；协作者、Stories、定时、配乐、选帧封面、用户标签、滤镜、隐藏点赞等仍保留页面默认且不在本轮范围。
 - 发布超时与 TikTok 对齐：整条上传/发布流程使用 15 分钟总预算；打开首页、身份核验、素材上传、裁剪/编辑、配文、封面与点击发布共享同一 deadline，关键等待按剩余预算收紧。未点击发布前超时退出 `1`（确定未发布）；点击发布后等待最终创建响应超时退出 `9`（结果未知，禁止自动重发）。
 - `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；超时错误的现场证据仍写入本地结果目录。
