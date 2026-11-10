@@ -17,6 +17,9 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     InstagramUploader, _is_instagram_logged_out, instagram_created_media, instagram_response_payload,
     _dismiss_optional_prompt,
 )
+from uploader.meta_uploader.insgraph_uploader.options import (
+    DEFAULT_OFF, SET, InstagramPublishOptions,
+)
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_id, find_instagram_post
 from utils.errors import PublishResultUnknownError, UsageError
 
@@ -349,6 +352,81 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         self.assertEqual(app.result['content_id'], '123_42')
                         self.assertEqual(await page.locator('body').get_attribute('data-clicks'), '1')
                         self.assertEqual(calls, 2)
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
+
+class InstagramCommentsOptionDomTests(unittest.TestCase):
+    """C3：真实 Chrome 下 Advanced settings → Turn off commenting 开关的读写回读。"""
+
+    def test_comments_switch_expands_advanced_settings_once(self):
+        """展开、点击、回读一次完成；重复应用不得再次展开或点击。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    # 结构按实测：折叠入口带 aria-expanded，开关是行内 input[role=switch]，
+                    # checked 语义是“评论已关闭”，初始 false。
+                    await page.set_content('''
+                      <div role="dialog">
+                        <div id="advanced" role="button" aria-expanded="false">Advanced settings</div>
+                        <div id="panel" hidden>
+                          <div class="row"><span>Turn off commenting</span>
+                            <input role="switch" type="checkbox" aria-checked="false"></div>
+                        </div>
+                      </div>
+                      <script>
+                        const advanced = document.getElementById('advanced');
+                        const panel = document.getElementById('panel');
+                        const toggle = document.querySelector('input[role="switch"]');
+                        advanced.addEventListener('click', () => {
+                          advanced.dataset.clicks = String(Number(advanced.dataset.clicks || 0) + 1);
+                          advanced.setAttribute('aria-expanded', 'true');
+                          panel.hidden = false;
+                        });
+                        toggle.addEventListener('click', () => {
+                          toggle.setAttribute('aria-checked', String(toggle.checked));
+                        });
+                      </script>
+                    ''')
+                    with tempfile.TemporaryDirectory() as folder:
+                        image = Path(folder) / 'image.png'
+                        image.touch()
+                        app = InstagramUploader(
+                            'unused.json', title='caption', image_files=[image],
+                            options=InstagramPublishOptions(comments=False),
+                            result_file=Path(folder) / 'result.json',
+                        )
+                        await app._apply_options(
+                            page=page, budget=app.start_publish_budget()
+                        )
+                        self.assertEqual(
+                            await page.locator('#advanced').get_attribute('data-clicks'), '1'
+                        )
+                        self.assertEqual(
+                            await page.locator('input[role=switch]').get_attribute('aria-checked'),
+                            'true',
+                        )
+                        self.assertEqual(
+                            app.result['options']['comments'],
+                            {'requested': False, 'applied': False, 'status': SET},
+                        )
+                        # 第二次应用：高级设置已展开、开关已 off，必须零点击。
+                        await app._apply_options(
+                            page=page, budget=app.start_publish_budget()
+                        )
+                        self.assertEqual(
+                            await page.locator('#advanced').get_attribute('data-clicks'), '1'
+                        )
+                        self.assertEqual(
+                            app.result['options']['comments']['status'], DEFAULT_OFF
+                        )
+                        self.assertEqual(
+                            await page.locator('input[role=switch]').get_attribute('aria-checked'),
+                            'true',
+                        )
                 finally:
                     await browser.close()
         asyncio.run(scenario())
