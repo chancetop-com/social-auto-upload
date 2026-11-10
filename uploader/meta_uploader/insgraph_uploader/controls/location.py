@@ -28,7 +28,7 @@ from ..options import (
 )
 
 if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchright 绑进注册表。
-    from patchright.async_api import Page
+    from patchright.async_api import ElementHandle, Page
 
     from uploader.publish_timeout import PublishTimeoutBudget
 
@@ -67,13 +67,12 @@ _SUGGESTION_JS = """(el, action) => {
     if (!norm(node.textContent)) continue;
     rows.push(node);
   }
-  if (action && action.click) {
+  if (action && action.return_node) {
     const node = rows[action.index];
-    if (!node) return false;
+    if (!node) return null;
     if (norm(node.textContent).toLowerCase() !==
-        String(action.label || '').toLowerCase()) return false;
-    node.click();
-    return true;
+        String(action.label || '').toLowerCase()) return null;
+    return node;
   }
   return rows
     .map((node, index) => ({index, label: norm(node.textContent)}))
@@ -148,16 +147,16 @@ class LocationControl:
                 applied=None,
             )
         index, label = chosen
-        clicked = await self._click_entry(entry, index, label)
-        if not clicked:
+        node = await self._click_entry(entry, index, label)
+        if node is None:
             raise OptionMismatchError(
                 self._mismatch_message(requested, [label for _, label in entries]),
                 applied=None,
             )
-        if not await self._wait_for_dropdown_gone(entry):
-            # 列表仍在说明选择没生效：不让后续回读把输入框里的输入当成已选地点。
+        if not await self._wait_row_detached(node):
+            # 被点节点仍在 DOM 里说明选择没生效：不把输入框里的输入当成已选地点。
             raise OptionMismatchError(
-                'Instagram 地点联想列表在选中后仍未消失：'
+                'Instagram 地点候选在点击后仍未生效：'
                 f'被选「{label}」',
                 applied=await self.read(),
             )
@@ -209,21 +208,40 @@ class LocationControl:
                 return []
             await asyncio.sleep(_POLL_SECONDS)
 
-    async def _click_entry(self, entry: Locator, index: int, label: str) -> bool:
-        """在行元素上派发 ``.click()``；文本在点击前再核对一次。"""
+    async def _click_entry(
+        self, entry: Locator, index: int, label: str
+    ) -> 'ElementHandle | None':
+        """返回被点候选的元素句柄并派发 ``.click()``；文本在点击前再核对一次。"""
         try:
-            return bool(await entry.evaluate(
+            handle = await entry.evaluate_handle(
                 _SUGGESTION_JS,
-                {'index': index, 'label': label, 'click': True},
-            ))
+                {'index': index, 'label': label, 'return_node': True},
+            )
         except Exception:
-            return False
+            return None
+        node = handle.as_element()
+        if node is None:
+            return None
+        try:
+            await node.evaluate('el => el.click()')
+        except Exception:
+            return None
+        return node
 
-    async def _wait_for_dropdown_gone(self, entry: Locator) -> bool:
-        """选中后必须等列表真正消失，再读回输入框。"""
+    async def _wait_row_detached(self, node: 'ElementHandle') -> bool:
+        """选中后 Instagram 会卸载整个联想列表：以被点节点脱离 DOM 为准。
+
+        实测（2026-11-10）：点击候选后列表节点 ``isConnected === false``，而
+        输入框值保持不变；用“页面上是否还有类似尺寸的 div”判断会误判，因为
+        配文栏滚动容器与页面其他节点也满足几何条件。
+        """
         deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
         while True:
-            if not await self._suggestions(entry):
+            try:
+                if await node.evaluate('el => !el.isConnected'):
+                    return True
+            except Exception:
+                # 句柄已随旧文档销毁，同样视为消失。
                 return True
             if time.monotonic() >= deadline:
                 return False

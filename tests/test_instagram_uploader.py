@@ -639,6 +639,71 @@ class InstagramLocationOptionDomTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
+class InstagramLocationStaleListTests(unittest.TestCase):
+    """C1 反例：候选项点击后若没有从 DOM 卸载，不能把输入框文本当成已选地点。"""
+
+    def test_suggestion_that_never_detaches_is_mismatch(self):
+        async def scenario():
+            from uploader.meta_uploader.insgraph_uploader.options import (
+                InstagramPublishOptions,
+            )
+
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    # 与真实页面同构：无 role，只靠尺寸与位置识别；点击只改输入框，
+                    # 列表节点故意保留（模拟“看起来选中、其实没生效”）。
+                    await page.set_content('''<div role="dialog">
+                        <div style="height:44px"><input placeholder="Add location" autocomplete="off"></div>
+                        <div id="suggestions"></div>
+                      </div>
+                      <script>
+                        const input = document.querySelector('input[placeholder="Add location"]');
+                        input.addEventListener('input', () => {
+                          const list = document.getElementById('suggestions');
+                          if (!input.value.trim()) return;
+                          setTimeout(() => {
+                            list.innerHTML = '';
+                            for (const label of ['Shanghai, China', 'Shanghai']) {
+                              const row = document.createElement('div');
+                              row.style.height = '60px';
+                              row.style.width = '300px';
+                              const text = document.createElement('div');
+                              text.textContent = label;
+                              row.appendChild(text);
+                              row.onclick = () => { input.value = label; };
+                              list.appendChild(row);
+                            }
+                          }, 100);
+                        });
+                      </script>''')
+                    with tempfile.TemporaryDirectory() as folder:
+                        image = Path(folder) / 'image.png'
+                        image.touch()
+                        app = InstagramUploader(
+                            'unused.json', title='caption',
+                            image_files=[str(image)],
+                            options=InstagramPublishOptions(location='Shanghai'),
+                            result_file=Path(folder) / 'result.json',
+                        )
+                        with self.assertRaises(RuntimeError) as ctx:
+                            await app._apply_options(
+                                page, budget=app.start_publish_budget()
+                            )
+                    self.assertIn('location=mismatch', str(ctx.exception))
+                    self.assertEqual(
+                        app.result['options']['location']['status'], 'mismatch'
+                    )
+                    # 输入框里已经是候选标签，但列表没消失，不能算 set。
+                    self.assertEqual(
+                        await page.locator('#suggestions > div').count(), 2
+                    )
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
+
 class InstagramCommentsOptionDomTests(unittest.TestCase):
     """C3：真实 Chrome 下 Advanced settings → Turn off commenting 开关的读写回读。"""
 
