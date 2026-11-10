@@ -129,6 +129,34 @@ class InstagramLocationFlagTests(unittest.TestCase):
                 )
             upload.assert_not_awaited()
 
+    def test_empty_location_string_also_exits_2(self):
+        """``--location ""`` 不能被折叠成“未请求”，必须是静态输入错误。"""
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'image.png'
+            image.touch()
+            args = self._parse(
+                'upload-note', '--account', 'creator',
+                '--images', str(image), '--title', 'caption',
+                '--location', '',
+            )
+            options = instagram_command._build_publish_options(args)
+            self.assertIsNotNone(options)
+            self.assertEqual(options.location, '')
+            upload = AsyncMock()
+            with patch.object(
+                instagram_command, 'upload_instagram_content', upload
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(
+                    sau_cli.main([
+                        'instagram', 'upload-note', '--account', 'creator',
+                        '--images', str(image), '--title', 'caption',
+                        '--location', '',
+                    ]),
+                    2,
+                )
+            upload.assert_not_awaited()
+
 
 class InstagramLocationPipelineTests(unittest.TestCase):
     """B 层：注入 fake 地点控件，验证管线的记录与失败语义（spec §5.2、§7.2）。"""
