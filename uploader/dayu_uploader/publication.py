@@ -3,17 +3,19 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
-from patchright.async_api import Page, expect
+from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, expect
 from uploader.dayu_uploader.verification import check_dayu_article_content, wait_dayu_publication
 from uploader.dayu_uploader.schedule import read_dayu_schedule
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.log import dayu_logger
 
 
 async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
                                   article_html: str | None = None,
-                                  publish_not_before=None) -> None:
+                                  publish_not_before=None,
+                                  budget: PublishTimeoutBudget | None = None) -> None:
     """提交动作各执行一次；每次远端写入前后保存阶段与作品标识，供只读查询。"""
+    budget = budget or PublishTimeoutBudget("大鱼号")
     result["status"] = "preview_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     # 主表单“发表”仅生成预览；用精确按钮名区分后续的“确认发表”。
@@ -35,7 +37,7 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     try:
         async with page.expect_response(
             lambda r: urlsplit(r.url).path == "/dashboard/save-draft" and r.request.method == "POST",
-            timeout=45000,
+            timeout=budget.clamp_ms(45000),
         ) as draft_event:
             await page.get_by_role("button", name="发表", exact=True).click()
     finally:
@@ -80,21 +82,27 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
             await preview.close()
     # 预览页的最终提交按钮有独立名称，不能复用主表单的“发表”定位。
     confirm = page.get_by_role("button", name="确认发表", exact=True)
-    await expect(confirm).to_be_visible(timeout=30000)
-    await wait_until_publish_allowed(
+    await expect(confirm).to_be_visible(timeout=budget.clamp_ms(30000))
+    await budget.wait_until_allowed(
         publish_not_before,
         logger=dayu_logger,
         label="大鱼号发表",
     )
+    budget.check_pre_click()
     # 响应超时不能再点确认。保留 origin_id 后可查询本次记录，无需重新上传。
     result["status"] = "submission_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    async with page.expect_response(
-        lambda r: urlsplit(r.url).path == "/dashboard/submit-article" and r.request.method == "POST",
-        timeout=45000,
-    ) as submit_event:
-        await confirm.click()
-    response = await submit_event.value
+    publish_clicked = False
+    try:
+        async with page.expect_response(
+            lambda r: urlsplit(r.url).path == "/dashboard/submit-article" and r.request.method == "POST",
+            timeout=budget.clamp_ms(45000),
+        ) as submit_event:
+            await confirm.click()
+            publish_clicked = True
+        response = await submit_event.value
+    except BrowserTimeoutError:
+        raise budget.timeout_error(publish_clicked) from None
     if not response.ok:
         raise RuntimeError(f"发表结果未确认: HTTP {response.status}，请核查原作品")
     submitted = (await response.json()).get("data", {})

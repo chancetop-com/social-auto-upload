@@ -15,6 +15,7 @@ import cv2
 from patchright.async_api import Page, async_playwright, expect
 
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.schedule import fill_dayu_schedule, validate_dayu_schedule
 from uploader.dayu_uploader.session import (
@@ -32,7 +33,13 @@ from utils.browser_session import BrowserSession, browser_session
 from utils.log import dayu_logger
 
 
-async def wait_dayu_processing(page: Page, filename: str, timeout: int = 600) -> None:
+async def wait_dayu_processing(
+    page: Page,
+    filename: str,
+    timeout: int = 600,
+    *,
+    budget: PublishTimeoutBudget | None = None,
+) -> None:
     """处理失败优先于完成文案；100% 和“上传成功，处理中”都不能判为可发表。"""
     deadline = time.monotonic() + timeout
     # 视频容器是上传前后保留的业务区域；不把变化中的进度或结果文案写进锚点。
@@ -40,7 +47,13 @@ async def wait_dayu_processing(page: Page, filename: str, timeout: int = 600) ->
     await expect(region).to_have_count(1)
     previous = None
     while time.monotonic() < deadline:
-        text = await region.inner_text(timeout=max(1, min(5000, int((deadline - time.monotonic()) * 1000))))
+        if budget is not None:
+            budget.check_pre_click()
+        # 给单次读取留出最小调度时间；deadline 仍由外层 while 控制，
+        # 避免把 1–3ms 传给 Playwright 后在正常网络抖动下误报超时。
+        text = await region.inner_text(
+            timeout=max(100, min(5000, int((deadline - time.monotonic()) * 1000)))
+        )
         if re.search(r"失败|不支持|小于|超出|(?<!不)超过|请重新上传|无法", text):
             raise RuntimeError(f"大鱼号视频处理被拒绝: {text.strip()}")
         if "视频上传成功，处理完成" in text:
@@ -56,6 +69,7 @@ async def wait_dayu_processing(page: Page, filename: str, timeout: int = 600) ->
 class DayuVideo(BaseVideoUploader):
     """以实际页面流程发表一个视频，持久化提交 ID 供断线后只读核验。"""
 
+    publish_platform_label = "大鱼号"
     SUPPORTED_VIDEO_EXTENSIONS = {
         ".3gp", ".avi", ".flv", ".mp4", ".m3u8", ".mpg", ".asf", ".wmv",
         ".mkv", ".mov", ".ts", ".webm", ".mts",
@@ -208,6 +222,7 @@ class DayuVideo(BaseVideoUploader):
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Publish on the injected session; Multilogin never touches identity files."""
+        budget = self.start_publish_budget()
         multilogin = session.managed
         expected = None if multilogin else load_dayu_identity(self.account_file)
         results_dir = dayu_results_dir(self.account_file)
@@ -234,7 +249,9 @@ class DayuVideo(BaseVideoUploader):
             file_input = page.locator('input[type="file"][name="file"]')
             await expect(file_input).to_have_count(1, timeout=30000)
             await file_input.set_input_files(str(self.file_path))
-            await wait_dayu_processing(page, self.file_path.name, self.upload_timeout)
+            await wait_dayu_processing(
+                page, self.file_path.name, self.upload_timeout, budget=budget
+            )
             await self.fill_video_form(page)
             if multilogin:
                 await raise_if_login_required(page)
@@ -242,7 +259,9 @@ class DayuVideo(BaseVideoUploader):
                 # 填表和异步封面处理之后，再次核对同一主体及视频处理结果。
                 if (await read_dayu_identity(page))["wmid"] != identity["wmid"]:
                     raise RuntimeError("填表期间大鱼号主体发生变化，拒绝提交")
-            await wait_dayu_processing(page, self.file_path.name, self.upload_timeout)
+            await wait_dayu_processing(
+                page, self.file_path.name, self.upload_timeout, budget=budget
+            )
             if self.prepare_only:
                 await page.screenshot(path=str(result_file.with_suffix(".png")), full_page=True)
                 result.update(success=True, status="prepared")
@@ -253,6 +272,7 @@ class DayuVideo(BaseVideoUploader):
             await submit_dayu_publication(
                 page, result, result_file,
                 publish_not_before=getattr(self, "publish_not_before", None),
+                budget=budget,
             )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号{action}: {result['content_id']}")

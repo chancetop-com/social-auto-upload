@@ -15,8 +15,9 @@ import cv2
 from loguru import logger
 from patchright.async_api import Page, async_playwright, expect
 
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
+from utils.errors import PublishResultUnknownError
 from uploader.zhihu_uploader.constants import (
     ZHIHU_CONTEXT_KWARGS, ZHIHU_LAUNCH_KWARGS, ZHIHU_ORIGINALITY, ZHIHU_TIMEZONE,
     ZHIHU_VIDEO_DESCRIPTION_MAX, ZHIHU_VIDEO_EXTENSIONS, ZHIHU_VIDEO_MAX_BYTES,
@@ -232,6 +233,7 @@ class ZhihuVideo:
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: upload page operations plus a single publish click."""
+        budget = PublishTimeoutBudget("知乎视频")
         results_dir = self.results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now(ZHIHU_TIMEZONE):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
@@ -265,7 +267,9 @@ class ZhihuVideo:
             result["status"] = "uploading"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             # 表单在素材选择后才出现；候选来自该账号、该素材的实际页面。
-            await expect(page.get_by_text("上传成功", exact=True)).to_be_visible(timeout=self.upload_timeout * 1000)
+            await expect(page.get_by_text("上传成功", exact=True)).to_be_visible(
+                timeout=budget.clamp_ms(self.upload_timeout * 1000)
+            )
             choices = await self.video_options(page)
             result["options"] = choices
             if self.show_options:
@@ -285,17 +289,23 @@ class ZhihuVideo:
             # 当前视频入口在原页显示成功弹层，“查看详情”另开 /pin/<id>。
             # 不能等待原页跳转到旧版 /zvideo/，否则已发表也会被误判为未知。
             publish = page.get_by_role("button", name="发布视频", exact=True)
-            await expect(publish).to_be_enabled()
-            await wait_until_publish_allowed(
+            await expect(publish).to_be_enabled(timeout=budget.clamp_ms(30000))
+            await budget.wait_until_allowed(
                 getattr(self, "publish_not_before", None),
                 logger=logger,
                 label="知乎视频发布",
             )
+            budget.check_pre_click()
             submitted = True
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             await publish.click()
-            await expect(page.get_by_text("发布成功", exact=True)).to_be_visible(timeout=60000)
+            try:
+                await expect(page.get_by_text("发布成功", exact=True)).to_be_visible(
+                    timeout=budget.post_click_timeout_ms(60000)
+                )
+            except AssertionError:
+                raise budget.timeout_error(True) from None
             result.update(success=True, status="published")
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             async with page.expect_popup() as detail_info:
@@ -304,6 +314,8 @@ class ZhihuVideo:
             await detail.wait_for_url(re.compile(r"^https://www\.zhihu\.com/(?:pin|zvideo|video)/\d+"), timeout=60000)
             result["url"] = detail.url
             return result
+        except PublishResultUnknownError:
+            raise
         except Exception as exc:
             if multilogin and page is not None:
                 raise_if_login_required(page)

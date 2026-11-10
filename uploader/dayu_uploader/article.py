@@ -18,6 +18,7 @@ from uploader.dayu_uploader.article_style import render_dayu_compatible_html
 from uploader.dayu_uploader.constants import DAYU_SOURCE_REPRINT, DAYU_SOURCE_TYPES
 from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.schedule import fill_dayu_schedule, validate_dayu_schedule
+from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.dayu_uploader.session import (
     DAYU_CONTEXT_KWARGS,
     DAYU_INIT_SCRIPT,
@@ -73,6 +74,10 @@ class DayuArticle:
         self.theme = theme
         self.schedule = schedule
         self.publish_not_before = publish_not_before
+
+    def _budget_ms(self, default_ms: int) -> int:
+        budget = getattr(self, "_publish_budget", None)
+        return budget.clamp_ms(default_ms) if budget else default_ms
 
     def validate_upload_args(self, *, check_identity: bool = True):
         """在接触远端素材之前，检查正文格式、封面序号及来源的条件必填项。"""
@@ -175,7 +180,7 @@ class DayuArticle:
             await upload.set_input_files(str(image_path))
             # chosen 是本次已选素材状态，结合文件名及远端 src 确认本次上传对象。
             chosen = dialog.locator(".article-material-localImage_list_item_chosen")
-            await expect(chosen).to_have_count(1, timeout=self.upload_timeout * 1000)
+            await expect(chosen).to_have_count(1, timeout=self._budget_ms(self.upload_timeout * 1000))
             await expect(chosen.locator("p")).to_have_text(image_path.name)
             await expect(chosen.locator("img")).to_have_attribute("src", re.compile(r"^https://mp\.dayu\.com/dayu/image\?"))
             await dialog.get_by_role("button", name="确认", exact=True).click()
@@ -280,6 +285,8 @@ class DayuArticle:
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Publish on the injected session; Multilogin never touches identity files."""
+        budget = PublishTimeoutBudget("大鱼号")
+        self._publish_budget = budget
         multilogin = session.managed
         expected = None if multilogin else load_dayu_identity(self.account_file)
         results_dir = dayu_results_dir(self.account_file)
@@ -319,6 +326,7 @@ class DayuArticle:
             await submit_dayu_publication(
                 page, result, result_file, article_html=self.publication_html,
                 publish_not_before=getattr(self, "publish_not_before", None),
+                budget=budget,
             )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号图文{action}: {result['content_id']}")

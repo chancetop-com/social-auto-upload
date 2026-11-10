@@ -30,7 +30,6 @@ from patchright.async_api import (
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import weibo_logger
@@ -379,6 +378,7 @@ class WeiBoVideo(BaseVideoUploader):
          等待上传完成 → 填标题 → 上传封面 → 勾选二创 + AI声明 →
          填描述 → 点击发布。
     """
+    publish_platform_label = "微博"
 
     def __init__(
         self,
@@ -459,6 +459,7 @@ class WeiBoVideo(BaseVideoUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
         await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
@@ -534,11 +535,14 @@ class WeiBoVideo(BaseVideoUploader):
           - 上传完成：`<i class="woo-font woo-font--check">` + `<span>上传完成</span>`
         以"上传完成"块**变为可见**作为唯一完成判据（三块文字都恒在 DOM 里，不能用文字存在与否判断）。
         """
+        budget = self.publish_budget
+        timeout = budget.clamp_seconds(timeout)
         start = time.monotonic()
         done = page.locator('div:has(> i.woo-font--check) span:text-is("上传完成")').first
         uploading = page.locator('span:text-is("上传中")').first
         last_log = 0.0
         while True:
+            budget.check_pre_click()
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"视频上传超时（>{timeout}s）")
 
@@ -627,7 +631,8 @@ class WeiBoVideo(BaseVideoUploader):
         closed = False
         last_click = 0.0
         start = time.monotonic()
-        while time.monotonic() - start < 300:  # 宽松 5 分钟
+        while time.monotonic() - start < 300:  # 宽松 5 分钟，且不突破总预算
+            self.publish_budget.check_pre_click()
             # 结果判定：编辑封面层不再可见 → 成功
             try:
                 if not await cover_layer.is_visible():
@@ -889,24 +894,28 @@ class WeiBoVideo(BaseVideoUploader):
         except Exception:
             pass
 
+        budget = self.publish_budget
         publish_btn = page.locator('div[class*="_check_2z30i"] button:has(span:text-is("发布"))').first
         if not await publish_btn.count():
             publish_btn = page.get_by_role("button", name="发布").first
-        await publish_btn.wait_for(state="visible", timeout=15000)
+        await publish_btn.wait_for(
+            state="visible", timeout=budget.clamp_ms(15000)
+        )
         # 不依赖本地模式的高视口；滚动到可视区后再触发点击（本地模式同样无害）。
         await publish_btn.scroll_into_view_if_needed()
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=weibo_logger,
             label="微博发布",
         )
+        budget.check_pre_click()
         await publish_btn.evaluate("el => el.click()")
         weibo_logger.info(_msg("🏃", "已点击发布按钮(JS)"))
 
         success_layer = page.locator('div[class*="_layer1_9a8j7"]').first
         again_btn = page.locator('button:has(span:text-is("再发一条视频"))').first
-        start = time.monotonic()
-        while time.monotonic() - start < 60:
+        dialog_confirmed = False
+        while budget.remaining_seconds() > 0:
             if multilogin:
                 _raise_if_login_required(page)
             try:
@@ -921,21 +930,23 @@ class WeiBoVideo(BaseVideoUploader):
                     return
             except Exception:
                 pass
-            # 处理可能的二次确认对话框
-            try:
-                dialog = page.locator('.woo-dialog-main, .woo-modal-wrap, [class*="Dialog"]').first
-                if await dialog.count() and await dialog.is_visible():
-                    for name in ("确定", "确认", "继续", "仍然发布", "发布"):
-                        cb = dialog.locator(f'button:has(span:text-is("{name}"))').first
-                        if await cb.count() and await cb.is_visible():
-                            await cb.evaluate("el => el.click()")
-                            weibo_logger.info(_msg("🏃", f"已确认对话框：{name}"))
-                            break
-            except Exception:
-                pass
+            # 二次确认对话框只点一次，避免循环里重复提交。
+            if not dialog_confirmed:
+                try:
+                    dialog = page.locator('.woo-dialog-main, .woo-modal-wrap, [class*="Dialog"]').first
+                    if await dialog.count() and await dialog.is_visible():
+                        for name in ("确定", "确认", "继续", "仍然发布", "发布"):
+                            cb = dialog.locator(f'button:has(span:text-is("{name}"))').first
+                            if await cb.count() and await cb.is_visible():
+                                await cb.evaluate("el => el.click()")
+                                dialog_confirmed = True
+                                weibo_logger.info(_msg("🏃", f"已确认对话框：{name}"))
+                                break
+                except Exception:
+                    pass
             await page.wait_for_timeout(1500)
 
-        raise RuntimeError("发布后 60s 未见成功层/「再发一条视频」，判定发布未成功（未入库）")
+        raise budget.timeout_error(True)
 
     async def main(self, *, session: BrowserSession | None = None):
         if session is not None:

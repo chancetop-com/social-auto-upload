@@ -1250,7 +1250,10 @@ class UploadNoteFlowTests(unittest.TestCase):
         browser = playwright.chromium.launch_browser
         context = browser.contexts[0]
         note._upload_on_page.assert_awaited_once_with(
-            ANY, multilogin=False, deadline=1900.0
+            ANY, multilogin=False, budget=ANY
+        )
+        self.assertEqual(
+            note._upload_on_page.await_args.kwargs["budget"].deadline, 1900.0
         )
         self.assertEqual(context.storage_state_calls, ["/tmp/cookie.json"])
         self.assertTrue(context.closed)

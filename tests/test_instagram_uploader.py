@@ -52,8 +52,10 @@ class InstagramContractTests(unittest.TestCase):
     def test_publish_deadline_raises_before_publish_click(self):
         app = InstagramUploader('unused.json', title='caption', video_file='video.mp4')
 
+        budget = app.start_publish_budget()
+        budget.deadline = time.monotonic() - 1
         with self.assertRaises(RuntimeError) as ctx:
-            app._check_publish_deadline(time.monotonic() - 1)
+            budget.check_pre_click()
 
         self.assertIn('15 分钟', str(ctx.exception))
         self.assertIn('尚未点击发布', str(ctx.exception))
@@ -62,8 +64,9 @@ class InstagramContractTests(unittest.TestCase):
     def test_publish_timeout_error_distinguishes_click_state(self):
         app = InstagramUploader('unused.json', title='caption', video_file='video.mp4')
 
-        before = app._publish_timeout_error(False)
-        after = app._publish_timeout_error(True)
+        budget = app.start_publish_budget()
+        before = budget.timeout_error(False)
+        after = budget.timeout_error(True)
 
         self.assertIsInstance(before, RuntimeError)
         self.assertNotIsInstance(before, PublishResultUnknownError)
@@ -118,11 +121,13 @@ class InstagramContractTests(unittest.TestCase):
                             'unused.json', title='caption', video_file='video.mp4',
                             result_file=Path(folder) / 'result.json',
                         )
+                        budget = app.start_publish_budget()
+                        budget.deadline = time.monotonic() + 3
                         with self.assertRaises(PublishResultUnknownError):
                             await app._publish(
                                 page,
                                 {'user_id': '42', 'username': 'creator'},
-                                deadline=asyncio.get_running_loop().time() + 3,
+                                budget=budget,
                             )
                 finally:
                     release.set()
@@ -205,7 +210,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                             video = Path(folder)/'video.mp4'
                             video.touch()
                             app = InstagramUploader('unused', title='caption', video_file=video)
-                            await app._upload_files(page)
+                            await app._upload_files(
+                                page, budget=app.start_publish_budget()
+                            )
                         self.assertEqual(await page.get_by_role('dialog').count(), 1)
                         self.assertEqual(await page.locator('._ac76 [role=button]').count(), 1)
                     await page.set_content('<div role="dialog"><button>Unrelated dialog</button></div>')
@@ -258,7 +265,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         cover.write_bytes(png)
                         app = InstagramUploader('unused', title='caption', video_file='video.mp4', thumbnail=cover)
                         await page.goto('https://www.instagram.com/')
-                        await app._advance_media_editor(page)
+                        await app._advance_media_editor(
+                            page, budget=app.start_publish_budget()
+                        )
                         self.assertEqual(await page.locator('[role=heading]').inner_text(), 'compose')
                         self.assertEqual(await page.locator('#outside').evaluate('e=>e.files.length'), 0)
                         await page.reload()
@@ -266,7 +275,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         cover.write_bytes(png + b'other image bytes')
                         await page.locator('body').evaluate("e=>e.dataset.wrong='true'")
                         with self.assertRaisesRegex(RuntimeError, '预览与指定图片不匹配'):
-                            await app._advance_media_editor(page)
+                            await app._advance_media_editor(
+                                page, budget=app.start_publish_budget()
+                            )
                         self.assertEqual(await page.locator('[role=heading]').inner_text(), 'edit')
                 finally:
                     await browser.close()
@@ -324,7 +335,11 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as folder:
                         target = Path(folder)/'result.json'
                         app = InstagramUploader('unused.json', title='caption', video_file='video.mp4', result_file=target)
-                        task = asyncio.create_task(app._publish(page, {'user_id': '42', 'username': 'creator'}))
+                        task = asyncio.create_task(app._publish(
+                            page,
+                            {'user_id': '42', 'username': 'creator'},
+                            budget=app.start_publish_budget(),
+                        ))
                         await page.locator('body[data-processing="true"]').wait_for()
                         self.assertFalse(task.done(), '202 后仍必须等待最终创建响应')
                         self.assertNotEqual(app.result['status'], 'published')

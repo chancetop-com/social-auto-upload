@@ -274,7 +274,7 @@ class MultiloginUploadTests(unittest.TestCase):
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
         self.assertEqual(context.add_init_script_calls, 0)
-        note_content.assert_awaited_once_with(page)
+        note_content.assert_awaited_once_with(page, multilogin=True)
         self.assertIsNone(note.account_file)
 
     def test_mlx_validation_skips_cookie_auth(self):

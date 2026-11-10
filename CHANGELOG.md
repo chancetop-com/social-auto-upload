@@ -21,6 +21,13 @@
 - 验证范围：离线测试覆盖激活矩阵、双 key 冲突、base 校验、参数矩阵、生命周期、429 → `11` 与 key 脱敏。**真实 AdsPower 冒烟未执行（ticket 09）**：本机未安装 AdsPower、50325 未监听，以下仍未验证——已运行 Profile 的 start 返回形状、重复 stop、429 真实形状、`contexts` 是否恒为 1、超过 30s 的冷启动、旧客户端 V2 状态码、`/status` 是否鉴权、最低 V2 版本。
 - 已知限制：命令级登录检测与身份日志已是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin，待后续统一。
 
+### 发布超时（全平台）
+
+- 浏览器发布平台统一与 TikTok 对齐：抖音、快手、视频号、百家号、支付宝生活号、YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频/文章、Facebook 个人主页、Facebook Page 均使用 15 分钟总预算（`uploader/publish_timeout.py`）。预算覆盖打开发布页、上传素材、填写元数据、封面/声明/合集、点击发布和等待平台确认。
+- 未点击发布前超时退出 `1`（确定未发布）；点击发布后超时退出 `9`（结果未知，禁止自动重发）。知乎、雪球、大鱼号、Facebook Page 等原本只记录 `submission_unknown` 的流程现在会保留专用错误类型。
+- TikTok、小红书与 Instagram 迁移到同一个 `PublishTimeoutBudget`，仅通过构造参数保留各自更具体的错误文案；deadline 计算、点击前检查与点击后 unknown 判断统一由 helper 负责。
+- `--not-before` 主动等待不计入预算，并从 deadline 中顺延；素材上传/转码等待按剩余预算收紧。Bilibili 因 `biliup` 单命令提交，保留“启动前等待”的语义，并给命令本身增加 15 分钟超时；命令启动后超时按结果未知退出 `9`。
+
 ### 小红书
 
 - 重新设计发布声明能力：`upload-video` / `upload-note` 新增 `--original` / `--no-original`（原创声明开关）与 `--content-type`（`fiction` / `ai` / `marketing` / `self-shot` / `repost`，对应「添加内容类型声明」菜单）。两项声明默认都不操作页面，保持平台默认。

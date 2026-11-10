@@ -10,10 +10,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from loguru import logger
-from patchright.async_api import Page, async_playwright, expect
+from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, async_playwright, expect
 
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
+from utils.errors import PublishResultUnknownError
 from uploader.xueqiu_uploader.constants import (
     XUEQIU_ARTICLE_URL, XUEQIU_CONTEXT_KWARGS, XUEQIU_DECLARATIONS,
     XUEQIU_IMAGE_SUFFIXES, XUEQIU_LAUNCH_KWARGS, XUEQIU_VISIBILITY,
@@ -50,6 +51,10 @@ class XueqiuArticle:
         self.debug = debug
         self.cover = Path(cover).expanduser().resolve() if cover else None
         self.publish_not_before = publish_not_before
+
+    def _budget_ms(self, default_ms: int) -> int:
+        budget = getattr(self, "_publish_budget", None)
+        return budget.clamp_ms(default_ms) if budget else default_ms
 
     def validate_upload_args(self, *, check_cookie: bool = True):
         """所有本地参数在创建远端草稿前校验，不猜测尚未观察到的长度上限。
@@ -125,11 +130,11 @@ class XueqiuArticle:
             await file_chooser.element.evaluate("input => { input.value = ''; }")
             await file_chooser.set_files(str(image))
             await expect(body).not_to_contain_text(marker)
-            await expect(body.locator("img")).to_have_count(index + 1, timeout=60000)
+            await expect(body.locator("img")).to_have_count(index + 1, timeout=self._budget_ms(60000))
             # 图片按原稿顺序逐个替换，已断言数量；data/blob 预览不代表服务端完成。
             inserted = body.locator("img").nth(index)
-            await expect(inserted).to_have_attribute("src", re.compile(r"^(?:https:)?//xqimg\.imedao\.com/"), timeout=60000)
-            await expect(inserted).to_have_js_property("complete", True, timeout=60000)
+            await expect(inserted).to_have_attribute("src", re.compile(r"^(?:https:)?//xqimg\.imedao\.com/"), timeout=self._budget_ms(60000))
+            await expect(inserted).to_have_js_property("complete", True, timeout=self._budget_ms(60000))
             if await inserted.evaluate("e => e.naturalWidth") <= 0:
                 raise RuntimeError(f"正文图片无法加载: {image.name}")
             self.uploaded_images.append(await inserted.evaluate("e => e.src"))
@@ -166,10 +171,10 @@ class XueqiuArticle:
             if await crop.locator('img[alt="Crop"]').evaluate("e => e.naturalWidth") <= 0:
                 raise RuntimeError("封面裁剪预览无法加载")
             await crop.get_by_role("button", name="确认裁剪", exact=True).click()
-            await expect(crop).to_have_count(0, timeout=60000)
+            await expect(crop).to_have_count(0, timeout=self._budget_ms(60000))
             # 实测成功封面以背景图展示，原上传按钮被 hidden；不能检查占位 img 的固定地址。
             cover_preview = cover_row.locator('div[class*="index_input-cover-pic-btn_"]')
-            await expect(cover_preview).to_have_attribute("style", re.compile(r".*xqimg\.imedao\.com/.*"), timeout=60000)
+            await expect(cover_preview).to_have_attribute("style", re.compile(r".*xqimg\.imedao\.com/.*"), timeout=self._budget_ms(60000))
             self.cover_url = await cover_preview.evaluate(
                 "e => new URL(getComputedStyle(e).backgroundImage.slice(5, -2), location.href).href")
         for label, value in (("分享范围：", self.visibility), ("创作声明：", self.declaration)):
@@ -185,7 +190,7 @@ class XueqiuArticle:
             await option.click()
             await expect(selected).to_contain_text(value)
         # publish_state 是独立自动保存状态区域，不以正文里的同名文字判断保存完成。
-        await expect(page.locator('div[class*="publish_state_"]')).to_contain_text("已经保存至草稿", timeout=60000)
+        await expect(page.locator('div[class*="publish_state_"]')).to_contain_text("已经保存至草稿", timeout=self._budget_ms(60000))
         await page.get_by_role("button", name="预览", exact=True).click()
         # 预览容器的业务前缀在实测 DOM 中稳定；h1 与 content-text 分别承载预览标题、正文。
         preview = page.locator('div[class*="index_preview-content_"]')
@@ -193,7 +198,7 @@ class XueqiuArticle:
         await expect(preview.locator("h1")).to_have_text(self.title)
         # 预览由异步服务端结果填入，先等本次文字，不能只等空预览外壳可见。
         preview_body = preview.locator('div[class*="index_content-text_"] > div')
-        await expect(preview_body).to_contain_text(next(text.strip() for text in self.document.text if text.strip()), timeout=30000)
+        await expect(preview_body).to_contain_text(next(text.strip() for text in self.document.text if text.strip()), timeout=self._budget_ms(30000))
         await check_xueqiu_article_content(preview_body, self.document)
         # 预览 content-text 直属封面 img 与直属 div 内的正文图片并存；只在后者核对插图。
         preview_images = preview.locator('div[class*="index_content-text_"] > div img')
@@ -251,6 +256,8 @@ class XueqiuArticle:
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: editor/preview/publish plus one server response check."""
+        budget = PublishTimeoutBudget("雪球")
+        self._publish_budget = budget
         results_dir = self.results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
@@ -285,21 +292,32 @@ class XueqiuArticle:
             await expect(page.locator('div[class*="index_preview-content_"]')).to_be_hidden()
             publish = page.get_by_role("button", name="发布", exact=True)
             # 页面用 class 表达禁用态，不能仅依赖 HTML disabled；保留语义前缀排除哈希变化。
-            await expect(publish).not_to_have_class(re.compile(r".*publish_disabled_.*"), timeout=30000)
-            await wait_until_publish_allowed(
+            await expect(publish).not_to_have_class(
+                re.compile(r".*publish_disabled_.*"),
+                timeout=budget.clamp_ms(30000),
+            )
+            await budget.wait_until_allowed(
                 getattr(self, "publish_not_before", None),
                 logger=logger,
                 label="雪球发布",
             )
+            budget.check_pre_click()
             result.update(status="submission_unknown", editor_url=page.url)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             # 实测最终发表 POST /xq/statuses/update.json 返回作品 ID、user_id、title、text、is_private。
             # 页面随后回首页，因此不能用“跳转作者详情”这一错误假设判断成功。
-            async with page.expect_response(lambda response: response.request.method == "POST"
-                                            and response.url == "https://mp.xueqiu.com/xq/statuses/update.json",
-                                            timeout=60000) as submitted:
-                await publish.click()
-            response = await submitted.value
+            publish_clicked = False
+            try:
+                async with page.expect_response(
+                    lambda response: response.request.method == "POST"
+                    and response.url == "https://mp.xueqiu.com/xq/statuses/update.json",
+                    timeout=budget.clamp_ms(60000),
+                ) as submitted:
+                    await publish.click()
+                    publish_clicked = True
+                response = await submitted.value
+            except BrowserTimeoutError:
+                raise budget.timeout_error(publish_clicked) from None
             payload = await response.json()
             content_id = payload.get("id")
             if not response.ok or not isinstance(content_id, int) or isinstance(content_id, bool) or content_id <= 0:
@@ -334,6 +352,8 @@ class XueqiuArticle:
             else:
                 await check_page.close()
             return result
+        except PublishResultUnknownError:
+            raise
         except Exception as exc:
             if multilogin and page is not None:
                 raise_if_login_required(page)

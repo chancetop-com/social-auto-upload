@@ -18,7 +18,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from conf import DEBUG_MODE
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -264,12 +264,20 @@ async def _click_if_present(page: Page, selector: str, timeout: int = 4000) -> b
         return False
 
 
-async def _wait_upload_complete(page: Page, max_polls: int = 360) -> bool:
+async def _wait_upload_complete(
+    page: Page,
+    max_polls: int = 360,
+    *,
+    budget: PublishTimeoutBudget | None = None,
+) -> bool:
     """等网页上传从 X% 跑到 100% 再发布。浏览器上传靠窗口开着才传得完，
     若上传到一半就点发布并关闭浏览器，上传会被掐断卡在中途（如 76%）。
-    出现“处理/检查/上传完成”或不再“正在上传”即视为传完。max_polls*5s=30min 上限。"""
+    出现“处理/检查/上传完成”或不再“正在上传”即视为传完。
+    max_polls*5s 是平台上限，实际还受 15 分钟发布总预算约束。"""
     last = ""
     for _ in range(max_polls):
+        if budget is not None:
+            budget.check_pre_click()
         txt = ""
         for sel in (".progress-label", "span.progress-label", "ytcp-video-upload-progress"):
             loc = page.locator(sel).first
@@ -293,6 +301,8 @@ async def _wait_upload_complete(page: Page, max_polls: int = 360) -> bool:
 
 
 class YouTubeVideo(BaseVideoUploader):
+    publish_platform_label = "YouTube"
+
     def __init__(self, title, file_path, tags, account_file, *,
                  description="", thumbnail_path=None, playlist=None,
                  visibility="public", debug=DEBUG_MODE, headless=False):
@@ -350,6 +360,7 @@ class YouTubeVideo(BaseVideoUploader):
                 await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> Page:
+        self.start_publish_budget()
         page = await session.context.new_page()
         page.set_default_timeout(60000)
 
@@ -377,7 +388,9 @@ class YouTubeVideo(BaseVideoUploader):
             _raise_if_login_required(page)
 
         # 2) 等详情对话框
-        await page.locator("#title-textarea").wait_for(state="visible", timeout=120000)
+        await page.locator("#title-textarea").wait_for(
+            state="visible", timeout=self.publish_budget.clamp_ms(120000)
+        )
 
         # 3) 标题
         youtube_logger.info(_msg("✍️", "填写标题"))
@@ -458,20 +471,22 @@ class YouTubeVideo(BaseVideoUploader):
 
         # 10.5) 关键：等上传真正传完再发布。浏览器上传靠窗口开着传，
         #       传到一半就点发布+关浏览器 = 上传被掐断卡在中途（如 76%）。
+        budget = self.publish_budget
         youtube_logger.info(_msg("📤", "等待上传完成（传完才发布）…"))
-        await _wait_upload_complete(page)
+        await _wait_upload_complete(page, budget=budget)
         if multilogin:
             _raise_if_login_required(page)
 
         # 11) 发布
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=youtube_logger,
             label="YouTube 发布",
         )
+        budget.check_pre_click()
         await page.wait_for_timeout(1200)
-        if not await _click_if_present(page, "#done-button", 15000):
-            youtube_logger.warning(_msg("🤔", "未找到发布按钮，可能上传未到可发布进度；请在窗口里手动发布"))
+        if not await _click_if_present(page, "#done-button", budget.clamp_ms(15000)):
+            raise RuntimeError("未找到 YouTube 发布按钮，未提交发布")
         else:
             await page.wait_for_timeout(4000)
             video_url = ""

@@ -3,11 +3,34 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from uploader.publish_timeout import (
+    PUBLISH_TIMEOUT_SECONDS,
+    PublishTimeoutBudget,
+)
+
 
 class BaseVideoUploader:
     #: 本地发布闸门：全部准备完成后，只有本地时间 >= 该值才点击发布。
     #: 命令层在构造上传器后赋值；None 表示不做客户端等待。
     publish_not_before: datetime | None = None
+    #: 发布超时预算使用的平台名；子类覆盖后错误文案会带上平台名。
+    publish_platform_label = "平台"
+    publish_timeout_seconds = PUBLISH_TIMEOUT_SECONDS
+
+    def start_publish_budget(self) -> PublishTimeoutBudget:
+        """在整条上传/发布流程开始时创建共享 deadline。"""
+        self._publish_budget = PublishTimeoutBudget(
+            self.publish_platform_label,
+            timeout_seconds=self.publish_timeout_seconds,
+        )
+        return self._publish_budget
+
+    @property
+    def publish_budget(self) -> PublishTimeoutBudget:
+        """获取本次流程的预算；直接调用子步骤时按需创建。"""
+        budget = getattr(self, "_publish_budget", None)
+        return budget if budget is not None else self.start_publish_budget()
+
     SUPPORTED_VIDEO_EXTENSIONS = {
         ".mp4",
         ".mov",

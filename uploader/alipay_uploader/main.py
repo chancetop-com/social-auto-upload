@@ -19,7 +19,6 @@ from patchright.async_api import (
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -374,6 +373,8 @@ async def alipay_setup(account_file, handle=False, return_detail=False, qrcode_c
 
 
 class AlipayVideo(BaseVideoUploader):
+    publish_platform_label = "支付宝"
+
     def __init__(
         self,
         title,
@@ -414,7 +415,11 @@ class AlipayVideo(BaseVideoUploader):
 
     async def open_upload_page(self, page: Page, *, multilogin: bool = False) -> None:
         # 进内容创作平台首页，点"发布视频"卡片（JS 跳转）进入短视频发布表单
-        await page.goto(ALIPAY_LIFE_ACCOUNT_URL, timeout=120000, wait_until="domcontentloaded")
+        await page.goto(
+            ALIPAY_LIFE_ACCOUNT_URL,
+            timeout=self.publish_budget.clamp_ms(120000),
+            wait_until="domcontentloaded",
+        )
         if multilogin:
             _raise_if_login_required(page)
         try:
@@ -541,9 +546,12 @@ class AlipayVideo(BaseVideoUploader):
 
     async def wait_for_upload_complete(self, page: Page, timeout: int = 1800) -> None:
         # 等待"确认发布"按钮变为可点击（视频上传+转码完成）
+        budget = self.publish_budget
         publish_btn = page.get_by_role("button", name="确认发布").first
         start = time.monotonic()
+        timeout = budget.clamp_seconds(timeout)
         while True:
+            budget.check_pre_click()
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"等待视频上传/转码超时（>{timeout}s），确认发布按钮始终不可用")
             try:
@@ -561,8 +569,11 @@ class AlipayVideo(BaseVideoUploader):
                 await asyncio.sleep(2)
 
     async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
+        budget = self.publish_budget
         publish_btn = page.get_by_role("button", name="确认发布").first
-        await publish_btn.wait_for(state="visible", timeout=30000)
+        await publish_btn.wait_for(
+            state="visible", timeout=budget.clamp_ms(30000)
+        )
         # 某些账号下点击后不会立即跳 posts，需同时观察成功提示文案
         if await publish_btn.is_disabled():
             raise RuntimeError("确认发布按钮仍不可点击，无法提交")
@@ -691,28 +702,26 @@ class AlipayVideo(BaseVideoUploader):
                 alipay_logger.warning(_msg("😵", f"点击「继续发布」失败: {exc}"))
             return False
 
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=alipay_logger,
             label="支付宝发布",
         )
+        budget.check_pre_click()
         await _collect_click_diag("点击前")
         await publish_btn.click()
+        publish_clicked = True
         await page.wait_for_timeout(600)
         await _collect_click_diag("首次点击后")
         # 首次点击后可能立即弹出优化项拦截弹窗，先放行一次
         await _dismiss_quality_modal()
 
-        start = time.monotonic()
-        timeout = 90
         success_toast = page.locator('.antd5-message-notice-content:has-text("发布成功"), .antd5-message-notice-content:has-text("提交成功"), .antd5-message-notice-content:has-text("提交审核"), .antd5-message-notice-content:has-text("审核中")').first
         fail_toast = page.locator('.antd5-message-notice-content:has-text("发布失败"), .antd5-message-notice-content:has-text("提交失败"), .antd5-message-notice-content:has-text("请稍后重试")').first
 
         retried_after_aigc = False
-        submit_click_retries = 0
-        last_click_ts = start
         try:
-            while time.monotonic() - start <= timeout:
+            while budget.remaining_seconds() > 0:
                 if multilogin:
                     _raise_if_login_required(page)
                 if "/content-creation/posts" in page.url:
@@ -722,13 +731,19 @@ class AlipayVideo(BaseVideoUploader):
                 # 优化项弹窗可能延迟出现，随时拦截提交，随见随点「继续发布」放行
                 await _dismiss_quality_modal()
 
-                # 命中 AIGC 预处理链路后，页面通常仍停留在发布页，需要再点一次确认发布才真正提交
+                # 核心判据：必须至少看到一次 captcha verify / publishShortVideo 请求
+                saw_captcha_verify = any("captcha.alipay.com/api/v1/captcha/verify" in u.lower() for _, u, _, _ in net_events)
+                saw_publish_submit = any("publishshortvideo.json" in u.lower() for _, u, _, _ in net_events)
+                no_submit_signal = not (saw_captcha_verify or saw_publish_submit)
+
+                # 命中 AIGC 预处理链路后，页面通常仍停留在发布页，需要再点一次确认发布才真正提交。
+                # 仅在尚未观察到提交请求时补点，避免提交后因 AIGC 事件晚到而重复发布。
                 try:
                     saw_aigc_done = any(
                         ("querylooptask" in u.lower() and '"done":true' in (b or "").lower())
                         for _, u, _, b in net_events
                     )
-                    if saw_aigc_done and not retried_after_aigc:
+                    if saw_aigc_done and not retried_after_aigc and no_submit_signal:
                         if await publish_btn.count() and not await publish_btn.is_disabled():
                             await publish_btn.click()
                             retried_after_aigc = True
@@ -737,23 +752,6 @@ class AlipayVideo(BaseVideoUploader):
                             await _collect_click_diag("AIGC后二次点击后")
                 except Exception:
                     pass
-
-                # 核心判据：必须至少看到一次 captcha verify / publishShortVideo 请求
-                saw_captcha_verify = any("captcha.alipay.com/api/v1/captcha/verify" in u.lower() for _, u, _, _ in net_events)
-                saw_publish_submit = any("publishshortvideo.json" in u.lower() for _, u, _, _ in net_events)
-                no_submit_signal = not (saw_captcha_verify or saw_publish_submit)
-                if no_submit_signal and submit_click_retries < 3 and (time.monotonic() - last_click_ts) >= 8:
-                    try:
-                        if await publish_btn.count() and not await publish_btn.is_disabled():
-                            await publish_btn.click()
-                            submit_click_retries += 1
-                            last_click_ts = time.monotonic()
-                            alipay_logger.info(_msg("🔁", f"未检测到提交请求信号，重试点击确认发布（{submit_click_retries}/3）"))
-                            await page.wait_for_timeout(500)
-                            await _collect_click_diag(f"重试点击后#{submit_click_retries}")
-                    except Exception:
-                        pass
-
                 try:
                     if await success_toast.count() and await success_toast.is_visible():
                         alipay_logger.success(_msg("🥳", "视频发布成功（toast 命中）"))
@@ -769,9 +767,7 @@ class AlipayVideo(BaseVideoUploader):
                     pass
                 await page.wait_for_timeout(1000)
 
-            raise RuntimeError(
-                f"发布后未检测到成功信号（90s），当前地址: {page.url}"
-            )
+            raise budget.timeout_error(publish_clicked)
         finally:
             page.remove_listener("response", _on_response)
             page.remove_listener("request", _on_request)
@@ -823,6 +819,7 @@ class AlipayVideo(BaseVideoUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
         await self.open_upload_page(page, multilogin=multilogin)

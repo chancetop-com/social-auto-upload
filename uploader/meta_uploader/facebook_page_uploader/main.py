@@ -22,7 +22,6 @@ from patchright.async_api import (
 )
 
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 
@@ -222,6 +221,8 @@ async def meta_setup(
 class MetaBusinessUploader(BaseVideoUploader):
     """Business Suite 中的 Facebook Page 视频和图文发布器。"""
 
+    publish_platform_label = "Facebook Page"
+
     def __init__(
         self,
         platform: str,
@@ -302,15 +303,15 @@ class MetaBusinessUploader(BaseVideoUploader):
         # 视频在新版 Business Suite 会进入“创建 Reels”向导，不渲染 video 标签；
         # 图片则留在原 composer。两种状态都必须等到文件名或向导业务标题出现。
         if self.video_file:
-            await page.get_by_text(self.video_file.name, exact=True).wait_for(state="visible", timeout=180_000)
+            await page.get_by_text(self.video_file.name, exact=True).wait_for(state="visible", timeout=self.publish_budget.clamp_ms(180_000))
             # 新版 Reel 向导有独立业务 surface；不依赖 Create reel/创建 Reels 标题。
             await page.locator('[data-surface$="lib:bizweb_create_reel"]').wait_for()
             await dismiss_guidance_cards(page)
-            await page.get_by_text('100%', exact=True).wait_for(state='visible', timeout=180000)
+            await page.get_by_text('100%', exact=True).wait_for(state='visible', timeout=self.publish_budget.clamp_ms(180000))
         else:
             # 上传后媒体区生成服务端预览及像素尺寸；不以中文“移除照片”或正文框代表上传完成。
-            await expect(media.locator('img')).to_have_count(len(files), timeout=180000)
-            await expect(media.get_by_text(re.compile(r"^\d+ x \d+$")).filter(visible=True)).to_have_count(len(files), timeout=180000)
+            await expect(media.locator('img')).to_have_count(len(files), timeout=self.publish_budget.clamp_ms(180000))
+            await expect(media.get_by_text(re.compile(r"^\d+ x \d+$")).filter(visible=True)).to_have_count(len(files), timeout=self.publish_budget.clamp_ms(180000))
 
     async def _fill_caption(self, page: Page) -> None:
         # Reel 标题为 left_panel 中唯一普通 text input；关键词输入另有 combobox 角色。
@@ -345,7 +346,7 @@ class MetaBusinessUploader(BaseVideoUploader):
             await expect(steps.nth(index)).to_have_attribute('aria-current', 'step')
             actions = page.locator('[data-surface$="bizweb_create_reel:footer"] [role="button"]:not([aria-label])')
             await expect(actions).to_have_count(2)
-            await expect(actions.nth(1)).to_be_enabled(timeout=180000)
+            await expect(actions.nth(1)).to_be_enabled(timeout=self.publish_budget.clamp_ms(180000))
             await actions.nth(1).click()
             await expect(steps.nth(index + 1)).to_have_attribute('aria-current', 'step')
         # 快拍开关与当前 Page 的 Facebook 徽标属于同一单开关业务组；其余开关没有品牌图片。
@@ -444,20 +445,29 @@ class MetaBusinessUploader(BaseVideoUploader):
             actions = page.locator('[data-surface$="bizweb_create_reel:footer"] [role="button"]:not([aria-label])')
             await expect(actions).to_have_count(2)
             button = actions.nth(1)
-        await expect(button).to_be_enabled()
-        await wait_until_publish_allowed(
+        budget = self.publish_budget
+        await expect(button).to_be_enabled(timeout=budget.clamp_ms(30000))
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=logger,
             label="Facebook Page 发布",
         )
+        budget.check_pre_click()
         self.result['status'] = 'submission_unknown'
         self.result_file.parent.mkdir(parents=True, exist_ok=True)
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
         # 只捕获本次点击触发的创建作品响应；上传素材 ID 和广告建议中的 story ID 都不能代替内容编号。
-        async with page.expect_response(lambda response: '/api/graphql' in response.url and
-                parse_qs(response.request.post_data or '').get('fb_api_req_friendly_name') == ['BusinessComposerStoryCreationMutation'], timeout=90000) as response_info:
-            await button.click()
-        payload = await (await response_info.value).json()
+        publish_clicked = False
+        try:
+            async with page.expect_response(lambda response: '/api/graphql' in response.url and
+                    parse_qs(response.request.post_data or '').get('fb_api_req_friendly_name') == ['BusinessComposerStoryCreationMutation'],
+                    timeout=budget.clamp_ms(90000)) as response_info:
+                await button.click()
+                publish_clicked = True
+            response = await response_info.value
+        except BrowserTimeoutError:
+            raise budget.timeout_error(publish_clicked) from None
+        payload = await response.json()
         if payload.get('errors'):
             raise RuntimeError('平台创建作品响应包含错误；请查原记录，勿重复提交')
         creation = payload.get('data', {}).get('xfamily_content_create', {})
@@ -477,9 +487,14 @@ class MetaBusinessUploader(BaseVideoUploader):
             # 创建响应后页面仍执行后续发布步骤，不能立即导航走；实测完成框带本次标题、
             # 作品预览及关闭/完成两个动作。标题是本次业务参数，非某种语言的成功文案。
             completion = page.locator('[role="dialog"][aria-labelledby][tabindex="-1"]').filter(has_text=self.title)
-            await expect(completion).to_have_count(1, timeout=120000)
-            await expect(completion.get_by_role('heading')).to_have_count(1)
-            await expect(completion.get_by_role('button')).to_have_count(2)
+            try:
+                await expect(completion).to_have_count(
+                    1, timeout=budget.post_click_timeout_ms(120000)
+                )
+                await expect(completion.get_by_role('heading')).to_have_count(1)
+                await expect(completion.get_by_role('button')).to_have_count(2)
+            except (BrowserTimeoutError, AssertionError):
+                raise budget.timeout_error(True) from None
             # 完成框两个动作均是关闭/完成；点击最后一个代表平台已受理本次 Reel。
             await completion.get_by_role('button').last.click()
             await expect(completion).to_have_count(0)
@@ -524,9 +539,14 @@ class MetaBusinessUploader(BaseVideoUploader):
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Multilogin body: consume the injected context, touch no cookies."""
+        self.start_publish_budget()
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
-        await page.goto(META_BUSINESS_URL, wait_until="domcontentloaded", timeout=120_000)
+        await page.goto(
+            META_BUSINESS_URL,
+            wait_until="domcontentloaded",
+            timeout=self.publish_budget.clamp_ms(120_000),
+        )
         if session.managed:
             _raise_if_login_required(page)
             if await _is_business_logged_out(page):
@@ -547,6 +567,7 @@ class MetaBusinessUploader(BaseVideoUploader):
         if session is not None:
             return await self.upload_in(session)
 
+        self.start_publish_budget()
         async with async_playwright() as playwright:
             browser, context, page = await _open_business_page(
                 playwright, self.account_file, proxy=self.proxy, headless=self.headless

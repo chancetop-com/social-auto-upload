@@ -798,7 +798,7 @@ class UploaderSeamTests(unittest.TestCase):
 
         page_ops.assert_awaited_once()
         self.assertTrue(page_ops.await_args.kwargs["multilogin"])
-        self.assertEqual(page_ops.await_args.kwargs["deadline"], 1900.0)
+        self.assertEqual(page_ops.await_args.kwargs["budget"].deadline, 1900.0)
 
     def test_mlx_upload_reuses_an_existing_page(self):
         video = self._video(account_file=None)
@@ -858,8 +858,9 @@ class UploaderSeamTests(unittest.TestCase):
         init_script.assert_not_awaited()
         video.change_language.assert_awaited_once()
         page_ops.assert_awaited_once_with(
-            ANY, multilogin=False, deadline=1900.0
+            ANY, multilogin=False, budget=ANY
         )
+        self.assertEqual(page_ops.await_args.kwargs["budget"].deadline, 1900.0)
         self.assertEqual(
             context.storage_state_calls, ["/tmp/couple-cookie.json"]
         )

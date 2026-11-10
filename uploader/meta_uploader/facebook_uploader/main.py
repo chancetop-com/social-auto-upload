@@ -13,7 +13,7 @@ from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
 
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import facebook_logger
@@ -253,6 +253,12 @@ class FacebookPost:
             parts.append(" ".join(f"#{tag}" for tag in self.tags))
         return "\n\n".join(parts)
 
+    def _ensure_publish_budget(self) -> PublishTimeoutBudget:
+        budget = getattr(self, "_publish_budget", None)
+        if budget is None:
+            budget = self._publish_budget = PublishTimeoutBudget("Facebook")
+        return budget
+
     async def _find_caption_editor(self, page: Page):
         # 外层 aria-modal dialog 属于本次发帖表单，排除首页评论框及隐藏模板。
         editor = page.locator('[role="dialog"][aria-modal="true"] [contenteditable="true"][role="textbox"]')
@@ -268,9 +274,10 @@ class FacebookPost:
         await expect(button).to_be_visible()
         return button
 
-    async def _wait_until_publishable(self, page: Page) -> None:
-        deadline = asyncio.get_running_loop().time() + 180
+    async def _wait_until_publishable(self, page: Page, budget: PublishTimeoutBudget) -> None:
+        deadline = asyncio.get_running_loop().time() + budget.clamp_seconds(180)
         while asyncio.get_running_loop().time() < deadline:
+            budget.check_pre_click()
             error = page.locator('[role="dialog"] [role="alert"]')
             if await error.count() and await error.first.is_visible():
                 message = (await error.first.inner_text()).strip()
@@ -286,7 +293,9 @@ class FacebookPost:
             await page.wait_for_timeout(1000)
         raise TimeoutError("Facebook 视频上传或处理超时，发布按钮未就绪")
 
-    async def _publish_and_verify(self, page: Page) -> None:
+    async def _publish_and_verify(
+        self, page: Page, budget: PublishTimeoutBudget
+    ) -> None:
         publish_button = await self._find_publish_button(page)
         # 已实测成功提示是完整句子，不能把动态中任意“已发布”文案当成本次成功。
         success_pattern = re.compile(r"^(?:你的帖子已成功分享给.+|你的帖子已发布|Your post has been published[.!]?)$", re.I)
@@ -294,14 +303,14 @@ class FacebookPost:
         for index in range(await success_text.count()):
             if await success_text.nth(index).is_visible():
                 raise RuntimeError("提交前已存在发布成功提示，无法区分本次结果；未提交")
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=facebook_logger,
             label="Facebook 发布",
         )
+        budget.check_pre_click()
         await publish_button.click()
-        deadline = asyncio.get_running_loop().time() + 90
-        while asyncio.get_running_loop().time() < deadline:
+        while budget.remaining_seconds() > 0:
             # 只接受状态提示或成功文案；弹窗消失本身不足以证明服务端已受理。
             success_text = page.get_by_text(success_pattern)
             if await success_text.count():
@@ -309,7 +318,7 @@ class FacebookPost:
                     if await success_text.nth(index).is_visible():
                         return
             await page.wait_for_timeout(1000)
-        raise TimeoutError("已点击 Facebook 发布，但未观察到明确的发布成功状态")
+        raise budget.timeout_error(True)
 
     def _validate_media(self) -> None:
         if not self.files:
@@ -327,8 +336,11 @@ class FacebookPost:
             raise RuntimeError("首页发帖影音上传控件不唯一，未上传")
         await file_input.set_input_files([str(file) for file in self.files])
 
+        budget = self._ensure_publish_budget()
         # 选择素材后 composer 异步挂载；不能在同一轮立即检查 count 就判输入框不存在。
-        await page.locator('[role="dialog"] [contenteditable="true"][role="textbox"]:visible').wait_for(timeout=30000)
+        await page.locator('[role="dialog"] [contenteditable="true"][role="textbox"]:visible').wait_for(
+            timeout=budget.clamp_ms(30000)
+        )
         editor = await self._find_caption_editor(page)
         caption = self._caption()
         await editor.click()
@@ -336,14 +348,19 @@ class FacebookPost:
         if (await editor.inner_text()).strip() != caption:
             raise RuntimeError("Facebook 正文输入框未读回预期内容")
 
-        await self._wait_until_publishable(page)
-        await self._publish_and_verify(page)
+        await self._wait_until_publishable(page, budget)
+        await self._publish_and_verify(page, budget)
 
     async def upload_in(self, session: BrowserSession) -> None:
         """Multilogin body: consume the injected context, touch no cookies."""
+        self._ensure_publish_budget()
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
-        await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded", timeout=90_000)
+        await page.goto(
+            FACEBOOK_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=self._ensure_publish_budget().clamp_ms(90_000),
+        )
         if session.managed:
             _raise_if_login_required(page)
         await self._publish_on_page(page)
@@ -364,6 +381,7 @@ class FacebookPost:
         if self.account_file is None or not self.account_file.is_file():
             raise RuntimeError(f"Facebook 登录态文件不存在: {self.account_file}")
 
+        self._ensure_publish_budget()
         browser, context, page = await _open_facebook_page(
             playwright, self.account_file, proxy=self.proxy, headless=self.headless
         )

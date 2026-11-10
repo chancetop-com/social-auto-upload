@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from subprocess import TimeoutExpired
 from uploader.bilibili_uploader.runtime import run_biliup_command
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
     add_not_before_flag,
@@ -116,12 +117,20 @@ async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:
 
     # biliup 是一个整体命令，无法在「填好表、点发布」之间插入等待；
     # 这里在启动上传命令前等待到目标时间，保证不会早于 --not-before 提交。
-    await wait_until_publish_allowed(
+    budget = PublishTimeoutBudget("Bilibili")
+    await budget.wait_until_allowed(
         request.publish_not_before,
         logger=bilibili_logger,
         label="Bilibili 发布",
     )
-    result = run_biliup_command(arguments)
+    timeout = budget.remaining_seconds()
+    if timeout <= 0:
+        raise budget.pre_click_error()
+    try:
+        result = run_biliup_command(arguments, timeout=timeout)
+    except TimeoutExpired:
+        # 命令已经启动，可能已上传或已提交；按结果未知处理，禁止自动重发。
+        raise budget.timeout_error(True) from None
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "").strip() or "Bilibili upload failed")
     return account_file

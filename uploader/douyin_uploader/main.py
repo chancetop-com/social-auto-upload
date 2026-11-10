@@ -14,7 +14,6 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -460,11 +459,15 @@ class DouYinBaseUploader(BaseVideoUploader):
         # 2026-06 抖音发布页 DOM：标题=input[placeholder*=填写作品标题]，描述=div.zone-container[contenteditable]
         # version_2(post/video) 发布页要等视频上传完才渲染表单（实测约 40s），故等待超时给到 120s
         title_input = page.locator('input[placeholder*="填写作品标题"]').first
-        await title_input.wait_for(state="visible", timeout=120000)
+        await title_input.wait_for(
+            state="visible", timeout=self.publish_budget.clamp_ms(120000)
+        )
         await title_input.fill(title[:30])
 
         description_editor = page.locator('div.zone-container[contenteditable="true"]').first
-        await description_editor.wait_for(state="visible", timeout=120000)
+        await description_editor.wait_for(
+            state="visible", timeout=self.publish_budget.clamp_ms(120000)
+        )
         await description_editor.click()
         await page.keyboard.press("Control+KeyA")
         await page.keyboard.press("Delete")
@@ -709,6 +712,8 @@ class DouYinBaseUploader(BaseVideoUploader):
 
 
 class DouYinVideo(DouYinBaseUploader):
+    publish_platform_label = "抖音"
+
     def __init__(
         self,
         title,
@@ -1090,13 +1095,20 @@ class DouYinVideo(DouYinBaseUploader):
                 pass
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         page = await session.context.new_page()
-        await page.goto(DOUYIN_UPLOAD_URL, wait_until="domcontentloaded", timeout=90000)
+        await page.goto(
+            DOUYIN_UPLOAD_URL,
+            wait_until="domcontentloaded",
+            timeout=self.publish_budget.clamp_ms(90000),
+        )
         if session.managed:
             _raise_if_login_required(page)
         douyin_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         douyin_logger.info(_msg("🧭", "小人正在赶往上传主页"))
-        await page.wait_for_url(DOUYIN_UPLOAD_URL, timeout=90000)
+        await page.wait_for_url(
+            DOUYIN_UPLOAD_URL, timeout=self.publish_budget.clamp_ms(90000)
+        )
 
         # ── 进入页面后可能弹身份验证（短信验证码）或被踢到登录页 ──
         await page.wait_for_timeout(2000)
@@ -1105,6 +1117,7 @@ class DouYinVideo(DouYinBaseUploader):
         )
 
     async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
+        budget = self.publish_budget
 
         # 确认已经在上传页（非登录页），再找上传 input
         # 用更精确的选择器避免匹配到登录表单的 input
@@ -1119,6 +1132,7 @@ class DouYinVideo(DouYinBaseUploader):
         await upload_input.set_input_files(self.file_path)
 
         while True:
+            budget.check_pre_click()
             try:
                 await page.wait_for_url(
                     "https://creator.douyin.com/creator-micro/content/publish?enter_from=publish_page",
@@ -1144,6 +1158,7 @@ class DouYinVideo(DouYinBaseUploader):
         douyin_logger.info(_msg("🏷️", f"小人一共贴了 {len(self.tags)} 个话题"))
 
         while True:
+            budget.check_pre_click()
             try:
                 number = await page.locator('[class^="long-card"] div:has-text("重新上传")').count()
                 if number > 0:
@@ -1184,14 +1199,19 @@ class DouYinVideo(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=douyin_logger,
             label="抖音视频发布",
         )
 
+        publish_clicked = False
         sms_prompt_logged = False
         while True:
+            if budget.remaining_seconds() <= 0:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise budget.timeout_error(publish_clicked)
             try:
                 # 移除会拦截发布按钮点击的新手引导/话题下拉浮层
                 await page.evaluate(
@@ -1217,8 +1237,9 @@ class DouYinVideo(DouYinBaseUploader):
 
                 # ── 正常发布流程 ──
                 publish_button = page.get_by_role("button", name="发布", exact=True)
-                if await publish_button.count():
+                if not publish_clicked and await publish_button.count():
                     await publish_button.click(force=True)
+                    publish_clicked = True
                 await page.wait_for_url(
                     "https://creator.douyin.com/creator-micro/content/manage**",
                     timeout=3000,
@@ -1246,6 +1267,8 @@ class DouYinVideo(DouYinBaseUploader):
 
 
 class DouYinNote(DouYinBaseUploader):
+    publish_platform_label = "抖音"
+
     def __init__(
         self,
         image_paths,
@@ -1298,7 +1321,8 @@ class DouYinNote(DouYinBaseUploader):
             normalized_image_paths.append(str(self.validate_image_file(image_path)))
         self.image_paths = normalized_image_paths
 
-    async def upload_note_content(self, page: Page) -> None:
+    async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
+        budget = self.publish_budget
         douyin_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         douyin_logger.info(_msg("🔀", "小人正在切换到图文发布"))
         await page.get_by_text("发布图文", exact=True).click()
@@ -1308,6 +1332,7 @@ class DouYinNote(DouYinBaseUploader):
         await page.locator("div[class^='container'] input[accept*='image']").set_input_files(self.image_paths)
 
         while True:
+            budget.check_pre_click()
             try:
                 await page.wait_for_url(
                     "**/creator-micro/content/post/image?**",
@@ -1334,17 +1359,23 @@ class DouYinNote(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=douyin_logger,
             label="抖音图文发布",
         )
 
+        publish_clicked = False
         while True:
+            if budget.remaining_seconds() <= 0:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise budget.timeout_error(publish_clicked)
             try:
                 publish_button = page.get_by_role("button", name="发布", exact=True)
-                if await publish_button.count():
+                if not publish_clicked and await publish_button.count():
                     await publish_button.click()
+                    publish_clicked = True
                 await page.wait_for_url(
                     "**/creator-micro/content/manage?enter_from=publish**",
                     timeout=3000,
@@ -1390,14 +1421,21 @@ class DouYinNote(DouYinBaseUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         page = await session.context.new_page()
-        await page.goto(DOUYIN_UPLOAD_URL, wait_until="domcontentloaded", timeout=90000)
+        await page.goto(
+            DOUYIN_UPLOAD_URL,
+            wait_until="domcontentloaded",
+            timeout=self.publish_budget.clamp_ms(90000),
+        )
         if session.managed:
             _raise_if_login_required(page)
         douyin_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
-        await page.wait_for_url(DOUYIN_UPLOAD_URL, timeout=90000)
+        await page.wait_for_url(
+            DOUYIN_UPLOAD_URL, timeout=self.publish_budget.clamp_ms(90000)
+        )
 
-        await self.upload_note_content(page)
+        await self.upload_note_content(page, multilogin=session.managed)
 
     async def douyin_upload_note(self, *, session: BrowserSession | None = None):
         if session is not None:

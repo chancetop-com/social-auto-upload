@@ -11,11 +11,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from loguru import logger
-from patchright.async_api import Page, async_playwright, expect
+from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, async_playwright, expect
 
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
 from utils.browser_session import BrowserSession
+from utils.errors import PublishResultUnknownError
 from uploader.zhihu_uploader.constants import (
     ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL, ZHIHU_CONTEXT_KWARGS,
     ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS, ZHIHU_TIMEZONE,
@@ -54,6 +55,10 @@ class ZhihuArticle:
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
         self.publish_not_before = publish_not_before
+
+    def _budget_ms(self, default_ms: int) -> int:
+        budget = getattr(self, "_publish_budget", None)
+        return budget.clamp_ms(default_ms) if budget else default_ms
 
     def validate_upload_args(self, *, check_cookie: bool = True) -> None:
         """在启动浏览器前检查标题、正文、图片及定时时间。
@@ -152,11 +157,11 @@ class ZhihuArticle:
                 await expect(image_input).to_have_count(1)
                 await image_input.evaluate("input => { input.value = ''; }")
                 await image_input.set_input_files(str(image))
-            await expect(body.locator("img")).to_have_count(index, timeout=self.upload_timeout * 1000)
+            await expect(body.locator("img")).to_have_count(index, timeout=self._budget_ms(self.upload_timeout * 1000))
             # 已断言图片数量，按本次逐张插入顺序核对服务器地址和实际解码状态。
             inserted = body.locator("img").nth(index - 1)
-            await expect(inserted).to_have_attribute("src", re.compile(r"^https://"), timeout=self.upload_timeout * 1000)
-            await expect(inserted).to_have_js_property("complete", True, timeout=self.upload_timeout * 1000)
+            await expect(inserted).to_have_attribute("src", re.compile(r"^https://"), timeout=self._budget_ms(self.upload_timeout * 1000))
+            await expect(inserted).to_have_js_property("complete", True, timeout=self._budget_ms(self.upload_timeout * 1000))
             if await inserted.evaluate("image => image.naturalWidth") <= 0:
                 raise RuntimeError(f"知乎文章第 {index} 张图片无法加载")
             self.uploaded_images.append(await inserted.get_attribute("src"))
@@ -238,6 +243,8 @@ class ZhihuArticle:
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: editor page operations plus a single publish click."""
+        budget = PublishTimeoutBudget("知乎文章")
+        self._publish_budget = budget
         results_dir = self.results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now(ZHIHU_TIMEZONE):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
@@ -271,21 +278,32 @@ class ZhihuArticle:
 
             # 发布按钮只有标题和正文满足编辑器要求后才可用；提交只触发一次。
             publish = page.get_by_role("button", name="发布", exact=True)
-            await expect(publish).to_be_enabled()
-            await wait_until_publish_allowed(
+            await expect(publish).to_be_enabled(timeout=budget.clamp_ms(30000))
+            await budget.wait_until_allowed(
                 getattr(self, "publish_not_before", None),
                 logger=logger,
                 label="知乎文章发布",
             )
+            budget.check_pre_click()
             submitted = True
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             await publish.click()
             # 草稿也有 /p/<id>/edit 地址；必须到正式详情页并读到作品标题才算发表。
-            await page.wait_for_url(re.compile(r"^https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?$"), timeout=60000)
-            await expect(page.get_by_role("article").get_by_role("heading", name=self.title, exact=True)).to_be_visible()
+            try:
+                await page.wait_for_url(
+                    re.compile(r"^https://zhuanlan\.zhihu\.com/p/\d+/?(?:\?.*)?$"),
+                    timeout=budget.post_click_timeout_ms(60000),
+                )
+                await expect(page.get_by_role("article").get_by_role("heading", name=self.title, exact=True)).to_be_visible(
+                    timeout=budget.post_click_timeout_ms(30000)
+                )
+            except (BrowserTimeoutError, AssertionError):
+                raise budget.timeout_error(True) from None
             result.update(success=True, status="published", url=page.url)
             return result
+        except PublishResultUnknownError:
+            raise
         except Exception as exc:
             if multilogin and page is not None:
                 raise_if_login_required(page)

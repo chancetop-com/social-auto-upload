@@ -311,8 +311,10 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             account_file="account.json",
         )
 
+        budget = app.start_publish_budget()
+        budget.deadline = time.monotonic() - 1
         with self.assertRaises(RuntimeError) as ctx:
-            app._check_publish_deadline(time.monotonic() - 1)
+            budget.check_pre_click()
 
         self.assertIn("15 分钟", str(ctx.exception))
         self.assertIn("尚未点击发布", str(ctx.exception))
@@ -465,8 +467,9 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             account_file="account.json",
         )
 
-        before = app._publish_timeout_error(False)
-        after = app._publish_timeout_error(True)
+        budget = app.start_publish_budget()
+        before = budget.timeout_error(False)
+        after = budget.timeout_error(True)
 
         self.assertIsInstance(before, RuntimeError)
         self.assertNotIsInstance(before, PublishResultUnknownError)

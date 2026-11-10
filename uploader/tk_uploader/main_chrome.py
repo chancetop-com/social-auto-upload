@@ -16,7 +16,7 @@ import asyncio
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
+from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.tk_uploader.tk_config import (
     TIKTOK_ENTRY_WAIT_MS,
     TIKTOK_IMAGE_SUFFIXES,
@@ -31,7 +31,6 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_MAX_IMAGE_COUNT,
     TIKTOK_MAX_TITLE_LENGTH,
     TIKTOK_PHOTO_UPLOAD_URL,
-    TIKTOK_PUBLISH_TIMEOUT_SECONDS,
     TIKTOK_UPLOAD_ENTRY_SELECTOR,
     TIKTOK_UPLOAD_URL,
     Tk_Locator,
@@ -1107,6 +1106,25 @@ class TiktokBaseUploader(BaseVideoUploader):
     upload_url = TIKTOK_UPLOAD_URL
     upload_entry_selector = TIKTOK_UPLOAD_ENTRY_SELECTOR
 
+    def start_publish_budget(self) -> PublishTimeoutBudget:
+        self._publish_budget = PublishTimeoutBudget(
+            "TikTok",
+            pre_click_message=_PRE_PUBLISH_TIMEOUT_MESSAGE,
+            result_unknown_message=_PUBLISH_RESULT_UNKNOWN_MESSAGE,
+        )
+        return self._publish_budget
+
+    def _coerce_budget(
+        self, deadline: float | PublishTimeoutBudget | None
+    ) -> PublishTimeoutBudget:
+        """Reuse the live budget; keep legacy float ``deadline`` call sites working."""
+        if isinstance(deadline, PublishTimeoutBudget):
+            return deadline
+        budget = self.publish_budget
+        if deadline is not None:
+            budget.deadline = deadline
+        return budget
+
     def media_label(self) -> str:
         """Human label used by the upload log; the video text is unchanged."""
         return f"{self.title}.mp4"
@@ -1121,13 +1139,9 @@ class TiktokBaseUploader(BaseVideoUploader):
         # create a page when the context has none.
         page, _owned = await _select_probe_page(session.context)
         multilogin = session.managed
-        deadline = (
-            time.monotonic() + TIKTOK_PUBLISH_TIMEOUT_SECONDS
-            if multilogin
-            else None
-        )
+        budget = self.start_publish_budget()
         await self._upload_on_page(
-            page, multilogin=multilogin, deadline=deadline
+            page, multilogin=multilogin, budget=budget
         )
 
     async def upload_local(self, playwright: Playwright | None) -> None:
@@ -1162,11 +1176,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 await self.change_language(page)
                 # Local mode keeps the same total budget as Multilogin so a
                 # stuck upload cannot hold the process forever.
-                deadline = (
-                    time.monotonic() + TIKTOK_PUBLISH_TIMEOUT_SECONDS
-                )
+                budget = self.start_publish_budget()
                 await self._upload_on_page(
-                    page, multilogin=False, deadline=deadline
+                    page, multilogin=False, budget=budget
                 )
                 await context.storage_state(path=f"{self.account_file}")
                 tiktok_logger.info('  [-] update cookie！')
@@ -1207,13 +1219,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 f"[+] TikTok language switch skipped: {exc}"
             )
 
-    def _check_publish_deadline(self, deadline: float | None) -> None:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError(
-                "TikTok 上传超时（15 分钟），已中止发布。"
-            )
-
-    async def _upload_on_page(self, page, *, multilogin: bool, deadline: float | None) -> None:
+    async def _upload_on_page(
+        self,
+        page,
+        *,
+        multilogin: bool,
+        budget: PublishTimeoutBudget | None,
+    ) -> None:
         # 1. open the upload page and pick the locator base
         await self.open_upload_page(page, multilogin=multilogin)
         # 2. attach the media file(s)
@@ -1222,7 +1234,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self.fill_metadata(page)
         # 4. wait until the editor finished processing the media
         await self.wait_media_ready(
-            page, deadline=deadline, multilogin=multilogin
+            page, deadline=budget, multilogin=multilogin
         )
         # 5. publish options (privacy / comments / reuse)
         await self.apply_options(page)
@@ -1232,7 +1244,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self.apply_schedule(page)
         # 8. publish
         await self.click_publish(
-            page, deadline=deadline, multilogin=multilogin
+            page, deadline=budget, multilogin=multilogin
         )
         if multilogin:
             _raise_if_login_required(page)
@@ -1305,7 +1317,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         self,
         page,
         *,
-        deadline: float | None = None,
+        deadline: float | PublishTimeoutBudget | None = None,
         multilogin: bool = False,
     ) -> None:
         raise NotImplementedError
@@ -2427,16 +2439,20 @@ class TiktokBaseUploader(BaseVideoUploader):
             await self._apply_hashtag(page, tag)
             await page.keyboard.press("End")
 
-    async def click_publish(self, page, *, deadline: float | None = None, multilogin: bool = False):
-        wait_started = time.monotonic()
-        await wait_until_publish_allowed(
+    async def click_publish(
+        self,
+        page,
+        *,
+        deadline: float | PublishTimeoutBudget | None = None,
+        multilogin: bool = False,
+    ):
+        budget = self._coerce_budget(deadline)
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=tiktok_logger,
             label="TikTok 发布",
         )
-        if deadline is not None:
-            # 主动等待不属于发布交互预算；把 deadline 顺延相同长度。
-            deadline += time.monotonic() - wait_started
+        budget.check_pre_click()
         # ``publish_clicked`` flips only after ``click()`` returns cleanly; a
         # click that raises proves nothing was sent.  Once flipped, the button
         # is never clicked again: a second click could duplicate the post.
@@ -2444,16 +2460,14 @@ class TiktokBaseUploader(BaseVideoUploader):
         dialog_clicked = False
         while True:
             try:
-                self._check_publish_deadline(deadline)
+                budget.check_pre_click()
             except RuntimeError:
                 if publish_clicked:
                     # A login redirect still wins over "result unknown".
                     if multilogin:
                         _raise_if_login_required(page)
-                    raise PublishResultUnknownError(
-                        _PUBLISH_RESULT_UNKNOWN_MESSAGE
-                    ) from None
-                raise RuntimeError(_PRE_PUBLISH_TIMEOUT_MESSAGE) from None
+                    raise budget.timeout_error(True) from None
+                raise budget.timeout_error(False) from None
 
             if multilogin:
                 _raise_if_login_required(page)
@@ -2515,9 +2529,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 if publish_clicked:
                     # Page/context closed, CDP dropped, or a form error after
                     # the click: stop at once instead of spinning to deadline.
-                    raise PublishResultUnknownError(
-                        _PUBLISH_RESULT_UNKNOWN_MESSAGE
-                    ) from e
+                    raise budget.timeout_error(True) from e
                 tiktok_logger.exception(f"  [-] Exception: {e}")
                 tiktok_logger.info("  [-] video publishing")
                 await asyncio.sleep(0.5)
@@ -2933,9 +2945,17 @@ class TiktokVideo(TiktokBaseUploader):
             " video 链接；先核查 Content 列表，避免重复发布。"
         )
 
-    async def wait_media_ready(self, page, *, deadline: float | None = None, multilogin: bool = False):
+    async def wait_media_ready(
+        self,
+        page,
+        *,
+        deadline: float | PublishTimeoutBudget | None = None,
+        multilogin: bool = False,
+    ):
+        budget = self._coerce_budget(deadline)
         while True:
-            self._check_publish_deadline(deadline)
+            if budget is not None:
+                budget.check_pre_click()
             if multilogin:
                 _raise_if_login_required(page)
             try:
@@ -3201,11 +3221,13 @@ class TiktokNote(TiktokBaseUploader):
         self,
         page,
         *,
-        deadline: float | None = None,
+        deadline: float | PublishTimeoutBudget | None = None,
         multilogin: bool = False,
     ) -> None:
+        budget = self._coerce_budget(deadline)
         while True:
-            self._check_publish_deadline(deadline)
+            if budget is not None:
+                budget.check_pre_click()
             if multilogin:
                 _raise_if_login_required(page)
             try:

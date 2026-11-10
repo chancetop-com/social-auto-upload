@@ -20,7 +20,6 @@ from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError 
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import baijiahao_logger
@@ -367,6 +366,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
 
     流程：打开发布页 → 上传视频文件 → 填标题 → 等待上传/转码完成 → 等封面生成 → 点击发布。
     """
+    publish_platform_label = "百家号"
 
     def __init__(
         self,
@@ -441,9 +441,14 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
-        await page.goto(BAIJIAHAO_PUBLISH_URL, timeout=120000, wait_until="domcontentloaded")
+        await page.goto(
+            BAIJIAHAO_PUBLISH_URL,
+            timeout=self.publish_budget.clamp_ms(120000),
+            wait_until="domcontentloaded",
+        )
         if multilogin:
             _raise_if_login_required(page)
         baijiahao_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
@@ -463,7 +468,9 @@ class BaiJiaHaoVideo(BaseVideoUploader):
 
         # 2) 等待进入表单页面（contenteditable 标题区出现即表单渲染完毕）
         title_editor = page.locator('div[class*="contentEditable"]').first
-        await title_editor.wait_for(state="visible", timeout=180000)
+        await title_editor.wait_for(
+            state="visible", timeout=self.publish_budget.clamp_ms(180000)
+        )
         await page.wait_for_timeout(1000)
 
         # 3) 填写标题
@@ -509,11 +516,14 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         出现过进度且进度消失/达 100% 才算真正上传完成。
         """
         import re as _re
+        budget = self.publish_budget
+        timeout = budget.clamp_seconds(timeout)
         start = time.monotonic()
         seen_progress = False
         gone_count = 0
         while True:
             if time.monotonic() - start > timeout:
+                budget.check_pre_click()
                 baijiahao_logger.warning(_msg("⚠️", f"等待上传超时（>{timeout}s），继续后续步骤"))
                 return
             if multilogin:
@@ -702,9 +712,12 @@ class BaiJiaHaoVideo(BaseVideoUploader):
 
     async def _wait_cover_ready(self, page: Page, timeout: int = 120) -> None:
         """等待百家号自动生成封面图。"""
+        budget = self.publish_budget
+        timeout = budget.clamp_seconds(timeout)
         start = time.monotonic()
         while True:
             if time.monotonic() - start > timeout:
+                budget.check_pre_click()
                 baijiahao_logger.warning(_msg("⚠️", "等待封面生成超时，继续发布"))
                 return
             if await page.locator("div.cheetah-spin-container img").count():
@@ -715,6 +728,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
 
     async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         """点击发布按钮并确认成功。"""
+        budget = self.publish_budget
         # 确保没有残留弹窗遮挡
         modal = page.locator('.cheetah-modal-wrap:visible').first
         if await modal.count():
@@ -727,18 +741,21 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             publish_btn = page.locator('button:text-is("发布")').first
         if not await publish_btn.count():
             publish_btn = page.locator('button:has-text("发布")').last
-        await publish_btn.wait_for(state="visible", timeout=15000)
-        await wait_until_publish_allowed(
+        await publish_btn.wait_for(
+            state="visible", timeout=budget.clamp_ms(15000)
+        )
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=baijiahao_logger,
             label="百家号发布",
         )
+        budget.check_pre_click()
         await publish_btn.click(force=True)
+        publish_clicked = True
         baijiahao_logger.info(_msg("🏃", "已点击发布按钮"))
 
-        # 等待跳转或成功提示（最多30s）
-        start = time.monotonic()
-        while time.monotonic() - start < 30:
+        # 发布后共享整条流程的 15 分钟 deadline。
+        while budget.remaining_seconds() > 0:
             if multilogin:
                 _raise_if_login_required(page)
             url = page.url
@@ -765,7 +782,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         if BAIJIAHAO_SUCCESS_URL_PREFIX in page.url or "/rc/content" in page.url:
             baijiahao_logger.success(_msg("🥳", "视频发布成功"))
         else:
-            raise RuntimeError(f"发布后未跳转到成功页面（30s），当前 URL: {page.url}")
+            raise budget.timeout_error(publish_clicked)
 
     async def main(self, *, session: BrowserSession | None = None):
         if session is not None:

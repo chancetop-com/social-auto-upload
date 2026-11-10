@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import inspect
 import os
 from datetime import datetime
@@ -14,7 +15,6 @@ from patchright.async_api import async_playwright
 
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -611,6 +611,8 @@ class KSBaseUploader(BaseVideoUploader):
 
 
 class KSVideo(KSBaseUploader):
+    publish_platform_label = "快手"
+
     def __init__(
         self,
         title,
@@ -754,6 +756,7 @@ class KSVideo(KSBaseUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         page = await session.context.new_page()
         await page.goto(KUAISHOU_UPLOAD_URL)
         if session.managed:
@@ -800,10 +803,13 @@ class KSVideo(KSBaseUploader):
             await page.keyboard.type(f"#{tag} ")
             await asyncio.sleep(2)
 
-        loop = asyncio.get_running_loop()
-        upload_deadline = loop.time() + KUAISHOU_UPLOAD_TIMEOUT_SECONDS
+        budget = self.publish_budget
+        upload_deadline = min(
+            time.monotonic() + KUAISHOU_UPLOAD_TIMEOUT_SECONDS, budget.deadline
+        )
         retry_count = 0
-        while loop.time() < upload_deadline:
+        while time.monotonic() < upload_deadline:
+            budget.check_pre_click()
             try:
                 number = await page.locator("text=上传中").count()
                 if number == 0:
@@ -824,6 +830,8 @@ class KSVideo(KSBaseUploader):
                 await asyncio.sleep(2)
             retry_count += 1
         else:
+            if budget.remaining_seconds() <= 0:
+                raise budget.pre_click_error()
             raise TimeoutError(
                 f"等待快手视频上传完成超时（>{KUAISHOU_UPLOAD_TIMEOUT_SECONDS}秒），已停止发布"
             )
@@ -835,24 +843,30 @@ class KSVideo(KSBaseUploader):
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
 
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=kuaishou_logger,
             label="快手视频发布",
         )
 
+        publish_clicked = False
         last_publish_error = None
         for attempt in range(1, KUAISHOU_PUBLISH_ATTEMPTS + 1):
+            if budget.remaining_seconds() <= 0:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise budget.timeout_error(publish_clicked)
             try:
-                confirmed = await _click_visible_publish_confirm(page)
-                if not confirmed:
-                    publish_button = page.get_by_text("发布", exact=True)
-                    if await publish_button.count() == 0:
-                        raise RuntimeError("未找到快手发布按钮")
-                    await publish_button.click()
-
-                await asyncio.sleep(1)
-                await _click_visible_publish_confirm(page)
+                if not publish_clicked:
+                    confirmed = await _click_visible_publish_confirm(page)
+                    if not confirmed:
+                        publish_button = page.get_by_text("发布", exact=True)
+                        if await publish_button.count() == 0:
+                            raise RuntimeError("未找到快手发布按钮")
+                        await publish_button.click()
+                        await asyncio.sleep(1)
+                        await _click_visible_publish_confirm(page)
+                    publish_clicked = True
 
                 await page.wait_for_url(KUAISHOU_MANAGE_URL_PATTERN, timeout=5000)
                 kuaishou_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
@@ -868,6 +882,8 @@ class KSVideo(KSBaseUploader):
                     await page.screenshot(full_page=True)
                 await asyncio.sleep(1)
         else:
+            if publish_clicked:
+                raise budget.timeout_error(True)
             raise RuntimeError(
                 f"快手发布连续失败 {KUAISHOU_PUBLISH_ATTEMPTS} 次，已停止重试: {last_publish_error}"
             )
@@ -881,6 +897,8 @@ class KSVideo(KSBaseUploader):
 
 
 class KSNote(KSBaseUploader):
+    publish_platform_label = "快手"
+
     def __init__(
         self,
         image_paths,
@@ -921,6 +939,7 @@ class KSNote(KSBaseUploader):
         self.image_paths = normalized_image_paths
 
     async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
+        budget = self.publish_budget
         kuaishou_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         kuaishou_logger.info(_msg("🔀", "小人正在切换到图文发布"))
         await page.locator('div[role="tablist"] div[role="tab"]:has-text("图文")').click()
@@ -960,6 +979,7 @@ class KSNote(KSBaseUploader):
         max_retries = 60
         retry_count = 0
         while retry_count < max_retries:
+            budget.check_pre_click()
             try:
                 number = await page.locator("text=上传中").count()
                 if number == 0:
@@ -987,22 +1007,29 @@ class KSNote(KSBaseUploader):
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
 
-        await wait_until_publish_allowed(
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=kuaishou_logger,
             label="快手图文发布",
         )
 
+        publish_clicked = False
         while True:
+            if budget.remaining_seconds() <= 0:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise budget.timeout_error(publish_clicked)
             try:
-                publish_button = page.get_by_text("发布", exact=True)
-                if await publish_button.count() > 0:
-                    await publish_button.click()
+                if not publish_clicked:
+                    publish_button = page.get_by_text("发布", exact=True)
+                    if await publish_button.count() > 0:
+                        await publish_button.click()
 
-                await asyncio.sleep(1)
-                confirm_button = page.get_by_text("确认发布")
-                if await confirm_button.count() > 0:
-                    await confirm_button.click()
+                    await asyncio.sleep(1)
+                    confirm_button = page.get_by_text("确认发布")
+                    if await confirm_button.count() > 0:
+                        await confirm_button.click()
+                    publish_clicked = True
 
                 await page.wait_for_url(KUAISHOU_MANAGE_URL_PATTERN, timeout=5000)
                 kuaishou_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
@@ -1050,6 +1077,7 @@ class KSNote(KSBaseUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         page = await session.context.new_page()
         await page.goto(KUAISHOU_UPLOAD_URL)
         if session.managed:

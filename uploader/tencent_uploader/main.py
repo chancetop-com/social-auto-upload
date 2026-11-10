@@ -17,7 +17,6 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -604,6 +603,8 @@ async def weixin_setup(
 
 
 class TencentBaseUploader(BaseVideoUploader):
+    publish_platform_label = "视频号"
+
     def __init__(
         self,
         publish_date: datetime | int,
@@ -698,7 +699,12 @@ class TencentBaseUploader(BaseVideoUploader):
         # 视频号已改版：直接全页加载 /platform/post/create 会被跳回 /platform 首页，
         # 发布表单 iframe 只加载空壳（Vue 不挂载），页面上没有任何 input[type=file]。
         # 正确入口：先进首页，再点可见的「发表视频」按钮做客户端跳转，表单才会真正挂载。
-        await page.goto(TENCENT_HOME_URL, timeout=120000, wait_until="domcontentloaded")
+        budget = self.publish_budget
+        await page.goto(
+            TENCENT_HOME_URL,
+            timeout=budget.clamp_ms(120000),
+            wait_until="domcontentloaded",
+        )
         # cookie 失效时前端 JS 会跳转到登录页, 提前发现并报明确的错误
         try:
             await page.wait_for_url("**/login.html**", timeout=8000)
@@ -729,13 +735,21 @@ class TencentBaseUploader(BaseVideoUploader):
         # 首页真正可点的入口是 button.weui-desktop-btn。
         publish_entry = page.locator("button.weui-desktop-btn", has_text="发表视频").first
         try:
-            await publish_entry.wait_for(state="visible", timeout=30000)
+            await publish_entry.wait_for(
+                state="visible", timeout=budget.clamp_ms(30000)
+            )
             await publish_entry.click()
         except Exception:
             # 兜底：按钮没点到时退回老逻辑直接跳转（可能仍是空壳，但保持向后兼容）
-            await page.goto(TENCENT_UPLOAD_URL, timeout=120000, wait_until="domcontentloaded")
+            await page.goto(
+                TENCENT_UPLOAD_URL,
+                timeout=budget.clamp_ms(120000),
+                wait_until="domcontentloaded",
+            )
         try:
-            await page.wait_for_url("**/platform/post/create", timeout=120000)
+            await page.wait_for_url(
+                "**/platform/post/create", timeout=budget.clamp_ms(120000)
+            )
         except Exception:
             pass
 
@@ -951,13 +965,17 @@ class TencentBaseUploader(BaseVideoUploader):
         整整循环了近 2 小时也不会停，进程也不会退。用户看到的只有「正在上传视频中」，
         真相是同一段视频被反复上传了 20 多次。
 
-        默认 1 小时 / 3 次重试：慢网络上大文件确实会传很久，上限要给够；
-        但到点、或者重试用完，就带现场截图明确报错，不要静默地转下去。
+        平台默认上限 1 小时 / 3 次重试，但整条发布流程还受 15 分钟总预算约束；
+        实际等待取两者较小值。到点、或者重试用完，就带现场截图明确报错，
+        不要静默地转下去。
         """
+        budget = self.publish_budget
+        timeout_seconds = budget.clamp_seconds(timeout_seconds)
         deadline = time.monotonic() + timeout_seconds
         last_report = 0.0
         retries = 0
         while True:
+            budget.check_pre_click()
             if time.monotonic() > deadline:
                 try:
                     shot = Path(BASE_DIR) / "debug_tencent_upload_timeout.png"
@@ -1013,9 +1031,11 @@ class TencentBaseUploader(BaseVideoUploader):
                 await asyncio.sleep(2)
 
     async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
+        budget = self.publish_budget
         is_draft = getattr(self, "is_draft", False)
         # 先等待并清理遮罩/弹窗,再等发表按钮出现
         for wait_round in range(60):
+            budget.check_pre_click()
             if multilogin:
                 _raise_if_login_required(page)
             await self._dismiss_switch_account_dialog(page)
@@ -1033,21 +1053,29 @@ class TencentBaseUploader(BaseVideoUploader):
         else:
             tencent_logger.warning(_msg("😵", "60s 内未找到可见的发表/草稿按钮，尝试强制继续"))
         if not is_draft:
-            await wait_until_publish_allowed(
+            await budget.wait_until_allowed(
                 getattr(self, "publish_not_before", None),
                 logger=tencent_logger,
                 label="视频号发表",
             )
+            budget.check_pre_click()
         # 点发表/草稿
+        publish_clicked = False
         for attempt in range(20):
+            if budget.remaining_seconds() <= 0:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise budget.timeout_error(publish_clicked)
             if multilogin:
                 _raise_if_login_required(page)
             try:
-                if await publish_btn.count():
+                if not publish_clicked and await publish_btn.count():
                     try:
                         await publish_btn.click(timeout=4000)
                     except Exception:
                         await publish_btn.evaluate("el => el.click()")
+                    if not is_draft:
+                        publish_clicked = True
                 if is_draft:
                     await page.wait_for_url("**/post/list**", timeout=5000)
                     tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
@@ -1077,7 +1105,7 @@ class TencentBaseUploader(BaseVideoUploader):
                     tencent_logger.warning(_msg("😵", f"发布仍未完成(第{attempt}次)，异常: {str(exc)[:60]}"))
                 tencent_logger.info(_msg("🏃", "视频正在发布中..."))
                 await asyncio.sleep(1)
-        raise RuntimeError("发布未在预期时间内完成，请检查发布页面")
+        raise budget.timeout_error(publish_clicked)
 
 
 class TencentVideo(TencentBaseUploader):
@@ -1278,6 +1306,7 @@ class TencentVideo(TencentBaseUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
         await self.open_upload_page(page, multilogin=multilogin)
@@ -1411,6 +1440,7 @@ class TencentNote(TencentBaseUploader):
             await browser.close()
 
     async def upload_in(self, session: BrowserSession) -> None:
+        self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
         await self.open_upload_page(page, multilogin=multilogin)

@@ -19,14 +19,12 @@ import asyncio
 import inspect
 import os
 import re
-import time
 from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import hupu_logger
@@ -407,6 +405,7 @@ class HuPuVideo(BaseVideoUploader):
          上传封面 → 选专区（步行街主干道）→ 选原创/二创 → 选 AI 声明 →
          点击「确定发布」→ 等待跳转到帖子页面。
     """
+    publish_platform_label = "虎扑"
 
     def __init__(
         self,
@@ -478,6 +477,7 @@ class HuPuVideo(BaseVideoUploader):
 
     async def upload_in(self, session: BrowserSession, *, page: Page | None = None) -> None:
         """Run the publish flow on the provided session's context only."""
+        self.start_publish_budget()
         multilogin = session.managed
         if page is None:
             page = await session.context.new_page()
@@ -524,7 +524,9 @@ class HuPuVideo(BaseVideoUploader):
 
         # 等待视频上传就绪（标题输入框出现即可填写）
         title_field = page.get_by_placeholder("请输入标题（最少4个字，最多40个字）")
-        await title_field.wait_for(state="visible", timeout=300000)
+        await title_field.wait_for(
+            state="visible", timeout=self.publish_budget.clamp_ms(300000)
+        )
         hupu_logger.info(_msg("🥳", "视频已就绪"))
 
     async def _fill_title(self, page: Page) -> None:
@@ -628,20 +630,23 @@ class HuPuVideo(BaseVideoUploader):
 
     async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         """点击「确定发布」并等待跳转到帖子页面。"""
+        budget = self.publish_budget
         # 录制脚本：page.get_by_label("发视频").get_by_text("确定发布").click()
         publish_btn = page.get_by_label("发视频").get_by_text("确定发布")
-        await publish_btn.wait_for(state="visible", timeout=15000)
-        await wait_until_publish_allowed(
+        await publish_btn.wait_for(
+            state="visible", timeout=budget.clamp_ms(15000)
+        )
+        await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=hupu_logger,
             label="虎扑发布",
         )
+        budget.check_pre_click()
         await publish_btn.click()
         hupu_logger.info(_msg("🏃", "已点击「确定发布」"))
 
         # 等待跳转到帖子详情页（URL 匹配 bbs.hupu.com/{数字}.html）
-        start = time.monotonic()
-        while time.monotonic() - start < 60:
+        while budget.remaining_seconds() > 0:
             if multilogin:
                 _raise_if_login_required(page)
             current_url = page.url
@@ -651,8 +656,7 @@ class HuPuVideo(BaseVideoUploader):
 
             await page.wait_for_timeout(2000)
 
-        # 超时 - 可能已成功但检测不到
-        hupu_logger.warning(_msg("⚠️", f"发布后 60s 未检测到帖子页面跳转，当前 URL: {page.url}"))
+        raise budget.timeout_error(True)
 
     async def main(self):
         async with async_playwright() as playwright:

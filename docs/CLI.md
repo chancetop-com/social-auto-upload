@@ -91,9 +91,27 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 
 - 等待时间使用**本地时区**的墙钟时间，格式固定为 `YYYY-MM-DD HH:MM`；
 - 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
-- 主动等待不计入平台原有的上传/发布超时预算；小红书、Instagram 与 TikTok 会把等待时长从发布阶段超时中扣除；
+- 主动等待不计入上传/发布超时预算；所有支持客户端发布闸门的平台都会把等待时长从 deadline 中顺延；
 - 使用 `--no-publish` / `--prepare-only` / `--draft` 时不会等待，也不会点击发布；
 - Bilibili 由 `biliup` 一次性完成上传和提交，无法在「填好表」和「点发布」之间插入等待，因此 `--not-before` 在启动 `biliup` 前生效。
+
+## 发布超时预算（全平台）
+
+浏览器发布平台统一与 TikTok 对齐：整条上传/发布流程共用一个 **15 分钟总预算**
+（`uploader/publish_timeout.py` 的 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）。TikTok、
+小红书与 Instagram 也使用同一 `PublishTimeoutBudget`，仅保留各自更具体的错误文案。
+
+- 预算覆盖打开发布页、上传素材、填写标题/正文/标签、封面、声明、合集、定时设置、点击发布，以及等待平台确认；
+- **尚未点击发布**时超时：普通失败，CLI 退出 `1`，确定没有发布任何内容；
+- **已经点击发布**后超时：结果未知，CLI 退出 `9`，禁止自动重发；先到平台后台按标题与发布时间核对；
+- `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；
+- 平台原有的素材上传/转码等长等待会收紧到剩余预算；点击后的短轮询可能有秒级收尾开销；
+- 各平台若还保留自己的短等待（如上传完成 600s、封面 120s），取“平台短等待”和“剩余总预算”的较小值；
+- Bilibili 是 `biliup` 单命令上传并提交，没有可区分的“点击发布”时刻；`--not-before` 在启动 `biliup` 前等待。命令本身同样受 15 分钟预算约束：命令启动后超时按结果未知退出 `9`，不会自动重发。
+
+已接入的浏览器发布平台：抖音、快手、小红书、视频号、百家号、支付宝生活号、
+YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频/文章、Facebook
+个人主页、Facebook Page、Instagram、TikTok。
 
 ## 托管浏览器模式（通用）
 
@@ -481,7 +499,7 @@ sau xiaohongshu upload-video --account <account_name> \
 
 ### 小红书发布超时
 
-小红书的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（`XHS_PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
+小红书的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
 
 - 预算覆盖打开发布页、上传素材、填写标题/正文/标签、设置声明和封面、定时设置以及点击发布；
 - **尚未点击发布**时超时：退出 `1`，确定没有发布任何内容；
@@ -619,7 +637,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 ### Instagram 发布超时
 
-Instagram 的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（`INSTAGRAM_PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
+Instagram 的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
 
 - 预算覆盖打开首页、身份核验、上传素材、裁剪/编辑、填写配文、封面设置以及点击发布；
 - **尚未点击发布**时超时：退出 `1`，确定没有发布任何内容；
