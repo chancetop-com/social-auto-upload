@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..options import InstagramOptionControl
+from .location import LocationControl
 
 if TYPE_CHECKING:  # 运行时只依赖 options，避免 main <-> controls 循环导入。
     from patchright.async_api import Page
@@ -36,6 +37,7 @@ def resolve_instagram_option_controls(
 
 def _register_location(controls, page, *, image_count, budget) -> None:
     """地点控件（工单 13）。"""
+    controls['location'] = LocationControl(page, budget=budget)
 
 
 def _register_alt_text(controls, page, *, image_count, budget) -> None:

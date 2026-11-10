@@ -112,6 +112,12 @@ def _add_instagram_option_flags(parser, *, include_alt_text: bool) -> None:
 
 def _add_location_flag(parser) -> None:
     """地点（工单 13）。"""
+    parser.add_argument(
+        '--location',
+        metavar='TEXT',
+        default=None,
+        help='Instagram 地点名称（按候选精确匹配；不传则不动页面默认）',
+    )
 
 
 def _add_comments_flag(parser) -> None:
