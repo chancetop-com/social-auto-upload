@@ -23,7 +23,22 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 账号文件保存为 `cookies/instagram_creator.json`。密码和验证由用户在工程浏览器输入。上传流程会自动跳过首次通知提示、确认 Reels 介绍，没有提示则继续。登录验证仍由用户完成；未知弹窗或提示关闭失败须报告，不能宣称上传成功。
 
-视频支持 MP4/MOV，照片支持 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际处理取决于平台。多图按输入顺序发布轮播，单图和两图轮播已实测。标题、正文、标签合计最多 2200 字符。当前账号独立网页版的照片/Reels 表单及高级设置没有定时入口，当前 CLI 仅支持立即发布；不能把定时任务转换成立即发布。地点、协作者、AI 标签、替代文字、滤镜、裁剪、声音和评论/点赞设置未接入，沿用页面默认值。
+视频支持 MP4/MOV，照片支持 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际处理取决于平台。多图按输入顺序发布轮播，单图和两图轮播已实测。标题、正文、标签合计最多 2200 字符；超过时退出 `2`，且静态校验都在启动浏览器前完成。当前账号独立网页版的照片/Reels 表单及高级设置没有定时入口，当前 CLI 仅支持立即发布；不能把定时任务转换成立即发布。
+
+已接入四项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，不传即完全不动页面默认：
+
+- `--location TEXT`：按联想列表忽略大小写与多余空白的精确匹配；无精确匹配退出 `1`、不发布，错误信息列出候选。
+- `--no-comments`：请求关闭评论；入口缺失或不可用视为已满足（`default_off`，退出 `0`）。没有 `--comments`。
+- `--ai-generated` / `--no-ai-generated`：互斥，同传退出 `2`；开启时入口缺失退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
+- `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于图片张数，每条 1–1000 字符，不截断。
+
+```powershell
+sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-images.json
+```
+
+协作者、Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。四项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 记录 `location`、`alt_text`、`comments`、`ai_generated` 的 `requested` / `applied` / `status`（必要时含 `reason`）。
+
+选择器只在 **English 界面 + Personal 账号**验证过，中文标签为未验证回退，专业账号未验证。四项能力目前是 **offline-verified / post-publish unverified**：离线与真实 DOM 测试通过，尚未真实账号真发验收，发布后设置是否保留仍待确认；不得据此宣称已支持中文界面或专业账号。
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 

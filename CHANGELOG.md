@@ -43,6 +43,17 @@
 
 ### Instagram
 
+- **破坏性变更**：配文（标题、正文、标签合计）超过 2200 字符的退出码由 `1`（`ValueError`）改为 `2`（`UsageError`），与 TikTok、小红书对齐；调度层若按 `1` 判断需改用 `2`。
+- 新增四项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，**不传即完全不动页面默认、也不读取相关控件**：
+  - `--location TEXT`：按 Instagram 联想列表忽略大小写与多余空白的精确匹配；无精确匹配退出 `1`、不发布，错误信息列出观察到的候选。
+  - `--no-comments`：请求关闭评论；入口缺失或不可用视为已满足（`default_off`，退出 `0`）。没有 `--comments`。
+  - `--ai-generated` / `--no-ai-generated`：互斥，同传由 argparse 退出 `2`；开启时入口缺失或不可用退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
+  - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于 `--images` 张数，每条 1–1000 字符，不截断；`upload-video --alt-text` 由 argparse 退出 `2`。
+- 所有静态校验（配文超长、视频与图片互斥、`--thumbnail` 与图片同传、替代文字条数/长度、空 `--location`）在启动浏览器或托管 Profile 前完成并退出 `2`。
+- 选项设置与回读在点击 Share **之前**完成：任一项未生效退出 `1`、不点击发布，不会退化为 `9`；结果文件仍写入失败证据。既有退出码 `0/1/9/10/11` 含义不变。
+- 结果 JSON 新增顶层 `options`，固定含 `location`、`alt_text`、`comments`、`ai_generated`，每项 `{requested, applied, status[, reason]}`；`status` ∈ `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` ∈ `entry_missing` / `account_ineligible`。字段为新增，旧消费方可忽略。
+- 验证范围：离线 A/B/C/D 测试与真实 Chrome DOM 哨兵通过。**真实账号真发验收尚未执行**，四项能力均为 **offline-verified / post-publish unverified**，发布后设置是否被平台保留待验收。
+- 已知限制：选择器仅在 **English 界面 + Personal 账号**观察，中文标签为未验证回退，专业账号未验证；协作者、Stories、定时、配乐、选帧封面、用户标签、滤镜、隐藏点赞等仍保留页面默认且不在本轮范围。
 - 发布超时与 TikTok 对齐：整条上传/发布流程使用 15 分钟总预算；打开首页、身份核验、素材上传、裁剪/编辑、配文、封面与点击发布共享同一 deadline，关键等待按剩余预算收紧。未点击发布前超时退出 `1`（确定未发布）；点击发布后等待最终创建响应超时退出 `9`（结果未知，禁止自动重发）。
 - `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；超时错误的现场证据仍写入本地结果目录。
 
