@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..options import InstagramOptionControl
 from .location import LocationControl
+from .toggles import SwitchControl, disclosure_panel
 
 if TYPE_CHECKING:  # 运行时只依赖 options，避免 main <-> controls 循环导入。
     from patchright.async_api import Page
@@ -45,7 +46,16 @@ def _register_alt_text(controls, page, *, image_count, budget) -> None:
 
 
 def _register_comments(controls, page, *, image_count, budget) -> None:
-    """关闭评论控件（工单 11）。"""
+    """关闭评论控件（工单 11）：Advanced settings 内语义反转的开关。"""
+    controls["comments"] = SwitchControl(
+        page,
+        labels=("Turn off commenting", "关闭评论"),
+        panel=disclosure_panel(
+            page, ("Advanced settings", "高级设置"), budget=budget
+        ),
+        invert=True,
+        budget=budget,
+    )
 
 
 def _register_ai_generated(controls, page, *, image_count, budget) -> None:
