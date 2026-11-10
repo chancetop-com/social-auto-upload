@@ -5,11 +5,13 @@
 （每图一个、自上而下按 ``--images`` 顺序），没有缩略图切换、没有
 ``Done``/``Save`` 按钮；再次激活该行即折叠，输入框从 DOM 移除，但值保留在
 前端状态里，重开后原样回填。因此控件只做三件事：展开、按顺序填写并 blur、
-再折叠回原状。
+收起。``set()`` / ``read()`` 结束时**一律收起**（spec §4.3.2），使管线的下一次
+``read()`` 是真正的关闭 → 重开回读，而不是同一会话里的就地读取。
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from typing import TYPE_CHECKING
 
@@ -37,8 +39,8 @@ class AltTextControl:
     """按图片张数填写替代文字的控件（``resolve/read/set`` 三方法）。
 
     图片张数由调用方从 ``self.image_files`` 传入，不用 DOM 猜测。折叠区只在
-    需要时展开，并在结束时恢复原状：原来是收起状态就重新收起，原来已展开则
-    保持展开。
+    需要时展开；``read()`` / ``set()`` 结束时一律收起，``resolve()`` 只是探针，
+    保持原状并容忍收起失败。
     """
 
     def __init__(
@@ -103,8 +105,13 @@ class AltTextControl:
         # activate 已用输入框出现作为展开成功的判据。
         return (True, True) if opened else (False, False)
 
-    async def _close(self) -> None:
-        """再次激活折叠行并等输入框消失；关闭失败不覆盖已经拿到的结果。"""
+    async def _collapse(self) -> None:
+        """再次激活折叠行直到输入框消失；收不起来抛 ``OptionMismatchError``。
+
+        ``read()`` / ``set()`` 必须让折叠区回到收起状态，管线的下一次 ``read()``
+        才是“关闭 → 重开”回读；展开着却收不起来时无法确认回读，按 mismatch 上报
+        （退出 1），不再像旧实现那样静默放弃。
+        """
         entry = await self._entry()
         if entry is None or not await self._has_inputs():
             return
@@ -112,11 +119,23 @@ class AltTextControl:
         deadline = time.monotonic() + self._timeout(_CLOSE_TIMEOUT_MS) / 1000
         while await self._has_inputs():
             if time.monotonic() >= deadline:
-                return
+                raise OptionMismatchError(
+                    'Instagram 无障碍折叠区未能收起：Alt text 输入框仍在 DOM 中，'
+                    '无法完成关闭 → 重开回读',
+                    applied=None,
+                )
             await asyncio.sleep(_POLL_SECONDS)
 
+    async def _collapse_ignoring_failure(self) -> None:
+        """异常路径上的尽力收起：不覆盖已经在传递的原始错误。"""
+        with contextlib.suppress(OptionMismatchError):
+            await self._collapse()
+
     async def resolve(self) -> str:
-        """入口缺失 / 不可用 / 展开后仍无输入框时按不可用归类。"""
+        """入口缺失 / 不可用 / 展开后仍无输入框时按不可用归类。
+
+        本方法只是探针：只收起自己展开的折叠区，收起失败也不改变结论。
+        """
         entry = await self._entry()
         if entry is None:
             return MISSING
@@ -128,33 +147,42 @@ class AltTextControl:
             return PRESENT if await self._has_inputs() else MISSING
         finally:
             if by_us:
-                await self._close()
+                await self._collapse_ignoring_failure()
 
     async def read(self) -> list[str]:
-        """打开折叠区回读逐张输入值，然后恢复原状。"""
-        opened, by_us = await self._ensure_open()
+        """打开折叠区回读逐张输入值，然后一律收起。
+
+        无论进入时是否已展开，结束时都收起：回读必须是“关闭 → 重开”，否则读到
+        的是同一会话里的就地状态。收不起来即按 mismatch 上报。
+        """
+        opened, _ = await self._ensure_open()
         if not opened:
             return []
         try:
-            return await self._values()
-        finally:
-            if by_us:
-                await self._close()
+            values = await self._values()
+        except BaseException:
+            await self._collapse_ignoring_failure()
+            raise
+        await self._collapse()
+        return values
 
     async def set(self, requested: object) -> None:
-        """数量等于图片张数才逐张填写；数量不符不填写并报出已观察到的值。"""
+        """数量等于图片张数才逐张填写；数量不符不填写并报出已观察到的值。
+
+        填写完成后一律收起折叠区，保证管线下一次 ``read()`` 是关闭 → 重开回读。
+        """
         if isinstance(requested, str):
             texts = [requested]
         else:
             texts = [str(text) for text in requested]  # type: ignore[union-attr]
-        opened, by_us = await self._ensure_open()
+        opened, _ = await self._ensure_open()
+        if not opened:
+            raise OptionMismatchError(
+                f'Instagram 无障碍折叠区未展开：Alt text 输入框 0 个，'
+                f'图片 {self.image_count} 张',
+                applied=[],
+            )
         try:
-            if not opened:
-                raise OptionMismatchError(
-                    f'Instagram 无障碍折叠区未展开：Alt text 输入框 0 个，'
-                    f'图片 {self.image_count} 张',
-                    applied=[],
-                )
             inputs = await self._inputs()
             count = await inputs.count()
             values = await self._values()
@@ -182,6 +210,8 @@ class AltTextControl:
                 await field.fill(text)
                 # 实测必须失焦才写入页面状态；否则折叠后值会丢。
                 await field.evaluate('el => el.blur()')
-        finally:
-            if by_us:
-                await self._close()
+        except BaseException:
+            await self._collapse_ignoring_failure()
+            raise
+        # 正常结束必须真的收起：否则管线的 read() 只是同一会话的就地读取。
+        await self._collapse()

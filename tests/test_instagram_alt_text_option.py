@@ -20,6 +20,7 @@ from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ENTRY_MISSING,
     MISMATCH,
+    PRESENT,
     SET,
     UNSUPPORTED,
     InstagramPublishOptions,
@@ -303,6 +304,9 @@ class _StubAltTextControl(AltTextControl):
         self.opens = 0
         self.closes = 0
 
+    async def _entry(self):
+        return object()
+
     async def _ensure_open(self):
         self.opens += 1
         return True, True
@@ -310,7 +314,7 @@ class _StubAltTextControl(AltTextControl):
     async def _inputs(self):
         return self.inputs
 
-    async def _close(self):
+    async def _collapse(self):
         self.closes += 1
 
 
@@ -365,6 +369,54 @@ class AltTextControlUnitTests(unittest.TestCase):
         control = _StubAltTextControl(inputs, image_count=2)
         self.assertEqual(asyncio.run(control.read()), ['一', '二'])
         self.assertEqual((control.opens, control.closes), (1, 1))
+
+    def test_read_collapses_even_when_section_was_already_open(self):
+        """§4.3.2：进入时已展开也必须收起，下一次 read() 才是关闭 → 重开。"""
+        class _AlreadyOpen(_StubAltTextControl):
+            async def _ensure_open(self):
+                self.opens += 1
+                return True, False
+
+        control = _AlreadyOpen([_FakeInput('一')], image_count=1)
+        self.assertEqual(asyncio.run(control.read()), ['一'])
+        self.assertEqual(control.closes, 1)
+
+    def test_set_collapses_even_when_section_was_already_open(self):
+        """set() 结束时一律收起，避免管线随后的 read() 变成同一会话就地读取。"""
+        class _AlreadyOpen(_StubAltTextControl):
+            async def _ensure_open(self):
+                self.opens += 1
+                return True, False
+
+        inputs = [_FakeInput()]
+        control = _AlreadyOpen(inputs, image_count=1)
+        asyncio.run(control.set(['单图描述']))
+        self.assertEqual(inputs[0].value, '单图描述')
+        self.assertEqual(control.closes, 1)
+
+    def test_section_that_will_not_collapse_is_mismatch(self):
+        """收不起来就无法确认回读：set()/read() 都必须以 mismatch 退出 1。"""
+        class _Stuck(_StubAltTextControl):
+            async def _collapse(self):
+                raise OptionMismatchError('Instagram 无障碍折叠区未能收起', applied=None)
+
+        for name, operation in (
+            ('set', lambda control: control.set(['单图描述'])),
+            ('read', lambda control: control.read()),
+        ):
+            with self.subTest(name=name):
+                control = _Stuck([_FakeInput('旧值')], image_count=1)
+                with self.assertRaisesRegex(OptionMismatchError, '未能收起'):
+                    asyncio.run(operation(control))
+
+    def test_resolve_tolerates_a_section_that_will_not_collapse(self):
+        """resolve() 只是探针：收起失败不能把入口判成不可用。"""
+        class _Stuck(_StubAltTextControl):
+            async def _collapse(self):
+                raise OptionMismatchError('Instagram 无障碍折叠区未能收起', applied=None)
+
+        control = _Stuck([_FakeInput()], image_count=1)
+        self.assertEqual(asyncio.run(control.resolve()), PRESENT)
 
 
 if __name__ == '__main__':
