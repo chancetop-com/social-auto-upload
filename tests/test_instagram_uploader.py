@@ -601,3 +601,66 @@ class InstagramAltTextDomTests(unittest.TestCase):
                 finally:
                     await browser.close()
         asyncio.run(scenario())
+
+
+class InstagramAiLabelDomTests(unittest.TestCase):
+    """C4：真实 Chrome 下配文页 Add AI label 开关的开启与幂等回读。"""
+
+    def test_ai_label_switch_turns_on_once(self):
+        """请求开启 → 点击一次 → 回读 set；再次应用不得重复点击。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    # 结构按 06 实测：配文弹窗内的行内 input[role=switch]，
+                    # aria-checked 初始 false，点击后翻转。
+                    await page.set_content('''
+                      <div role="dialog">
+                        <div class="row"><span>Add AI label</span>
+                          <input role="switch" type="checkbox" aria-checked="false"></div>
+                      </div>
+                      <script>
+                        const toggle = document.querySelector('input[role="switch"]');
+                        toggle.addEventListener('click', () => {
+                          toggle.dataset.clicks =
+                            String(Number(toggle.dataset.clicks || 0) + 1);
+                          toggle.setAttribute('aria-checked', String(toggle.checked));
+                        });
+                      </script>
+                    ''')
+                    with tempfile.TemporaryDirectory() as folder:
+                        app = InstagramUploader(
+                            'unused.json', title='caption', video_file='video.mp4',
+                            options=InstagramPublishOptions(ai_generated=True),
+                            result_file=Path(folder) / 'result.json',
+                        )
+                        # 不注入 controls：走真实注册表 + 真实 DOM。
+                        await app._apply_options(
+                            page=page, budget=app.start_publish_budget()
+                        )
+                        self.assertEqual(
+                            app.result['options']['ai_generated'],
+                            {'requested': True, 'applied': True, 'status': SET},
+                        )
+                        switch = page.locator('input[role=switch]')
+                        self.assertEqual(
+                            await switch.get_attribute('aria-checked'), 'true'
+                        )
+                        self.assertEqual(
+                            await switch.get_attribute('data-clicks'), '1'
+                        )
+                        # 第二次应用：开关已 on，必须零点击且仍记 set。
+                        await app._apply_options(
+                            page=page, budget=app.start_publish_budget()
+                        )
+                        self.assertEqual(
+                            await switch.get_attribute('data-clicks'), '1'
+                        )
+                        self.assertEqual(
+                            app.result['options']['ai_generated'],
+                            {'requested': True, 'applied': True, 'status': SET},
+                        )
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())

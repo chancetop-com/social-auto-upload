@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..options import InstagramOptionControl
+from .ai_label import AiLabelControl
 from .alt_text import AltTextControl
 from .location import LocationControl
 from .toggles import SwitchControl, disclosure_panel
@@ -63,4 +64,5 @@ def _register_comments(controls, page, *, image_count, budget) -> None:
 
 
 def _register_ai_generated(controls, page, *, image_count, budget) -> None:
-    """AI 标识控件（工单 12）。"""
+    """AI 标识控件（工单 12）：配文页直接可见、语义不反转的开关。"""
+    controls["ai_generated"] = AiLabelControl(page, budget=budget)
