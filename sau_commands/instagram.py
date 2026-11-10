@@ -124,6 +124,10 @@ def _add_ai_generated_flags(parser) -> None:
 
 def _add_alt_text_flag(parser) -> None:
     """替代文字，仅 upload-note（工单 14）。"""
+    parser.add_argument(
+        '--alt-text', action='append', metavar='TEXT', default=None,
+        help='每张图片一条替代文字（1-1000 字符），可重复；条数必须为 0 或等于图片张数',
+    )
 
 
 @dataclass(slots=True)
