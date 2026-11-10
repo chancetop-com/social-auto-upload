@@ -108,7 +108,7 @@ class AltTextControl:
         entry = await self._entry()
         if entry is None or not await self._has_inputs():
             return
-        await press_enter(self.page, entry, budget=self.budget)
+        await press_enter(self.page, entry)
         deadline = time.monotonic() + self._timeout(_CLOSE_TIMEOUT_MS) / 1000
         while await self._has_inputs():
             if time.monotonic() >= deadline:

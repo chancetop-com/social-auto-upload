@@ -70,9 +70,7 @@ async def _wait_until(
         await asyncio.sleep(_POLL_SECONDS)
 
 
-async def press_enter(
-    page: 'Page', row: 'Locator', *, budget: 'PublishTimeoutBudget | None' = None
-) -> None:
+async def press_enter(page: 'Page', row: 'Locator') -> None:
     """聚焦折叠行并按 Enter；鼠标点击在面板边缘会被覆盖层拦截，键盘才稳定。"""
     with contextlib.suppress(Exception):
         await row.scroll_into_view_if_needed()
@@ -98,7 +96,7 @@ async def activate(
             return True
     except Exception:
         pass
-    await press_enter(page, row, budget=budget)
+    await press_enter(page, row)
     if await _wait_until(is_open, clamp_wait(budget, _ACTIVATE_TIMEOUT_MS)):
         return True
     with contextlib.suppress(Exception):
