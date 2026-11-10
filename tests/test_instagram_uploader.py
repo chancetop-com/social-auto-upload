@@ -641,6 +641,8 @@ _ADVANCED_HTML = (
 )
 
 # Accessibility：行内折叠区；输入框展开时才挂载，折叠时移除但值保留。
+# 值只在字段显式失焦（blur）时提交——折叠导致的焦点移动不算，避免产品代码
+# 省略 blur 却被“顺带失焦”掩盖。
 _ALT_HTML = '''
 <div role="dialog" id="compose">
   <div class="_ac76"><div role="heading">Create new post</div></div>
@@ -673,12 +675,11 @@ _ALT_HTML = '''
       input.setAttribute('aria-label', 'Alt text');
       if (!value) input.setAttribute('placeholder', 'Alt text');
       input.value = value;
-      input.addEventListener('input', () => {
-        altValues[index] = input.value;
-        if (input.value) input.removeAttribute('placeholder');
-        else input.setAttribute('placeholder', 'Alt text');
-      });
-      input.addEventListener('blur', () => {
+      // 实测：input 事件不写入页面状态，只有失焦才提交。这里进一步要求“字段
+      // 自己失焦”（relatedTarget 为空）：焦点移到折叠行并不算提交，因此产品
+      // 代码必须显式 blur，否则重开折叠区只能读到空值。
+      input.addEventListener('blur', (event) => {
+        if (event.relatedTarget) return;
         altValues[index] = input.value;
       });
       altSection.appendChild(input);
