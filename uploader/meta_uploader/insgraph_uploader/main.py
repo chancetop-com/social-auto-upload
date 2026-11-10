@@ -485,9 +485,10 @@ class InstagramUploader:
             status, reason = option_status(
                 requested, None, kind=kind, presence=presence
             )
-            # 入口存在但不可用时仍尽量回读页面实际状态（spec §5.2 的 applied 列）。
+            # 入口不可用且请求的是“关闭”时，spec §5.2 要求记录实际状态（applied=false）；
+            # 请求值/开启时该行为 null，且读取可能触发控件副作用，故不读。
             applied = None
-            if presence == INELIGIBLE:
+            if presence == INELIGIBLE and kind == 'toggle' and requested is False:
                 try:
                     applied = await control.read()
                 except Exception:
@@ -536,9 +537,14 @@ class InstagramUploader:
                 )
                 if detail:
                     details.append(f'{key}: {detail}')
-            except (LoginRequiredError, PublishResultUnknownError):
-                # 登录失效 / 结果未知属于硬异常：立即中止，不再操作后续选项。
+            except LoginRequiredError:
+                # 登录失效属于硬异常：立即中止，不再操作后续选项（退出 10）。
                 raise
+            except PublishResultUnknownError as error:
+                # 点击发布前不可能“结果未知”；按普通失败中止，不能误报退出 9。
+                raise RuntimeError(
+                    f'Instagram 发布选项未生效: {key}: {error}'
+                ) from error
             except Exception as error:
                 # 预算耗尽同样必须中止（§7.2 B12）：check_pre_click 会在耗尽时抛错。
                 budget.check_pre_click()

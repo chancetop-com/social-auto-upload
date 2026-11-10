@@ -40,6 +40,7 @@ class _FakeLocationControl:
         # 预置回读值用于模拟“页面把选中值改成了别的东西”。
         self.readback = readback
         self.set_calls = []
+        self.read_calls = []
         self.clicked = []
         self.clicked_indices = []
         self._selected = None
@@ -48,6 +49,7 @@ class _FakeLocationControl:
         return self.presence
 
     async def read(self):
+        self.read_calls.append(True)
         if self.readback is not None:
             return self.readback
         return self._selected
@@ -233,7 +235,9 @@ class InstagramLocationPipelineTests(unittest.TestCase):
             record = app.result['options']['location']
             self.assertEqual(record['status'], UNSUPPORTED)
             self.assertEqual(record['reason'], ENTRY_MISSING)
+            # 请求值 + 不可用：applied 必须为 null，且不读取/不点击页面。
             self.assertIsNone(record['applied'])
+            self.assertEqual(control.read_calls, [])
             self.assertEqual(control.set_calls, [])
 
     def test_ineligible_entry_is_unsupported_account_ineligible(self):
@@ -247,7 +251,9 @@ class InstagramLocationPipelineTests(unittest.TestCase):
             record = app.result['options']['location']
             self.assertEqual(record['status'], UNSUPPORTED)
             self.assertEqual(record['reason'], ACCOUNT_INELIGIBLE)
+            # 请求值 + 不可用：applied 必须为 null，且不读取/不点击页面。
             self.assertIsNone(record['applied'])
+            self.assertEqual(control.read_calls, [])
             self.assertEqual(control.set_calls, [])
 
     def test_readback_differing_from_clicked_candidate_is_mismatch(self):

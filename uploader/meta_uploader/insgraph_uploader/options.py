@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from utils.errors import UsageError
+
+if TYPE_CHECKING:  # 只用于类型标注：本模块保持零浏览器依赖。
+    from uploader.publish_timeout import PublishTimeoutBudget
 
 # 结果文件中的 status，只允许这 5 个。
 NOT_REQUESTED = "not_requested"
@@ -87,7 +90,7 @@ def normalize_text(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
-def clamp_wait(budget: object | None, default_ms: int) -> int:
+def clamp_wait(budget: 'PublishTimeoutBudget | None', default_ms: int) -> int:
     """有发布预算时把单步等待收紧到剩余预算，否则用控件默认值。"""
     clamp = getattr(budget, "clamp_ms", None)
     return int(clamp(default_ms)) if callable(clamp) else default_ms

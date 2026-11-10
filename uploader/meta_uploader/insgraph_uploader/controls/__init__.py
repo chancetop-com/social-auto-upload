@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..options import InstagramOptionControl
-from .ai_label import AiLabelControl
+from .ai_label import ai_label_control
 from .alt_text import AltTextControl
 from .location import LocationControl
 from .toggles import SwitchControl, disclosure_panel
@@ -27,10 +27,12 @@ def resolve_instagram_option_controls(
 ) -> dict[str, InstagramOptionControl]:
     """返回 ``{结果键: 控件}``；每个工单只填自己的 ``_register_*``。
 
-    ``page`` 是配文页；所有控件都必须把定位限定在 ``page.get_by_role('dialog')``
-    内。``image_count`` 供替代文字控件断言输入框数量（不用 DOM 猜测图片数）。
+    ``page`` 是配文页；控件入口与开关都必须限定在 ``page.get_by_role('dialog')``
+    内。唯一例外是联想列表：Instagram 可能把它挂到 portal / 页面根，此时按 role
+    在弹窗内优先、页面级兜底（见 ``location.py``）。``image_count`` 供替代文字控件断言输入框数量（不用 DOM 猜测图片数）。
     ``budget`` 是可选的 ``PublishTimeoutBudget``，供需要收紧等待的控件使用；
-    不传时控件使用页面默认超时。
+    不传时控件使用页面默认超时。四个 ``_register_*`` 共用同一签名，便于这里一次
+    调用全部控件；不需要图片张数的控件忽略 ``image_count``。
     """
     controls: dict[str, InstagramOptionControl] = {}
     _register_location(controls, page, image_count=image_count, budget=budget)
@@ -67,4 +69,4 @@ def _register_comments(controls, page, *, image_count, budget) -> None:
 
 def _register_ai_generated(controls, page, *, image_count, budget) -> None:
     """AI 标识控件（工单 12）：配文页直接可见、语义不反转的开关。"""
-    controls["ai_generated"] = AiLabelControl(page, budget=budget)
+    controls["ai_generated"] = ai_label_control(page, budget=budget)

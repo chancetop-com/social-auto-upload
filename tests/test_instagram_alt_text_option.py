@@ -102,6 +102,8 @@ class InstagramAltTextParserTests(unittest.TestCase):
         cases = (
             ('数量不符', self.images, ('只有一条',)),
             ('空串', self.images[:1], ('',)),
+            ('纯空白', self.images[:1], ('   ',)),
+            ('混合列表含纯空白', self.images[:2], ('ok', '  ')),
             ('超长', self.images[:1], ('x' * 1001,)),
         )
         for label, images, alt_texts in cases:
@@ -117,6 +119,22 @@ class InstagramAltTextParserTests(unittest.TestCase):
                     )
                 self.assertEqual(code, 2)
                 upload.assert_not_awaited()
+
+
+    def test_whitespace_only_alt_text_exits_2(self):
+        """ticket 14：去空白后长度为 0 同样非法，不能把纯空白填进页面。"""
+        with self.assertRaises(UsageError):
+            validate_publish_options(
+                InstagramPublishOptions(alt_texts=('   ',)),
+                image_count=1,
+                caption='caption',
+            )
+        with self.assertRaises(UsageError):
+            validate_publish_options(
+                InstagramPublishOptions(alt_texts=('ok', '  ')),
+                image_count=2,
+                caption='caption',
+            )
 
 
 class _FakeAltTextControl:
@@ -142,21 +160,6 @@ class _FakeAltTextControl:
         self.calls.append('set')
         self.sets.append(list(requested))
 
-
-    def test_whitespace_only_alt_text_exits_2(self):
-        """ticket 14：去空白后长度为 0 同样非法，不能把纯空白填进页面。"""
-        with self.assertRaises(UsageError):
-            validate_publish_options(
-                InstagramPublishOptions(alt_texts=('   ',)),
-                image_count=1,
-                caption='caption',
-            )
-        with self.assertRaises(UsageError):
-            validate_publish_options(
-                InstagramPublishOptions(alt_texts=('ok', '  ')),
-                image_count=2,
-                caption='caption',
-            )
 
 
 class InstagramAltTextPipelineTests(unittest.TestCase):

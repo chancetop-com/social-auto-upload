@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import sau_cli
 from sau_commands import instagram as instagram_command
-from uploader.meta_uploader.insgraph_uploader.controls.ai_label import AiLabelControl
+from uploader.meta_uploader.insgraph_uploader.controls.ai_label import ai_label_control
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
@@ -205,8 +205,8 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
             self.assertIn(
                 "ai_generated=unsupported(account_ineligible)", str(ctx.exception)
             )
-            # 不可用时仍回读实际状态；请求 on 依然按 unsupported 失败。
-            self.assertEqual(control.calls, ["resolve", "read"])
+            # 请求开启时 applied 必须是 null，也不应触发控件读取。
+            self.assertEqual(control.calls, ["resolve"])
             self.assertEqual(
                 app.result["options"]["ai_generated"],
                 {
@@ -216,6 +216,16 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
                     "reason": ACCOUNT_INELIGIBLE,
                 },
             )
+
+    def test_on_and_ineligible_does_not_read_the_switch(self):
+        """spec §5.2：请求开启 + 账号不合格 → applied 必须是 null，也不读取控件。"""
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(InstagramPublishOptions(ai_generated=True), folder=folder)
+            control = _FakeAiControl([True], presence="ineligible")
+            with self.assertRaises(RuntimeError):
+                self._apply(app, {"ai_generated": control})
+            self.assertEqual(control.calls, ["resolve"])
+            self.assertIsNone(app.result["options"]["ai_generated"]["applied"])
 
     def test_on_and_already_on_records_set_without_clicking(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -407,7 +417,7 @@ class AiLabelControlTests(unittest.TestCase):
 
     def test_control_reads_checked_as_ai_generated(self):
         switch = _FakeSwitch(checked=False)
-        control = AiLabelControl(_FakePage(switch))
+        control = ai_label_control(_FakePage(switch))
         self.assertEqual(asyncio.run(control.resolve()), "present")
         self.assertIs(asyncio.run(control.read()), False)
         asyncio.run(control.set(True))
@@ -416,7 +426,7 @@ class AiLabelControlTests(unittest.TestCase):
 
     def test_control_does_not_match_unrelated_rows(self):
         switch = _FakeSwitch(checked=True, row="Turn off commenting")
-        control = AiLabelControl(_FakePage(switch))
+        control = ai_label_control(_FakePage(switch))
         self.assertEqual(asyncio.run(control.resolve()), "missing")
 
 
