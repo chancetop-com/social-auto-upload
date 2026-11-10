@@ -11,6 +11,11 @@ from patchright.async_api import Page, async_playwright, expect
 
 from .main import _open_instagram_page, instagram_identity, instagram_response_payload
 
+# 菜单项、确认框与删除响应的等待窗口；确认框会多一层动画，给更长的时间。
+_MENU_TIMEOUT_MS = 30_000
+_CONFIRM_TIMEOUT_MS = 60_000
+_DELETE_RESPONSE_TIMEOUT_MS = 60_000
+
 
 def instagram_post_id(post_url: str) -> str:
     """接受站点实际提供的短链接和带作者的链接，拒绝外域及非作品地址。"""
@@ -84,20 +89,20 @@ async def instagram_post_action(account_file: Path, *, post_url: str, expected_t
                 delete_item = buttons.filter(
                     has_text=re.compile(r'^(Delete|Delete post|删除)$')
                 )
-                await expect(delete_item).to_have_count(1, timeout=30_000)
+                await expect(delete_item).to_have_count(1, timeout=_MENU_TIMEOUT_MS)
                 # 实测鼠标激活有时只关闭弹出菜单；该 role=button 支持 Enter，键盘激活正常进入确认框。
                 await delete_item.first.press('Enter')
                 # 确认框是带标题的模态 dialog，只有删除、取消两项，删除固定在首位。
                 # 与前一菜单严格区分；不把菜单关闭当成已删除。
                 confirm = page.locator('[role="dialog"][aria-modal="true"]').filter(has=page.get_by_role('heading'))
-                await expect(confirm).to_have_count(1, timeout=60_000)
+                await expect(confirm).to_have_count(1, timeout=_CONFIRM_TIMEOUT_MS)
                 confirm_buttons = confirm.get_by_role('button')
                 await expect(confirm_buttons).to_have_count(2)
                 result['status'] = 'deletion_unknown'
                 result_file.parent.mkdir(parents=True, exist_ok=True)
                 result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
                 target = f"/api/v1/web/create/{result['content_id']}/delete/"
-                async with page.expect_response(lambda r: urlparse(r.url).path == target and r.request.method == 'POST', timeout=60_000) as event:
+                async with page.expect_response(lambda r: urlparse(r.url).path == target and r.request.method == 'POST', timeout=_DELETE_RESPONSE_TIMEOUT_MS) as event:
                     await confirm_buttons.nth(0).press('Enter')
                 payload = instagram_response_payload(await (await event.value).text())
                 if payload.get('payload', {}).get('did_delete') is not True:
