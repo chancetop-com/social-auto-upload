@@ -44,6 +44,13 @@
 - [08 — 第一波参数契约的测试与验收策略](./issues/08-test-strategy.md) — 第一波缩为 4 项；三层测试（`options.py` 纯逻辑 + fake 控制件 + 真实 DOM happy path）；静态输入错误统一 exit 2（**caption 超长改为 2，破坏性变更**）；`options` 保留 5 status 并加 `reason=entry_missing|account_ineligible`；真发验收本轮不做，作为 09 的独立附录且不写账号；漂移靠 4 条真实 DOM 用例当哨兵，不引入 manifest。
 - [09 — 汇总第一波实施规格](./issues/09-assemble-spec.md) — 产出 [`spec.md`](./spec.md)：4 项参数契约、配文页 UI 路径与双语选择器、`resolve/read/set` 回读协议、5 status + 2 reason 失败语义、三层测试与退出码矩阵、独立真发验收附录、部署/回滚；collaborators 不实现，caption 超长 exit 2。
 
+- [10 — 共用选项管线与静态校验](./issues/10-options-pipeline-prefactor.md) — `options.py`（三态数据类 + 5 status 纯函数 + 控件协议）、`_apply_options` 通用管线、`options` 结果骨架、CLI 透传与静态校验落地；caption 超长改 `UsageError → 2`。
+- [11 — 关闭评论端到端](./issues/11-disable-comments.md) — `SwitchControl` + `disclosure_panel` 复用件；`--no-comments` 语义反转（checked = 已关闭），高级设置展开幂等；入口缺失/disabled 且请求关闭记 `default_off`。
+- [12 — AI 生成标识端到端](./issues/12-ai-generated-label.md) — `--ai-generated/--no-ai-generated` 互斥组；复用 `SwitchControl` 不反转；on + 入口缺失 → exit 1，off 已满足 → exit 0。
+- [13 — Location 端到端](./issues/13-location.md) — 输入 → 联想 → 规范化精确匹配 → 回读；空白候选保留原始下标避免点错；无匹配列候选并 exit 1，绝不点模糊候选。
+- [14 — Alt text 端到端](./issues/14-alt-text.md) — Accessibility 模态框逐张填写、关闭后重开回读；数量 0 → `unsupported(entry_missing)`，1..N-1 → `mismatch` 并保留部分回读。
+- [15 — 文档与回归收口](./issues/15-docs-and-regression.md) — `docs/CLI.md` / `CHANGELOG.md` / `GLOSSARY.md` / Instagram Skill 与实现对齐；A/B/C/D 全绿；四项标 `offline-verified / post-publish unverified`，真发验收见 [16](./issues/16-real-account-acceptance.md)（非阻塞、待人工）。
+
 ## Not yet specified
 
 <!-- 第一波规格已交付；本 effort 的目的地已到达。以下未决项属于后续第二波的新 effort，不在此地图继续展开。 -->
