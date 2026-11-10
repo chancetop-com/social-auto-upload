@@ -10,7 +10,8 @@ import asyncio
 from datetime import datetime
 from typing import Any, Callable
 
-DEFAULT_POLL_SECONDS = 5.0
+#: ``None`` 表示一次 ``asyncio.sleep`` 睡到目标时间；传入秒数则分段轮询。
+DEFAULT_POLL_SECONDS: float | None = None
 DEFAULT_LOG_INTERVAL_SECONDS = 300.0
 
 
@@ -47,13 +48,14 @@ async def wait_until_publish_allowed(
     label: str = "发布",
     now: Callable[..., datetime] = datetime.now,
     sleep: Callable[[float], Any] = asyncio.sleep,
-    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    poll_seconds: float | None = DEFAULT_POLL_SECONDS,
     log_interval_seconds: float = DEFAULT_LOG_INTERVAL_SECONDS,
 ) -> None:
     """阻塞到本地时间 ``>= target``；``target`` 为 ``None`` 时立即返回。
 
-    等待期间分段睡眠并定期输出剩余时间，避免长时间静默。目标时间已过时
-    不等待，保证 ``--not-before`` 可以安全地指向过去的时间。
+    默认一次 ``sleep`` 睡到目标时间；醒来后会再核对一次墙上时钟，时钟被
+    回拨时继续补睡。只有调用方显式传入 ``poll_seconds`` 时才分段轮询。
+    目标时间已过时不等待，保证 ``--not-before`` 可以安全地指向过去的时间。
     """
     if target is None:
         return
@@ -78,7 +80,10 @@ async def wait_until_publish_allowed(
         if logger is not None and remaining <= next_log_at:
             logger.info(f"⏳ 距离{label}还有 {_format_remaining(remaining)}")
             next_log_at = remaining - log_interval_seconds
-        await sleep(min(remaining, poll_seconds))
+        if poll_seconds is None:
+            await sleep(remaining)
+        else:
+            await sleep(min(remaining, poll_seconds))
 
     if logger is not None:
         logger.success(f"⏰ 已到 {target.strftime('%Y-%m-%d %H:%M')}，开始点击{label}")

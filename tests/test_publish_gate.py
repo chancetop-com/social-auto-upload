@@ -71,6 +71,25 @@ class PublishGateTests(unittest.TestCase):
         self.assertEqual(clock.current, target)
         self.assertEqual([level for level, _ in logger.records], ["info", "success"])
 
+    def test_default_sleep_is_one_shot_like_kotlin_delay(self):
+        start = datetime(2026, 1, 1, 12, 0, 0)
+        clock = _FakeClock(start)
+        calls: list[float] = []
+
+        async def sleep(seconds: float) -> None:
+            calls.append(seconds)
+            clock.current += timedelta(seconds=seconds)
+
+        asyncio.run(
+            wait_until_publish_allowed(
+                start + timedelta(hours=2),
+                now=clock.now,
+                sleep=sleep,
+            )
+        )
+
+        self.assertEqual(calls, [7200])
+
     def test_rejects_non_datetime_target(self):
         with self.assertRaises(TypeError):
             asyncio.run(wait_until_publish_allowed("2026-01-01 12:00"))
