@@ -535,31 +535,50 @@ class InstagramLoginGuardTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 # 开关行：标签列 + 开关列是兄弟；开关自身与父元素 textContent 为空。
-_AI_ROW_HTML = '''
-  <div class="row" id="ai-row">
+def _switch_row(row_id: str, label: str, switch_id: str, description: str) -> str:
+    """构造一行真实配文页开关；行 id、文案与开关 id 由调用方区分。"""
+    return f'''
+  <div class="row" id="{row_id}">
     <div>
-      <div><span dir="auto">Add AI label</span></div>
-      <div><span>This label is required for realistic photos and videos made with AI.</span></div>
+      <div><span dir="auto">{label}</span></div>
+      <div><span>{description}</span></div>
     </div>
     <div><div><div><div>
-      <input id="ai-switch" role="switch" type="checkbox" aria-checked="false">
+      <input id="{switch_id}" role="switch" type="checkbox" aria-checked="false">
     </div></div></div></div>
   </div>'''
 
+
+_AI_ROW_HTML = _switch_row(
+    'ai-row', 'Add AI label', 'ai-switch',
+    'This label is required for realistic photos and videos made with AI.',
+)
+
+# 真实配文页同时有三项开关；干扰项故意排在 Add AI label 之前，纯“取第一个
+# [role=switch]”的实现必须在这里失败。
 _AI_LABEL_HTML = (
     '''
 <div role="dialog" id="compose">
   <div class="_ac76"><div role="heading">Create new post</div></div>'''
+    + _switch_row(
+        'hide-like-row', 'Hide like and view counts', 'hide-like-switch',
+        'The like and view counts on this post will be hidden.',
+    )
     + _AI_ROW_HTML
+    + _switch_row(
+        'comments-row', 'Turn off commenting', 'comments-switch',
+        'You can change this later by going to the ··· menu at the top of your post.',
+    )
     + '''
   <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
 </div>
 <script>
-  const aiSwitch = document.getElementById('ai-switch');
-  aiSwitch.addEventListener('click', () => {
-    aiSwitch.dataset.clicks = String(Number(aiSwitch.dataset.clicks || 0) + 1);
-    aiSwitch.setAttribute('aria-checked', String(aiSwitch.checked));
-  });
+  for (const input of document.querySelectorAll('[role=switch]')) {
+    input.addEventListener('click', () => {
+      input.dataset.clicks = String(Number(input.dataset.clicks || 0) + 1);
+      input.setAttribute('aria-checked', String(input.checked));
+    });
+  }
 </script>
 '''
 )
