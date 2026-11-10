@@ -1,10 +1,13 @@
 """Instagram 地点控件：输入 → 等待联想 → 规范化精确匹配 → 回读（spec §4.3.1）。
 
-实测结构（real-dom-2026-11-10）：地点联想列表挂在页面根、**没有任何 ARIA
-role**，是一列普通 ``div`` 行。因此候选只能按几何 + 精确文本定位：位于输入框
-下方 520px 内、高 40–80px、宽超过 200px、子元素不超过 2 个。点击用行元素的
-``.click()`` 派发；模糊候选永不点击。回读值以页面输入框为准，比较对象始终是
-“被点候选的标签”，而不是原始请求值。
+实测结构（real-dom-2026-11-10）：地点联想列表以 portal 挂在页面根，**没有任何
+ARIA role**，是一列普通 ``div`` 行。因此候选只能从输入框元素出发，按几何 + 精确
+文本定位：取输入框正下方的滚动容器——``top`` 落在 ``bottom-12`` 到
+``bottom+160`` 之间、``height >= 40``、``width >= 100``、水平中心相距不超过
+320px，多个命中取最内层；候选行是该容器的直接子节点。点击用真实的指针事件
+（Playwright 的 ``node.click()``），实测 ``el.click()`` 不会触发选中；模糊候选
+永不点击，同名候选取第一个。回读值以页面输入框为准，比较对象始终是“被点候选的
+标签”，而不是原始请求值。
 """
 from __future__ import annotations
 
@@ -51,8 +54,9 @@ TYPE_DELAY_MS = 80
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 
-# 几何 + 文本探针：默认返回下方候选行；传入 click 参数时点击指定行。
-# 行结构是普通 div（无 role），所以不依赖类名，只看尺寸与位置。
+# 几何 + 文本探针：默认返回联想列表的候选行（保留原始下标）；传入
+# ``{index, label, return_node: True}`` 时返回该下标对应的行节点，供调用方用真实
+# 指针事件点击。行是普通 div（无 role），所以不依赖类名，只看尺寸与位置。
 _SUGGESTION_JS = """(el, action) => {
   const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const rect = el.getBoundingClientRect();
@@ -218,7 +222,7 @@ class LocationControl:
     async def _click_entry(
         self, entry: Locator, index: int, label: str
     ) -> 'ElementHandle | None':
-        """返回被点候选的元素句柄并派发 ``.click()``；文本在点击前再核对一次。"""
+        """返回被点候选的元素句柄并派发真实指针点击；文本在点击前再核对一次。"""
         try:
             handle = await entry.evaluate_handle(
                 _SUGGESTION_JS,
