@@ -69,6 +69,7 @@ def register(platform_parsers):
     instagram_video.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_video.add_argument("--result", type=Path)
     add_not_before_flag(instagram_video)
+    _add_instagram_option_flags(instagram_video, include_alt_text=False)
     add_runtime_flags(instagram_video)
     add_browser_flags(instagram_video)
     instagram_video.set_defaults(headless=False)
@@ -81,6 +82,7 @@ def register(platform_parsers):
     instagram_note.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_note.add_argument("--result", type=Path)
     add_not_before_flag(instagram_note)
+    _add_instagram_option_flags(instagram_note, include_alt_text=True)
     add_runtime_flags(instagram_note)
     add_browser_flags(instagram_note)
     instagram_note.set_defaults(headless=False)
@@ -93,6 +95,35 @@ def register(platform_parsers):
         action_parser.add_argument("--result", type=Path)
         add_runtime_flags(action_parser)
         action_parser.set_defaults(headless=False)
+
+
+def _add_instagram_option_flags(parser, *, include_alt_text: bool) -> None:
+    """注册发布选项参数（spec §3.1）；每个工单只填自己那一项。
+
+    未传任何参数时上传器保持 legacy 路径（零控件交互）；``--alt-text`` 只在
+    ``upload-note`` 注册。
+    """
+    _add_location_flag(parser)
+    _add_comments_flag(parser)
+    _add_ai_generated_flags(parser)
+    if include_alt_text:
+        _add_alt_text_flag(parser)
+
+
+def _add_location_flag(parser) -> None:
+    """地点（工单 13）。"""
+
+
+def _add_comments_flag(parser) -> None:
+    """关闭评论（工单 11）。"""
+
+
+def _add_ai_generated_flags(parser) -> None:
+    """AI 生成标识（工单 12）。"""
+
+
+def _add_alt_text_flag(parser) -> None:
+    """替代文字，仅 upload-note（工单 14）。"""
 
 
 @dataclass(slots=True)
