@@ -116,6 +116,11 @@ def _add_location_flag(parser) -> None:
 
 def _add_comments_flag(parser) -> None:
     """关闭评论（工单 11）。"""
+    parser.add_argument(
+        "--no-comments",
+        action="store_true",
+        help="Turn off commenting; omit to leave the page default",
+    )
 
 
 def _add_ai_generated_flags(parser) -> None:
