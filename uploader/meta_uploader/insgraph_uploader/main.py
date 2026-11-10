@@ -377,38 +377,57 @@ class InstagramUploader:
         return page.get_by_role('dialog').filter(
             has=page.locator('img[src^="/images/instagram/xig/ico/xxhdpi_launcher.png"]'))
 
+    @staticmethod
+    def _notification_dismiss(notifications: Locator) -> Locator:
+        """提示动作区第二个按钮才是关闭（实测第一个是 “Turn On”）。"""
+        return notifications.locator('._a9-z > button').nth(1)
+
+    async def _register_notification_handler(self, page: Page) -> Locator:
+        """注册覆盖整个发布流程的通知提示 handler，返回提示 locator 供轮询复用。
+
+        提示可能在点击创建**之后**才出现，会挡住裁剪、编辑与配文阶段；因此只由
+        ``_upload_steps`` 注册一次，直到流程结束才移除。``_upload_files`` 用返回的
+        同一个 locator 主动轮询，避免素材入口被延迟出现的提示卡住。
+        """
+        notifications = self._notification_prompt(page)
+        await page.add_locator_handler(
+            notifications,
+            lambda: _dismiss_optional_prompt(
+                notifications, self._notification_dismiss(notifications)
+            ),
+        )
+        return notifications
+
     async def _upload_files(self, page: Page, *, budget: PublishTimeoutBudget) -> None:
         """打开创建入口并等待裁剪阶段就绪，拒绝用上传后固定延时推断完成。"""
         budget.check_pre_click()
+        # handler 由 _upload_steps 注册并覆盖后续阶段；这里只复用同一个 locator
+        # 主动轮询，不能在此移除 handler，否则编辑与配文阶段失去保护。
         notifications = self._notification_prompt(page)
-        notification_buttons = notifications.locator('._a9-z > button')
         # 中英文首页均观察到这四个导航弹出入口，依次为通知、创建、设置、Meta。
         # 先断言完整组和各入口含 aria-selected 图标再取业务顺序第二项，避免全页任意 nth。
         navigation_popups = page.locator('a._a6hd[href="#"]').filter(has=page.locator('[aria-selected]'))
         dialog = page.get_by_role('dialog')
         file_input = dialog.locator(INSTAGRAM_MEDIA_INPUT)
-        try:
-            await expect(navigation_popups).to_have_count(
-                4, timeout=budget.clamp_ms(30_000)
-            )
-            await navigation_popups.nth(1).click()
-            # 创建弹窗可能被延迟出现的通知提示遮挡：轮询期间主动关闭已知提示，
-            # 直到素材入口真的可操作；只有超时才报错，不添加固定等待。
-            deadline = time.monotonic() + budget.clamp_ms(30_000) / 1000
-            while True:
-                if await notifications.count():
-                    await _dismiss_optional_prompt(
-                        notifications, notification_buttons.nth(1)
-                    )
-                if await file_input.count():
-                    break
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(
-                        'Instagram 创建弹窗未出现素材入口（可能被未知弹窗遮挡）'
-                    )
-                await page.wait_for_timeout(200)
-        finally:
-            await page.remove_locator_handler(notifications)
+        await expect(navigation_popups).to_have_count(
+            4, timeout=budget.clamp_ms(30_000)
+        )
+        await navigation_popups.nth(1).click()
+        # 创建弹窗可能被延迟出现的通知提示遮挡：轮询期间主动关闭已知提示，
+        # 直到素材入口真的可操作；只有超时才报错，不添加固定等待。
+        deadline = time.monotonic() + budget.clamp_ms(30_000) / 1000
+        while True:
+            if await notifications.count():
+                await _dismiss_optional_prompt(
+                    notifications, self._notification_dismiss(notifications)
+                )
+            if await file_input.count():
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    'Instagram 创建弹窗未出现素材入口（可能被未知弹窗遮挡）'
+                )
+            await page.wait_for_timeout(200)
         await expect(dialog).to_have_count(
             1, timeout=budget.clamp_ms(30_000)
         )
@@ -712,23 +731,20 @@ class InstagramUploader:
     async def _upload_steps(
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
     ) -> dict:
+        """注册全流程通知提示 handler，再执行上传、编辑与发布。"""
         budget.check_pre_click()
         # 实测通知提示可能在任一阶段弹出并挡住点击；整个流程保持同一个 handler，
         # 只处理已识别的提示，未知弹窗仍按失败处理。
-        notifications = self._notification_prompt(page)
-        notification_buttons = notifications.locator('._a9-z > button')
-        await page.add_locator_handler(
-            notifications,
-            lambda: _dismiss_optional_prompt(notifications, notification_buttons.nth(1)),
-        )
+        notifications = await self._register_notification_handler(page)
         try:
-            return await self._upload_steps_inner(page, identity, budget=budget)
+            return await self._upload_flow(page, identity, budget=budget)
         finally:
             await page.remove_locator_handler(notifications)
 
-    async def _upload_steps_inner(
+    async def _upload_flow(
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
     ) -> dict:
+        """按上传 → 编辑 → 配文发布三段推进，每段前检查发布预算。"""
         budget.check_pre_click()
         self.stage = 'upload'
         await self._upload_files(page, budget=budget)

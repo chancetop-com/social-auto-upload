@@ -138,6 +138,77 @@ class InstagramContractTests(unittest.TestCase):
                     await browser.close()
         asyncio.run(scenario())
 
+    def test_notification_handler_covers_upload_edit_and_publish(self):
+        """handler 只在 ``_upload_steps`` 注册一次，素材阶段不得提前移除。"""
+        events = []
+
+        class _RecordingPage:
+            """只记录 locator handler 的增删，其余属性透传真实页面。"""
+
+            def __init__(self, page):
+                self._page = page
+
+            def __getattr__(self, name):
+                return getattr(self._page, name)
+
+            async def add_locator_handler(self, locator, handler):
+                events.append('add')
+                await self._page.add_locator_handler(locator, handler)
+
+            async def remove_locator_handler(self, locator):
+                events.append('remove')
+                await self._page.remove_locator_handler(locator)
+
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    # 与真实顺序一致：通知提示在点击创建之后才挂载。
+                    await page.set_content(
+                        f'<body>{_NAVIGATION_HTML}'
+                        f'<script>{_DELAYED_NOTIFICATION_SCRIPT}</script></body>'
+                    )
+                    recorded = _RecordingPage(page)
+                    with tempfile.TemporaryDirectory() as folder:
+                        video = Path(folder) / 'video.mp4'
+                        video.touch()
+                        app = InstagramUploader(
+                            'unused', title='caption', video_file=video
+                        )
+                        def record(name):
+                            return AsyncMock(
+                                side_effect=lambda *args, **kwargs: events.append(name)
+                            )
+
+                        original_upload = InstagramUploader._upload_files
+
+                        async def upload_phase(self, page, *, budget):
+                            events.append('upload')
+                            await original_upload(self, page, budget=budget)
+
+                        with patch.object(
+                            InstagramUploader, '_upload_files', upload_phase
+                        ), patch.object(
+                            InstagramUploader, '_advance_media_editor', record('edit')
+                        ), patch.object(
+                            InstagramUploader, '_publish', record('publish')
+                        ):
+                            # 走真实 _upload_files：它若在执行中移除 handler，
+                            # 事件顺序会多出一次 remove，编辑与配文阶段即失去保护。
+                            await app._upload_steps(
+                                recorded, {'user_id': '42'},
+                                budget=app.start_publish_budget(),
+                            )
+                    self.assertEqual(
+                        events, ['add', 'upload', 'edit', 'publish', 'remove']
+                    )
+                    self.assertEqual(await page.locator('#notify').count(), 0)
+                finally:
+                    await browser.close()
+
+        asyncio.run(scenario())
+
     def test_verify_and_delete_are_reachable_from_cli(self):
         for action in ('verify', 'delete'):
             args = sau_cli.build_parser().parse_args(['instagram', action, '--account', 'creator',
@@ -173,6 +244,61 @@ class InstagramContractTests(unittest.TestCase):
                     with self.assertRaises((FileNotFoundError, ValueError)):
                         asyncio.run(app.upload())
                     launch.assert_not_called()
+
+
+# 首页四个导航弹出入口，第二项是创建；脚本让通知提示晚于创建弹窗出现。
+_NAVIGATION_HTML = ''.join(
+    '<a class="_a6hd" href="#" ' + ('onclick="createPost()"' if i == 1 else '')
+    + '><span aria-selected="false">Navigation</span></a>' for i in range(4))
+
+_DELAYED_NOTIFICATION_SCRIPT = """
+      function picked(input) {
+        const row = document.createElement('div');
+        row.className = '_ac76';
+        const button = document.createElement('div');
+        button.setAttribute('role', 'button');
+        button.textContent = 'Next';
+        row.appendChild(button);
+        input.closest('[role=dialog]').appendChild(row);
+      }
+      function createPost() {
+        setTimeout(function () {
+          const dialog = document.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/jpeg,video/mp4';
+          input.addEventListener('change', function () { picked(input); });
+          dialog.appendChild(input);
+          document.body.appendChild(dialog);
+        }, 700);
+        // 提示晚于创建弹窗出现：旧实现只保护了点击创建那一下。
+        setTimeout(function () {
+          const dialog = document.createElement('div');
+          dialog.setAttribute('role', 'dialog');
+          dialog.id = 'notify';
+          // 真实提示全屏覆盖：必须能挡住后续点击才会触发 handler。
+          dialog.style.position = 'fixed';
+          dialog.style.inset = '0';
+          dialog.style.zIndex = '10';
+          const icon = document.createElement('img');
+          icon.src = '/images/instagram/xig/ico/xxhdpi_launcher.png?test';
+          const zone = document.createElement('div');
+          zone.className = '_a9-z';
+          const turnOn = document.createElement('button');
+          turnOn.textContent = 'Turn On';
+          turnOn.addEventListener('click', function () { throw new Error('wrong'); });
+          const later = document.createElement('button');
+          later.textContent = 'Not Now';
+          later.addEventListener('click', function () { dialog.remove(); });
+          zone.appendChild(turnOn);
+          zone.appendChild(later);
+          dialog.appendChild(icon);
+          dialog.appendChild(zone);
+          document.body.appendChild(dialog);
+        }, 50);
+      }
+    """
 
 
 class InstagramBrowserRegressionTests(unittest.TestCase):
@@ -240,59 +366,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                 browser = await p.chromium.launch(channel='chrome', headless=True)
                 page = await browser.new_page()
                 try:
-                    navigation = ''.join(
-                        '<a class="_a6hd" href="#" ' + ('onclick="createPost()"' if i == 1 else '')
-                        + '><span aria-selected="false">Navigation</span></a>' for i in range(4))
-                    script = """
-                      function picked(input) {
-                        const row = document.createElement('div');
-                        row.className = '_ac76';
-                        const button = document.createElement('div');
-                        button.setAttribute('role', 'button');
-                        button.textContent = 'Next';
-                        row.appendChild(button);
-                        input.closest('[role=dialog]').appendChild(row);
-                      }
-                      function createPost() {
-                        setTimeout(function () {
-                          const dialog = document.createElement('div');
-                          dialog.setAttribute('role', 'dialog');
-                          const input = document.createElement('input');
-                          input.type = 'file';
-                          input.accept = 'image/jpeg,video/mp4';
-                          input.addEventListener('change', function () { picked(input); });
-                          dialog.appendChild(input);
-                          document.body.appendChild(dialog);
-                        }, 700);
-                        // 提示晚于创建弹窗出现：旧实现只保护了点击创建那一下。
-                        setTimeout(function () {
-                          const dialog = document.createElement('div');
-                          dialog.setAttribute('role', 'dialog');
-                          dialog.id = 'notify';
-                          // 真实提示全屏覆盖：必须能挡住后续点击才会触发 handler。
-                          dialog.style.position = 'fixed';
-                          dialog.style.inset = '0';
-                          dialog.style.zIndex = '10';
-                          const icon = document.createElement('img');
-                          icon.src = '/images/instagram/xig/ico/xxhdpi_launcher.png?test';
-                          const zone = document.createElement('div');
-                          zone.className = '_a9-z';
-                          const turnOn = document.createElement('button');
-                          turnOn.textContent = 'Turn On';
-                          turnOn.addEventListener('click', function () { throw new Error('wrong'); });
-                          const later = document.createElement('button');
-                          later.textContent = 'Not Now';
-                          later.addEventListener('click', function () { dialog.remove(); });
-                          zone.appendChild(turnOn);
-                          zone.appendChild(later);
-                          dialog.appendChild(icon);
-                          dialog.appendChild(zone);
-                          document.body.appendChild(dialog);
-                        }, 50);
-                      }
-                    """
                     await page.set_content(
-                        f'<body>{navigation}<script>{script}</script></body>'
+                        f'<body>{_NAVIGATION_HTML}'
+                        f'<script>{_DELAYED_NOTIFICATION_SCRIPT}</script></body>'
                     )
                     with tempfile.TemporaryDirectory() as folder:
                         video = Path(folder) / 'video.mp4'
