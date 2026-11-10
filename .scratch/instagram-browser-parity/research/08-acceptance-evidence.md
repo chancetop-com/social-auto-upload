@@ -34,6 +34,29 @@ sau instagram upload-note --account <alias> \
 
 帖子 URL：`https://www.instagram.com/p/Dfjh0AAG4u9/`（已删除，仅作记录）。
 
+## 正向用例 2（视频 / Reel：封面 + 标签 + 选项）
+
+```bash
+sau instagram upload-video --account <alias> \
+  --file demo.mp4 --thumbnail demo.png \
+  --title "sau 视频回归 20261110-170911" \
+  --desc "video + thumbnail + tags + 关评论 + AI 标识" \
+  --tags 回归,测试 --no-comments --ai-generated \
+  --result .local/acceptance/video.json
+```
+
+| 项 | 结果 | 结论 |
+|---|---|---|
+| 退出码 / 状态 | `0`，`published`，`media_count=1`，URL 形如 `/reel/<code>/` | ✅ |
+| `--file`（MP4 → Reels） | 进入裁剪/编辑/配文页并成功发布 | ✅ |
+| `--thumbnail` | 编辑页字节校验（预览图的 SHA-256 与 `demo.png` 一致）通过后才继续；发布未报错 | ✅（发布后网格封面未做像素级核对） |
+| `--desc` + `--tags` | 元描述为 `标题 + 正文 + #回归 #测试`，帖子页正文出现两个话题标签 | ✅ |
+| `--no-comments` | `options.comments {requested:false, applied:false, status:set}`；帖子页无评论输入框 | ✅ |
+| `--ai-generated` | `options.ai_generated {requested:true, applied:true, status:set}`；帖子页显示 `AI content` | ✅ |
+| Reels `processing` 等待 | 未观察到 202/`processing`，直接拿到最终创建响应 | ✅（未覆盖 202 分支） |
+
+帖子 URL：`https://www.instagram.com/reel/DfjjQxMA-CQ/`（已删除，仅作记录）。
+
 ## 负向用例
 
 | # | 命令要点 | 退出码 | 结果 |
@@ -66,5 +89,8 @@ sau instagram upload-note --account <alias> \
 - 中文界面：未验收（选择器仅英文实测；本地模式已固定英文，托管模式需 Profile 自行保持英文）。
 - 专业 / Business 账号：未验收。
 - 托管模式（MLX / AdsPower）：未验收（本次为本地 cookie 模式）。
-- 视频 / Reel 上的四项组合：本次用图片轮播覆盖；`upload-video` 的选项代码路径相同，但未单独真发。
+- 视频 + `--location` 的组合（视频这次只覆盖了关评论与 AI 标识）。
+- `--no-ai-generated`（请求关闭 AI 标识）与 `--not-before` 发布闸门。
+- `--proxy` / `--headless` / `--debug` 三个运行参数。
+- Reels 的 202 `processing` 分支（本次直接拿到最终响应）。
 - 发布后再次编辑、跨设备生效时间等平台侧细节：未验收。

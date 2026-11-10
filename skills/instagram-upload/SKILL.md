@@ -38,7 +38,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 协作者、Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。四项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 记录 `location`、`alt_text`、`comments`、`ai_generated` 的 `requested` / `applied` / `status`（必要时含 `reason`）。
 
-选择器只在 **English 界面 + Personal 账号**验证过，中文标签为未验证回退，专业账号未验证。本地模式固定 `locale=en-US`；托管模式需把 Profile 界面保持 English（账号语言设为中文时 Instagram 仍可能渲染中文）。四项能力已在真实账号真发验收通过（2026-11-10，English UI / Personal / 本地 cookie）：两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致并已删除。中文界面、专业账号、托管模式与 `upload-video` 组合仍未验收，不得据此宣称支持。
+选择器只在 **English 界面 + Personal 账号**验证过，中文标签为未验证回退，专业账号未验证。本地模式固定 `locale=en-US`；托管模式需把 Profile 界面保持 English（账号语言设为中文时 Instagram 仍可能渲染中文）。四项能力已在真实账号真发验收通过（2026-11-10，English UI / Personal / 本地 cookie）：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags` 发布后回读一致，均已删除。`--not-before`、`--proxy`、`--headless`、中文界面、专业账号与托管模式仍未验收，不得据此宣称支持。
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 

@@ -667,7 +667,7 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 >
 > 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
 >
-> 四项能力已在真实账号真发验收通过（2026-11-10，English UI、Personal 账号、本地 cookie 模式）：单条两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致（地点显示、`img[alt]` 逐张对应、无评论输入框、`AI content` 标签）。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。中文界面、专业账号与托管模式（MLX / AdsPower）仍未验收。
+> 四项能力已在真实账号真发验收通过（2026-11-10，English UI、Personal 账号、本地 cookie 模式）：单条两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致（地点显示、`img[alt]` 逐张对应、无评论输入框、`AI content` 标签）；同日另以 `upload-video` 发布 Reel，验证 `--file` / `--thumbnail`（字节校验）/ `--desc` / `--tags` 与关闭评论、AI 标识，发布后 `#话题` 与 `AI content` 均正确。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。中文界面、专业账号与托管模式（MLX / AdsPower）仍未验收。
 
 成功返回 `published`、`content_id`、`post_id`、`post_url` 和 `media_count`。Reels 可能先处于 `processing`，程序会等待本次提交的最终创建结果；超时后保留已观察状态。`submission_unknown` 表示已进入提交但未确认平台结果，`processing` 表示平台已受理且尚未取得最终作品，均不可直接重复上传。默认结果保存在 `.local/instagram-results/`；建议用 `--result` 指定路径。
 
@@ -763,7 +763,7 @@ sau tiktok upload-video \
 - 本地模式读写 `cookies/tiktok_<account>.json`；托管模式不读写 cookie 文件。
 - 托管分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**；本地模式会自动切换页面语言。
 - 本地模式与托管模式共用 15 分钟上传预算；登录页、验证码或 2FA 在托管模式下退出 `10`，本地模式按运行失败退出 `1`。
-- 真实账号的本地登录、`upload-note` 四项选项发布与 `delete` 已完成真发验收（2026-11-10）；`upload-video` 的四项选项、托管模式、中文界面与专业账号仍未验收。
+- 真实账号的本地登录、`upload-note` / `upload-video` 发布、四项选项与 `delete` 已完成真发验收（2026-11-10）；`--not-before`、`--proxy`、`--headless`、托管模式、中文界面与专业账号仍未验收。
 - 未注册的子命令仍由 argparse 退出 `2`。
 
 ### 视频发布选项
