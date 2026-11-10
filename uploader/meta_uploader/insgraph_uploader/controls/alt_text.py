@@ -68,8 +68,14 @@ class AltTextControl:
         dialogs = self._dialogs()
         if not await dialogs.count():
             return None
-        scope = dialogs.first
-        for label in _ENTRY_LABELS:
+        return await self._first_labelled(dialogs.first, _ENTRY_LABELS)
+
+    @staticmethod
+    async def _first_labelled(
+        scope: 'Locator', labels: tuple[str, ...]
+    ) -> 'Locator | None':
+        """按文案顺序找第一个入口：先 ``role=button``，再可见文本；都缺席返回 None。"""
+        for label in labels:
             for candidate in (
                 scope.get_by_role('button', name=label, exact=True),
                 scope.get_by_text(label, exact=True),
@@ -146,17 +152,13 @@ class AltTextControl:
 
     async def _close_modal(self, modal: 'Locator', *, applied: object = None) -> None:
         """点击模态框内主按钮并等待其消失；找不到按钮即报 mismatch，不猜文案。"""
-        for label in _CLOSE_LABELS:
-            for button in (
-                modal.get_by_role('button', name=label, exact=True),
-                modal.get_by_text(label, exact=True),
-            ):
-                if await button.count():
-                    await button.first.click()
-                    await expect(modal).to_have_count(
-                        0, timeout=self._timeout(_MODAL_CLOSE_TIMEOUT_MS)
-                    )
-                    return
+        button = await self._first_labelled(modal, _CLOSE_LABELS)
+        if button is not None:
+            await button.click()
+            await expect(modal).to_have_count(
+                0, timeout=self._timeout(_MODAL_CLOSE_TIMEOUT_MS)
+            )
+            return
         raise OptionMismatchError(
             'Instagram 无障碍模态框未找到关闭按钮（Done / Save / 完成），'
             '无法确认替代文字已保存',
