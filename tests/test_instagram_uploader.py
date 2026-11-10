@@ -529,3 +529,75 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
                 finally:
                     await browser.close()
         asyncio.run(scenario())
+
+
+class InstagramAltTextDomTests(unittest.TestCase):
+    """C2：真实 Chrome 中 Accessibility 模态框的填写、关闭与重开回读。"""
+
+    def test_alt_text_modal_roundtrip_sets_both_images(self):
+        from uploader.meta_uploader.insgraph_uploader.options import (
+            SET,
+            InstagramPublishOptions,
+        )
+
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    # 配文页本身是创建弹窗；无障碍模态框是它内部新开的另一个 dialog。
+                    # 实测结构：入口 Accessibility，模态框内每张图一个 Alt text 输入框。
+                    await page.set_content('''<div role="dialog" id="compose">
+                      <div class="_ac76"><div role="heading">Create new post</div></div>
+                      <div role="button" id="accessibility" aria-expanded="false"
+                           onclick="toggleAltModal()">Accessibility</div>
+                      <div role="dialog" id="alt-modal" style="display:none">
+                        <div role="heading">Accessibility</div>
+                        <label>Photo 1 <input type="text" placeholder="Alt text"></label>
+                        <label>Photo 2 <input type="text" placeholder="Alt text"></label>
+                        <div role="button" id="done" onclick="toggleAltModal()">Done</div>
+                      </div>
+                    </div>
+                    <script>function toggleAltModal() {
+                      const modal = document.getElementById('alt-modal');
+                      const open = modal.style.display === 'none';
+                      modal.style.display = open ? 'block' : 'none';
+                      document.getElementById('accessibility')
+                        .setAttribute('aria-expanded', String(open));
+                    }</script>''')
+                    with tempfile.TemporaryDirectory() as folder:
+                        images = [Path(folder) / f'{index}.png' for index in range(2)]
+                        for image in images:
+                            image.touch()
+                        requested = ('第一张图的描述', '第二张图的描述')
+                        app = InstagramUploader(
+                            'unused.json', title='caption', image_files=images,
+                            options=InstagramPublishOptions(alt_texts=requested),
+                            result_file=Path(folder) / 'result.json',
+                        )
+                        # 不注入 controls：走真实注册表 + 真实 DOM。
+                        await app._apply_options(
+                            page, budget=app.start_publish_budget()
+                        )
+                        self.assertEqual(
+                            app.result['options']['alt_text'],
+                            {'requested': list(requested), 'applied': list(requested),
+                             'status': SET},
+                        )
+                        # 两次填写按 --images 顺序落到对应输入框。
+                        self.assertEqual(
+                            await page.locator('input[placeholder="Alt text"]')
+                            .evaluate_all('(inputs) => inputs.map((input) => input.value)'),
+                            list(requested),
+                        )
+                        # 回读确实重新打开了模态框：结束时已关闭且值仍在。
+                        self.assertFalse(await page.locator('#alt-modal').is_visible())
+                        self.assertEqual(
+                            await page.locator('#accessibility')
+                            .get_attribute('aria-expanded'),
+                            'false',
+                        )
+                        self.assertEqual(await page.get_by_role('dialog').count(), 1)
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())

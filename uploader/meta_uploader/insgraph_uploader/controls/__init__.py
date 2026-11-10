@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..options import InstagramOptionControl
+from .alt_text import AltTextControl
 from .location import LocationControl
 from .toggles import SwitchControl, disclosure_panel
 
@@ -42,7 +43,10 @@ def _register_location(controls, page, *, image_count, budget) -> None:
 
 
 def _register_alt_text(controls, page, *, image_count, budget) -> None:
-    """替代文字控件（工单 14）。"""
+    """替代文字控件（工单 14）：张数取自调用方，不猜 DOM。"""
+    controls['alt_text'] = AltTextControl(
+        page, image_count=image_count, budget=budget
+    )
 
 
 def _register_comments(controls, page, *, image_count, budget) -> None:
