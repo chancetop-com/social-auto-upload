@@ -79,11 +79,14 @@ async def instagram_post_action(account_file: Path, *, post_url: str, expected_t
                 await menu_button.click()
                 menu = page.get_by_role('dialog')
                 buttons = menu.get_by_role('button')
-                # 自己的作品菜单已观察固定八项，首项为删除；role 同时涵盖原生/非原生按钮。
-                # 数量断言配合已核对的作者和原作品身份，结构改变即报错，不转点其他菜单。
-                await expect(buttons).to_have_count(8, timeout=30_000)
+                # 实测 2026-11 菜单项由 8 项增至 9 项（Instagram 新增条目），不再按数量/下标定位：
+                # 只在菜单里找文案精确等于“删除”的项，找不到就报错，绝不猜其他条目。
+                delete_item = buttons.filter(
+                    has_text=re.compile(r'^(Delete|Delete post|删除)$')
+                )
+                await expect(delete_item).to_have_count(1, timeout=30_000)
                 # 实测鼠标激活有时只关闭弹出菜单；该 role=button 支持 Enter，键盘激活正常进入确认框。
-                await buttons.nth(0).press('Enter')
+                await delete_item.first.press('Enter')
                 # 确认框是带标题的模态 dialog，只有删除、取消两项，删除固定在首位。
                 # 与前一菜单严格区分；不把菜单关闭当成已删除。
                 confirm = page.locator('[role="dialog"][aria-modal="true"]').filter(has=page.get_by_role('heading'))

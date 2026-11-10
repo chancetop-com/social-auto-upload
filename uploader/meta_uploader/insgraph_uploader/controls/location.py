@@ -56,18 +56,24 @@ _POLL_SECONDS = 0.1
 _SUGGESTION_JS = """(el, action) => {
   const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const rect = el.getBoundingClientRect();
-  const rows = [];
-  for (const node of document.querySelectorAll('div')) {
+  const mid = rect.left + rect.width / 2;
+  // 联想列表是 portal：取输入框正下方最近的滚动容器（最内层），而不是全页同尺寸 div，
+  // 否则侧栏 “Messages” / “Add collaborators” 等节点会混进候选甚至被误点。
+  const containers = [...document.querySelectorAll('div')].filter(node => {
+    const cs = getComputedStyle(node);
+    if (cs.overflowY !== 'auto' && cs.overflowY !== 'scroll') return false;
     const box = node.getBoundingClientRect();
-    if (box.height < 40 || box.height > 80) continue;
-    if (box.width <= 200) continue;
-    if (box.top < rect.bottom - 2 || box.top > rect.bottom + 520) continue;
-    if (node.children.length > 2) continue;
-    const flow = getComputedStyle(node).overflowY;
-    if (flow === 'auto' || flow === 'scroll') continue;
-    if (!norm(node.textContent)) continue;
-    rows.push(node);
-  }
+    if (box.height < 40 || box.width < 100) return false;
+    if (box.top < rect.bottom - 12 || box.top > rect.bottom + 160) return false;
+    if (Math.abs((box.left + box.width / 2) - mid) > 320) return false;
+    return node.children.length >= 1;
+  });
+  const innermost = containers.filter(
+    (node) => !containers.some((other) => other !== node && node.contains(other))
+  );
+  const list = innermost.sort((a, b) => b.children.length - a.children.length)[0];
+  if (!list) return action && action.return_node ? null : [];
+  const rows = [...list.children].filter((row) => norm(row.textContent));
   if (action && action.return_node) {
     const node = rows[action.index];
     if (!node) return null;

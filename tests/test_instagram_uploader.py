@@ -609,7 +609,8 @@ _LOCATION_HTML = '''
     <label><input aria-label="Add location" placeholder="Add location"
                   name="creation-location-input" autocomplete="off"></label>
   </div>
-  <div id="suggestions"></div>
+  <!-- 真实结构：portal 滚动容器，候选行是它的直接子节点 -->
+  <div id="suggestions" style="overflow-y:auto; max-height:240px; width:320px"></div>
   <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
 </div>
 <script>
@@ -729,7 +730,8 @@ class InstagramLocationStaleListTests(unittest.TestCase):
                     # 列表节点故意保留（模拟“看起来选中、其实没生效”）。
                     await page.set_content('''<div role="dialog">
                         <div style="height:44px"><input placeholder="Add location" autocomplete="off"></div>
-                        <div id="suggestions"></div>
+                        <!-- 真实结构：portal 滚动容器，候选行是它的直接子节点 -->
+  <div id="suggestions" style="overflow-y:auto; max-height:240px; width:320px"></div>
                       </div>
                       <script>
                         const input = document.querySelector('input[placeholder="Add location"]');
