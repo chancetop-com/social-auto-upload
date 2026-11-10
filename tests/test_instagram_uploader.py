@@ -352,3 +352,102 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                 finally:
                     await browser.close()
         asyncio.run(scenario())
+
+
+class InstagramLocationOptionDomTests(unittest.TestCase):
+    """C1：真实 Chrome 里驱动真实控件注册表完成 输入 → 联想 → 选中 → 回读。"""
+
+    def test_exact_location_suggestion_is_selected_and_read_back(self):
+        async def scenario():
+            from uploader.meta_uploader.insgraph_uploader.controls import (
+                resolve_instagram_option_controls,
+            )
+            from uploader.meta_uploader.insgraph_uploader.options import (
+                InstagramPublishOptions,
+            )
+
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    # 真实页面输入后异步（debounce）挂载联想项；候选按子串过滤，
+                    # 因此 "Shanghai, China" 会先于精确的 "Shanghai" 出现。
+                    # 点击候选才写入输入框值，回读值因此可观察。
+                    html = '''<div role="dialog"><div class="_ac76">
+                        <div role="heading">Create new post</div></div>
+                      <div class="row"><input placeholder="Add location" autocomplete="off"></div>
+                      <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
+                      <div id="suggestions"></div></div>
+                      <script>
+                        const candidates = ['Shanghai, China', 'Hangzhou', 'Shanghai'];
+                        const input = document.querySelector('input[placeholder="Add location"]');
+                        input.addEventListener('input', () => {
+                          const list = document.getElementById('suggestions');
+                          list.innerHTML = '';
+                          const wanted = input.value.trim().toLowerCase();
+                          if (!wanted) return;
+                          setTimeout(() => {
+                            const matches = candidates.filter(
+                              label => label.toLowerCase().includes(wanted));
+                            document.body.dataset.candidates = matches.join('|');
+                            list.innerHTML = '';
+                            for (const label of matches) {
+                              const option = document.createElement('div');
+                              option.setAttribute('role', 'option');
+                              option.textContent = label;
+                              option.onclick = () => {
+                                input.value = label;
+                                document.body.dataset.clicked = label;
+                                list.innerHTML = '';
+                              };
+                              list.appendChild(option);
+                            }
+                          }, 200);
+                        });
+                      </script>'''
+                    await page.set_content(html)
+                    with tempfile.TemporaryDirectory() as folder:
+                        image = Path(folder) / 'image.png'
+                        image.touch()
+                        app = InstagramUploader(
+                            'unused.json', title='caption',
+                            image_files=[str(image)],
+                            options=InstagramPublishOptions(location='  shanghai '),
+                            result_file=Path(folder) / 'result.json',
+                        )
+                        # 走真实注册表：不注入 controls，由 resolve_instagram_option_controls 构造。
+                        await app._apply_options(
+                            page, budget=app.start_publish_budget()
+                        )
+                        record = app.result['options']['location']
+                        self.assertEqual(record['status'], 'set')
+                        # applied 是页面候选标签，不是原始请求值。
+                        self.assertEqual(record['applied'], 'Shanghai')
+                        self.assertEqual(record['requested'], '  shanghai ')
+                        # 模糊候选 "Shanghai, China" 确实出现过，但没有被点击。
+                        self.assertIn(
+                            'Shanghai, China',
+                            await page.locator('body').get_attribute('data-candidates'),
+                        )
+                        self.assertEqual(
+                            await page.locator('body').get_attribute('data-clicked'),
+                            'Shanghai',
+                        )
+                        # 输入框为空时回读已选地点 chip 文本。
+                        await page.evaluate('''() => {
+                            const input = document.querySelector('input[placeholder="Add location"]');
+                            input.value = '';
+                            const chip = document.createElement('div');
+                            chip.setAttribute('role', 'button');
+                            chip.textContent = 'Shanghai, China';
+                            input.parentElement.appendChild(chip);
+                        }''')
+                        controls = resolve_instagram_option_controls(
+                            page, image_count=1
+                        )
+                        self.assertEqual(
+                            await controls['location'].read(), 'Shanghai, China'
+                        )
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
