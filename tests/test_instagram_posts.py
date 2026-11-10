@@ -25,9 +25,12 @@ EXPECTED_TEXT = '原有配文里的短句'
 DELETE_URL = f'https://www.instagram.com/api/v1/web/create/{CONTENT_ID}/delete/'
 
 
-def _post_page_html(menu_items: list[str]) -> str:
+def _post_page_html(
+    menu_items: list[str], confirm_labels: tuple[str, ...] = ('Delete', 'Cancel')
+) -> str:
     """作品详情页：``find_instagram_post`` 需要的元数据 + 菜单与确认框。"""
     items = '[' + ', '.join(f'"{label}"' for label in menu_items) + ']'
+    confirm = '[' + ', '.join(f'"{label}"' for label in confirm_labels) + ']'
     return f'''
 <!doctype html>
 <html>
@@ -68,15 +71,18 @@ def _post_page_html(menu_items: list[str]) -> str:
     heading.setAttribute('role', 'heading');
     heading.textContent = 'Delete post?';
     confirm.appendChild(heading);
-    const remove = document.createElement('button');
-    remove.textContent = 'Delete';
-    remove.addEventListener('click', () => {{
-      fetch('/api/v1/web/create/{CONTENT_ID}/delete/', {{method: 'POST'}});
+    const labels = {confirm};
+    labels.forEach((label) => {{
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.addEventListener('click', () => {{
+        document.body.dataset.confirmed = label;
+        if (label === 'Delete') {{
+          fetch('/api/v1/web/create/{CONTENT_ID}/delete/', {{method: 'POST'}});
+        }}
+      }});
+      confirm.appendChild(button);
     }});
-    confirm.appendChild(remove);
-    const cancel = document.createElement('button');
-    cancel.textContent = 'Cancel';
-    confirm.appendChild(cancel);
     document.body.appendChild(confirm);
   }}
 </script>
@@ -88,7 +94,9 @@ def _post_page_html(menu_items: list[str]) -> str:
 class InstagramPostDeleteTests(unittest.TestCase):
     """§4.4：菜单项按文案定位；``Delete`` 不在首位也必须命中，找不到就报错。"""
 
-    async def _run_delete_flow(self, menu_items):
+    async def _run_delete_flow(
+        self, menu_items, *, confirm_labels=('Delete', 'Cancel')
+    ):
         """在真实 Chrome 中执行删除流程；返回结果、点击记录与删除请求。"""
         delete_requests: list[str] = []
 
@@ -104,7 +112,8 @@ class InstagramPostDeleteTests(unittest.TestCase):
                 )
                 return
             await request.fulfill(
-                body=_post_page_html(menu_items), content_type='text/html'
+                body=_post_page_html(menu_items, confirm_labels),
+                content_type='text/html',
             )
 
         async with async_playwright() as p:
@@ -161,7 +170,13 @@ class InstagramPostDeleteTests(unittest.TestCase):
                     clicked_index = await page.locator('body').get_attribute(
                         'data-clicked-index'
                     )
-                return result, error, clicked, clicked_index, delete_requests
+                    confirmed = await page.locator('body').get_attribute(
+                        'data-confirmed'
+                    )
+                return (
+                    result, error, clicked, clicked_index, confirmed,
+                    delete_requests,
+                )
             finally:
                 with contextlib.suppress(Exception):
                     await browser.close()
@@ -171,7 +186,7 @@ class InstagramPostDeleteTests(unittest.TestCase):
             'Edit', 'Pin to profile', 'Delete', 'Go to post', 'Share to…',
             'Copy link', 'Embed', 'Unpin from profile', 'About this account',
         ]
-        result, error, clicked, clicked_index, requests = asyncio.run(
+        result, error, clicked, clicked_index, confirmed, requests = asyncio.run(
             self._run_delete_flow(menu_items)
         )
         self.assertIsNone(error)
@@ -179,12 +194,42 @@ class InstagramPostDeleteTests(unittest.TestCase):
         self.assertEqual(result['content_id'], CONTENT_ID)
         # 按下标取项会点成 Edit；命中 Delete 才能走到删除确认。
         self.assertEqual((clicked, clicked_index), ('Delete', '2'))
+        self.assertEqual(confirmed, 'Delete')
         self.assertEqual(requests, [DELETE_URL])
+
+    def test_confirm_action_is_located_by_label_when_cancel_is_first(self):
+        """确认框按钮顺序不可假设：Cancel 在首位时仍必须点中 Delete。"""
+        menu_items = ['Edit', 'Delete', 'Cancel']
+        result, error, clicked, clicked_index, confirmed, requests = asyncio.run(
+            self._run_delete_flow(
+                menu_items, confirm_labels=('Cancel', 'Delete')
+            )
+        )
+        self.assertIsNone(error)
+        self.assertEqual(result['status'], 'deleted')
+        self.assertEqual((clicked, clicked_index), ('Delete', '1'))
+        self.assertEqual(confirmed, 'Delete')
+        self.assertEqual(requests, [DELETE_URL])
+
+    def test_confirm_without_exact_delete_label_fails_closed(self):
+        """确认框没有精确 Delete 文案时不得按首位猜测（首位是 Cancel）。"""
+        menu_items = ['Edit', 'Delete', 'Cancel']
+        result, error, clicked, clicked_index, confirmed, requests = asyncio.run(
+            self._run_delete_flow(
+                menu_items, confirm_labels=('Cancel', 'Remove')
+            )
+        )
+        self.assertIsNone(result)
+        self.assertIsNotNone(error)
+        # 菜单项仍会被点开，但确认框里不能点任何按钮。
+        self.assertEqual((clicked, clicked_index), ('Delete', '1'))
+        self.assertIsNone(confirmed)
+        self.assertEqual(requests, [])
 
     def test_menu_without_exact_delete_raises_and_never_clicks(self):
         # 只有模糊干扰项：没有文案精确等于 Delete 的条目，不能猜。
         menu_items = ['Edit', 'Delete forever', 'Delete from profile', 'Cancel']
-        result, error, clicked, clicked_index, requests = asyncio.run(
+        result, error, clicked, clicked_index, confirmed, requests = asyncio.run(
             self._run_delete_flow(menu_items)
         )
         self.assertIsNone(result)
@@ -192,6 +237,7 @@ class InstagramPostDeleteTests(unittest.TestCase):
         self.assertIn('Instagram 原作品操作未完成', str(error))
         self.assertIsNone(clicked)
         self.assertIsNone(clicked_index)
+        self.assertIsNone(confirmed)
         self.assertEqual(requests, [])
 
 

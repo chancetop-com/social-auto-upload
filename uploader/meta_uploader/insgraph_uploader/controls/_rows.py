@@ -46,7 +46,10 @@ async def row_for(
             try:
                 if not await node.is_visible():
                     continue
-                row = node.locator('xpath=ancestor::*[@role="button"][1]')
+                # 实测折叠行是 div[role=button]；原生 button 作为结构回退。
+                row = node.locator(
+                    'xpath=ancestor::*[@role="button" or self::button][1]'
+                )
                 if await row.count():
                     return row.first
             except Exception:

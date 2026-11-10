@@ -25,10 +25,16 @@ if TYPE_CHECKING:  # 运行时只导入 options 与行助手，避免把 Page �
 
 # 入口文案：英文实测，中文按 spec §4.3.2 回退。
 _ENTRY_LABELS = ('Accessibility', '无障碍', '替代文字')
-# 输入框族：实测主选择器优先；DOM 顺序即图片顺序，不重排。
-_ALT_INPUT_SELECTOR = (
+# 输入框族：实测精确文案优先；精确文案缺失时才用大小写不敏感子串 + 中文回退。
+# DOM 顺序即图片顺序，两个选择器内部都不重排。
+_ALT_INPUT_EXACT = (
     'input[aria-label="Alt text"], input[placeholder="Alt text"], '
-    'textarea[aria-label="Alt text"]'
+    'textarea[aria-label="Alt text"], textarea[placeholder="Alt text"]'
+)
+_ALT_INPUT_FALLBACK = (
+    'input[aria-label*="alt" i], input[placeholder*="alt" i], '
+    'textarea[aria-label*="alt" i], textarea[placeholder*="alt" i], '
+    'input[aria-label*="替代文字"], input[placeholder*="替代文字"]'
 )
 
 _CLOSE_TIMEOUT_MS = 5_000
@@ -73,8 +79,16 @@ class AltTextControl:
             return False
 
     async def _inputs(self) -> 'Locator':
-        """当前已渲染的 Alt text 输入框；折叠时为空（DOM 一并移除）。"""
-        return self._dialog().locator(_ALT_INPUT_SELECTOR)
+        """当前已渲染的 Alt text 输入框；折叠时为空（DOM 一并移除）。
+
+        先认实测精确文案；精确文案完全缺席时才使用宽松子串回退，避免宽松
+        选择器覆盖实测哨兵。
+        """
+        dialog = self._dialog()
+        exact = dialog.locator(_ALT_INPUT_EXACT)
+        if await exact.count():
+            return exact
+        return dialog.locator(_ALT_INPUT_FALLBACK)
 
     async def _count(self) -> int:
         try:

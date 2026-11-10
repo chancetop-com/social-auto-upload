@@ -14,8 +14,8 @@ from patchright.async_api import async_playwright
 
 import sau_cli
 from uploader.meta_uploader.insgraph_uploader.main import (
-    InstagramUploader, _is_instagram_logged_out, instagram_created_media, instagram_response_payload,
-    _dismiss_optional_prompt,
+    InstagramUploader, _create_entry, _is_instagram_logged_out,
+    instagram_created_media, instagram_response_payload, _dismiss_optional_prompt,
 )
 from uploader.meta_uploader.insgraph_uploader.options import (
     DEFAULT_OFF, SET, InstagramPublishOptions,
@@ -282,7 +282,7 @@ _DELAYED_NOTIFICATION_SCRIPT = """
           dialog.style.inset = '0';
           dialog.style.zIndex = '10';
           const icon = document.createElement('img');
-          icon.src = '/images/instagram/xig/ico/xxhdpi_launcher.png?test';
+          icon.src = 'https://static.cdninstagram.com/rsrc/xxhdpi_launcher.png?test';
           const zone = document.createElement('div');
           zone.className = '_a9-z';
           const turnOn = document.createElement('button');
@@ -313,7 +313,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     html = '''<script>
                       function notification(){document.body.insertAdjacentHTML('beforeend',
                         `<div role="dialog" id="notifications">
-                        <img src="/images/instagram/xig/ico/xxhdpi_launcher.png?test">
+                        <img src="https://static.cdninstagram.com/rsrc/xxhdpi_launcher.png?test">
                         <div class="_a9-z"><button onclick="throw Error('wrong action')">Enable</button>
                         <button onclick="this.closest('[role=dialog]').remove()">後で</button></div></div>`);}
                       function create(){document.body.insertAdjacentHTML('beforeend',
@@ -322,7 +322,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend',
                           '<div class="_ac76"><div role="button">Next</div></div>');
                         if(document.body.dataset.prompts==='true') document.body.insertAdjacentHTML('beforeend',
-                          `<div role="dialog"><img src="/images/instagram/clips/reels_nux_icon.png?test">
+                          `<div role="dialog"><img src="https://static.cdninstagram.com/rsrc/reels_nux_icon.png?test">
                           <div class="_a9-z"><div><div><span><button onclick="throw Error('wrong action')">詳しく見る</button></span></div>
                           <div><button onclick="this.closest('[role=dialog]').remove()">OK</button></div></div></div></div>`);
                       },250);}
@@ -382,6 +382,129 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     await browser.close()
         asyncio.run(scenario())
 
+    def test_composer_without_hash_classes_uses_heading_and_action_roles(self):
+        """`_ac76` 缺失时，标题与主动作仍能靠 role + 可访问名推进两步。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content('''<div role="dialog">
+                      <div role="heading" id="heading">Crop</div>
+                      <div role="button" id="next" onclick="advance()">Next</div>
+                      <section id="media"></section></div>
+                      <script>let step=0;function advance(){step++;
+                        const h=document.getElementById('heading');
+                        if(step===1){h.textContent='Edit';}
+                        else{h.textContent='Create new post';
+                          document.getElementById('media').innerHTML=
+                            '<div contenteditable="true" role="textbox"></div>';}}
+                      </script>''')
+                    with tempfile.TemporaryDirectory() as folder:
+                        image = Path(folder)/'image.png'
+                        image.touch()
+                        app = InstagramUploader(
+                            'unused', title='caption', image_files=[image]
+                        )
+                        await app._advance_media_editor(
+                            page, budget=app.start_publish_budget()
+                        )
+                    self.assertEqual(
+                        await page.locator('[role=heading]').inner_text(),
+                        'Create new post',
+                    )
+                    self.assertEqual(
+                        await page.locator('[contenteditable=true][role=textbox]').count(),
+                        1,
+                    )
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
+    def test_prompt_dismisses_when_action_zone_hash_is_missing(self):
+        """动作区 hash 类名变化时，仍能关闭已识别的可选提示。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content('''<div role="dialog" id="notify">
+                      <img src="https://static.cdninstagram.com/rsrc/xxhdpi_launcher.png?test">
+                      <button>Turn On</button>
+                      <button onclick="document.getElementById('notify').remove()">Not Now</button>
+                      </div>''')
+                    notify = page.get_by_role('dialog')
+                    self.assertTrue(
+                        await InstagramUploader._dismiss_prompt(notify)
+                    )
+                    self.assertEqual(await page.get_by_role('dialog').count(), 0)
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
+    def test_create_entry_uses_icon_label_and_generic_file_input(self):
+        """导航顺序变化、素材 accept 不含 video 时，仍按图标 aria-label 打开创建。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content('''<a href="#"><span>Notifications</span></a>
+                      <a href="#" id="create" onclick="createPost()">
+                        <svg aria-label="New post" width="24" height="24"></svg></a>
+                      <a href="#"><span>Settings</span></a>
+                      <script>function createPost(){
+                        const dialog=document.createElement('div');
+                        dialog.setAttribute('role','dialog');
+                        dialog.innerHTML='<input type="file" accept="image/jpeg,image/png">'
+                          + '<div role="button">Next</div>';
+                        document.body.appendChild(dialog);
+                      }</script>''')
+                    with tempfile.TemporaryDirectory() as folder:
+                        image = Path(folder)/'image.png'
+                        image.touch()
+                        app = InstagramUploader(
+                            'unused', title='caption', image_files=[image]
+                        )
+                        await app._upload_files(
+                            page, budget=app.start_publish_budget()
+                        )
+                    self.assertEqual(
+                        await page.locator('[role=dialog] input[type=file]')
+                        .evaluate('e=>e.files.length'),
+                        1,
+                    )
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
+    def test_create_entry_prefers_label_inside_measured_nav_group(self):
+        """结构组仍是 4 个入口时，组内优先用 New post 标签，而不是盲取第二项。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    links = []
+                    for index in range(4):
+                        if index == 1:
+                            links.append(
+                                '<a class="_a6hd" href="#" id="create">'
+                                '<span aria-selected="false">'
+                                '<svg aria-label="New post"></svg></span></a>'
+                            )
+                        else:
+                            links.append(
+                                '<a class="_a6hd" href="#">'
+                                '<span aria-selected="false">nav</span></a>'
+                            )
+                    await page.set_content(''.join(links))
+                    entry = await _create_entry(page, budget=None)
+                    self.assertEqual(await entry.get_attribute('id'), 'create')
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
     def test_cover_waits_for_actual_preview_and_rejects_wrong_image(self):
         """真实 Chrome 中延迟替换预览，核对原图字节；错误预览必须停在编辑页。"""
         async def scenario():
@@ -403,7 +526,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                       <script>let step=0;function advance(){step++;
                         const h=document.querySelector('[role=heading]');
                         if(step===1){h.textContent='edit'; document.querySelector('#media').innerHTML=
-                          `<input type="file" accept="image/jpeg,image/png" onchange="coverChanged(this)">
+                          `<input type="file" accept="image/png,image/jpeg" onchange="coverChanged(this)">
                            <video></video><div style="background-image:url(old)"></div>`;
                         }else{h.textContent='compose';document.querySelector('#media').innerHTML+=
                           '<div contenteditable="true" role="textbox" data-lexical-editor="true"></div>';}}

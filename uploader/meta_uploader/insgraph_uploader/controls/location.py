@@ -36,9 +36,10 @@ if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchri
     from uploader.publish_timeout import PublishTimeoutBudget
 
 # 已实测入口（06 §2.4）：配文页创建弹窗内的 “Add location”。
-# 回退顺序固定：结构/placeholder → 中文 placeholder → aria-label，禁止全页定位。
+# 回退顺序固定：结构/name/placeholder → 中文 placeholder → aria-label，禁止全页定位。
 ENTRY_SELECTORS = (
     'input[placeholder="Add location"]',
+    'input[name="creation-location-input"]',
     'input[placeholder*="location" i]',
     'input[placeholder*="地点"]',
     'input[aria-label*="location" i]',

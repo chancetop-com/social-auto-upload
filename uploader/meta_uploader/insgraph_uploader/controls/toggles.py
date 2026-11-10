@@ -42,6 +42,13 @@ _SWITCH_TEXT_JS = """(el, labels) => {
   return false;
 }"""
 
+# 折叠状态的真值主要看内容是否可见；chevron 只作辅助，文案允许英文变体与中文。
+_UP_CHEVRON_SELECTOR = (
+    '[aria-label="Up chevron icon"], '
+    '[aria-label*="chevron" i][aria-label*="up" i], '
+    '[aria-label*="向上"]'
+)
+
 _READBACK_TIMEOUT_MS = 10_000
 _READBACK_INTERVAL_S = 0.1
 
@@ -156,7 +163,7 @@ class SwitchControl:
         if row is None:
             return False
         try:
-            return bool(await row.locator('[aria-label="Up chevron icon"]').count())
+            return bool(await row.locator(_UP_CHEVRON_SELECTOR).count())
         except Exception:
             return False
 

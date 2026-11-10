@@ -15,6 +15,10 @@ from .main import _open_instagram_page, instagram_identity, instagram_response_p
 _MENU_TIMEOUT_MS = 30_000
 _CONFIRM_TIMEOUT_MS = 60_000
 _DELETE_RESPONSE_TIMEOUT_MS = 60_000
+# 删除动作的可见文案：英文实测 + 中文回退；避免用菜单/确认框的固定下标。
+_DELETE_TEXT = re.compile(
+    r'^(Delete|Delete post|删除)$', re.IGNORECASE
+)
 
 
 def instagram_post_id(post_url: str) -> str:
@@ -77,8 +81,9 @@ async def instagram_post_action(account_file: Path, *, post_url: str, expected_t
             identity = await instagram_identity(page, account_file)
             result.update(await find_instagram_post(page, post_url=post_url, expected_text=expected_text, owner_id=identity['user_id']))
             if delete:
-                # 当前详情唯一的三圆点菜单按钮含 aria-haspopup=dialog；评论表情菜单不含 circle，
-                # 该结构已在中英文照片、轮播、Reel 详情观察，避免翻译后的 aria-label。
+                # 当前详情唯一的三圆点菜单按钮含 aria-haspopup=dialog 与 svg circle；评论表情
+                # 菜单不含 circle。该结构已在中英文照片、轮播、Reel 详情观察。找不到即失败关闭：
+                # 不用 “More options” 文案兜底，避免命中评论的溢出菜单后误删评论。
                 menu_button = page.locator('[role="button"][aria-haspopup="dialog"]').filter(has=page.locator('svg circle'))
                 await expect(menu_button).to_have_count(1)
                 await menu_button.click()
@@ -86,24 +91,26 @@ async def instagram_post_action(account_file: Path, *, post_url: str, expected_t
                 buttons = menu.get_by_role('button')
                 # 实测 2026-11 菜单项由 8 项增至 9 项（Instagram 新增条目），不再按数量/下标定位：
                 # 只在菜单里找文案精确等于“删除”的项，找不到就报错，绝不猜其他条目。
-                delete_item = buttons.filter(
-                    has_text=re.compile(r'^(Delete|Delete post|删除)$')
-                )
+                delete_item = buttons.filter(has_text=_DELETE_TEXT)
                 await expect(delete_item).to_have_count(1, timeout=_MENU_TIMEOUT_MS)
                 # 实测鼠标激活有时只关闭弹出菜单；该 role=button 支持 Enter，键盘激活正常进入确认框。
                 await delete_item.first.press('Enter')
-                # 确认框是带标题的模态 dialog，只有删除、取消两项，删除固定在首位。
-                # 与前一菜单严格区分；不把菜单关闭当成已删除。
+                # 确认框是带标题的模态 dialog，只有删除、取消两项。删除按钮必须按文案
+                # 精确命中；文案缺失时失败关闭，绝不按首位猜测，避免重排后误点取消。
                 confirm = page.locator('[role="dialog"][aria-modal="true"]').filter(has=page.get_by_role('heading'))
                 await expect(confirm).to_have_count(1, timeout=_CONFIRM_TIMEOUT_MS)
                 confirm_buttons = confirm.get_by_role('button')
                 await expect(confirm_buttons).to_have_count(2)
+                delete_confirm = confirm_buttons.filter(has_text=_DELETE_TEXT)
+                await expect(delete_confirm).to_have_count(
+                    1, timeout=_CONFIRM_TIMEOUT_MS
+                )
                 result['status'] = 'deletion_unknown'
                 result_file.parent.mkdir(parents=True, exist_ok=True)
                 result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
                 target = f"/api/v1/web/create/{result['content_id']}/delete/"
                 async with page.expect_response(lambda r: urlparse(r.url).path == target and r.request.method == 'POST', timeout=_DELETE_RESPONSE_TIMEOUT_MS) as event:
-                    await confirm_buttons.nth(0).press('Enter')
+                    await delete_confirm.press('Enter')
                 payload = instagram_response_payload(await (await event.value).text())
                 if payload.get('payload', {}).get('did_delete') is not True:
                     raise RuntimeError('Instagram 未确认目标作品删除成功')

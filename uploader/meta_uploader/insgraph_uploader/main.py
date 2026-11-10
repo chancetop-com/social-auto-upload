@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -50,10 +51,39 @@ from utils.errors import LoginRequiredError, PublishResultUnknownError
 INSTAGRAM_HOME_URL = "https://www.instagram.com/"
 # 未配置环境变量或 --proxy 时使用系统直连。
 INSTAGRAM_PROXY = os.environ.get("SAU_INSTAGRAM_PROXY")
-# 创建弹窗实际 accept 同时含照片与 MP4，此属性限定素材入口，排除编辑阶段的封面 input。
-INSTAGRAM_MEDIA_INPUT = 'input[type="file"][accept*="video/mp4"]'
+# 创建弹窗在选素材阶段只有一个 file input（编辑页的封面 input 此时尚未挂载）。
+# 用类型定位而不是 accept 文案顺序，避免 accept 改成仅 quicktime/仅图片时失效。
+INSTAGRAM_MEDIA_INPUT = 'input[type="file"]'
 # _ac76 是已观察中/英文裁剪、编辑、配文页共用的向导标题栏组件；主动作不含 SVG，返回按钮含 SVG。
 INSTAGRAM_PRIMARY_ACTION = '._ac76 [role="button"]:not(:has(svg))'
+# hash 组件缺失时按标题栏动作的可访问名回退；英文为主，中文回退。
+INSTAGRAM_PRIMARY_ACTION_NAME = re.compile(
+    r'^(Next|Share|Post|下一步|分享|发布)$', re.IGNORECASE
+)
+INSTAGRAM_COMPOSER_HEADING = '._ac76 [role="heading"]'
+# 可选提示的明确关闭文案；未命中时退回对话框最后一个按钮。
+PROMPT_DISMISS_TEXT = re.compile(
+    r'^(Not Now|Not now|Later|OK|Got it|Continue|以后再说|稍后|暂不|知道了|好的|关闭|取消)$',
+    re.IGNORECASE,
+)
+# 配文页独有 Lexical 编辑器；data-lexical-editor 缺失时仍可凭 contenteditable+textbox 回退。
+INSTAGRAM_CAPTION_EDITOR = (
+    '[contenteditable="true"][role="textbox"][data-lexical-editor="true"]'
+)
+INSTAGRAM_CAPTION_EDITOR_FALLBACK = '[contenteditable="true"][role="textbox"]'
+# 视频编辑页的封面入口只接受图片，且 accept 顺序不保证；按“含图片、不含视频”定位，
+# 并保留精确 accept 顺序作为旧版回退。
+INSTAGRAM_COVER_INPUT = (
+    'input[type="file"][accept*="image/jpeg"]:not([accept*="video"])'
+)
+INSTAGRAM_COVER_INPUT_FALLBACK = 'input[type="file"][accept="image/jpeg,image/png"]'
+# 并集同时等待两种写法；CSS 会去重，同一元素只计一次，数量哨兵仍有效。
+INSTAGRAM_COVER_INPUTS = (
+    f'{INSTAGRAM_COVER_INPUT}, {INSTAGRAM_COVER_INPUT_FALLBACK}'
+)
+# 创建入口优先按导航图标的 aria-label（可访问名，属于结构/role 层）定位；
+# 旧版无 aria-label 时保留实测的下标回退。不含 Story 文案：本轮不支持 Story。
+INSTAGRAM_CREATE_ENTRY_LABELS = ('New post', 'Create', '新帖子', '创建')
 
 INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS = 20_000
 INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS = 8_000
@@ -121,6 +151,116 @@ def _proxy_options(proxy: str | None) -> dict[str, str] | None:
     address = (INSTAGRAM_PROXY if proxy is None else proxy) or ""
     address = address.strip()
     return {"server": address} if address else None
+
+
+async def _first_present(primary: Locator, fallback: Locator) -> Locator:
+    """返回首个已挂载的候选 locator；未挂载时返回 fallback。
+
+    返回的是未取 ``.first`` 的 locator：调用方的 ``to_have_count(1)`` 仍是
+    真实的漂移哨兵，多匹配会失败而不是静默选中第一个。
+    """
+    try:
+        if await primary.count():
+            return primary
+    except Exception:
+        pass
+    return fallback
+
+
+async def _composer_heading(dialog: Locator) -> Locator:
+    """返回向导标题；hash 组件缺失时退回 role=heading。"""
+    return await _first_present(
+        dialog.locator(INSTAGRAM_COMPOSER_HEADING),
+        dialog.get_by_role('heading'),
+    )
+
+
+async def _primary_action(dialog: Locator) -> Locator:
+    """返回向导主动作；hash 组件缺失时按 Next/Share 的可访问名回退。"""
+    return await _first_present(
+        dialog.locator(INSTAGRAM_PRIMARY_ACTION),
+        dialog.get_by_role('button', name=INSTAGRAM_PRIMARY_ACTION_NAME),
+    )
+
+
+async def _caption_editor(dialog: Locator) -> Locator:
+    """返回配文编辑器；Lexical 标记缺失时退回 contenteditable 文本框。"""
+    return await _first_present(
+        dialog.locator(INSTAGRAM_CAPTION_EDITOR),
+        dialog.locator(INSTAGRAM_CAPTION_EDITOR_FALLBACK),
+    )
+
+
+async def _create_entry(page: Page, *, budget: PublishTimeoutBudget | None) -> Locator:
+    """返回首页“创建”导航入口。
+
+    优先级遵循 spec §4.4：先结构（已实测的四个导航弹出入口），在结构组内用
+    aria-label 消歧，最后才按实测下标取第二项。结构组数量变化时，才退到页面
+    级的 aria-label（英文/中文）；仍找不到则保留原有数量断言，明确报告漂移。
+    """
+    navigation_popups = page.locator('a._a6hd[href="#"]').filter(
+        has=page.locator('[aria-selected]')
+    )
+    timeout_ms = budget.clamp_ms(30_000) if budget else 30_000
+    try:
+        if await navigation_popups.count() == 4:
+            for label in INSTAGRAM_CREATE_ENTRY_LABELS:
+                candidate = navigation_popups.filter(
+                    has=page.locator(f'svg[aria-label="{label}" i]')
+                )
+                if await candidate.count():
+                    return candidate
+            # 实测顺序：通知、创建、设置、Meta；结构组未变时创建是第二项。
+            return navigation_popups.nth(1)
+    except Exception:
+        pass
+    for label in INSTAGRAM_CREATE_ENTRY_LABELS:
+        candidate = page.locator(
+            f'a[href="#"]:has(svg[aria-label="{label}" i])'
+        )
+        try:
+            if await candidate.count():
+                return candidate
+        except Exception:
+            continue
+    await expect(navigation_popups).to_have_count(4, timeout=timeout_ms)
+    return navigation_popups.nth(1)
+
+
+async def _media_input(dialog: Locator) -> Locator:
+    """按优先级返回创建弹窗的素材入口。
+
+    先认视频/多选这两个实测属性；accept 或 multiple 变化时退回任意 file input。
+    返回具体选择器而不是 ``.first``，让调用方的 ``to_have_count(1)`` 保持哨兵作用。
+    """
+    for selector in (
+        'input[type="file"][accept*="video/"]',
+        'input[type="file"][multiple]',
+        INSTAGRAM_MEDIA_INPUT,
+    ):
+        candidate = dialog.locator(selector)
+        try:
+            if await candidate.count():
+                return candidate
+        except Exception:
+            continue
+    return dialog.locator(INSTAGRAM_MEDIA_INPUT)
+
+
+async def _own_profile_link(page: Page) -> Locator:
+    """返回当前用户导航主页；导航选中容器缺失时退回头像 alt 文案。"""
+    return await _first_present(
+        page.locator('a[href]').filter(
+            has=page.locator('[aria-selected] img')
+        ),
+        # 只在导航区域内退回头像 alt，避免命中动态流里其他用户的头像。
+        page.locator('nav a[href], [role="navigation"] a[href]').filter(
+            has=page.locator(
+                'img[alt*="profile picture" i], img[alt*="profile photo" i], '
+                'img[alt*="头像"]'
+            )
+        ),
+    )
 
 
 async def _open_instagram_page(
@@ -210,7 +350,7 @@ async def _multilogin_identity(page: Page, context: BrowserContext) -> dict:
     user_ids = {c["value"] for c in cookies if c.get("name") == "ds_user_id"}
     if len(user_ids) != 1:
         raise RuntimeError("Instagram 当前会话缺少唯一用户 ID")
-    own_profile = page.locator('a[href]').filter(has=page.locator('[aria-selected] img'))
+    own_profile = await _own_profile_link(page)
     await expect(own_profile).to_have_count(1)
     href = await own_profile.get_attribute('href')
     username = urlparse(href).path.strip('/')
@@ -229,7 +369,7 @@ async def instagram_identity(page: Page, account_file: Path) -> dict:
     if len(expected) != 1 or current != expected:
         raise RuntimeError("Instagram 当前登录用户与账号文件绑定的用户 ID 不匹配")
     # 当前用户导航头像位于 aria-selected 图标容器中；动态流和推荐头像没有导航选中状态。
-    own_profile = page.locator('a[href]').filter(has=page.locator('[aria-selected] img'))
+    own_profile = await _own_profile_link(page)
     await expect(own_profile).to_have_count(1)
     href = await own_profile.get_attribute('href')
     username = urlparse(href).path.strip('/')
@@ -369,18 +509,31 @@ class InstagramUploader:
         return self._publish_budget
 
     def _notification_prompt(self, page: Page) -> Locator:
-        """已知的 “Turn on Notifications” 提示：固定图标 + ``_a9-z`` 动作区。
+        """已知的通知提示：launcher 图标 + 对话框。
 
         提示可能在点击创建**之后**才出现（实测 2026-11-10），因此整个上传流程都
         注册 locator handler，并在等待创建弹窗时主动轮询关闭，避免它挡住裁剪页。
+        图标只按文件名片段匹配，不绑定 /images/instagram 的完整路径。
         """
         return page.get_by_role('dialog').filter(
-            has=page.locator('img[src^="/images/instagram/xig/ico/xxhdpi_launcher.png"]'))
+            has=page.locator('img[src*="launcher.png"]'))
 
     @staticmethod
-    def _notification_dismiss(notifications: Locator) -> Locator:
-        """提示动作区第二个按钮才是关闭（实测第一个是 “Turn On”）。"""
-        return notifications.locator('._a9-z > button').nth(1)
+    async def _dismiss_prompt(prompt: Locator) -> bool:
+        """关闭已识别的可选提示。
+
+        通知提示是 “Turn On / Not Now”，Reels 介绍是 “Learn more / OK”：
+        优先按明确的关闭文案，文案未命中时才退回“最后一个按钮”。两种结构里
+        关闭动作都在最后，因此不依赖动作区 ``_a9-z`` hash 类名或固定 ``nth(1)``。
+        """
+        # 提示可能比调用点晚几百毫秒挂载：不要预先 count() 判缺席，
+        # 交给 _dismiss_optional_prompt 的 visible 等待窗口。
+        labeled = prompt.get_by_role('button', name=PROMPT_DISMISS_TEXT)
+        if await labeled.count() == 1:
+            return await _dismiss_optional_prompt(prompt, labeled)
+        return await _dismiss_optional_prompt(
+            prompt, prompt.get_by_role('button').last
+        )
 
     async def _register_notification_handler(self, page: Page) -> Locator:
         """注册覆盖整个发布流程的通知提示 handler，返回提示 locator 供轮询复用。
@@ -392,9 +545,7 @@ class InstagramUploader:
         notifications = self._notification_prompt(page)
         await page.add_locator_handler(
             notifications,
-            lambda: _dismiss_optional_prompt(
-                notifications, self._notification_dismiss(notifications)
-            ),
+            lambda: self._dismiss_prompt(notifications),
         )
         return notifications
 
@@ -404,23 +555,19 @@ class InstagramUploader:
         # handler 由 _upload_steps 注册并覆盖后续阶段；这里只复用同一个 locator
         # 主动轮询，不能在此移除 handler，否则编辑与配文阶段失去保护。
         notifications = self._notification_prompt(page)
-        # 中英文首页均观察到这四个导航弹出入口，依次为通知、创建、设置、Meta。
-        # 先断言完整组和各入口含 aria-selected 图标再取业务顺序第二项，避免全页任意 nth。
-        navigation_popups = page.locator('a._a6hd[href="#"]').filter(has=page.locator('[aria-selected]'))
         dialog = page.get_by_role('dialog')
-        file_input = dialog.locator(INSTAGRAM_MEDIA_INPUT)
-        await expect(navigation_popups).to_have_count(
-            4, timeout=budget.clamp_ms(30_000)
+        entry = await _create_entry(page, budget=budget)
+        await expect(entry).to_have_count(
+            1, timeout=budget.clamp_ms(30_000)
         )
-        await navigation_popups.nth(1).click()
+        await entry.click()
         # 创建弹窗可能被延迟出现的通知提示遮挡：轮询期间主动关闭已知提示，
         # 直到素材入口真的可操作；只有超时才报错，不添加固定等待。
         deadline = time.monotonic() + budget.clamp_ms(30_000) / 1000
         while True:
             if await notifications.count():
-                await _dismiss_optional_prompt(
-                    notifications, self._notification_dismiss(notifications)
-                )
+                await self._dismiss_prompt(notifications)
+            file_input = await _media_input(dialog)
             if await file_input.count():
                 break
             if time.monotonic() >= deadline:
@@ -437,13 +584,14 @@ class InstagramUploader:
         paths = [self.video_file] if self.video_file else self.image_files
         await file_input.set_input_files([str(p.resolve()) for p in paths])
         if self.video_file:
-            # 实际 Reels 介绍使用 reels_nux_icon；动作区“了解更多”位于 span 中，
-            # 确认按钮直接位于 div 中，按局部父子关系区分，不依赖语言与样式散列。
+            # 实际 Reels 介绍使用 reels_nux_icon；只按素材名片段识别，关闭动作复用
+            # “对话框最后一个按钮”，不依赖语言、hash 类名或父子层级。
             reels_intro = page.get_by_role('dialog').filter(
-                has=page.locator('img[src^="/images/instagram/clips/reels_nux_icon.png"]'))
-            await _dismiss_optional_prompt(reels_intro, reels_intro.locator('._a9-z div > button'))
+                has=page.locator('img[src*="reels_nux"]'))
+            await self._dismiss_prompt(reels_intro)
         # 裁剪标题栏主动作实际出现，才可推进；上传失败或未知弹窗阻断会保留现场并报错。
-        await expect(dialog.locator(INSTAGRAM_PRIMARY_ACTION)).to_have_count(
+        action = await _primary_action(dialog)
+        await expect(action).to_have_count(
             1, timeout=budget.clamp_ms(60_000)
         )
 
@@ -451,12 +599,13 @@ class InstagramUploader:
         """裁剪、编辑两步各等待标题改变，最终以 Lexical 配文输入框确认。"""
         # 同一个创建弹窗标题栏存在于三个阶段；局部主动作不含图标，排除返回和媒体工具按钮。
         dialog = page.get_by_role('dialog')
-        heading = dialog.locator('._ac76 [role="heading"]')
+        heading = await _composer_heading(dialog)
         for step in range(2):
             budget.check_pre_click()
             if step == 1 and self.thumbnail:
-                # 实际视频编辑弹窗中，精确 JPEG/PNG accept 是独立封面入口，排除初始视频素材 input。
-                cover = dialog.locator('input[type="file"][accept="image/jpeg,image/png"]')
+                # 视频编辑弹窗里封面入口只接受图片；并集同时等待“含图片、不含视频”
+                # 与实测精确顺序两种写法，避免入口晚挂载时一次性回退到旧选择器。
+                cover = dialog.locator(INSTAGRAM_COVER_INPUTS)
                 # 主预览的 video 紧邻封面背景层；右侧视频帧条也有背景图，不能拿帧条验证封面。
                 poster = dialog.locator('video + div[style*="background-image"]')
                 await expect(cover).to_have_count(
@@ -489,7 +638,7 @@ class InstagramUploader:
                 1, timeout=budget.clamp_ms(30_000)
             )
             previous = await heading.inner_text()
-            action = dialog.locator(INSTAGRAM_PRIMARY_ACTION)
+            action = await _primary_action(dialog)
             await expect(action).to_have_count(
                 1, timeout=budget.clamp_ms(30_000)
             )
@@ -500,8 +649,10 @@ class InstagramUploader:
             await expect(heading).not_to_have_text(
                 previous, timeout=budget.clamp_ms(60_000)
             )
-        # data-lexical-editor 标识真实正文编辑器，限定当前创建弹窗，排除评论输入框。
-        await expect(dialog.locator('[contenteditable="true"][role="textbox"][data-lexical-editor="true"]')).to_have_count(
+        # data-lexical-editor 标识真实正文编辑器；缺失时退回 contenteditable 文本框，
+        # 仍限定当前创建弹窗，避免命中评论输入框。
+        editor = await _caption_editor(dialog)
+        await expect(editor).to_have_count(
             1, timeout=budget.clamp_ms(30_000)
         )
 
@@ -636,9 +787,9 @@ class InstagramUploader:
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
     ) -> None:
         """先登记最终响应监听再分享，响应不明时记录 unknown 且不重发。"""
-        # 配文页独有 Lexical 编辑器；标题栏唯一主动作此时是分享，不使用翻译后的按钮名称。
+        # 配文页独有 Lexical 编辑器；标题栏唯一主动作此时是分享。
         dialog = page.get_by_role('dialog')
-        editor = dialog.locator('[contenteditable="true"][role="textbox"][data-lexical-editor="true"]')
+        editor = await _caption_editor(dialog)
         caption = self._caption()
         await editor.fill(caption)
         await expect(editor).to_have_text(
@@ -649,7 +800,7 @@ class InstagramUploader:
             # 未请求时保持既有 stage（legacy 失败证据不变）。
             self.stage = 'options'
         await self._apply_options(page, budget=budget)
-        action = dialog.locator(INSTAGRAM_PRIMARY_ACTION)
+        action = await _primary_action(dialog)
         await expect(action).to_have_count(
             1, timeout=budget.clamp_ms(30_000)
         )

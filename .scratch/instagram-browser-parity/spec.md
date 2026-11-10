@@ -167,8 +167,8 @@ sau instagram upload-note --account creator --images 1.jpg 2.jpg --title "标题
 |---|---|
 | 阶段 | 配文页 |
 | 主选择器（已实测） | `input[placeholder="Add location"]` |
-| 回退（候选） | `input[placeholder*="location" i]`、`input[placeholder*="地点"]`、`input[aria-label*="location" i]` |
-| 联想列表（候选） | `[role="option"]`，先 dialog 内，再页面/portal 根；按 role 匹配，不按标签名 |
+| 回退（候选） | `input[name="creation-location-input"]`（实测 DOM 结构属性）、`input[placeholder*="location" i]`、`input[placeholder*="地点"]`、`input[aria-label*="location" i]` |
+| 联想列表（已实测） | 真实 DOM **没有** `[role="option"]`：portal 滚动容器挂页面根，候选是普通 `div` 行；从输入框出发按几何（下方 520px 内、行高 40–80px、宽 >200px）枚举，再按精确文本选中 |
 | 交互 | 填入地点 → 等待列表 → 规范化精确匹配 → 点击唯一候选 |
 | 回读 | 输入框 `value`；为空时读已选 chip 文本（候选，DOM 用例固定） |
 | 规范化 | `" ".join(text.split()).casefold()`；大小写、首尾/连续空白不敏感 |
@@ -188,19 +188,19 @@ sau instagram upload-note --account creator --images 1.jpg 2.jpg --title "标题
 |---|---|
 | 阶段 | 配文页 |
 | 入口（已实测） | `Accessibility` 按钮/行（英文；中文回退「无障碍」/「替代文字」） |
-| 输入（已实测） | 模态框内 `input[placeholder="Alt text"]`，2 图轮播观察到 2 个 |
-| 回退（候选） | `input[placeholder*="alt" i]`、`textarea[placeholder*="alt" i]`、`input[aria-label*="alt" i]` |
-| 交互 | 打开模态框 → 断言输入框数量 = 图片数 N → 按图片顺序逐张 `fill` → 关闭 |
-| 回读 | 重新打开模态框，读取 N 个输入框的值，按顺序比较 |
+| 输入（已实测） | 行内折叠区内 `input[aria-label="Alt text"]` / `input[placeholder="Alt text"]`，2 图轮播观察到 2 个 |
+| 回退（候选） | `input[aria-label*="alt" i]`、`input[placeholder*="alt" i]`、`textarea[aria-label*="alt" i]`、`textarea[placeholder*="alt" i]`、中文「替代文字」 |
+| 交互 | 展开 `Accessibility` 行内折叠区 → 断言输入框数量 = 图片数 N → 按图片顺序逐张 `fill` 并 blur → 再次激活该行收起 |
+| 回读 | 收起后重新展开，读取 N 个输入框的值，按顺序比较 |
 | 数量不符 | 0 个 → `unsupported` + `entry_missing`；1..N-1 个 → `mismatch`（入口存在但无法表达全部图片），退出 1 |
 | 长度 | 每条 1–1000，已在 §3.3 静态校验；运行时不再截断 |
-| 关闭动作 | 模态框内主按钮（`Done` / `Save` / `完成`），限定 modal；找不到则以 `mismatch` 失败 |
+| 关闭动作 | 再次激活 `Accessibility` 折叠行（实测无 `Done`/`Save` 按钮）；收不起来 → `mismatch`，退出 1 |
 
 实现细节：
 
 - `--alt-text` 只在 `upload-note` 注册；视频命令即使手写该 flag 也由 argparse 拒绝。
 - 单图 = 1 条；轮播 = N 条；顺序严格对应 `--images` 顺序。
-- 回读必须重新打开模态框；不能以“填进去时的输入框值”代替回读。
+- 回读必须收起后重新展开折叠区；不能以“填进去时的输入框值”代替回读。
 - 图片数 N 从 `self.image_files` 取，不用 DOM 猜测。
 
 #### 4.3.3 关闭评论
