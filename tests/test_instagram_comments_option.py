@@ -190,13 +190,14 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
     def test_ineligible_but_already_off_is_default_off(self):
         with tempfile.TemporaryDirectory() as folder:
             app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            control = _FakeCommentsControl(presence="ineligible")
+            control = _FakeCommentsControl(presence="ineligible", values=[False])
             self._apply(app, {"comments": control})
-            self.assertEqual(control.calls, ["resolve"])
+            # 入口不可用时仍回读实际状态：spec §5.2 该行 applied=false。
+            self.assertEqual(control.calls, ["resolve", "read"])
             record = app.result["options"]["comments"]
             self.assertEqual(record["status"], DEFAULT_OFF)
             self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
-            self.assertIsNone(record["applied"])
+            self.assertIs(record["applied"], False)
 
     def test_not_requested_touches_no_control(self):
         with tempfile.TemporaryDirectory() as folder:

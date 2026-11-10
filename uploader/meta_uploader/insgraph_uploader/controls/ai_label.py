@@ -13,6 +13,8 @@ from .toggles import SwitchControl
 if TYPE_CHECKING:  # 仅用于类型标注，纯逻辑测试不构造浏览器类型。
     from patchright.async_api import Page
 
+    from uploader.publish_timeout import PublishTimeoutBudget
+
 # 英文优先、中文回退；与 spec §4.3.4 的回退顺序一致。
 AI_LABEL_TEXTS = ("Add AI label", "AI label", "AI 标签", "添加 AI 标签")
 
@@ -24,7 +26,9 @@ class AiLabelControl(SwitchControl):
     等待收紧到剩余发布预算。
     """
 
-    def __init__(self, page: 'Page', *, budget: object | None = None) -> None:
+    def __init__(
+        self, page: 'Page', *, budget: 'PublishTimeoutBudget | None' = None
+    ) -> None:
         super().__init__(
             page,
             labels=AI_LABEL_TEXTS,

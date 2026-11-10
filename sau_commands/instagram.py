@@ -125,7 +125,7 @@ def _add_comments_flag(parser) -> None:
     parser.add_argument(
         "--no-comments",
         action="store_true",
-        help="Turn off commenting; omit to leave the page default",
+        help="请求关闭评论（Turn off commenting）；不传则不动页面默认",
     )
 
 
@@ -137,14 +137,14 @@ def _add_ai_generated_flags(parser) -> None:
         dest="ai_generated",
         action="store_const",
         const=True,
-        help="Request the Add AI label switch be turned on; omit to leave the page default",
+        help="请求开启 AI 生成标识（Add AI label）；不传则不动页面默认",
     )
     group.add_argument(
         "--no-ai-generated",
         dest="ai_generated",
         action="store_const",
         const=False,
-        help="Request the Add AI label switch be turned off; omit to leave the page default",
+        help="请求关闭 AI 生成标识（--no-ai-generated）；不传则不动页面默认",
     )
 
 

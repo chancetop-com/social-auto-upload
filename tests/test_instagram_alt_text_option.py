@@ -24,7 +24,9 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     UNSUPPORTED,
     InstagramPublishOptions,
     OptionMismatchError,
+    validate_publish_options,
 )
+from utils.errors import UsageError
 
 
 class InstagramAltTextParserTests(unittest.TestCase):
@@ -139,6 +141,22 @@ class _FakeAltTextControl:
     async def set(self, requested):
         self.calls.append('set')
         self.sets.append(list(requested))
+
+
+    def test_whitespace_only_alt_text_exits_2(self):
+        """ticket 14：去空白后长度为 0 同样非法，不能把纯空白填进页面。"""
+        with self.assertRaises(UsageError):
+            validate_publish_options(
+                InstagramPublishOptions(alt_texts=('   ',)),
+                image_count=1,
+                caption='caption',
+            )
+        with self.assertRaises(UsageError):
+            validate_publish_options(
+                InstagramPublishOptions(alt_texts=('ok', '  ')),
+                image_count=2,
+                caption='caption',
+            )
 
 
 class InstagramAltTextPipelineTests(unittest.TestCase):

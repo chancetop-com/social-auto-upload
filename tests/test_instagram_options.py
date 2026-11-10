@@ -6,6 +6,7 @@ import contextlib
 import io
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -401,12 +402,14 @@ class InstagramOptionPipelineTests(unittest.TestCase):
     def test_toggle_ineligible_but_satisfied_is_default_off(self):
         with tempfile.TemporaryDirectory() as folder:
             app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            control = _FakeControl([], presence='ineligible')
+            control = _FakeControl([False], presence='ineligible')
             self._apply(app, {'comments': control})
             record = app.result['options']['comments']
             self.assertEqual(record['status'], DEFAULT_OFF)
             self.assertEqual(record['reason'], ACCOUNT_INELIGIBLE)
-            self.assertEqual(control.interactions, ['resolve'])
+            # 不可用但可读时仍记录实际状态（spec §5.2 applied 列）。
+            self.assertIs(record['applied'], False)
+            self.assertEqual(control.interactions, ['resolve', 'read'])
 
     def test_set_then_matching_readback_records_set(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -496,6 +499,28 @@ class InstagramOptionPipelineTests(unittest.TestCase):
             self.assertEqual(app.result['options']['location']['status'], MISMATCH)
             # 单项失败不阻止后续项继续尝试。
             self.assertEqual(comments.interactions, ['resolve', 'read'])
+
+    def test_spent_budget_aborts_before_later_options(self):
+        """B12：预算耗尽属于硬异常，立即中止，不再处理后续选项。"""
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(location='Shanghai', comments=False),
+                folder=folder,
+            )
+            budget = app.start_publish_budget()
+            budget.deadline = time.monotonic() - 1
+            location = _FakeControl(['Shanghai', 'Shanghai'])
+            comments = _FakeControl([False])
+            with self.assertRaisesRegex(RuntimeError, '15 分钟'):
+                asyncio.run(
+                    app._apply_options(
+                        page=None, budget=budget,
+                        controls={'location': location, 'comments': comments},
+                    )
+                )
+            # 首个选项的预算检查在控件交互前就已中止。
+            self.assertEqual(location.interactions, [])
+            self.assertEqual(comments.interactions, [])
 
     def test_failure_capture_keeps_options(self):
         with tempfile.TemporaryDirectory() as folder:

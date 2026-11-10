@@ -184,6 +184,7 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 self._apply(app, {"ai_generated": control})
             self.assertIn("ai_generated=unsupported(entry_missing)", str(ctx.exception))
+            # 入口缺失时无从回读，只允许一次 resolve。
             self.assertEqual(control.calls, ["resolve"])
             self.assertEqual(
                 app.result["options"]["ai_generated"],
@@ -204,7 +205,8 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
             self.assertIn(
                 "ai_generated=unsupported(account_ineligible)", str(ctx.exception)
             )
-            self.assertEqual(control.calls, ["resolve"])
+            # 不可用时仍回读实际状态；请求 on 依然按 unsupported 失败。
+            self.assertEqual(control.calls, ["resolve", "read"])
             self.assertEqual(
                 app.result["options"]["ai_generated"],
                 {

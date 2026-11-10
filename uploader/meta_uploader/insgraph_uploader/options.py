@@ -87,6 +87,12 @@ def normalize_text(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+def clamp_wait(budget: object | None, default_ms: int) -> int:
+    """有发布预算时把单步等待收紧到剩余预算，否则用控件默认值。"""
+    clamp = getattr(budget, "clamp_ms", None)
+    return int(clamp(default_ms)) if callable(clamp) else default_ms
+
+
 def location_matches(requested: object, applied: object) -> bool:
     """规范化后精确相等；回读缺失或非字符串一律不匹配。"""
     if not isinstance(requested, str) or not isinstance(applied, str):
@@ -244,7 +250,8 @@ def validate_publish_options(
                 "（必须为 0 条或与图片张数一致）"
             )
         for index, text in enumerate(alt_texts, start=1):
-            length = len(text) if isinstance(text, str) else 0
+            # ticket 14：按“去空白后”的长度判定；空串/纯空白都非法，且不截断。
+            length = len(text.strip()) if isinstance(text, str) else 0
             if not 1 <= length <= MAX_ALT_TEXT_LENGTH:
                 raise UsageError(
                     f"Instagram 第 {index} 条替代文字长度不合法：{length} 字符"

@@ -12,10 +12,19 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 
 from patchright.async_api import expect
 
-from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError, normalize_text
+from ..options import (
+    INELIGIBLE,
+    MISSING,
+    PRESENT,
+    OptionMismatchError,
+    clamp_wait,
+    normalize_text,
+)
 
 if TYPE_CHECKING:  # 仅用于类型标注，纯逻辑测试不构造浏览器类型。
     from patchright.async_api import Locator, Page
+
+    from uploader.publish_timeout import PublishTimeoutBudget
 
 # 开关优先取 input[role=switch]（实测结构），再回退 div[role=switch]/checkbox。
 _SWITCH_SELECTORS = ('input[role="switch"]', '[role="switch"]', '[role="checkbox"]')
@@ -27,12 +36,6 @@ _ROW_TEXT_JS = (
 
 _READBACK_TIMEOUT_MS = 10_000
 _READBACK_INTERVAL_S = 0.1
-
-
-def _timeout_ms(budget: object | None, default_ms: int = _READBACK_TIMEOUT_MS) -> int:
-    """有预算时把等待收紧到剩余总预算，否则用控件默认超时。"""
-    clamp = getattr(budget, "clamp_ms", None)
-    return int(clamp(default_ms)) if callable(clamp) else default_ms
 
 
 async def _switch_checked(switch: 'Locator') -> bool | None:
@@ -50,7 +53,7 @@ def disclosure_panel(
     page: 'Page',
     labels: tuple[str, ...],
     *,
-    budget: object | None = None,
+    budget: 'PublishTimeoutBudget | None' = None,
 ) -> Callable[[], Awaitable[None]]:
     """构造展开折叠区块（如 ``Advanced settings``）的零参异步函数。
 
@@ -78,7 +81,7 @@ def disclosure_panel(
                 return
             try:
                 await expect(target).to_have_attribute(
-                    "aria-expanded", "true", timeout=_timeout_ms(budget)
+                    "aria-expanded", "true", timeout=clamp_wait(budget, _READBACK_TIMEOUT_MS)
                 )
             except Exception:
                 # 只切换内容、不回写 aria-expanded 的实现同样继续往下走。
@@ -103,7 +106,7 @@ class SwitchControl:
         labels: tuple[str, ...],
         panel: Callable[[], Awaitable[None]] | None = None,
         invert: bool = False,
-        budget: object | None = None,
+        budget: 'PublishTimeoutBudget | None' = None,
     ) -> None:
         if not labels:
             raise ValueError("SwitchControl 至少需要一个文案回退")
@@ -184,7 +187,7 @@ class SwitchControl:
         await self._wait_readback(requested)
 
     async def _wait_readback(self, requested: bool) -> None:
-        deadline = time.monotonic() + _timeout_ms(self._budget) / 1000
+        deadline = time.monotonic() + clamp_wait(self._budget, _READBACK_TIMEOUT_MS) / 1000
         applied: bool | None = None
         while True:
             try:

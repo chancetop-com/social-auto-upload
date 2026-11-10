@@ -19,6 +19,7 @@ from ..options import (
     MISSING,
     PRESENT,
     OptionMismatchError,
+    clamp_wait,
     location_matches,
     normalize_text,
 )
@@ -62,7 +63,7 @@ class LocationControl:
 
     def _timeout(self, default_ms: int) -> int:
         """有预算时把单步等待收紧到剩余总预算。"""
-        return self._budget.clamp_ms(default_ms) if self._budget is not None else default_ms
+        return clamp_wait(self._budget, default_ms)
 
     async def _entry(self, timeout_ms: int) -> Locator | None:
         """按回退顺序返回第一个可见入口；全部缺席返回 None。"""
@@ -107,11 +108,12 @@ class LocationControl:
             # resolve() 已断言入口存在；此处只防御竞态，避免误填其他输入框。
             raise RuntimeError('Instagram 地点入口不可用')
         options = await self._type_and_wait(entry, requested)
-        labels = await self._labels(options)
-        chosen = self._exact_index(requested, labels)
+        entries = await self._entries(options)
+        chosen = self._exact_entry(requested, entries)
         if chosen is None:
             raise OptionMismatchError(
-                self._mismatch_message(requested, labels), applied=None
+                self._mismatch_message(requested, [label for _, label in entries]),
+                applied=None,
             )
         index, label = chosen
         await options.nth(index).click()
@@ -150,22 +152,28 @@ class LocationControl:
             return dialog_options
         return page_options
 
-    async def _labels(self, options: Locator | None) -> list[str]:
-        """按 DOM 顺序读取候选标签（空白折叠）；上限防止异常长列表。"""
+    async def _entries(self, options: Locator | None) -> list[tuple[int, str]]:
+        """按 DOM 顺序返回 ``(原始下标, 空白折叠标签)``，空标签项不参与匹配。
+
+        下标必须保留原始位置：``options.nth(i)`` 作用于未过滤的候选列表，若按
+        压缩后的下标点击，空标签候选会让点击落到错误的地点（spec §4.3.1）。
+        """
         if options is None:
             return []
-        labels: list[str] = []
+        entries: list[tuple[int, str]] = []
         for index in range(min(await options.count(), MAX_SCANNED_CANDIDATES)):
             label = ' '.join((await options.nth(index).inner_text()).split())
             if label:
-                labels.append(label)
-        return labels
+                entries.append((index, label))
+        return entries
 
     @staticmethod
-    def _exact_index(requested: str, labels: list[str]) -> tuple[int, str] | None:
+    def _exact_entry(
+        requested: str, entries: list[tuple[int, str]]
+    ) -> tuple[int, str] | None:
         """第一个规范化精确相等的候选；同名取第一个，模糊匹配永不命中。"""
         wanted = normalize_text(requested)
-        for index, label in enumerate(labels):
+        for index, label in entries:
             if normalize_text(label) == wanted:
                 return index, label
         return None

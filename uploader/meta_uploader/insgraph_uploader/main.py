@@ -27,7 +27,9 @@ from uploader.meta_uploader.insgraph_uploader.controls import (
 from uploader.meta_uploader.insgraph_uploader.options import (
     APPLY_ORDER,
     DEFAULT_OFF,
+    INELIGIBLE,
     MISMATCH,
+    MISSING,
     PRESENT,
     SET,
     InstagramPublishOptions,
@@ -474,7 +476,7 @@ class InstagramUploader:
         kind = option_kind(key)
         if control is None:
             status, reason = option_status(
-                requested, None, kind=kind, presence='missing'
+                requested, None, kind=kind, presence=MISSING
             )
             self._record_option(key, requested, None, status, reason)
             return None
@@ -483,7 +485,14 @@ class InstagramUploader:
             status, reason = option_status(
                 requested, None, kind=kind, presence=presence
             )
-            self._record_option(key, requested, None, status, reason)
+            # 入口存在但不可用时仍尽量回读页面实际状态（spec §5.2 的 applied 列）。
+            applied = None
+            if presence == INELIGIBLE:
+                try:
+                    applied = await control.read()
+                except Exception:
+                    applied = None
+            self._record_option(key, requested, applied, status, reason)
             return None
         current = await control.read()
         status, reason = option_status(requested, current, kind=kind)
@@ -515,7 +524,7 @@ class InstagramUploader:
             controls = resolve_instagram_option_controls(
                 page, image_count=len(self.image_files), budget=budget
             )
-        unexpected: list[str] = []
+        details: list[str] = []
         for key in APPLY_ORDER:
             requested = requested_option(self.options, key)
             if requested is None:
@@ -526,15 +535,18 @@ class InstagramUploader:
                     key, requested, controls.get(key), budget=budget
                 )
                 if detail:
-                    unexpected.append(f'{key}: {detail}')
+                    details.append(f'{key}: {detail}')
+            except (LoginRequiredError, PublishResultUnknownError):
+                # 登录失效 / 结果未知属于硬异常：立即中止，不再操作后续选项。
+                raise
             except Exception as error:
-                # 预算耗尽等硬异常立即中止；其余控件异常记 mismatch 后继续下一项。
+                # 预算耗尽同样必须中止（§7.2 B12）：check_pre_click 会在耗尽时抛错。
                 budget.check_pre_click()
                 self._record_option(key, requested, None, MISMATCH)
-                unexpected.append(str(error) or type(error).__name__)
+                details.append(f'{key}: {error}' if str(error) else f'{key}: {type(error).__name__}')
             finally:
                 self._write_result()
-        failures = option_failures(self.result['options']) + unexpected
+        failures = option_failures(self.result['options']) + details
         if failures:
             raise RuntimeError('Instagram 发布选项未生效: ' + '; '.join(failures))
 

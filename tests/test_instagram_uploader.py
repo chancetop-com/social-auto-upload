@@ -21,7 +21,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     DEFAULT_OFF, SET, InstagramPublishOptions,
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_id, find_instagram_post
-from utils.errors import PublishResultUnknownError, UsageError
+from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
 
 
 class InstagramContractTests(unittest.TestCase):
@@ -357,6 +357,26 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
+class InstagramLoginGuardTests(unittest.TestCase):
+    """§7.3/D：Instagram 未登录（守卫错误）必须映射为退出码 10。"""
+
+    def test_unauthenticated_upload_exits_10(self):
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'image.png'
+            image.touch()
+            guard = AsyncMock(side_effect=LoginRequiredError('Instagram 未登录'))
+            with patch.object(
+                sau_commands.instagram, 'upload_instagram_content', guard
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = sau_cli.main([
+                    'instagram', 'upload-note', '--account', 'creator',
+                    '--images', str(image), '--title', 'caption',
+                ])
+        self.assertEqual(code, 10)
+        guard.assert_awaited_once()
+
+
 class InstagramLocationOptionDomTests(unittest.TestCase):
     """C1：真实 Chrome 里驱动真实控件注册表完成 输入 → 联想 → 选中 → 回读。"""
 
@@ -394,6 +414,11 @@ class InstagramLocationOptionDomTests(unittest.TestCase):
                               label => label.toLowerCase().includes(wanted));
                             document.body.dataset.candidates = matches.join('|');
                             list.innerHTML = '';
+                            // 真实列表可能夹带空文案项；下标漂移会让点击落到错误候选。
+                            const blank = document.createElement('div');
+                            blank.setAttribute('role', 'option');
+                            blank.textContent = '   ';
+                            list.appendChild(blank);
                             for (const label of matches) {
                               const option = document.createElement('div');
                               option.setAttribute('role', 'option');

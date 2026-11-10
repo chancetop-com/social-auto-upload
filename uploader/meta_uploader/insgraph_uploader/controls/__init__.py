@@ -16,12 +16,14 @@ from .toggles import SwitchControl, disclosure_panel
 if TYPE_CHECKING:  # 运行时只依赖 options，避免 main <-> controls 循环导入。
     from patchright.async_api import Page
 
+    from uploader.publish_timeout import PublishTimeoutBudget
+
 
 def resolve_instagram_option_controls(
     page: 'Page',
     *,
     image_count: int,
-    budget: object | None = None,
+    budget: 'PublishTimeoutBudget | None' = None,
 ) -> dict[str, InstagramOptionControl]:
     """返回 ``{结果键: 控件}``；每个工单只填自己的 ``_register_*``。
 

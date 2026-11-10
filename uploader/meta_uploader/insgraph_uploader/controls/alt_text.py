@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING
 
 from patchright.async_api import expect
 
-from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError
+from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError, clamp_wait
 
 if TYPE_CHECKING:  # 运行时只导入 options 与 expect，避免把 Page 绑定成硬依赖。
     from patchright.async_api import Locator, Page
+
+    from uploader.publish_timeout import PublishTimeoutBudget
 
 # 入口文案：英文实测，中文按 spec §4.3.2 回退。
 _ENTRY_LABELS = ('Accessibility', '无障碍', '替代文字')
@@ -48,7 +50,7 @@ class AltTextControl:
     """
 
     def __init__(
-        self, page: 'Page', *, image_count: int, budget: object | None = None
+        self, page: 'Page', *, image_count: int, budget: 'PublishTimeoutBudget | None' = None
     ) -> None:
         self.page = page
         self.image_count = image_count
@@ -56,8 +58,7 @@ class AltTextControl:
 
     def _timeout(self, default_ms: int) -> int:
         """把等待收紧到剩余发布预算；无预算时用默认值。"""
-        clamp = getattr(self.budget, 'clamp_ms', None)
-        return clamp(default_ms) if clamp is not None else default_ms
+        return clamp_wait(self.budget, default_ms)
 
     def _dialogs(self) -> 'Locator':
         return self.page.get_by_role('dialog')
