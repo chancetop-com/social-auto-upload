@@ -70,6 +70,18 @@ class InstagramOptionControl(Protocol):
         ...
 
 
+class OptionMismatchError(RuntimeError):
+    """控件已能判断请求无法表达；``applied`` 是失败时页面实际可读到的值。
+
+    与普通异常不同：它只代表“这一项没生效”，管线记录 ``mismatch`` 后继续处理
+    后续选项，并把错误文案并入最终的聚合错误（例如地点无精确匹配时的候选列表）。
+    """
+
+    def __init__(self, message: str, *, applied: object = None) -> None:
+        super().__init__(message)
+        self.applied = applied
+
+
 def normalize_text(text: str) -> str:
     """空白折叠 + casefold，供地点与替代文字比较。"""
     return " ".join(text.split()).casefold()

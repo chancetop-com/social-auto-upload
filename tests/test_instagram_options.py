@@ -25,6 +25,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     SET,
     UNSUPPORTED,
     InstagramPublishOptions,
+    OptionMismatchError,
     alt_texts_match,
     empty_option_record,
     location_matches,
@@ -429,6 +430,35 @@ class InstagramOptionPipelineTests(unittest.TestCase):
                 app.result['options']['ai_generated'],
                 {'requested': True, 'applied': False, 'status': MISMATCH},
             )
+
+    def test_control_declared_mismatch_keeps_applied_value_and_detail(self):
+        """控件判定请求无法表达时，保留它读到的实际值并把文案并入聚合错误。"""
+        class _PartialControl(_FakeControl):
+            async def set(self, requested):
+                raise OptionMismatchError(
+                    '替代文字输入框 1 个，图片 2 张', applied=['第一张']
+                )
+
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(alt_texts=('第一张', '第二张'), comments=False),
+                folder=folder,
+                image_count=2,
+            )
+            comments = _FakeControl([False])
+            with self.assertRaises(RuntimeError) as ctx:
+                self._apply(
+                    app, {'alt_text': _PartialControl([['第一张']]), 'comments': comments}
+                )
+            message = str(ctx.exception)
+            self.assertIn('alt_text=mismatch', message)
+            self.assertIn('替代文字输入框 1 个', message)
+            self.assertEqual(
+                app.result['options']['alt_text'],
+                {'requested': ['第一张', '第二张'], 'applied': ['第一张'], 'status': MISMATCH},
+            )
+            # 已声明失败也不能阻止后续选项。
+            self.assertEqual(comments.interactions, ['resolve', 'read'])
 
     def test_multiple_failures_are_aggregated_in_one_error(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -31,6 +31,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     PRESENT,
     SET,
     InstagramPublishOptions,
+    OptionMismatchError,
     empty_option_record,
     instagram_caption,
     option_failures,
@@ -463,35 +464,46 @@ class InstagramUploader:
 
     async def _apply_one_option(
         self, key: str, requested, control, *, budget: PublishTimeoutBudget
-    ) -> None:
-        """解析入口、回读、必要时设置并再次回读；异常交由管线上报。"""
+    ) -> str | None:
+        """解析入口、回读、必要时设置并再次回读。
+
+        返回 ``None`` 表示已按页面状态记录结果；返回错误文案表示控件明确判定
+        请求无法表达（``OptionMismatchError``），结果已记为 ``mismatch``，文案
+        并入管线聚合错误。其他异常交由管线兜底。
+        """
         kind = option_kind(key)
         if control is None:
             status, reason = option_status(
                 requested, None, kind=kind, presence='missing'
             )
             self._record_option(key, requested, None, status, reason)
-            return
+            return None
         presence = await control.resolve()
         if presence != PRESENT:
             status, reason = option_status(
                 requested, None, kind=kind, presence=presence
             )
             self._record_option(key, requested, None, status, reason)
-            return
+            return None
         current = await control.read()
         status, reason = option_status(requested, current, kind=kind)
         if status in (SET, DEFAULT_OFF):
             # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
             self._record_option(key, requested, current, status, reason)
-            return
+            return None
         budget.check_pre_click()
-        await control.set(requested)
-        applied = await control.read()
+        try:
+            await control.set(requested)
+            applied = await control.read()
+        except OptionMismatchError as error:
+            # 控件已确认无法表达请求：记录它读到的实际值，不中断后续选项。
+            self._record_option(key, requested, error.applied, MISMATCH)
+            return str(error) or type(error).__name__
         status, reason = option_status(
             requested, applied, kind=kind, presence=PRESENT, acted=True
         )
         self._record_option(key, requested, applied, status, reason)
+        return None
 
     async def _apply_options(
         self, page: Page, *, budget: PublishTimeoutBudget, controls: dict | None = None
@@ -510,9 +522,11 @@ class InstagramUploader:
                 continue
             budget.check_pre_click()
             try:
-                await self._apply_one_option(
+                detail = await self._apply_one_option(
                     key, requested, controls.get(key), budget=budget
                 )
+                if detail:
+                    unexpected.append(f'{key}: {detail}')
             except Exception as error:
                 # 预算耗尽等硬异常立即中止；其余控件异常记 mismatch 后继续下一项。
                 budget.check_pre_click()
