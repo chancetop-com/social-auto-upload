@@ -1,9 +1,9 @@
 # 03 — 发布提交语义：预算底座 + 单次点击
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by: 01
-Assignee: —
+Assignee: wayfinder-session (opencode)
 
 ## Question
 
