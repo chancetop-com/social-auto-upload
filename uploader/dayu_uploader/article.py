@@ -57,7 +57,8 @@ class DayuArticle:
 
     def __init__(self, title, content_file, account_file, source, source_url="", author=None,
                  cover_indices=None, headless=True, debug=False, prepare_only=False,
-                 upload_timeout=600, theme=None, schedule=None):
+                 upload_timeout=600, theme=None, schedule=None,
+                 publish_not_before=None):
         self.title = title
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file else None
@@ -71,6 +72,7 @@ class DayuArticle:
         self.upload_timeout = upload_timeout
         self.theme = theme
         self.schedule = schedule
+        self.publish_not_before = publish_not_before
 
     def validate_upload_args(self, *, check_identity: bool = True):
         """在接触远端素材之前，检查正文格式、封面序号及来源的条件必填项。"""
@@ -314,7 +316,10 @@ class DayuArticle:
                 return result
             if multilogin:
                 await raise_if_login_required(page)
-            await submit_dayu_publication(page, result, result_file, article_html=self.publication_html)
+            await submit_dayu_publication(
+                page, result, result_file, article_html=self.publication_html,
+                publish_not_before=getattr(self, "publish_not_before", None),
+            )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号图文{action}: {result['content_id']}")
             return result

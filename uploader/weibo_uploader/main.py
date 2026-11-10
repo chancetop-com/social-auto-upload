@@ -30,6 +30,7 @@ from patchright.async_api import (
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import weibo_logger
@@ -894,6 +895,11 @@ class WeiBoVideo(BaseVideoUploader):
         await publish_btn.wait_for(state="visible", timeout=15000)
         # 不依赖本地模式的高视口；滚动到可视区后再触发点击（本地模式同样无害）。
         await publish_btn.scroll_into_view_if_needed()
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=weibo_logger,
+            label="微博发布",
+        )
         await publish_btn.evaluate("el => el.click()")
         weibo_logger.info(_msg("🏃", "已点击发布按钮(JS)"))
 

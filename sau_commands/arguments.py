@@ -57,6 +57,31 @@ def schedule_value(value: str):
         ) from exc
 
 
+def not_before_value(value: str) -> datetime:
+    """解析 ``--not-before``：只校验格式，允许指向过去（立即发布）。"""
+    try:
+        return datetime.strptime(value, SCHEDULE_FORMAT)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Invalid --not-before '{value}'. Expected format: {SCHEDULE_FORMAT}"
+        ) from exc
+
+
+def add_not_before_flag(parser: argparse.ArgumentParser) -> None:
+    """为发布命令注册客户端发布闸门参数。"""
+    parser.add_argument(
+        "--not-before",
+        type=not_before_value,
+        default=None,
+        metavar="TIME",
+        help=(
+            "All content is prepared first; click publish only when local time "
+            f"is at or after TIME (format {SCHEDULE_FORMAT.replace('%', '%%')}). "
+            "Omit to publish immediately."
+        ),
+    )
+
+
 def add_runtime_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     headless_group = parser.add_mutually_exclusive_group()

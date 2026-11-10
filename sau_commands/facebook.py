@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from patchright.async_api import async_playwright
 from uploader.base_video import BaseVideoUploader
@@ -19,6 +20,7 @@ from uploader.meta_uploader.facebook_uploader.main import (
 from uploader.meta_uploader.facebook_uploader.posts import facebook_post_action
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -87,6 +89,7 @@ def register(platform_parsers):
         default=FACEBOOK_PROXY,
         help="浏览器代理地址；不传时直连，传空字符串可覆盖环境变量并直连",
     )
+    add_not_before_flag(facebook_upload_video_parser)
     add_runtime_flags(facebook_upload_video_parser)
     add_browser_flags(facebook_upload_video_parser)
 
@@ -97,6 +100,7 @@ def register(platform_parsers):
     facebook_note.add_argument("--note", default="")
     facebook_note.add_argument("--tags", default="")
     facebook_note.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
+    add_not_before_flag(facebook_note)
     add_runtime_flags(facebook_note)
     add_browser_flags(facebook_note)
     facebook_note.set_defaults(headless=False)
@@ -112,6 +116,7 @@ class FacebookVideoUploadRequest:
     proxy: str | None = FACEBOOK_PROXY
     debug: bool = True
     headless: bool = True
+    publish_not_before: datetime | None = None
 
 
 async def login_facebook_account(
@@ -141,7 +146,8 @@ def _raise_login_required(target) -> None:
 
 
 async def _upload_facebook_mlx(
-    target, *, title: str, files, description: str, tags: list[str], headless: bool
+    target, *, title: str, files, description: str, tags: list[str], headless: bool,
+    publish_not_before=None,
 ) -> None:
     """Run one Facebook post through the Multilogin Profile session.
 
@@ -157,6 +163,7 @@ async def _upload_facebook_mlx(
         proxy=None,
         headless=headless,
     )
+    app.publish_not_before = publish_not_before
     async with async_playwright() as playwright:
         async with browser_session(
             playwright,
@@ -183,6 +190,7 @@ async def upload_facebook_video(
             description=request.description,
             tags=request.tags,
             headless=request.headless,
+            publish_not_before=request.publish_not_before,
         )
         return None
 
@@ -207,6 +215,7 @@ async def upload_facebook_video(
         proxy=request.proxy,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
     await app.main()
     return account_file
 
@@ -275,12 +284,14 @@ async def run(args):
                 description=args.note,
                 tags=parse_tags(args.tags),
                 headless=args.headless,
+                publish_not_before=args.not_before,
             )
             print("Facebook image post submitted")
             return 0
 
         app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
                            resolve_account_file("facebook", account_label), proxy=args.proxy, headless=args.headless)
+        app.publish_not_before = args.not_before
         await app.main()
         print("Facebook image post submitted")
         return 0
@@ -295,6 +306,7 @@ async def run(args):
             proxy=args.proxy,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         await upload_facebook_video(request, target=target)
         print(f"Facebook video upload submitted: {request.video_file}")

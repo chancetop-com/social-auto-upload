@@ -19,6 +19,7 @@ from patchright.async_api import (
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -690,6 +691,11 @@ class AlipayVideo(BaseVideoUploader):
                 alipay_logger.warning(_msg("😵", f"点击「继续发布」失败: {exc}"))
             return False
 
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=alipay_logger,
+            label="支付宝发布",
+        )
         await _collect_click_diag("点击前")
         await publish_btn.click()
         await page.wait_for_timeout(600)

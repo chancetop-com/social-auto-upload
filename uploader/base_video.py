@@ -5,6 +5,9 @@ from pathlib import Path
 
 
 class BaseVideoUploader:
+    #: 本地发布闸门：全部准备完成后，只有本地时间 >= 该值才点击发布。
+    #: 命令层在构造上传器后赋值；None 表示不做客户端等待。
+    publish_not_before: datetime | None = None
     SUPPORTED_VIDEO_EXTENSIONS = {
         ".mp4",
         ".mov",

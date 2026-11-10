@@ -13,6 +13,7 @@ from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
 
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import facebook_logger
@@ -293,6 +294,11 @@ class FacebookPost:
         for index in range(await success_text.count()):
             if await success_text.nth(index).is_visible():
                 raise RuntimeError("提交前已存在发布成功提示，无法区分本次结果；未提交")
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=facebook_logger,
+            label="Facebook 发布",
+        )
         await publish_button.click()
         deadline = asyncio.get_running_loop().time() + 90
         while asyncio.get_running_loop().time() < deadline:

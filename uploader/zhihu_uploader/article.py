@@ -10,8 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from loguru import logger
 from patchright.async_api import Page, async_playwright, expect
 
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
 from utils.browser_session import BrowserSession
 from uploader.zhihu_uploader.constants import (
@@ -41,7 +43,8 @@ class ZhihuArticle:
     """按原稿结构导入正文，在原稿位置上传图片，核对后只发表一次。"""
 
     def __init__(self, title, content_file, account_file, schedule=None,
-                 headless=True, debug=False, prepare_only=False, upload_timeout=600):
+                 headless=True, debug=False, prepare_only=False, upload_timeout=600,
+                 publish_not_before=None):
         self.title = title
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file is not None else None
@@ -50,6 +53,7 @@ class ZhihuArticle:
         self.debug = debug
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
+        self.publish_not_before = publish_not_before
 
     def validate_upload_args(self, *, check_cookie: bool = True) -> None:
         """在启动浏览器前检查标题、正文、图片及定时时间。
@@ -268,6 +272,11 @@ class ZhihuArticle:
             # 发布按钮只有标题和正文满足编辑器要求后才可用；提交只触发一次。
             publish = page.get_by_role("button", name="发布", exact=True)
             await expect(publish).to_be_enabled()
+            await wait_until_publish_allowed(
+                getattr(self, "publish_not_before", None),
+                logger=logger,
+                label="知乎文章发布",
+            )
             submitted = True
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

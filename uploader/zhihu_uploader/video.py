@@ -12,8 +12,10 @@ from pathlib import Path
 from uuid import uuid4
 
 import cv2
+from loguru import logger
 from patchright.async_api import Page, async_playwright, expect
 
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from uploader.zhihu_uploader.constants import (
     ZHIHU_CONTEXT_KWARGS, ZHIHU_LAUNCH_KWARGS, ZHIHU_ORIGINALITY, ZHIHU_TIMEZONE,
@@ -32,7 +34,8 @@ class ZhihuVideo:
 
     def __init__(self, title, file_path, account_file, description, category,
                  topics, video_mark, originality, schedule=None, show_options=False,
-                 headless=True, debug=False, prepare_only=False, upload_timeout=1200):
+                 headless=True, debug=False, prepare_only=False, upload_timeout=1200,
+                 publish_not_before=None):
         self.title = title
         self.file_path = Path(file_path).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file is not None else None
@@ -47,6 +50,7 @@ class ZhihuVideo:
         self.debug = debug
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
+        self.publish_not_before = publish_not_before
 
     def validate_upload_args(self, *, check_cookie: bool = True) -> None:
         """依据页面提示检查视频、标题、简介和当前上传所需的分类参数。
@@ -282,6 +286,11 @@ class ZhihuVideo:
             # 不能等待原页跳转到旧版 /zvideo/，否则已发表也会被误判为未知。
             publish = page.get_by_role("button", name="发布视频", exact=True)
             await expect(publish).to_be_enabled()
+            await wait_until_publish_allowed(
+                getattr(self, "publish_not_before", None),
+                logger=logger,
+                label="知乎视频发布",
+            )
             submitted = True
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

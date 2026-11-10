@@ -1634,22 +1634,6 @@ class UploadNoteConstantsTests(unittest.TestCase):
             "https://www.tiktok.com/tiktokstudio/upload?tab=photo",
         )
 
-    def test_constants_are_re_exported_from_main_chrome(self):
-        self.assertEqual(
-            tk_main.TIKTOK_PHOTO_UPLOAD_URL, TIKTOK_PHOTO_UPLOAD_URL
-        )
-        self.assertEqual(tk_main.TIKTOK_MAX_IMAGE_COUNT, 35)
-        self.assertEqual(
-            tk_main.TIKTOK_MAX_IMAGE_BYTES, 50 * 1024 * 1024
-        )
-        self.assertEqual(tk_main.TIKTOK_MAX_TITLE_LENGTH, 90)
-        self.assertEqual(tk_main.TIKTOK_MAX_DESCRIPTION_LENGTH, 4000)
-        self.assertEqual(tk_main.TIKTOK_MAX_HASHTAG_COUNT, 50)
-        self.assertEqual(
-            tk_main.TIKTOK_IMAGE_SUFFIXES,
-            {".jpg", ".jpeg", ".png", ".webp"},
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

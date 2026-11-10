@@ -6,10 +6,13 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 from patchright.async_api import Page, expect
 from uploader.dayu_uploader.verification import check_dayu_article_content, wait_dayu_publication
 from uploader.dayu_uploader.schedule import read_dayu_schedule
+from uploader.publish_gate import wait_until_publish_allowed
+from utils.log import dayu_logger
 
 
 async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
-                                  article_html: str | None = None) -> None:
+                                  article_html: str | None = None,
+                                  publish_not_before=None) -> None:
     """提交动作各执行一次；每次远端写入前后保存阶段与作品标识，供只读查询。"""
     result["status"] = "preview_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -78,6 +81,11 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     # 预览页的最终提交按钮有独立名称，不能复用主表单的“发表”定位。
     confirm = page.get_by_role("button", name="确认发表", exact=True)
     await expect(confirm).to_be_visible(timeout=30000)
+    await wait_until_publish_allowed(
+        publish_not_before,
+        logger=dayu_logger,
+        label="大鱼号发表",
+    )
     # 响应超时不能再点确认。保留 origin_id 后可查询本次记录，无需重新上传。
     result["status"] = "submission_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

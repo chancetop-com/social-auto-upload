@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from loguru import logger
 from patchright.async_api import (
     BrowserContext,
     Locator,
@@ -19,6 +20,7 @@ from patchright.async_api import (
     expect,
 )
 
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 
@@ -370,6 +372,11 @@ class InstagramUploader:
         action = dialog.locator(INSTAGRAM_PRIMARY_ACTION)
         await expect(action).to_have_count(1)
         await expect(action).to_be_enabled()
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=logger,
+            label="Instagram 发布",
+        )
         self.result.update(identity, status='submission_unknown')
         self.result_file.parent.mkdir(parents=True, exist_ok=True)
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')

@@ -1,6 +1,7 @@
 """weibo 的命令参数与执行逻辑。"""
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from patchright.async_api import async_playwright
@@ -15,6 +16,7 @@ from uploader.weibo_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -52,6 +54,7 @@ def register(platform_parsers):
     weibo_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     weibo_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path (<5MB)")
     weibo_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name")
+    add_not_before_flag(weibo_upload_video_parser)
     add_runtime_flags(weibo_upload_video_parser)
     add_browser_flags(weibo_upload_video_parser)
 
@@ -67,6 +70,7 @@ class WeiboVideoUploadRequest:
     collection_name: str | None = None
     debug: bool = True
     headless: bool = True
+    publish_not_before: datetime | None = None
 
 
 async def login_weibo_account(account_name: str, headless: bool = True, qrcode_callback=None) -> dict:
@@ -84,7 +88,7 @@ async def check_weibo_account(account_name: str) -> bool:
 def _build_weibo_uploader(
     request: WeiboVideoUploadRequest, account_file: str | None
 ) -> WeiBoVideo:
-    return WeiBoVideo(
+    app = WeiBoVideo(
         title=request.title,
         file_path=str(request.video_file),
         tags=request.tags,
@@ -95,6 +99,8 @@ def _build_weibo_uploader(
         debug=request.debug,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -179,6 +185,7 @@ async def run(args):
             collection_name=args.collection,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         await upload_weibo_video(request, target=target)
         print(f"Weibo video upload submitted: {request.video_file}")

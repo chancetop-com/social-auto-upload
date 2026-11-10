@@ -14,6 +14,7 @@ from patchright.async_api import async_playwright
 
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -834,6 +835,12 @@ class KSVideo(KSBaseUploader):
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
 
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=kuaishou_logger,
+            label="快手视频发布",
+        )
+
         last_publish_error = None
         for attempt in range(1, KUAISHOU_PUBLISH_ATTEMPTS + 1):
             try:
@@ -979,6 +986,12 @@ class KSNote(KSBaseUploader):
 
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time(page, self.publish_date)
+
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=kuaishou_logger,
+            label="快手图文发布",
+        )
 
         while True:
             try:

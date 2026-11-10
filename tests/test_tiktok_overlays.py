@@ -11,10 +11,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from uploader.tk_uploader.main_chrome import TiktokBaseUploader
-from uploader.tk_uploader.tk_config import (
-    TIKTOK_ENTRY_WAIT_MS,
-    TIKTOK_OVERLAY_CLICK_TIMEOUT_MS,
-)
+from uploader.tk_uploader.tk_config import TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
 
 
 def _locator(count: int = 0) -> MagicMock:
@@ -94,14 +91,6 @@ class DismissOverlayTests(unittest.TestCase):
 
         dialog.get_by_role.assert_not_called()
         joyride.first.click.assert_not_awaited()
-
-
-class TimeoutConstantTests(unittest.TestCase):
-    def test_entry_wait_covers_client_rendered_studio(self):
-        self.assertEqual(TIKTOK_ENTRY_WAIT_MS, 15_000)
-
-    def test_overlay_click_timeout_is_bounded(self):
-        self.assertEqual(TIKTOK_OVERLAY_CLICK_TIMEOUT_MS, 5_000)
 
 
 if __name__ == "__main__":

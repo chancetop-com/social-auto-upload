@@ -15,6 +15,7 @@ from patchright.async_api import async_playwright
 
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -170,6 +171,7 @@ def register(platform_parsers):
     upload_video_parser.add_argument(
         "--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}"
     )
+    add_not_before_flag(upload_video_parser)
     upload_video_parser.add_argument(
         "--thumbnail", type=existing_file_path, help="Optional thumbnail path"
     )
@@ -215,6 +217,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument(
         "--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}"
     )
+    add_not_before_flag(upload_note_parser)
     # Photo posts have no content-reuse control, so ``--disable-reuse`` is not
     # registered here.  The first image is the cover: no thumbnail/cover flag.
     _add_publish_option_flags(upload_note_parser, include_reuse=False)
@@ -234,6 +237,7 @@ class TiktokVideoUploadRequest:
     headless: bool = True
     options: TiktokPublishOptions | None = None
     account_file: Path | None = None
+    publish_not_before: datetime | None = None
 
 
 def _build_publish_options(args) -> TiktokPublishOptions | None:
@@ -290,7 +294,7 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
     ``request.account_file`` is ``None`` in Multilogin mode and the local cookie
     path in local mode.
     """
-    return TiktokVideo(
+    app = TiktokVideo(
         request.title,
         str(request.video_file),
         request.tags,
@@ -302,6 +306,8 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
         options=request.options,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 @dataclass(slots=True)
@@ -316,6 +322,7 @@ class TiktokNoteUploadRequest:
     headless: bool = True
     options: TiktokPublishOptions | None = None
     account_file: Path | None = None
+    publish_not_before: datetime | None = None
 
 
 def _note_text(args) -> str | None:
@@ -413,7 +420,7 @@ def _validate_note_images(image_files: list[Path]) -> None:
 
 def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
     """Build the photo-post uploader; keyword-only fields stay keyword-only."""
-    return TiktokNote(
+    app = TiktokNote(
         [str(path) for path in request.image_files],
         request.note,
         request.tags,
@@ -424,6 +431,8 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
         debug=request.debug,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 async def _require_local_cookie(account_file, account_label: str, headless: bool) -> None:
@@ -556,6 +565,7 @@ async def run(args):
             headless=args.headless,
             options=_build_publish_options(args),
             account_file=account_file,
+            publish_not_before=args.not_before,
         )
         await _upload_note(request, target)
         print(
@@ -578,6 +588,7 @@ async def run(args):
             headless=args.headless,
             options=_build_publish_options(args),
             account_file=account_file,
+            publish_not_before=args.not_before,
         )
         await _upload_video(request, target)
         print(f"TikTok video upload submitted: {request.video_file}")

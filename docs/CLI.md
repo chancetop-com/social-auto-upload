@@ -66,6 +66,35 @@ Windows 下推荐先指定镜像，再安装 Chromium：
 $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
 ```
 
+## 客户端发布闸门（`--not-before`）
+
+所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DD HH:MM"`：
+
+- 上传素材、填写标题/正文、封面、声明、合集等准备工作照常执行；
+- 全部准备完成后，如果本地当前时间早于目标时间，保持浏览器打开并等待；
+- 只有本地时间 **>= `--not-before`** 才执行最后一次「发布/发表」点击；
+- 不传该参数时立即发布；目标时间已在过去时也立即发布。
+
+```bash
+# 先完成所有准备，20:00 之后才点发布
+sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --not-before "2026-12-01 20:00"
+```
+
+它与平台原生的 `--schedule` 是两套机制，可以同时使用：
+
+- `--schedule`：把发布时间交给平台，由平台在目标时间自动发布；
+- `--not-before`：在本地点发布前等待，发布动作仍由当前进程完成，适合需要人工保持登录态、平台不支持原生定时或希望统一控制提交时刻的场景。
+
+两者同时使用时，应让 `--not-before` 早于 `--schedule`；否则等待结束时平台侧定时时间可能已经过去，导致平台拒绝或立即发布。
+
+注意事项：
+
+- 等待时间使用**本地时区**的墙钟时间，格式固定为 `YYYY-MM-DD HH:MM`；
+- 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
+- 主动等待不计入平台原有的上传/发布超时预算；小红书与 TikTok 会把等待时长从发布阶段超时中扣除；
+- 使用 `--no-publish` / `--prepare-only` / `--draft` 时不会等待，也不会点击发布；
+- Bilibili 由 `biliup` 一次性完成上传和提交，无法在「填好表」和「点发布」之间插入等待，因此 `--not-before` 在启动 `biliup` 前生效。
+
 ## 托管浏览器模式（通用）
 
 设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用启动指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。

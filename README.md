@@ -167,6 +167,17 @@ sau douyin check --account creator
 # 换成 dayu、xueqiu、zhihu 等平台名称即可；具体登录要求见对应文档。
 ```
 
+#### 指定发布时刻（可选）
+
+所有发布命令都支持 `--not-before "YYYY-MM-DD HH:MM"`：先完成素材上传、标题/正文、封面、声明等全部准备，再等待到本地时间不早于目标时间后才点击发布。它和平台原生 `--schedule` 是两套机制，可以同时使用。
+
+```bash
+sau xiaohongshu upload-video --account creator --file demo.mp4 --title "新视频" \
+  --not-before "2026-12-01 20:00"
+```
+
+详见 [CLI 使用说明的客户端发布闸门](./docs/CLI.md#客户端发布闸门--not-before)。
+
 #### 托管浏览器模式（可选）
 
 除 Bilibili 外，浏览器平台可以改由托管浏览器 Profile 提供浏览器与登录态。设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，CLI 不再读写 `cookies/*.json`，而是通过对应桌面应用启动指定 Profile，并在结束时停止由本次调用启动的 Profile。两个凭据同时设置会退出 `1`。

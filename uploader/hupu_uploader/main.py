@@ -26,6 +26,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import hupu_logger
@@ -630,6 +631,11 @@ class HuPuVideo(BaseVideoUploader):
         # 录制脚本：page.get_by_label("发视频").get_by_text("确定发布").click()
         publish_btn = page.get_by_label("发视频").get_by_text("确定发布")
         await publish_btn.wait_for(state="visible", timeout=15000)
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=hupu_logger,
+            label="虎扑发布",
+        )
         await publish_btn.click()
         hupu_logger.info(_msg("🏃", "已点击「确定发布」"))
 

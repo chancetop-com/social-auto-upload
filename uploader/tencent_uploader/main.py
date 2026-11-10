@@ -17,6 +17,7 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -1031,6 +1032,12 @@ class TencentBaseUploader(BaseVideoUploader):
             await asyncio.sleep(1)
         else:
             tencent_logger.warning(_msg("😵", "60s 内未找到可见的发表/草稿按钮，尝试强制继续"))
+        if not is_draft:
+            await wait_until_publish_allowed(
+                getattr(self, "publish_not_before", None),
+                logger=tencent_logger,
+                label="视频号发表",
+            )
         # 点发表/草稿
         for attempt in range(20):
             if multilogin:

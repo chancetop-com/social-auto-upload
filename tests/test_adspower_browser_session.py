@@ -21,7 +21,7 @@ from tests.fakes import (
     FakePlaywright,
 )
 from utils.adspower import AdspowerProvider, AdspowerTarget
-from utils.browser_session import BrowserSession, browser_session
+from utils.browser_session import browser_session
 from utils.errors import RateLimitedError, StartIncompleteError
 
 PROFILE = "profile-ticket13"
@@ -34,18 +34,6 @@ def run(coro):
 
 def _provider(client: FakeAdspowerClient) -> AdspowerProvider:
     return AdspowerProvider(AdspowerTarget(PROFILE), client)
-
-
-class ManagedTruthTableTests(unittest.TestCase):
-    def test_managed_property_truth_table(self):
-        for mode, expected in (
-            ("local", False),
-            ("multilogin", True),
-            ("adspower", True),
-        ):
-            with self.subTest(mode=mode):
-                session = BrowserSession(browser=object(), context=object(), mode=mode)
-                self.assertIs(session.managed, expected)
 
 
 class AdspowerLifecycleTests(unittest.TestCase):

@@ -64,7 +64,8 @@ class DayuVideo(BaseVideoUploader):
 
     def __init__(self, title, file_path, tags, account_file, thumbnail_path, category,
                  source, desc="", headless=True, debug=False, prepare_only=False,
-                 upload_timeout=600, source_url="", schedule=None):
+                 upload_timeout=600, source_url="", schedule=None,
+                 publish_not_before=None):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
@@ -79,6 +80,7 @@ class DayuVideo(BaseVideoUploader):
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
         self.schedule = schedule
+        self.publish_not_before = publish_not_before
 
     def validate_upload_args(self, *, check_identity: bool = True) -> None:
         """上传前拒绝无法解码、时长不足、超限素材及缺失必填信息。"""
@@ -248,7 +250,10 @@ class DayuVideo(BaseVideoUploader):
 
             if multilogin:
                 await raise_if_login_required(page)
-            await submit_dayu_publication(page, result, result_file)
+            await submit_dayu_publication(
+                page, result, result_file,
+                publish_not_before=getattr(self, "publish_not_before", None),
+            )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号{action}: {result['content_id']}")
             return result

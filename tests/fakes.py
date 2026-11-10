@@ -17,15 +17,28 @@ class ForbiddenApiError(AssertionError):
 
 
 class FakePage:
-    def __init__(self, *, events: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        events: list[str] | None = None,
+        user_agent: str = "HeadlessChrome/120.0",
+    ) -> None:
         self.url = "about:blank"
         self.closed = False
         self.events = events if events is not None else []
         self.goto_calls: list[tuple[str, dict[str, Any]]] = []
+        self.user_agent = user_agent
+        self.evaluate_calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
 
     async def goto(self, url: str, **kwargs: Any) -> None:
         self.url = url
         self.goto_calls.append((url, kwargs))
+
+    async def evaluate(
+        self, expression: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        self.evaluate_calls.append((expression, args, kwargs))
+        return self.user_agent
 
     async def close(self) -> None:
         self.closed = True

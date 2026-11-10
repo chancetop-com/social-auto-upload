@@ -9,8 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from loguru import logger
 from patchright.async_api import Page, async_playwright, expect
 
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from uploader.xueqiu_uploader.constants import (
     XUEQIU_ARTICLE_URL, XUEQIU_CONTEXT_KWARGS, XUEQIU_DECLARATIONS,
@@ -37,7 +39,7 @@ class XueqiuArticle:
 
     def __init__(self, title, content_file, account_file, visibility="公开",
                  declaration="不添加创作声明", prepare_only=False, headless=False, debug=False,
-                 cover=None):
+                 cover=None, publish_not_before=None):
         self.title = title.strip()
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file is not None else None
@@ -47,6 +49,7 @@ class XueqiuArticle:
         self.headless = headless
         self.debug = debug
         self.cover = Path(cover).expanduser().resolve() if cover else None
+        self.publish_not_before = publish_not_before
 
     def validate_upload_args(self, *, check_cookie: bool = True):
         """所有本地参数在创建远端草稿前校验，不猜测尚未观察到的长度上限。
@@ -283,6 +286,11 @@ class XueqiuArticle:
             publish = page.get_by_role("button", name="发布", exact=True)
             # 页面用 class 表达禁用态，不能仅依赖 HTML disabled；保留语义前缀排除哈希变化。
             await expect(publish).not_to_have_class(re.compile(r".*publish_disabled_.*"), timeout=30000)
+            await wait_until_publish_allowed(
+                getattr(self, "publish_not_before", None),
+                logger=logger,
+                label="雪球发布",
+            )
             result.update(status="submission_unknown", editor_url=page.url)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             # 实测最终发表 POST /xq/statuses/update.json 返回作品 ID、user_id、title、text、is_private。

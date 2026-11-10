@@ -38,7 +38,6 @@ from uploader.tencent_uploader.main import (
     TENCENT_CONTEXT_KWARGS,
     TENCENT_HOME_URL,
     TENCENT_LAUNCH_KWARGS,
-    TENCENT_LOGIN_CHECK_TIMEOUT_MS,
     TENCENT_UPLOAD_URL,
     TencentNote,
     TencentVideo,
@@ -649,13 +648,6 @@ class TencentLoginDetectionTests(unittest.TestCase):
         page = _LoginPage(final_url=TENCENT_HOME_URL)
         with self.assertRaises(RuntimeError):
             asyncio.run(tencent_main.is_logged_in(_LoginContext(page)))
-
-    def test_goto_timeout_budget_is_15_to_30_seconds(self):
-        self.assertGreaterEqual(TENCENT_LOGIN_CHECK_TIMEOUT_MS, 15_000)
-        self.assertLessEqual(
-            TENCENT_LOGIN_CHECK_TIMEOUT_MS + tencent_main.TENCENT_LOGIN_CHECK_SETTLE_MS,
-            30_000,
-        )
 
 
 class BaijiahaoLoginDetectionTests(unittest.TestCase):

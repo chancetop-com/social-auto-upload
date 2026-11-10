@@ -43,6 +43,10 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 
 两种模式都由 Profile 提供登录态与出口 IP，CLI 不读写 `cookies/*.json`；`--account` 仅作日志标签，`login` 一律拒绝。`verify` / `delete` / `article` 仍本地执行。**Bilibili 是明确特例：不支持托管浏览器模式**（`biliup` 没有浏览器上下文，托管模式下退出 `1`）。退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
+## 指定发布时刻
+
+所有 `upload-video` / `upload-note` / `upload-article` 支持 `--not-before "YYYY-MM-DD HH:MM"`：先完成上传、填表、封面和声明，再等到本地时间不早于目标时间才点击发布。它和平台原生 `--schedule` 不同，可同时使用；同时使用时让 `--not-before` 早于 `--schedule`。`--no-publish` / `--prepare-only` / `--draft` 会跳过等待。Bilibili 因 `biliup` 一次性提交，等待发生在启动命令之前。
+
 ## 工作流程
 
 1. 如已安装对应平台 Skill，先读取并遵循它；从仓库运行时读取 `skills/<skill-name>/SKILL.md`。

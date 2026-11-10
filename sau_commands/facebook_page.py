@@ -18,6 +18,7 @@ from uploader.meta_uploader.facebook_page_uploader.main import (
 from uploader.meta_uploader.facebook_page_uploader.posts import meta_post_action
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_image_files,
@@ -79,6 +80,7 @@ def register(platform_parsers):
         upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"定时发布时间，格式 {schedule_help}")
         upload_video_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_video_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
+        add_not_before_flag(upload_video_parser)
         add_runtime_flags(upload_video_parser)
         add_browser_flags(upload_video_parser)
         upload_video_parser.set_defaults(headless=False)
@@ -93,6 +95,7 @@ def register(platform_parsers):
         upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"定时发布时间，格式 {schedule_help}")
         upload_note_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_note_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
+        add_not_before_flag(upload_note_parser)
         add_runtime_flags(upload_note_parser)
         add_browser_flags(upload_note_parser)
         upload_note_parser.set_defaults(headless=False)
@@ -113,6 +116,7 @@ class MetaUploadRequest:
     debug: bool = True
     headless: bool = False
     result_file: Path | None = None
+    publish_not_before: datetime | None = None
 
 
 async def login_meta_account(platform: str, account_name: str, *, headless: bool = False, proxy: str | None = FACEBOOK_PAGE_PROXY) -> dict:
@@ -132,7 +136,7 @@ async def check_meta_account(platform: str, account_name: str, *, proxy: str | N
 
 
 def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUploader:
-    return MetaBusinessUploader(
+    app = MetaBusinessUploader(
         request.platform,
         account_file,
         title=request.title,
@@ -146,6 +150,8 @@ def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUpl
         headless=request.headless,
         result_file=request.result_file,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(platform: str, target) -> None:
@@ -245,6 +251,7 @@ async def run(args):
             proxy=args.proxy,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         result = await upload_meta_content(request, target=target)
         print(json.dumps(result, ensure_ascii=False, indent=2))

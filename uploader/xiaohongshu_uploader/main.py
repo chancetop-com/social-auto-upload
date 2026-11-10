@@ -16,6 +16,7 @@ from patchright.async_api import async_playwright
 
 from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError, PublishResultUnknownError
@@ -1173,6 +1174,15 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
             return
 
+        wait_started = time.monotonic()
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=xiaohongshu_logger,
+            label="小红书发布",
+        )
+        # 主动等待不属于发布交互预算；把 deadline 顺延相同长度。
+        deadline += time.monotonic() - wait_started
+
         publish_clicked = False
         while True:
             if time.monotonic() >= deadline:
@@ -1348,6 +1358,15 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         if self.no_publish:
             xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
             return
+
+        wait_started = time.monotonic()
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=xiaohongshu_logger,
+            label="小红书发布",
+        )
+        # 主动等待不属于发布交互预算；把 deadline 顺延相同长度。
+        deadline += time.monotonic() - wait_started
 
         publish_clicked = False
         while True:

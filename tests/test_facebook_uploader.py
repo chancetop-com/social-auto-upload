@@ -1,4 +1,3 @@
-import sau_commands.facebook
 import asyncio
 import tempfile
 import unittest

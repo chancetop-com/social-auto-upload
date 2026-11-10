@@ -16,6 +16,7 @@ import asyncio
 
 from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from uploader.tk_uploader.tk_config import (
     TIKTOK_ENTRY_WAIT_MS,
     TIKTOK_IMAGE_SUFFIXES,
@@ -2427,6 +2428,15 @@ class TiktokBaseUploader(BaseVideoUploader):
             await page.keyboard.press("End")
 
     async def click_publish(self, page, *, deadline: float | None = None, multilogin: bool = False):
+        wait_started = time.monotonic()
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=tiktok_logger,
+            label="TikTok 发布",
+        )
+        if deadline is not None:
+            # 主动等待不属于发布交互预算；把 deadline 顺延相同长度。
+            deadline += time.monotonic() - wait_started
         # ``publish_clicked`` flips only after ``click()`` returns cleanly; a
         # click that raises proves nothing was sent.  Once flipped, the button
         # is never clicked again: a second click could duplicate the post.

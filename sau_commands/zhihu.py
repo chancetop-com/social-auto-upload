@@ -22,6 +22,7 @@ from uploader.zhihu_uploader.verification import verify_zhihu_result
 from uploader.zhihu_uploader.video import ZhihuVideo
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     resolve_account_file,
@@ -77,6 +78,7 @@ def register(platform_parsers):
                                help=f"实验性定时发布，格式 {schedule_help}，北京时间 {ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
     zhihu_article.add_argument("--prepare-only", action="store_true", help="填写并检查编辑器后结束，不点击发布")
     zhihu_article.add_argument("--upload-timeout", type=int, default=600, help="每张正文图片上传等待秒数")
+    add_not_before_flag(zhihu_article)
     add_runtime_flags(zhihu_article)
     add_browser_flags(zhihu_article)
     zhihu_article.set_defaults(headless=False)
@@ -96,6 +98,7 @@ def register(platform_parsers):
                              help=f"实验性定时发布，格式 {schedule_help}，北京时间 {ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
     zhihu_video.add_argument("--prepare-only", action="store_true", help="上传并填写后结束，不点击发布")
     zhihu_video.add_argument("--upload-timeout", type=int, default=1200, help="视频上传等待秒数")
+    add_not_before_flag(zhihu_video)
     add_runtime_flags(zhihu_video)
     add_browser_flags(zhihu_video)
     zhihu_video.set_defaults(headless=False)
@@ -125,6 +128,7 @@ async def _run_multilogin(args, target):
             title=args.title, content_file=args.content_file, account_file=None,
             schedule=args.schedule, prepare_only=args.prepare_only,
             upload_timeout=args.upload_timeout, headless=headless, debug=args.debug,
+            publish_not_before=args.not_before,
         )
     else:
         app = ZhihuVideo(
@@ -134,6 +138,7 @@ async def _run_multilogin(args, target):
             originality=args.originality, schedule=args.schedule,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
             headless=headless, debug=args.debug,
+            publish_not_before=args.not_before,
         )
 
     async with async_playwright() as playwright:
@@ -184,6 +189,7 @@ async def run(args):
             title=args.title, content_file=args.content_file, account_file=account_file,
             schedule=args.schedule, prepare_only=args.prepare_only,
             upload_timeout=args.upload_timeout, headless=args.headless, debug=args.debug,
+            publish_not_before=args.not_before,
         )
         result = await app.main()
     else:
@@ -194,6 +200,7 @@ async def run(args):
             originality=args.originality, schedule=args.schedule,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
             headless=args.headless, debug=args.debug,
+            publish_not_before=args.not_before,
         )
         result = await app.main()
     print(json.dumps(result, ensure_ascii=False, indent=2))

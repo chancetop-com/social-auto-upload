@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+from loguru import logger
 from patchright.async_api import (
     BrowserContext,
     Page,
@@ -21,6 +22,7 @@ from patchright.async_api import (
 )
 
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 
@@ -443,6 +445,11 @@ class MetaBusinessUploader(BaseVideoUploader):
             await expect(actions).to_have_count(2)
             button = actions.nth(1)
         await expect(button).to_be_enabled()
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=logger,
+            label="Facebook Page 发布",
+        )
         self.result['status'] = 'submission_unknown'
         self.result_file.parent.mkdir(parents=True, exist_ok=True)
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')

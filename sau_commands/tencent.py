@@ -17,6 +17,7 @@ from uploader.tencent_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -54,6 +55,7 @@ def register(platform_parsers):
     tencent_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     tencent_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     tencent_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(tencent_upload_video_parser)
     tencent_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
     tencent_upload_video_parser.add_argument("--thumbnail-landscape", type=existing_file_path, help="Optional 4:3 landscape thumbnail path")
     tencent_upload_video_parser.add_argument("--thumbnail-portrait", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
@@ -83,6 +85,7 @@ class TencentVideoUploadRequest:
     debug: bool = True
     headless: bool = True
     collection_name: str | None = None
+    publish_not_before: datetime | None = None
 
 
 async def login_tencent_account(account_name: str, headless: bool = True) -> dict:
@@ -121,6 +124,7 @@ async def upload_tencent_video(request: TencentVideoUploadRequest, *, target=Non
             headless=request.headless,
             collection_name=request.collection_name,
         )
+        app.publish_not_before = request.publish_not_before
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -166,6 +170,7 @@ async def upload_tencent_video(request: TencentVideoUploadRequest, *, target=Non
         headless=request.headless,
         collection_name=request.collection_name,
     )
+    app.publish_not_before = request.publish_not_before
     await app.tencent_upload_video()
     return account_file
 
@@ -223,6 +228,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             collection_name=args.collection,
+            publish_not_before=args.not_before,
         )
         await upload_tencent_video(request, target=target)
         print(f"Tencent/WeChat Channels video upload submitted: {request.video_file}")

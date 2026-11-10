@@ -29,7 +29,7 @@ class XueqiuInputTests(unittest.TestCase):
 
     def test_relative_images_stay_between_original_paragraphs(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
+            root = Path(folder).resolve()
             (root / 'image.png').write_bytes(b'test')
             source = root / 'article.html'
             source.write_text('<h1 style="color:red">标题</h1><p>前文</p><img src="image.png"><h2>次标题</h2><p>后文</p>', encoding='utf-8')
@@ -42,7 +42,7 @@ class XueqiuInputTests(unittest.TestCase):
 
     def test_markdown_keeps_heading_and_image_position(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
+            root = Path(folder).resolve()
             (root / 'image.png').write_bytes(b'test')
             source = root / 'article.md'
             source.write_text('# 标题\n\n**前文**\n\n![配图](image.png)\n\n## 小标题\n\n后文', encoding='utf-8')

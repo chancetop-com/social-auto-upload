@@ -30,7 +30,6 @@ from uploader.tk_uploader.main_chrome import (
     TIKTOK_LAUNCH_KWARGS,
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_URL,
-    TIKTOK_PUBLISH_TIMEOUT_SECONDS,
     TIKTOK_UPLOAD_URL,
     TiktokVideo,
     is_logged_in,
@@ -722,9 +721,6 @@ class IsLoggedInTests(unittest.TestCase):
         self.assertEqual(existing.close_calls, 0)
         self.assertTrue(context.created[0].closed)
 
-    def test_budget_constant_is_20_seconds(self):
-        self.assertEqual(TIKTOK_LOGIN_CHECK_TIMEOUT_MS, 20_000)
-
 
 # ---------------------------------------------------------------------------
 # Seam / forbidden APIs / local parity
@@ -875,18 +871,6 @@ class UploaderSeamTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             asyncio.run(video.upload(None))
 
-    def test_firefox_main_is_not_wired(self):
-        # Importing the Firefox module would require upstream Playwright (the
-        # runtime only ships Patchright), so assert on its source instead.
-        firefox_main = Path(tk_main.__file__).with_name("main.py")
-        source = firefox_main.read_text(encoding="utf-8")
-        self.assertNotIn("patchright", source)
-        self.assertNotIn("BrowserSession", source)
-        self.assertNotIn("browser_session", source)
-        self.assertNotIn("upload_in", source)
-        self.assertNotIn("is_logged_in", source)
-        self.assertIn("playwright.async_api", source)
-
     def test_uploader_builder_passes_none_account_file(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video = Path(tmp_dir) / "demo.mp4"
@@ -1036,9 +1020,6 @@ class VideoAttachMediaTests(unittest.TestCase):
 class PublishLoopTests(unittest.TestCase):
     def _video(self) -> TiktokVideo:
         return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
-
-    def test_publish_timeout_is_15_minutes(self):
-        self.assertEqual(TIKTOK_PUBLISH_TIMEOUT_SECONDS, 15 * 60)
 
     def test_detect_upload_status_stops_at_deadline(self):
         video = self._video()

@@ -116,6 +116,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                             '<a class="_a6hd" href="#" ' + ('onclick="create()"' if i == 1 else '')
                             + '><span aria-selected="false">Navigation</span></a>' for i in range(4))
                         await page.set_content(f'<body data-prompts="{str(prompts).lower()}">{navigation}{html}</body>')
+                        # 通知提示与创建入口都在 250ms 后才出现；先等它们挂载，
+                        # 否则 locator handler 可能在提示出现前就被移除。
+                        await page.wait_for_timeout(300)
                         with tempfile.TemporaryDirectory() as folder:
                             video = Path(folder)/'video.mp4'
                             video.touch()

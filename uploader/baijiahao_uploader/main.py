@@ -20,6 +20,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError 
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.log import baijiahao_logger
@@ -727,6 +728,11 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         if not await publish_btn.count():
             publish_btn = page.locator('button:has-text("发布")').last
         await publish_btn.wait_for(state="visible", timeout=15000)
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=baijiahao_logger,
+            label="百家号发布",
+        )
         await publish_btn.click(force=True)
         baijiahao_logger.info(_msg("🏃", "已点击发布按钮"))
 

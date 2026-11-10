@@ -4,14 +4,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from uploader.bilibili_uploader.runtime import run_biliup_command
+from uploader.publish_gate import wait_until_publish_allowed
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     existing_file_path,
     has_interactive_terminal,
     parse_tags,
     resolve_account_file,
     schedule_value,
 )
+from utils.log import bilibili_logger
 from sau_commands.browser import (
     reject_managed_login,
     reject_managed_platform,
@@ -39,6 +42,7 @@ def register(platform_parsers):
     bilibili_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     bilibili_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional Bilibili cover image path")
     bilibili_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(bilibili_upload_video_parser)
 
 
 @dataclass(slots=True)
@@ -51,6 +55,7 @@ class BilibiliVideoUploadRequest:
     tags: list[str]
     publish_date: datetime | int
     thumbnail_file: Path | None = None
+    publish_not_before: datetime | None = None
 
 
 async def login_bilibili_account(account_name: str) -> dict:
@@ -109,6 +114,13 @@ async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:
     if isinstance(request.publish_date, datetime):
         arguments.extend(["--dtime", str(int(request.publish_date.timestamp()))])
 
+    # biliup 是一个整体命令，无法在「填好表、点发布」之间插入等待；
+    # 这里在启动上传命令前等待到目标时间，保证不会早于 --not-before 提交。
+    await wait_until_publish_allowed(
+        request.publish_not_before,
+        logger=bilibili_logger,
+        label="Bilibili 发布",
+    )
     result = run_biliup_command(arguments)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "").strip() or "Bilibili upload failed")
@@ -147,6 +159,7 @@ async def run(args):
             tags=parse_tags(args.tags),
             publish_date=args.schedule or 0,
             thumbnail_file=args.thumbnail,
+            publish_not_before=args.not_before,
         )
         await upload_bilibili_video(request)
         print(f"Bilibili video upload submitted: {request.video_file}")

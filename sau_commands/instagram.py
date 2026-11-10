@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from loguru import logger
 from patchright.async_api import async_playwright
@@ -18,6 +19,7 @@ from uploader.meta_uploader.insgraph_uploader.main import (
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_image_files,
@@ -61,6 +63,7 @@ def register(platform_parsers):
     instagram_video.add_argument("--tags", default="")
     instagram_video.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_video.add_argument("--result", type=Path)
+    add_not_before_flag(instagram_video)
     add_runtime_flags(instagram_video)
     add_browser_flags(instagram_video)
     instagram_video.set_defaults(headless=False)
@@ -72,6 +75,7 @@ def register(platform_parsers):
     instagram_note.add_argument("--tags", default="")
     instagram_note.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_note.add_argument("--result", type=Path)
+    add_not_before_flag(instagram_note)
     add_runtime_flags(instagram_note)
     add_browser_flags(instagram_note)
     instagram_note.set_defaults(headless=False)
@@ -98,6 +102,7 @@ class InstagramUploadRequest:
     proxy: str | None = INSTAGRAM_PROXY
     headless: bool = False
     result_file: Path | None = None
+    publish_not_before: datetime | None = None
 
 
 async def login_instagram_account(account_name: str, *, headless: bool = False, proxy: str | None = INSTAGRAM_PROXY) -> dict:
@@ -111,7 +116,7 @@ async def check_instagram_account(account_name: str, *, proxy: str | None = INST
 
 
 def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramUploader:
-    return InstagramUploader(
+    app = InstagramUploader(
         account_file,
         title=request.title,
         description=request.description,
@@ -123,6 +128,8 @@ def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramU
         headless=request.headless,
         result_file=request.result_file,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -226,6 +233,7 @@ async def run(args):
             proxy=args.proxy,
             headless=args.headless,
             result_file=args.result,
+            publish_not_before=args.not_before,
         )
         result = await upload_instagram_content(request, target=target)
         print(json.dumps(result, ensure_ascii=False, indent=2))

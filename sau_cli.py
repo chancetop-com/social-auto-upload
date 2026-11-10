@@ -63,6 +63,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         args.profile_id = None
     if not hasattr(args, "account"):
         args.account = None
+    if not hasattr(args, "not_before"):
+        args.not_before = None
 
     if args.platform not in PLATFORMS:
         raise RuntimeError(f"Unsupported platform: {args.platform}")

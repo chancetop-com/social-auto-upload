@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 客户端发布闸门
+
+- 所有发布命令（`upload-video` / `upload-note` / `upload-article`）新增 `--not-before "YYYY-MM-DD HH:MM"`：先完成上传、填表、封面、声明、合集等全部准备，再等待到本地时间 **>= 目标时间**后才点击发布；不传时立即发布，目标时间已过也立即发布。
+- 与平台原生 `--schedule` 互不替代，可同时使用：`--schedule` 由平台在目标时间发布，`--not-before` 负责本地提交时刻。
+- 使用 `--no-publish` / `--prepare-only` / `--draft` 时跳过等待；Bilibili 因 `biliup` 单命令提交，等待发生在启动命令之前。
+- 新增 `uploader/publish_gate.py` 与 `BaseVideoUploader.publish_not_before`；等待期间分段睡眠并定期输出剩余时间。
+
 ### 托管浏览器（AdsPower）
 
 - 新增 AdsPower 托管浏览器模式：设置非空 `ADSPOWER_API_KEY` 后，`sau <platform> check|upload-*` 通过 AdsPower Local API V2 启动 `--profile-id` 指定的 Chromium Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 接管现有上下文，复用 Profile 登录态并在结束时停止本次启动的 Profile；不再读写 `cookies/*.json`。

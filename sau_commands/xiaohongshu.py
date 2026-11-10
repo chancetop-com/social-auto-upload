@@ -20,6 +20,7 @@ from uploader.xiaohongshu_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_image_files,
@@ -168,6 +169,7 @@ def register(platform_parsers):
     xiaohongshu_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     xiaohongshu_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(xiaohongshu_upload_video_parser)
     xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     _add_declaration_flags(xiaohongshu_upload_video_parser)
     add_runtime_flags(xiaohongshu_upload_video_parser)
@@ -180,6 +182,7 @@ def register(platform_parsers):
     xiaohongshu_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(xiaohongshu_upload_note_parser)
     _add_declaration_flags(xiaohongshu_upload_note_parser)
     add_runtime_flags(xiaohongshu_upload_note_parser)
     add_browser_flags(xiaohongshu_upload_note_parser)
@@ -203,6 +206,7 @@ class XiaohongshuVideoUploadRequest:
     shoot_location: str | None = None
     shoot_date: str | None = None
     no_publish: bool = False
+    publish_not_before: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -222,6 +226,7 @@ class XiaohongshuNoteUploadRequest:
     shoot_location: str | None = None
     shoot_date: str | None = None
     no_publish: bool = False
+    publish_not_before: datetime | None = None
 
 
 async def login_xiaohongshu_account(account_name: str, headless: bool = True) -> dict:
@@ -237,7 +242,7 @@ async def check_xiaohongshu_account(account_name: str) -> bool:
 
 
 def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) -> XiaoHongShuVideo:
-    return XiaoHongShuVideo(
+    app = XiaoHongShuVideo(
         title=request.title,
         file_path=str(request.video_file),
         desc=request.description,
@@ -255,10 +260,12 @@ def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) 
         shoot_date=request.shoot_date,
         no_publish=request.no_publish,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) -> XiaoHongShuNote:
-    return XiaoHongShuNote(
+    app = XiaoHongShuNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
         desc=request.note,
@@ -276,6 +283,8 @@ def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) ->
         shoot_date=request.shoot_date,
         no_publish=request.no_publish,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -412,6 +421,7 @@ async def run(args):
             shoot_location=shoot_location,
             shoot_date=shoot_date,
             no_publish=getattr(args, "no_publish", False),
+            publish_not_before=args.not_before,
         )
         await upload_xiaohongshu_video(request, target=target)
         print(f"Xiaohongshu video upload submitted: {request.video_file}")
@@ -438,6 +448,7 @@ async def run(args):
             shoot_location=shoot_location,
             shoot_date=shoot_date,
             no_publish=getattr(args, "no_publish", False),
+            publish_not_before=args.not_before,
         )
         await upload_xiaohongshu_note(request, target=target)
         print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")

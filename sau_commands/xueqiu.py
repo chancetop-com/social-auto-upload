@@ -18,6 +18,7 @@ from uploader.xueqiu_uploader.session import (
 from uploader.xueqiu_uploader.verification import verify_xueqiu_result
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     resolve_account_file,
@@ -69,7 +70,7 @@ async def _run_multilogin(args, target):
         title=args.title, content_file=args.content_file, account_file=None,
         visibility=args.visibility, declaration=args.declaration,
         prepare_only=args.prepare_only, headless=headless, debug=args.debug,
-        cover=args.cover,
+        cover=args.cover, publish_not_before=args.not_before,
     )
     async with async_playwright() as playwright:
         async with browser_session(
@@ -116,6 +117,7 @@ def register(platform_parsers):
     xueqiu_article.add_argument("--visibility", choices=XUEQIU_VISIBILITY, default="公开", help="分享范围")
     xueqiu_article.add_argument("--declaration", choices=XUEQIU_DECLARATIONS, required=True, help="按实际创作方式选择")
     xueqiu_article.add_argument("--prepare-only", action="store_true", help="检查预览后结束；雪球会自动保存远端草稿")
+    add_not_before_flag(xueqiu_article)
     add_runtime_flags(xueqiu_article)
     add_browser_flags(xueqiu_article)
     # 本机真实验收使用可见 Chrome；headless 访问曾触发下载/访问拦截，用户可显式选择。
@@ -152,7 +154,7 @@ async def run(args):
             title=args.title, content_file=args.content_file, account_file=account_file,
             visibility=args.visibility, declaration=args.declaration,
             prepare_only=args.prepare_only, headless=args.headless, debug=args.debug,
-            cover=args.cover,
+            cover=args.cover, publish_not_before=args.not_before,
         )
         result = await app.main()
     print(json.dumps(result, ensure_ascii=False, indent=2))

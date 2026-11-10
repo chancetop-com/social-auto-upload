@@ -34,7 +34,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
 from sau_commands import bilibili as bilibili_command
-from sau_commands import browser as browser_command
 from sau_commands import dayu as dayu_command
 from sau_commands import facebook as facebook_command
 from sau_commands import facebook_page as facebook_page_command

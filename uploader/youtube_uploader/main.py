@@ -18,6 +18,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from conf import DEBUG_MODE
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -463,6 +464,11 @@ class YouTubeVideo(BaseVideoUploader):
             _raise_if_login_required(page)
 
         # 11) 发布
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=youtube_logger,
+            label="YouTube 发布",
+        )
         await page.wait_for_timeout(1200)
         if not await _click_if_present(page, "#done-button", 15000):
             youtube_logger.warning(_msg("🤔", "未找到发布按钮，可能上传未到可发布进度；请在窗口里手动发布"))

@@ -18,6 +18,7 @@ from uploader.ks_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_image_files,
@@ -56,6 +57,7 @@ def register(platform_parsers):
     kuaishou_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     kuaishou_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     kuaishou_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(kuaishou_upload_video_parser)
     kuaishou_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     kuaishou_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(kuaishou_upload_video_parser)
@@ -68,6 +70,7 @@ def register(platform_parsers):
     kuaishou_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     kuaishou_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     kuaishou_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(kuaishou_upload_note_parser)
     add_runtime_flags(kuaishou_upload_note_parser)
     add_browser_flags(kuaishou_upload_note_parser)
 
@@ -85,6 +88,7 @@ class KuaishouVideoUploadRequest:
     debug: bool = True
     headless: bool = True
     collection_name: str | None = None
+    publish_not_before: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -98,6 +102,7 @@ class KuaishouNoteUploadRequest:
     publish_strategy: str = KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
     headless: bool = True
+    publish_not_before: datetime | None = None
 
 
 async def login_kuaishou_account(account_name: str, headless: bool = True) -> dict:
@@ -113,7 +118,7 @@ async def check_kuaishou_account(account_name: str) -> bool:
 
 
 def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> KSVideo:
-    return KSVideo(
+    app = KSVideo(
         title=request.title,
         file_path=str(request.video_file),
         desc=request.description,
@@ -126,10 +131,12 @@ def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> 
         headless=request.headless,
         collection_name=request.collection_name,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _build_note_uploader(request: KuaishouNoteUploadRequest, account_file) -> KSNote:
-    return KSNote(
+    app = KSNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
         note=request.note,
@@ -140,6 +147,8 @@ def _build_note_uploader(request: KuaishouNoteUploadRequest, account_file) -> KS
         debug=request.debug,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -254,6 +263,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             collection_name=args.collection,
+            publish_not_before=args.not_before,
         )
         await upload_kuaishou_video(request, target=target)
         print(f"Kuaishou video upload submitted: {request.video_file}")
@@ -270,6 +280,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         await upload_kuaishou_note(request, target=target)
         print(f"Kuaishou note upload submitted: {len(request.image_files)} images")

@@ -1,6 +1,7 @@
 """baijiahao 的命令参数与执行逻辑。"""
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from patchright.async_api import async_playwright
 from uploader.baijiahao_uploader.main import (
@@ -14,6 +15,7 @@ from uploader.baijiahao_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -51,6 +53,7 @@ def register(platform_parsers):
     baijiahao_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     baijiahao_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path")
     baijiahao_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name")
+    add_not_before_flag(baijiahao_upload_video_parser)
     add_runtime_flags(baijiahao_upload_video_parser)
     add_browser_flags(baijiahao_upload_video_parser)
 
@@ -66,6 +69,7 @@ class BaijiahaoVideoUploadRequest:
     collection_name: str | None = None
     debug: bool = True
     headless: bool = True
+    publish_not_before: datetime | None = None
 
 
 async def login_baijiahao_account(account_name: str, headless: bool = True, qrcode_callback=None) -> dict:
@@ -93,6 +97,7 @@ async def upload_baijiahao_video(request: BaijiahaoVideoUploadRequest, *, target
             debug=request.debug,
             headless=request.headless,
         )
+        app.publish_not_before = request.publish_not_before
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -126,6 +131,7 @@ async def upload_baijiahao_video(request: BaijiahaoVideoUploadRequest, *, target
         debug=request.debug,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
     await app.main()
     return account_file
 
@@ -174,6 +180,7 @@ async def run(args):
             collection_name=args.collection,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         await upload_baijiahao_video(request, target=target)
         print(f"Baijiahao video upload submitted: {request.video_file}")

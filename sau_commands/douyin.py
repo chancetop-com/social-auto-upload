@@ -19,6 +19,7 @@ from uploader.douyin_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_image_files,
@@ -57,6 +58,7 @@ def register(platform_parsers):
     upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(upload_video_parser)
     upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
     upload_video_parser.add_argument("--thumbnail-landscape", type=existing_file_path, help="Optional 4:3 landscape thumbnail path")
     upload_video_parser.add_argument("--thumbnail-portrait", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
@@ -79,6 +81,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(upload_note_parser)
     add_runtime_flags(upload_note_parser)
     add_browser_flags(upload_note_parser)
 
@@ -101,6 +104,7 @@ class DouyinVideoUploadRequest:
     headless: bool = True
     declaration: str | None = None
     collection_name: str | None = None
+    publish_not_before: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -115,6 +119,7 @@ class DouyinNoteUploadRequest:
     debug: bool = True
     headless: bool = True
     bgm: str = ""
+    publish_not_before: datetime | None = None
 
 
 async def login_douyin_account(account_name: str, headless: bool = True) -> dict:
@@ -130,7 +135,7 @@ async def check_douyin_account(account_name: str) -> bool:
 
 
 def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> DouYinVideo:
-    return DouYinVideo(
+    app = DouYinVideo(
         request.title,
         str(request.video_file),
         request.tags,
@@ -151,10 +156,12 @@ def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> Do
         headless=request.headless,
         collection_name=request.collection_name,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _build_note_uploader(request: DouyinNoteUploadRequest, account_file) -> DouYinNote:
-    return DouYinNote(
+    app = DouYinNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
         note=request.note,
@@ -166,6 +173,8 @@ def _build_note_uploader(request: DouyinNoteUploadRequest, account_file) -> DouY
         headless=request.headless,
         bgm=request.bgm,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -285,6 +294,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             collection_name=args.collection,
+            publish_not_before=args.not_before,
         )
         await upload_video(request, target=target)
         print(f"Douyin video upload submitted: {request.video_file}")
@@ -311,6 +321,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             bgm=args.bgm or "",
+            publish_not_before=args.not_before,
         )
         await upload_note(request, target=target)
         print(f"Douyin note upload submitted: {len(request.image_files)} images")

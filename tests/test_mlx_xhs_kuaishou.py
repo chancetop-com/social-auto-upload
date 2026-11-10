@@ -26,7 +26,7 @@ import sau_cli
 from conf import LOCAL_CHROME_PATH
 from sau_commands import kuaishou as ks_command
 from sau_commands import xiaohongshu as xhs_command
-from tests.fakes import FakeContext, FakePage, FakePlaywright
+from tests.fakes import FakeContext, FakePlaywright
 from uploader.ks_uploader import main as ks_main
 from uploader.ks_uploader.main import (
     KUAISHOU_CONTEXT_KWARGS,
@@ -41,7 +41,6 @@ from uploader.ks_uploader.main import (
 from uploader.xiaohongshu_uploader import main as xhs_main
 from uploader.xiaohongshu_uploader.main import (
     XHS_CONTEXT_KWARGS,
-    XHS_INIT_SCRIPT,
     XHS_LAUNCH_KWARGS,
     XHS_LOGIN_CHECK_URL,
     XiaoHongShuNote,
@@ -276,23 +275,34 @@ class LocalGoldenTests(unittest.TestCase):
             with patch.object(xhs_main, "set_init_script", init_script):
                 asyncio.run(app.upload(playwright))
 
-        self.assertEqual(XHS_LAUNCH_KWARGS, {"channel": "chromium"})
-        self.assertEqual(XHS_CONTEXT_KWARGS, {"permissions": ["geolocation"]})
-        self.assertTrue(XHS_INIT_SCRIPT)
         self.assertEqual(
             playwright.chromium.launch_calls,
-            [{"headless": False, **XHS_LAUNCH_KWARGS}],
+            [{"headless": False, "channel": "chromium"}],
         )
         browser = playwright.chromium.launch_browser
+        # 第一个 context 是 UA 探测用的临时 context，第二个才是真正的上传 context。
         self.assertEqual(
             browser.new_context_calls,
-            [{"storage_state": "/tmp/xhs-cookie.json", **XHS_CONTEXT_KWARGS}],
+            [
+                {},
+                {
+                    "storage_state": "/tmp/xhs-cookie.json",
+                    "user_agent": "Chrome/120.0",
+                    "permissions": ["geolocation"],
+                    "locale": "zh-CN",
+                    "extra_http_headers": {
+                        "Accept-Language": "zh-CN,zh;q=0.9"
+                    },
+                },
+            ],
         )
-        init_script.assert_awaited_once_with(browser.contexts[0])
+        probe_context, context = browser.contexts
+        self.assertTrue(probe_context.closed)
+        init_script.assert_awaited_once_with(context)
         app.upload_in.assert_awaited_once()
         session = app.upload_in.await_args.args[0]
         self.assertEqual(session.mode, "local")
-        self.assertIs(session.context, browser.contexts[0])
+        self.assertIs(session.context, context)
 
     def test_xhs_note_launch_context_and_init_script_are_golden(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -308,14 +318,27 @@ class LocalGoldenTests(unittest.TestCase):
 
         self.assertEqual(
             playwright.chromium.launch_calls,
-            [{"headless": True, **XHS_LAUNCH_KWARGS}],
+            [{"headless": True, "channel": "chromium"}],
         )
         browser = playwright.chromium.launch_browser
         self.assertEqual(
             browser.new_context_calls,
-            [{"storage_state": "/tmp/xhs-note-cookie.json", **XHS_CONTEXT_KWARGS}],
+            [
+                {},
+                {
+                    "storage_state": "/tmp/xhs-note-cookie.json",
+                    "user_agent": "Chrome/120.0",
+                    "permissions": ["geolocation"],
+                    "locale": "zh-CN",
+                    "extra_http_headers": {
+                        "Accept-Language": "zh-CN,zh;q=0.9"
+                    },
+                },
+            ],
         )
-        init_script.assert_awaited_once()
+        probe_context, context = browser.contexts
+        self.assertTrue(probe_context.closed)
+        init_script.assert_awaited_once_with(context)
 
     def test_xhs_local_teardown_saves_cookie_then_closes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -330,7 +353,8 @@ class LocalGoldenTests(unittest.TestCase):
                 asyncio.run(app.upload(playwright))
 
         browser = playwright.chromium.launch_browser
-        context = browser.contexts[0]
+        probe_context, context = browser.contexts
+        self.assertTrue(probe_context.closed)
         self.assertEqual(context.storage_state_calls, ["/tmp/xhs-cookie.json"])
         self.assertTrue(context.closed)
         self.assertTrue(browser.closed)

@@ -1,6 +1,7 @@
 """hupu 的命令参数与执行逻辑。"""
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from patchright.async_api import async_playwright
 from uploader.hupu_uploader.main import (
@@ -15,6 +16,7 @@ from uploader.hupu_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -51,6 +53,7 @@ def register(platform_parsers):
     hupu_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     hupu_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     hupu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path")
+    add_not_before_flag(hupu_upload_video_parser)
     add_runtime_flags(hupu_upload_video_parser)
     add_browser_flags(hupu_upload_video_parser)
 
@@ -65,6 +68,7 @@ class HupuVideoUploadRequest:
     thumbnail_file: Path | None = None
     debug: bool = True
     headless: bool = True
+    publish_not_before: datetime | None = None
 
 
 async def login_hupu_account(account_name: str, headless: bool = False, qrcode_callback=None) -> dict:
@@ -80,7 +84,7 @@ async def check_hupu_account(account_name: str) -> bool:
 
 
 def _build_uploader(request: HupuVideoUploadRequest, account_file) -> HuPuVideo:
-    return HuPuVideo(
+    app = HuPuVideo(
         title=request.title,
         file_path=str(request.video_file),
         tags=request.tags,
@@ -90,6 +94,8 @@ def _build_uploader(request: HupuVideoUploadRequest, account_file) -> HuPuVideo:
         debug=request.debug,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -180,6 +186,7 @@ async def run(args):
             thumbnail_file=args.thumbnail,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         await upload_hupu_video(request, target=target)
         print(f"Hupu video upload submitted: {request.video_file}")

@@ -15,6 +15,7 @@ from uploader.youtube_uploader.main import (
 )
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -56,6 +57,7 @@ def register(platform_parsers):
     youtube_upload_video_parser.add_argument(
         "--visibility", default="public", choices=["public", "unlisted", "private"], help="Video visibility")
     youtube_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    add_not_before_flag(youtube_upload_video_parser)
     add_runtime_flags(youtube_upload_video_parser)
     add_browser_flags(youtube_upload_video_parser)
 
@@ -73,6 +75,7 @@ class YouTubeVideoUploadRequest:
     schedule: datetime | int = 0
     debug: bool = True
     headless: bool = False
+    publish_not_before: datetime | None = None
 
 
 async def login_youtube_account(account_name: str, headless: bool = False) -> dict:
@@ -88,7 +91,7 @@ async def check_youtube_account(account_name: str) -> bool:
 
 
 def _build_youtube_uploader(request: YouTubeVideoUploadRequest, account_file) -> YouTubeVideo:
-    return YouTubeVideo(
+    app = YouTubeVideo(
         request.title,
         str(request.video_file),
         request.tags,
@@ -100,6 +103,8 @@ def _build_youtube_uploader(request: YouTubeVideoUploadRequest, account_file) ->
         debug=request.debug,
         headless=request.headless,
     )
+    app.publish_not_before = request.publish_not_before
+    return app
 
 
 def _raise_login_required(target) -> None:
@@ -184,6 +189,7 @@ async def run(args):
             schedule=args.schedule or 0,
             debug=args.debug,
             headless=args.headless,
+            publish_not_before=args.not_before,
         )
         await upload_youtube_video(request, target=target)
         print(f"YouTube video upload submitted: {request.video_file}")

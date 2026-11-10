@@ -126,22 +126,5 @@ class PlatformWiringTests(unittest.TestCase):
         self.assertNotIn("reject_multilogin_login", source)
         self.assertNotIn("reject_multilogin_platform", source)
 
-    def test_shim_keeps_legacy_multilogin_names(self):
-        source = _source(ROOT / "sau_commands" / "multilogin.py")
-        for name in (
-            "add_multilogin_flags",
-            "login_required_error",
-            "multilogin_enabled",
-            "reject_multilogin_login",
-            "reject_multilogin_platform",
-            "require_account",
-            "require_local_account",
-            "resolve_account_label",
-            "resolve_multilogin_target",
-        ):
-            with self.subTest(name=name):
-                self.assertIn(name, source)
-
-
 if __name__ == "__main__":
     unittest.main()

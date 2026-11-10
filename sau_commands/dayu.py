@@ -29,6 +29,7 @@ from uploader.dayu_uploader.session import (
 from uploader.dayu_uploader.verification import verify_dayu_article, verify_dayu_video
 from sau_commands.arguments import (
     SCHEDULE_FORMAT,
+    add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
     parse_tags,
@@ -74,6 +75,7 @@ def register(platform_parsers):
     dayu_upload.add_argument("--schedule", type=schedule_value,
                             help=f"{schedule_help}，北京时间，{DAYU_SCHEDULE_MIN_HOURS}小时后至{DAYU_SCHEDULE_MAX_DAYS}天内，分钟为{DAYU_SCHEDULE_STEP_MINUTES}的倍数")
     dayu_upload.add_argument("--prepare-only", action="store_true", help="Upload and fill only; do not click publish")
+    add_not_before_flag(dayu_upload)
     dayu_upload.add_argument("--upload-timeout", type=int, default=600, help="Upload/processing timeout in seconds")
     add_runtime_flags(dayu_upload)
     add_browser_flags(dayu_upload)
@@ -89,6 +91,7 @@ def register(platform_parsers):
     dayu_article.add_argument("--schedule", type=schedule_value,
                              help=f"{schedule_help}，北京时间，{DAYU_SCHEDULE_MIN_HOURS}小时后至{DAYU_SCHEDULE_MAX_DAYS}天内，分钟为{DAYU_SCHEDULE_STEP_MINUTES}的倍数")
     dayu_article.add_argument("--prepare-only", action="store_true", help="上传和填写后结束，不发表")
+    add_not_before_flag(dayu_article)
     dayu_article.add_argument("--upload-timeout", type=int, default=600, help="每张图片上传等待秒数")
     add_runtime_flags(dayu_article)
     add_browser_flags(dayu_article)
@@ -191,6 +194,7 @@ async def run(args):
             source=args.source, desc=args.desc, headless=args.headless, debug=args.debug,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
             source_url=args.source_url, schedule=args.schedule,
+            publish_not_before=args.not_before,
         )
         if target is not None:
             result = await _run_mlx_upload(app, target=target, headless=args.headless)
@@ -203,6 +207,7 @@ async def run(args):
             theme=args.theme, schedule=args.schedule,
             cover_indices=args.cover_indices, headless=args.headless, debug=args.debug,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
+            publish_not_before=args.not_before,
         )
         if target is not None:
             result = await _run_mlx_upload(app, target=target, headless=args.headless)

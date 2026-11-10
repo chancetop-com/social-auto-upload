@@ -14,6 +14,7 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from uploader.publish_gate import wait_until_publish_allowed
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
@@ -1070,15 +1071,23 @@ class DouYinVideo(DouYinBaseUploader):
         )
         context = await set_init_script(context)
 
-        await self.upload_in(
-            BrowserSession(browser=browser, context=context, mode="local")
-        )
-
-        await context.storage_state(path=self.account_file)
-        douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
-        await asyncio.sleep(2)
-        await context.close()
-        await browser.close()
+        try:
+            await self.upload_in(
+                BrowserSession(browser=browser, context=context, mode="local")
+            )
+            await context.storage_state(path=self.account_file)
+            douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+            await asyncio.sleep(2)
+        finally:
+            # 声明/发布失败也要释放浏览器；单独吞掉关闭异常，避免覆盖原始错误。
+            try:
+                await context.close()
+            except Exception:
+                pass
+            try:
+                await browser.close()
+            except Exception:
+                pass
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
@@ -1174,6 +1183,12 @@ class DouYinVideo(DouYinBaseUploader):
 
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
+
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=douyin_logger,
+            label="抖音视频发布",
+        )
 
         sms_prompt_logged = False
         while True:
@@ -1318,6 +1333,12 @@ class DouYinNote(DouYinBaseUploader):
 
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
+
+        await wait_until_publish_allowed(
+            getattr(self, "publish_not_before", None),
+            logger=douyin_logger,
+            label="抖音图文发布",
+        )
 
         while True:
             try:
