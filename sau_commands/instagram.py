@@ -177,7 +177,7 @@ def _build_publish_options(args) -> InstagramPublishOptions | None:
 
     与 TikTok 的 ``_build_publish_options`` 同构：``None`` 表示不动页面默认，
     显式 ``False``（``--no-comments`` / ``--no-ai-generated``）不能被压缩。
-    本工单尚未注册用户可见 flag，读取到的永远是 ``None``。
+    四个 flag 全部未传时返回 ``None``，上传器保持 legacy 路径。
     """
     location = getattr(args, "location", None) or None
     alt_texts = getattr(args, "alt_text", None) or None
