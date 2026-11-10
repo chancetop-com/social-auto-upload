@@ -43,6 +43,7 @@ ENTRY_SELECTORS = (
 # 等待联想列表的建议窗口（spec §4.3.1）；有预算时按剩余预算收紧。
 ENTRY_TIMEOUT_MS = 5_000
 SUGGESTION_TIMEOUT_MS = 10_000
+CLICK_TIMEOUT_MS = 10_000
 # 联想列表可能分批挂载：出现后短暂静置，避免只看到第一条就判“无精确匹配”。
 SUGGESTION_SETTLE_MS = 250
 # 逐字符输入更接近人工操作，实测 fill() 不会触发联想列表。
@@ -222,8 +223,11 @@ class LocationControl:
         node = handle.as_element()
         if node is None:
             return None
+        # 实测：联想行只响应真实指针事件；``el.click()`` 不会触发选中，
+        # 因此这里用 Playwright 的真实点击，失败即按未选中处理。
         try:
-            await node.evaluate('el => el.click()')
+            await node.scroll_into_view_if_needed()
+            await node.click(timeout=self._timeout(CLICK_TIMEOUT_MS))
         except Exception:
             return None
         return node
