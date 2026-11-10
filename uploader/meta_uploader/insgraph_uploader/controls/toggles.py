@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 
 from patchright.async_api import expect
 
-from ..options import INELIGIBLE, MISSING, PRESENT, normalize_text
+from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError, normalize_text
 
 if TYPE_CHECKING:  # 仅用于类型标注，纯逻辑测试不构造浏览器类型。
     from patchright.async_api import Locator, Page
@@ -194,8 +194,10 @@ class SwitchControl:
             if applied == requested:
                 return
             if time.monotonic() >= deadline:
-                raise RuntimeError(
+                # 回读不一致按 mismatch 记录，并保留页面实际读到值（spec §5.2）。
+                raise OptionMismatchError(
                     f"Instagram 开关回读不一致: {self._labels[0]} "
-                    f"requested={requested} applied={applied}"
+                    f"requested={requested} applied={applied}",
+                    applied=applied,
                 )
             await asyncio.sleep(_READBACK_INTERVAL_S)
