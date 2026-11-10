@@ -233,6 +233,79 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     await browser.close()
         asyncio.run(scenario())
 
+    def test_delayed_notification_prompt_does_not_block_upload(self):
+        """创建弹窗已打开后才出现的通知提示必须被关闭，不能卡住素材入口。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    navigation = ''.join(
+                        '<a class="_a6hd" href="#" ' + ('onclick="createPost()"' if i == 1 else '')
+                        + '><span aria-selected="false">Navigation</span></a>' for i in range(4))
+                    script = """
+                      function picked(input) {
+                        const row = document.createElement('div');
+                        row.className = '_ac76';
+                        const button = document.createElement('div');
+                        button.setAttribute('role', 'button');
+                        button.textContent = 'Next';
+                        row.appendChild(button);
+                        input.closest('[role=dialog]').appendChild(row);
+                      }
+                      function createPost() {
+                        setTimeout(function () {
+                          const dialog = document.createElement('div');
+                          dialog.setAttribute('role', 'dialog');
+                          const input = document.createElement('input');
+                          input.type = 'file';
+                          input.accept = 'image/jpeg,video/mp4';
+                          input.addEventListener('change', function () { picked(input); });
+                          dialog.appendChild(input);
+                          document.body.appendChild(dialog);
+                        }, 700);
+                        // 提示晚于创建弹窗出现：旧实现只保护了点击创建那一下。
+                        setTimeout(function () {
+                          const dialog = document.createElement('div');
+                          dialog.setAttribute('role', 'dialog');
+                          dialog.id = 'notify';
+                          // 真实提示全屏覆盖：必须能挡住后续点击才会触发 handler。
+                          dialog.style.position = 'fixed';
+                          dialog.style.inset = '0';
+                          dialog.style.zIndex = '10';
+                          const icon = document.createElement('img');
+                          icon.src = '/images/instagram/xig/ico/xxhdpi_launcher.png?test';
+                          const zone = document.createElement('div');
+                          zone.className = '_a9-z';
+                          const turnOn = document.createElement('button');
+                          turnOn.textContent = 'Turn On';
+                          turnOn.addEventListener('click', function () { throw new Error('wrong'); });
+                          const later = document.createElement('button');
+                          later.textContent = 'Not Now';
+                          later.addEventListener('click', function () { dialog.remove(); });
+                          zone.appendChild(turnOn);
+                          zone.appendChild(later);
+                          dialog.appendChild(icon);
+                          dialog.appendChild(zone);
+                          document.body.appendChild(dialog);
+                        }, 50);
+                      }
+                    """
+                    await page.set_content(
+                        f'<body>{navigation}<script>{script}</script></body>'
+                    )
+                    with tempfile.TemporaryDirectory() as folder:
+                        video = Path(folder) / 'video.mp4'
+                        video.touch()
+                        app = InstagramUploader('unused', title='caption', video_file=video)
+                        await app._upload_files(page, budget=app.start_publish_budget())
+                    # 提示先挡住创建入口，素材弹窗随后才挂载；等待期间必须主动关闭提示。
+                    self.assertEqual(await page.locator('#notify').count(), 0)
+                    self.assertEqual(await page.locator('._ac76 [role=button]').count(), 1)
+                finally:
+                    await browser.close()
+        asyncio.run(scenario())
+
     def test_cover_waits_for_actual_preview_and_rejects_wrong_image(self):
         """真实 Chrome 中延迟替换预览，核对原图字节；错误预览必须停在编辑页。"""
         async def scenario():
