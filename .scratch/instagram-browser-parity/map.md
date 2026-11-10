@@ -50,6 +50,7 @@
 - [13 — Location 端到端](./issues/13-location.md) — 输入 → 联想 → 规范化精确匹配 → 回读；空白候选保留原始下标避免点错；无匹配列候选并 exit 1，绝不点模糊候选。
 - [14 — Alt text 端到端](./issues/14-alt-text.md) — Accessibility 模态框逐张填写、关闭后重开回读；数量 0 → `unsupported(entry_missing)`，1..N-1 → `mismatch` 并保留部分回读。
 - [15 — 文档与回归收口](./issues/15-docs-and-regression.md) — `docs/CLI.md` / `CHANGELOG.md` / `GLOSSARY.md` / Instagram Skill 与实现对齐；A/B/C/D 全绿；四项标 `offline-verified / post-publish unverified`，真发验收见 [16](./issues/16-real-account-acceptance.md)（非阻塞、待人工）。
+- [17 — 本地模式固定英文界面](./issues/17-english-locale.md) — `INSTAGRAM_CONTEXT_KWARGS` 由空表改为 `locale=en-US` + `Accept-Language`，本地 context（含登录窗口）应用；托管模式不变，Profile 须人工保持 English；入口缺失日志打印 `html[lang]`。
 
 ## Not yet specified
 

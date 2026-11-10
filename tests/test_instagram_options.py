@@ -522,6 +522,24 @@ class InstagramOptionPipelineTests(unittest.TestCase):
             self.assertEqual(location.interactions, [])
             self.assertEqual(comments.interactions, [])
 
+    def test_option_failure_logging_tolerates_missing_or_broken_page(self):
+        """入口缺失日志只是排查线索，不能在无页面或 evaluate 失败时改变结果。"""
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(InstagramPublishOptions(location='Shanghai'), folder=folder)
+            app.result['options']['location'] = {
+                'requested': 'Shanghai', 'applied': None, 'status': MISMATCH,
+            }
+            # page=None（fake 层）与 evaluate 抛错都必须静默降级。
+            asyncio.run(app._log_option_outcome('location', None))
+            broken = SimpleNamespace(evaluate=AsyncMock(side_effect=RuntimeError('no page')))
+            asyncio.run(app._log_option_outcome('location', broken))
+            # 未失败项不输出任何日志，也不触碰页面。
+            app.result['options']['comments'] = {
+                'requested': False, 'applied': False, 'status': SET,
+            }
+            asyncio.run(app._log_option_outcome('comments', broken))
+            broken.evaluate.assert_awaited_once()
+
     def test_failure_capture_keeps_options(self):
         with tempfile.TemporaryDirectory() as folder:
             app = self._app(InstagramPublishOptions(location='Shanghai'), folder=folder)

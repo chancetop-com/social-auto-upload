@@ -442,10 +442,21 @@ class LocalGoldenTests(unittest.TestCase):
         )
         self.assertEqual(
             browser.new_context_calls,
-            [{"storage_state": "/tmp/instagram-cookie.json"}],
+            [
+                {
+                    "storage_state": "/tmp/instagram-cookie.json",
+                    "locale": "en-US",
+                    "extra_http_headers": {"Accept-Language": "en-US,en;q=0.9"},
+                }
+            ],
         )
         self.assertEqual(INSTAGRAM_LAUNCH_KWARGS, {"channel": "chrome"})
-        self.assertEqual(INSTAGRAM_CONTEXT_KWARGS, {})
+        # 本地模式固定英文界面（spec §4.4）；托管模式由 Profile 自己保持英文。
+        self.assertEqual(INSTAGRAM_CONTEXT_KWARGS["locale"], "en-US")
+        self.assertEqual(
+            INSTAGRAM_CONTEXT_KWARGS["extra_http_headers"],
+            {"Accept-Language": "en-US,en;q=0.9"},
+        )
         self.assertFalse(INSTAGRAM_INIT_SCRIPT)
         self.assertEqual(
             instagram_launch_kwargs(None), {"channel": "chrome", "proxy": None}

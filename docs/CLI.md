@@ -663,6 +663,8 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 
 结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible`（无归因时省略）。`options` 是新增字段，旧消费方可直接忽略。
 
+本地模式的浏览器 context 固定 `locale=en-US` 与 `Accept-Language: en-US`，不依赖操作系统的浏览器语言（与 TikTok 一致）；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
+>
 > 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
 >
 > 四项能力当前是 **offline-verified / post-publish unverified**：离线测试与真实 DOM 哨兵已通过，但尚未用真实账号真发验收；发布后在 App 或网页端复查这些设置是否保留，仍待验收。

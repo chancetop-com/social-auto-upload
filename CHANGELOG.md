@@ -50,6 +50,7 @@
   - `--ai-generated` / `--no-ai-generated`：互斥，同传由 argparse 退出 `2`；开启时入口缺失或不可用退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
   - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于 `--images` 张数，每条 1–1000 字符，不截断；`upload-video --alt-text` 由 argparse 退出 `2`。
 - 所有静态校验（配文超长、视频与图片互斥、`--thumbnail` 与图片同传、替代文字条数/长度、空 `--location`）在启动浏览器或托管 Profile 前完成并退出 `2`。
+- 本地模式固定 `locale=en-US` 与 `Accept-Language: en-US`（`INSTAGRAM_CONTEXT_KWARGS`，此前为空表），界面语言不再随操作系统的浏览器语言漂移；登录窗口同样固定。托管模式不应用该设置，Profile 界面必须人工保持 English。选项入口缺失时会打印页面 `html[lang]`，便于区分“选择器漂移”与“账号语言不是英文”。
 - 选项设置与回读在点击 Share **之前**完成：任一项未生效退出 `1`、不点击发布，不会退化为 `9`；结果文件仍写入失败证据。既有退出码 `0/1/9/10/11` 含义不变。
 - 结果 JSON 新增顶层 `options`，固定含 `location`、`alt_text`、`comments`、`ai_generated`，每项 `{requested, applied, status[, reason]}`；`status` ∈ `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` ∈ `entry_missing` / `account_ineligible`。字段为新增，旧消费方可忽略。
 - 验证范围：离线 A/B/C/D 测试与真实 Chrome DOM 哨兵通过。**真实账号真发验收尚未执行**，四项能力均为 **offline-verified / post-publish unverified**，发布后设置是否被平台保留待验收。

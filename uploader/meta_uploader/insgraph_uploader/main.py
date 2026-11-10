@@ -32,6 +32,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     MISSING,
     PRESENT,
     SET,
+    UNSUPPORTED,
     InstagramPublishOptions,
     OptionMismatchError,
     empty_option_record,
@@ -70,7 +71,13 @@ _INSTAGRAM_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
 # Golden local-mode browser options.  Multilogin mode reuses the same values
 # only so the call sites stay symmetric; ``browser_session`` ignores them.
 INSTAGRAM_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
-INSTAGRAM_CONTEXT_KWARGS: dict[str, object] = {}
+# 本地模式固定英文界面，不依赖操作系统的浏览器语言：四个发布选项的选择器
+# （Add location / Alt text / Turn off commenting / Add AI label）只在英文 UI 实测过。
+# 托管模式不会应用 context_kwargs：MLX / AdsPower Profile 必须由人工保持英文界面。
+INSTAGRAM_CONTEXT_KWARGS: dict[str, object] = {
+    "locale": "en-US",
+    "extra_http_headers": {"Accept-Language": "en-US,en;q=0.9"},
+}
 INSTAGRAM_INIT_SCRIPT = False
 
 _INSTAGRAM_LOGIN_URL_MARKERS = (
@@ -129,7 +136,10 @@ async def _open_instagram_page(
         headless=headless, **instagram_launch_kwargs(proxy)
     )
     try:
-        context = await browser.new_context(storage_state=str(account_file))
+        # 与 TikTok / 小红书一致：本地 context 固定界面语言，见 INSTAGRAM_CONTEXT_KWARGS。
+        context = await browser.new_context(
+            storage_state=str(account_file), **INSTAGRAM_CONTEXT_KWARGS
+        )
         page = await context.new_page()
         page.set_default_timeout(30_000)
         await page.goto(
@@ -259,7 +269,10 @@ async def instagram_setup(account_file: str | Path, *, handle: bool = False, pro
         browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=_proxy_options(proxy), args=["--start-maximized"])
         candidate = account_file.with_name(f'{account_file.stem}.{uuid4().hex}.pending.json')
         try:
-            context = await browser.new_context(no_viewport=not headless)
+            # 登录窗口同样固定英文，导出的存储状态与后续发布界面一致。
+            context = await browser.new_context(
+                no_viewport=not headless, **INSTAGRAM_CONTEXT_KWARGS
+            )
             page = await context.new_page()
             await page.goto(INSTAGRAM_HOME_URL + 'accounts/login/', wait_until='domcontentloaded', timeout=120_000)
             # 消息入口仅在人工登录及挑战完成后出现；不按 URL 或登录表单消失宣告成功。
@@ -455,6 +468,31 @@ class InstagramUploader:
             1, timeout=budget.clamp_ms(30_000)
         )
 
+    async def _log_option_outcome(self, key: str, page: Page | None) -> None:
+        """入口缺失/不一致时打印页面语言，便于判断是否账号界面语言未固定。
+
+        本地模式已通过 ``INSTAGRAM_CONTEXT_KWARGS`` 固定 en-US；托管模式的界面
+        语言由 Profile 决定，这里的 ``html[lang]`` 是排查入口缺失的第一线索。
+        """
+        record = self.result['options'][key]
+        if record['status'] not in (UNSUPPORTED, MISMATCH):
+            return
+        language = 'unknown'
+        if page is not None:
+            try:
+                language = str(
+                    await page.evaluate('document.documentElement.lang') or 'unknown'
+                )
+            except Exception:
+                language = 'unknown'
+        logger.warning(
+            "Instagram 选项 {} 未生效（{}{}）；页面语言 html[lang]={}",
+            key,
+            record['status'],
+            f"/{record['reason']}" if record.get('reason') else '',
+            language,
+        )
+
     def _record_option(
         self, key: str, requested, applied, status: str, reason: str | None = None
     ) -> None:
@@ -537,6 +575,7 @@ class InstagramUploader:
                 )
                 if detail:
                     details.append(f'{key}: {detail}')
+                await self._log_option_outcome(key, page)
             except LoginRequiredError:
                 # 登录失效属于硬异常：立即中止，不再操作后续选项（退出 10）。
                 raise
