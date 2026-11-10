@@ -10,7 +10,7 @@ summary: 发布 Facebook Page 视频或图文，并管理排期。
 
 # Facebook Page 发布与删除
 
-本 Skill 调用现有 `sau facebook-page`，不重复实现浏览器逻辑。Instagram 当前暂停，后续使用独立网页方式；不使用 Business Suite 绑定 Instagram。
+本 Skill 调用现有 `sau facebook-page`，不重复实现浏览器逻辑。Instagram 已改为独立网页命令 `sau instagram`（见 `instagram-upload` Skill），不使用 Business Suite 绑定 Instagram。
 
 默认不配置代理，浏览器按系统网络直连；网络环境需要代理时显式传 `--proxy` 或设置 `SAU_FACEBOOK_PAGE_PROXY`。
 

@@ -631,7 +631,41 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 视频输入为 MP4/MOV；照片为 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际解码与处理受平台限制。多个图片路径按传入顺序创建轮播；当前已实测单张照片及两张不同照片。标题、正文、标签合并为配文，合计最多 2200 字符。`--headless` 可切换无头运行，人工登录使用默认可见模式。
 
-当前账号的照片/Reels 发布页及高级设置中没有定时入口，因此此独立网页实现只支持立即发布，不提供 `--schedule`；这不代表所有 Instagram 账号和客户端都没有定时能力。页面还提供地点、协作者、AI 标签、隐藏点赞/播放数、关闭评论，照片提供替代文字与滤镜，视频提供裁剪和声音；上述选填功能当前未接入 CLI，保留页面默认设置。首次通知提示会自动选择稍后，视频上传时的 Reels 介绍会自动确认；没有提示则继续。登录、验证仍由用户在工程浏览器完成，未知弹窗或操作失败会明确报错。
+配文超过 2200 字符、视频与图片同时传入或都未传入、`--thumbnail` 与图片同传、替代文字条数或长度不合法、`--location` 为空等静态错误，都在启动浏览器或托管 Profile **之前**校验并退出 `2`。**注意**：配文超长此前退出 `1`（`ValueError`），现在改为退出 `2`（用法错误），与 TikTok、小红书对齐；调度层若按 `1` 判断需同步调整。
+
+当前账号的照片/Reels 发布页及高级设置中没有定时入口，因此此独立网页实现只支持立即发布，不提供 `--schedule`；这不代表所有 Instagram 账号和客户端都没有定时能力。首次通知提示会自动选择稍后，视频上传时的 Reels 介绍会自动确认；没有提示则继续。登录、验证仍由用户在工程浏览器完成，未知弹窗或操作失败会明确报错。
+
+### Instagram 发布选项
+
+`upload-video` / `upload-note` 已接入四项网页发布选项，全部可选；**不传即完全不动页面默认**，也不会读取任何相关控件。
+
+| 参数 | 命令 | 行为 |
+|---|---|---|
+| `--location TEXT` | `upload-video`、`upload-note` | 在 Instagram 的联想列表里按**忽略大小写与多余空白的精确匹配**选择；无精确匹配则退出 `1`、不发布，错误信息列出观察到的候选 |
+| `--no-comments` | `upload-video`、`upload-note` | 请求关闭评论；入口不存在或不可用视为已满足（`default_off`，退出 `0`） |
+| `--ai-generated` | `upload-video`、`upload-note` | 请求打开 AI 生成标识；入口不存在或不可用时退出 `1` |
+| `--no-ai-generated` | `upload-video`、`upload-note` | 请求关闭 AI 生成标识；已是关闭或入口缺失时退出 `0` |
+| `--alt-text TEXT` | 仅 `upload-note` | 每张图片一条替代文字，可重复；条数必须为 0 或正好等于 `--images` 张数，每条 1–1000 字符，不会截断 |
+
+- `--ai-generated` 与 `--no-ai-generated` 互斥，同时传入由 argparse 退出 `2`；没有 `--aigc` 别名。
+- 没有 `--comments`：评论只有“请求关闭”一个方向，想保持开启就不传 `--no-comments`。
+- `--alt-text` 按 `--images` 顺序逐张填写；`upload-video --alt-text` 由 argparse 拒绝，退出 `2`。
+- 选项动作与回读（set-then-readback）在点击 Share **之前**完成。任何一项未生效都退出 `1`、不点击发布，也不会用到 `9`；结果文件仍会记录每项状态和失败证据。
+
+```powershell
+sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-carousel.json
+sau instagram upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文" --no-comments --result .local/instagram-video.json
+```
+
+示例中的 `--location` 必须与 Instagram 当时给出的候选完全一致（忽略大小写与多余空白）；候选名称随账号和地区变化，建议先用 `--headed` 观察一次再固定。
+
+其余网页选填能力仍保留页面默认，CLI 不读取也不修改：协作者、Stories、定时发布、配乐/曲库、选帧封面、用户标签、滤镜、隐藏点赞/播放数。发布后平台是否降级这些设置（等同官方 API 的 `config_issue`）本轮不做回读对账，属于真实账号待验收项。
+
+结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible`（无归因时省略）。`options` 是新增字段，旧消费方可直接忽略。
+
+> 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
+>
+> 四项能力当前是 **offline-verified / post-publish unverified**：离线测试与真实 DOM 哨兵已通过，但尚未用真实账号真发验收；发布后在 App 或网页端复查这些设置是否保留，仍待验收。
 
 成功返回 `published`、`content_id`、`post_id`、`post_url` 和 `media_count`。Reels 可能先处于 `processing`，程序会等待本次提交的最终创建结果；超时后保留已观察状态。`submission_unknown` 表示已进入提交但未确认平台结果，`processing` 表示平台已受理且尚未取得最终作品，均不可直接重复上传。默认结果保存在 `.local/instagram-results/`；建议用 `--result` 指定路径。
 
