@@ -226,6 +226,10 @@ class _FakeSwitch:
     async def is_checked(self):
         return self.checked
 
+    async def is_visible(self):
+        """真实开关在面板收起时不可见；替身默认可见，缺席由 ``_locate`` 表达。"""
+        return True
+
     async def scroll_into_view_if_needed(self):
         return None
 
