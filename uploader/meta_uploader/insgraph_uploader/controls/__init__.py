@@ -1,7 +1,7 @@
 """发布选项控件注册表：按结果键返回页面控件实现。
 
-后续工单各加一行：``location``（13）、``alt_text``（14）、``comments``（11）、
-``ai_generated``（12）。本工单只建立接缝，返回空表。
+每个工单只填自己的 ``_register_*``：``location``（13）、``alt_text``（14）、
+``comments``（11）、``ai_generated``（12）。
 """
 from __future__ import annotations
 
