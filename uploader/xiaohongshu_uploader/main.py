@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
 import re
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -28,7 +30,7 @@ from utils.dom import Candidate
 from utils.dom import ElementMissingError
 from utils.dom import ElementUnusableError
 from utils.dom import Resolved
-from utils.dom import check as check_dom
+from utils.dom import check
 from utils.dom import wait_resolved
 from utils.errors import LoginRequiredError
 from utils.humanize import MAYBE_DISPATCHED
@@ -98,8 +100,9 @@ XHS_LOCATION_INPUT_TIMEOUT_MS = 30_000
 XHS_LOCATION_DROPDOWN_TIMEOUT_MS = 3_000
 XHS_LOCATION_OPTION_TIMEOUT_MS = 3_000
 XHS_LOCATION_FALLBACK_TIMEOUT_MS = 2_000
-XHS_TOPIC_MENU_TIMEOUT_MS = 6_000
-XHS_TOPIC_ITEM_TIMEOUT_MS = 4_000
+# 话题：候选就绪窗口与回读窗口（spec §3 U7）。两者都再经剩余预算收紧。
+XHS_TOPIC_READY_WINDOW_MS = 5_000
+XHS_TOPIC_READBACK_WINDOW_MS = 1_000
 XHS_DECLARATION_SCROLL_TIMEOUT_MS = 5_000
 XHS_DECLARATION_MODAL_TIMEOUT_MS = 8_000
 XHS_DECLARATION_SUGGESTION_TIMEOUT_MS = 10_000
@@ -148,6 +151,9 @@ XHS_LOGIN_SETTLE_MS = 3_000
 XHS_VIDEO_UPLOAD_POLL_SECONDS = 2.0
 XHS_NOTE_UPLOAD_POLL_SECONDS = 1.0
 XHS_LOGIN_SUCCESS_SETTLE_SECONDS = 2.0
+# 话题候选 200ms、编辑区回读 50ms（spec §3 U7）。
+XHS_TOPIC_POLL_SECONDS = 0.2
+XHS_TOPIC_READBACK_POLL_SECONDS = 0.05
 
 # ---------------------------------------------------------------------------
 # 选择器基线（spec §3 U4，ticket 33）。每个环节一组候选，顺序固定：
@@ -213,9 +219,14 @@ XHS_NOTE_IMAGE_CANDIDATES = (
 XHS_TOPIC_MENU_SELECTOR = "#creator-editor-topic-container"
 XHS_TOPIC_ITEM_SELECTOR = "#creator-editor-topic-container .item"
 XHS_TOPIC_ITEM_NAME_SELECTOR = "#creator-editor-topic-container .item .name"
+XHS_TOPIC_ITEM_NAME_CHILD_SELECTOR = ".name"
+XHS_TOPIC_MAX_CLICKS = 3
 XHS_TOPIC_READBACK_CANDIDATES = (
     Candidate('div.tiptap[role="textbox"] a[data-topic]'),
 )
+
+# 标签上限的唯一口径：只在校验期截断（spec §3 U7）。
+XHS_MAX_TAGS = 10
 
 # 8. 定时开关：中文卡片过滤已删除，两个结构容器都是无文本锚点。
 XHS_SCHEDULE_SWITCH_CANDIDATES = (
@@ -468,7 +479,7 @@ async def _arm_ready(
     只用于契约对齐（谓词本身无等待）。
     """
     locator = page.locator(XHS_PUBLISH_BUTTON_SELECTOR)
-    ready, reason = await check_dom(
+    ready, reason = await check(
         locator,
         "interactive",
         point=XHS_PUBLISH_BUTTON_POINT,
@@ -606,6 +617,63 @@ XHS_LOGIN_CHECK_URL = _build_xhs_creator_url(
 
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
+
+
+def format_tag_cap_warning(tags) -> str:
+    """标签超限的唯一文案：CLI 与上传器校验期共用（spec §3 U7）。"""
+    items = list(tags or [])
+    dropped = items[XHS_MAX_TAGS:]
+    return (
+        f"标签数量 {len(items)} 超过小红书上限 {XHS_MAX_TAGS}，"
+        f"只取前 {XHS_MAX_TAGS} 个；已丢弃: {dropped}"
+    )
+
+
+def _cap_tags(tags) -> list[str]:
+    """校验期截断：超过 10 个只取前 10，并列出被丢弃的条目。"""
+    items = list(tags or [])
+    if len(items) <= XHS_MAX_TAGS:
+        return items
+    xiaohongshu_logger.warning(_msg("🏷️", format_tag_cap_warning(items)))
+    return items[:XHS_MAX_TAGS]
+
+
+def _normalise_topic(value) -> str:
+    """话题名归一化（两侧同规则）：去前导 # → strip → 折叠空白 → casefold。"""
+    text = str(value or "")
+    if text.startswith("#"):
+        text = text[1:]
+    text = text.strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.casefold()
+
+
+def _parse_topic_name(raw) -> str | None:
+    """``data-topic`` → JSON → ``name``；解析失败返回 ``None``（名字未知）。"""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    return name
+
+
+def _multiset_difference(after, before) -> list[str]:
+    """多重集合差：``after - before``，保留重复项的计数。"""
+    remaining = Counter(before)
+    new_values: list[str] = []
+    for value in after:
+        if remaining[value] > 0:
+            remaining[value] -= 1
+        else:
+            new_values.append(value)
+    return new_values
 
 
 async def _xhs_user_agent(browser) -> str:
@@ -1029,6 +1097,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         else:
             self.publish_date = 0
 
+        # 标签上限的唯一口径：校验期一处截断（发布前、开浏览器前）。
+        self.tags = _cap_tags(getattr(self, "tags", []) or [])
+
     async def set_schedule_time_xiaohongshu(
         self,
         page: Page,
@@ -1166,14 +1237,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             return
 
         humanizer = humanizer or self._humanizer(page)
-        # 小红书标签上限为 10 个，超过会导致死循环卡住发布
-        max_tags = 10
-        if len(self.tags) > max_tags:
-            xiaohongshu_logger.warning(
-                _msg("🏷️", f"标签数量 {len(self.tags)} 超过小红书上限 {max_tags}，只取前 {max_tags} 个: {self.tags[:max_tags]}")
-            )
-            self.tags = self.tags[:max_tags]
-
         if not getattr(self, "desc", ""):
             desc = await _resolve_anchor(
                 page,
@@ -1184,29 +1247,224 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             )
             await humanizer.click(desc.locator)
 
-        for tag in self.tags:  # 循环处理所有 tags
-            # 话题候选下拉框依赖小红书联想接口实时返回，网络抖动/无匹配时会等不到。
-            # 标签是可选增强项：等不到候选框就跳过该标签继续，不让整条发布因此失败。
+        for tag in self.tags:
+            # 话题是增强项：插入失败降级为纯文本，绝不因此中止发布（spec §3 U7）。
+            await humanizer.type_text("#" + tag)
+            await self._insert_topic(page, tag, humanizer)
+
+    def _topic_window_ms(self, default_ms: int) -> int:
+        """把话题窗口收紧到剩余预算；预算耗尽时窗口为 0（读一次即判定）。"""
+        remaining_ms = max(0, int(self.publish_budget.remaining_seconds() * 1000))
+        return min(default_ms, remaining_ms)
+
+    async def _scan_topic_candidate(self, page: Page, tag: str):
+        """顺序扫描全部渲染候选项，返回 ``(item, item_count)``。
+
+        只认 name **全等**的项（无前缀/包含匹配）；多个全等取最前并打 info。
+        容器需 ATTACHED、被点项需 INTERACTIVE。读取失败按「无候选」处理。
+        """
+        container = page.locator(XHS_TOPIC_MENU_SELECTOR)
+        try:
+            attached, _reason = await check(container, "attached")
+        except Exception:
+            attached = False
+        if not attached:
+            return None, 0
+
+        items_locator = page.locator(XHS_TOPIC_ITEM_SELECTOR)
+        try:
+            count = int(await items_locator.count())
+        except Exception:
+            return None, 0
+        if count <= 0:
+            return None, 0
+
+        target = _normalise_topic(tag)
+        matches = []
+        try:
+            for index in range(count):
+                item = items_locator.nth(index)
+                name = await item.locator(
+                    XHS_TOPIC_ITEM_NAME_CHILD_SELECTOR
+                ).text_content()
+                if _normalise_topic(name) == target:
+                    matches.append(item)
+        except Exception:
+            # 读取候选失败 = 这一轮没有候选；话题缺失只降级，不失败。
+            return None, count
+
+        if not matches:
+            return None, count
+        if len(matches) > 1:
+            xiaohongshu_logger.info(
+                _msg("🏷️", f"topic-ambiguous:{len(matches)}")
+            )
+        candidate = matches[0]
+        try:
+            usable, _reason = await check(candidate, "interactive")
+        except Exception:
+            usable = False
+        if not usable:
+            return None, count
+        return candidate, count
+
+    async def _read_topic_nodes(self, page: Page) -> list[str] | None:
+        """读正文编辑器根内的全部话题锚点（只读 ``data-topic``，只需 ATTACHED）。
+
+        选择器自带 ``div.tiptap[role="textbox"]`` 作用域，预览镜像不在其中。
+        读取失败返回 ``None``：调用点据此区分「读不到」与「0 个新增」。
+        """
+        try:
+            locator = XHS_TOPIC_READBACK_CANDIDATES[0].build(page)
+            count = int(await locator.count())
+        except Exception:
+            return None
+        values: list[str] = []
+        for index in range(count):
             try:
-                await humanizer.type_text("#" + tag)
-                await page.locator(XHS_TOPIC_MENU_SELECTOR).wait_for(
-                    state="visible",
-                    timeout=self._wait_ms(XHS_TOPIC_MENU_TIMEOUT_MS),
-                )
-                first_item = page.locator(XHS_TOPIC_ITEM_SELECTOR).first
-                await first_item.wait_for(
-                    state="visible",
-                    timeout=self._wait_ms(XHS_TOPIC_ITEM_TIMEOUT_MS),
-                )
-                await humanizer.click(first_item)
-            except Exception as exc:
-                xiaohongshu_logger.warning(
-                    _msg("🏷️", f"话题『{tag}』未出现候选，跳过该标签继续发布: {exc}")
-                )
-                # 清掉已键入但未成词的 "#tag" 文本，避免它残留进正文
-                for _ in range(len("#" + tag)):
-                    await humanizer.press("Backspace")
+                raw = await locator.nth(index).get_attribute("data-topic")
+            except Exception:
+                return None
+            values.append(raw or "")
+        return values
+
+    async def _readback_new_topics(
+        self, page: Page, baseline: list[str]
+    ) -> list[str] | None:
+        """点击后统一回读：50ms 轮询，窗口 ``min(1s, 剩余预算)``。"""
+        deadline = time.monotonic() + self._topic_window_ms(
+            XHS_TOPIC_READBACK_WINDOW_MS
+        ) / 1000
+        after: list[str] | None = None
+        while True:
+            after = await self._read_topic_nodes(page)
+            if after is not None:
+                new_nodes = _multiset_difference(after, baseline)
+                if new_nodes:
+                    return new_nodes
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return [] if after is not None else None
+            await asyncio.sleep(min(XHS_TOPIC_READBACK_POLL_SECONDS, remaining))
+
+    def _topic_failure(
+        self,
+        reason: str,
+        tag: str,
+        *,
+        observed_names,
+        new_nodes,
+        attempts: int,
+        elapsed_ms: int = 0,
+    ) -> ElementUnusableError:
+        """话题失败对象：``reason`` 之外的四个字段挂在实例上（ticket 39）。"""
+        error = ElementUnusableError(
+            what=f"话题『{tag}』",
+            role="interactive",
+            selector=XHS_TOPIC_ITEM_SELECTOR,
+            reason=reason,
+            tried=[(XHS_TOPIC_ITEM_SELECTOR, None)],
+            elapsed_ms=elapsed_ms,
+            publish_clicked=False,
+        )
+        error.tag = tag
+        error.observed_names = list(observed_names)
+        error.new_nodes = list(new_nodes)
+        error.attempts = int(attempts)
+        return error
+
+    async def _insert_topic(
+        self, page: Page, tag: str, humanizer: Humanizer
+    ) -> None:
+        """找候选 → 最多点击 3 次 → 循环外统一回读一次。"""
+        started = time.monotonic()
+        deadline = started + self._topic_window_ms(
+            XHS_TOPIC_READY_WINDOW_MS
+        ) / 1000
+        attempts = 0
+        baseline: list[str] | None = None
+
+        while attempts < XHS_TOPIC_MAX_CLICKS and time.monotonic() < deadline:
+            candidate, item_count = await self._scan_topic_candidate(page, tag)
+            if candidate is None:
+                if attempts > 0 or item_count > 0:
+                    # 点过之后候选消失 = 正常成功信号；有项但无全等 = 无候选。
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(XHS_TOPIC_POLL_SECONDS, remaining))
                 continue
+
+            if baseline is None:
+                # 基线按标签条目固定：第一次点击前取一次，重试不刷新。
+                baseline = await self._read_topic_nodes(page)
+                if baseline is None:
+                    # 读不到编辑区就不点：宁可降级也不插入无法校验的内容。
+                    break
+
+            await humanizer.click(candidate)
+            attempts += 1
+            if attempts >= XHS_TOPIC_MAX_CLICKS:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(XHS_TOPIC_POLL_SECONDS, remaining))
+
+        if attempts == 0:
+            await self._degrade_topic(tag, humanizer, attempts=attempts)
+            return
+
+        new_nodes = await self._readback_new_topics(page, baseline or [])
+        if new_nodes is None:
+            raise self._topic_failure(
+                "topic-mismatch",
+                tag,
+                observed_names=[],
+                new_nodes=[],
+                attempts=attempts,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+            )
+
+        observed_names = [_parse_topic_name(raw) for raw in new_nodes]
+        if len(new_nodes) > 1:
+            raise self._topic_failure(
+                "topic-multi-insert",
+                tag,
+                observed_names=observed_names,
+                new_nodes=new_nodes,
+                attempts=attempts,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+            )
+        if not new_nodes:
+            await self._degrade_topic(tag, humanizer, attempts=attempts)
+            return
+        if _normalise_topic(observed_names[0]) == _normalise_topic(tag):
+            xiaohongshu_logger.info(_msg("🏷️", f"topic-match:{tag}"))
+            return
+
+        raise self._topic_failure(
+            "topic-mismatch",
+            tag,
+            observed_names=observed_names,
+            new_nodes=new_nodes,
+            attempts=attempts,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+
+    async def _degrade_topic(
+        self, tag: str, humanizer: Humanizer, *, attempts: int
+    ) -> None:
+        """降级：保留纯文本 ``#tag`` + 一个空格；不按 Backspace 清理。"""
+        await humanizer.press("Space")
+        xiaohongshu_logger.warning(
+            _msg(
+                "🏷️",
+                f"话题『{tag}』未插入（尝试 {attempts} 次），"
+                "保留纯文本继续发布",
+            )
+        )
 
     async def fill_meta(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
         humanizer = humanizer or self._humanizer(page)

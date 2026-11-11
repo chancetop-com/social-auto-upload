@@ -10,11 +10,13 @@ from uploader.xiaohongshu_uploader.main import (
     XHS_CONTEXT_KWARGS,
     XHS_INIT_SCRIPT,
     XHS_LAUNCH_KWARGS,
+    XHS_MAX_TAGS,
     XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
     XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
     XiaoHongShuNote,
     XiaoHongShuVideo,
     cookie_auth as xiaohongshu_cookie_auth,
+    format_tag_cap_warning,
     is_logged_in,
     xiaohongshu_setup,
 )
@@ -417,9 +419,8 @@ async def run(args):
 
     if args.action == "upload-video":
         parsed_tags = parse_tags(args.tags)
-        if len(parsed_tags) > 10:
-            print(f"错误：小红书标签最多 10 个，当前提供了 {len(parsed_tags)} 个: {parsed_tags}", file=sys.stderr)
-            return 1
+        if len(parsed_tags) > XHS_MAX_TAGS:
+            print(f"警告：{format_tag_cap_warning(parsed_tags)}", file=sys.stderr)
         request = XiaohongshuVideoUploadRequest(
             account_name=account_label,
             video_file=args.file,
@@ -447,9 +448,8 @@ async def run(args):
 
     if args.action == "upload-note":
         parsed_tags = parse_tags(args.tags)
-        if len(parsed_tags) > 10:
-            print(f"错误：小红书标签最多 10 个，当前提供了 {len(parsed_tags)} 个: {parsed_tags}", file=sys.stderr)
-            return 1
+        if len(parsed_tags) > XHS_MAX_TAGS:
+            print(f"警告：{format_tag_cap_warning(parsed_tags)}", file=sys.stderr)
         request = XiaohongshuNoteUploadRequest(
             account_name=account_label,
             image_files=parse_image_files(args.images),
