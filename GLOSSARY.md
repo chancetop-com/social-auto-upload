@@ -32,7 +32,11 @@
 
 ## Login required（登录失效）
 
-平台侧的登录态无效（登录页、登录表单、未登录锚点）。托管模式下 upload 与 check 以退出码 `10` 表达，交由调度 App 安排人工登录；它不是桌面应用的 API Key / token 失效，也不是 Profile 占用。
+平台侧的登录态无效（登录页、登录表单、未登录锚点）。本地模式与托管模式**同码 `10`**，交由调度 App 安排人工登录；它不是桌面应用的 API Key / token 失效，也不是 Profile 占用。探测本身失败（网络错误、5xx、页面结构异常）属于故障而非失效，退出码是 `1`。发布点击之后才检出登录失效时，异常带 `publish_attempted=true`，表示帖子可能已经提交，必须先核对再决定是否重跑。
+
+## 人机验证（verification）
+
+平台要求通过验证码或滑块等交互才能继续的状态，异常字段为 `reason="verification"`。它与登录失效同码 `10`，区别只在补救动作：登录失效先恢复会话，人机验证先完成验证（通过后通常不必重新扫码）。派发前检出记 `publish_attempted=False`；派发后检出记 `True`，后者同样要先核对帖子是否已存在。
 
 ## 请求过于频繁（429）
 
@@ -86,6 +90,10 @@ AdsPower 的 Profile 标识。CLI 通过 `--profile-id` 传入；AdsPower V2 请
 
 显式传参后操作页面控件，再从页面读取最终状态并与请求值比较；不一致即视为失败。未传参的选项不参与设置或回读，保持页面默认。
 
+## 元素角色（attached/visible/interactive/editable）
+
+判定一个元素能否用于当前动作的四档递进语义。**attached**：在 DOM 中且已连接，只要求唯一命中（多义即失败，不得用 `.first` 蒙混）。**visible**：自身与祖先链未被 `display`/`visibility` 隐藏，`opacity` 连乘不低于阈值，且没有 `aria-hidden="true"`。**interactive**：在 `visible` 之上还要求未禁用、`pointer-events` 不为 `none`，并按落点做 `elementFromPoint` 命中自身或后代（反遮挡的最终判据）。**editable**：在 `visible` 之上要求可写（`input`/`textarea` 或 `contenteditable="true"`，且非 `readonly`/`disabled`）。
+
 ## 入口缺失（entry_missing）
 
 请求的发布选项在页面上找不到对应控件：未开放、未渲染或被账号门控。结果文件以 `status=unsupported` 记录；若请求的是“关闭”类开关（关闭评论、关闭 AI 标识），则视为已满足，记 `default_off` 并退出 `0`。它不代表页面改版或发布流程故障，只说明本次请求无法在该账号落地；若请求的是“开启”类状态，则按失败处理，退出 `1` 且不点击发布。
@@ -101,6 +109,14 @@ AdsPower 的 Profile 标识。CLI 通过 `--profile-id` 传入；AdsPower V2 请
 ## 发布结果未知
 
 发布动作已经发出，但没有观察到成功页面，也没有命中登录或验证码跳转的状态。帖子可能已经发布，对应退出码 `9`；禁止自动重发，必须先人工核查。
+
+## publish_attempted
+
+本次运行是否已经越过不可回退点（提交动作的派发）。该字段在派发前即置位，因此 `True` 只证明“可能已提交”，不证明成功。退出码为 `10` 且该字段为 `True` 时，CLI 额外向 stderr 打单独一行 `publish_attempted=true`；其余任何退出码都不打这一行。
+
+## ARM / FIRE / OBSERVE（发布提交三段）
+
+一次发布运行拆成三段。**ARM**：反复检查发布按钮的就绪谓词（存在、`interactive`、`is-publish`、`submit-disabled`），是唯一允许重试的阶段；就绪窗用尽即确定未发布（退出码 `1`）。**FIRE**：先置位 `publish_attempted`，再做落点复核与人类化点击，单次运行至多派发一次；派发后不再触碰按钮，任何异常都视为可能已发布（退出码 `9`）。**OBSERVE**：只按 URL 判断结果，离开 `/publish/publish` 且未命中登录/验证页为成功（退出码 `0`），窗口内仍未离开为结果未知（退出码 `9`）。
 
 ## Photos tab / 图片帖
 
