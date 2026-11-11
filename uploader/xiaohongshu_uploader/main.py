@@ -10,6 +10,7 @@ import tempfile
 import time
 from collections import Counter
 from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -27,6 +28,7 @@ from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
 from utils.browser_session import BrowserSession
 from utils.browser_session import provider_label
+from utils.controls import read_switch_state
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
 from utils.dom import ElementUnusableError
@@ -250,6 +252,33 @@ XHS_TOPIC_READBACK_CANDIDATES = (
 
 # 标签上限的唯一口径：只在校验期截断（spec §3 U7）。
 XHS_MAX_TAGS = 10
+
+# ---------------------------------------------------------------------------
+# 元数据长度与回读（spec §3 U8）。
+#
+# 标题是平台加权口径（UTF-16 码元 >127 记 2，加总后除 2 向上取整 ≤20）；
+# 正文是逐字符口径（≤1000），话题锚点按 `#name` + 分隔符计入。
+# 越限的现场信号只认节点存在性：标题 `.max_suffix` / `.c-input_max`，
+# 正文 `div.length-error`；不读数值、不判可见。
+# ---------------------------------------------------------------------------
+XHS_TITLE_MAX_LENGTH = 20
+XHS_BODY_MAX_LENGTH = 1000
+XHS_TITLE_MAX_SUFFIX_SELECTORS = (
+    ".edit-container .suffix.max_suffix",
+    ".d-input-wrapper.c-input_max",
+)
+XHS_BODY_LENGTH_ERROR_SELECTOR = "div.edit-container div.length-error"
+# 输入后先等 350ms，再轮询到 500ms；不是超时，是平台渲染延迟窗口。
+XHS_TITLE_WARN_MIN_MS = 350
+XHS_TITLE_WARN_WINDOW_MS = 500
+XHS_TITLE_WARN_POLL_MS = 50
+# 定时边界（spec §3 U8 D）：now + 2h < t <= now + 14d；墙上时间语义。
+XHS_MAX_SCHEDULE_LEAD_TIME = timedelta(days=14)
+# 失焦后到单次回读之间的渲染静置（C2）。
+XHS_SCHEDULE_READBACK_SETTLE_MS = 300
+XHS_SCHEDULE_SWITCH_SIMULATOR_SELECTOR = ".d-switch-simulator"
+XHS_SCHEDULE_DATE_INPUT_SELECTOR = ".date-picker-container input"
+
 
 # 8. 定时开关：中文卡片过滤已删除，两个结构容器都是无文本锚点。
 XHS_SCHEDULE_SWITCH_CANDIDATES = (
@@ -971,6 +1000,145 @@ def _cap_tags(tags) -> list[str]:
     return items[:XHS_MAX_TAGS]
 
 
+def _utf16_weight(char: str) -> int:
+    """单个字符的平台权重：每个 UTF-16 码元 >127 记 2，否则记 1。"""
+    units = char.encode("utf-16-le")
+    return sum(
+        2 if int.from_bytes(units[index : index + 2], "little") > 127 else 1
+        for index in range(0, len(units), 2)
+    )
+
+
+def xhs_title_length(title: str) -> int:
+    """小红书标题长度：``ceil(Σ code-unit weight / 2)``，上限 20。
+
+    emoji（代理对）占 4 权重 → 计 2；CJK 每个占 2 权重 → 计 1；
+    ASCII 每个占 1 权重 → 两个 ASCII 计 1。组合字符按两个码点计。
+    """
+    weighted = sum(_utf16_weight(char) for char in str(title or ""))
+    return (weighted + 1) // 2
+
+
+def xhs_truncate_title(title: str, limit: int = XHS_TITLE_MAX_LENGTH) -> str:
+    """按平台口径截断到 ``limit``，绝不切开代理对。"""
+    used = 0
+    kept: list[str] = []
+    for char in str(title or ""):
+        weight = _utf16_weight(char)
+        if (used + weight + 1) // 2 > limit:
+            break
+        used += weight
+        kept.append(char)
+    return "".join(kept)
+
+
+def validate_title_length(title: str) -> str:
+    """显式标题预检：超限抛 ``ValueError``（浏览器未启动），绝不截断。"""
+    length = xhs_title_length(title)
+    if length > XHS_TITLE_MAX_LENGTH:
+        raise ValueError(
+            f"标题过长：当前 {length} / 上限 {XHS_TITLE_MAX_LENGTH}"
+            "（小红书口径：按 UTF-16 码元加权，码元 >127 记 2、否则记 1，"
+            "加总后除 2 向上取整）"
+        )
+    return title
+
+
+def xhs_body_length(desc: str, tags=None) -> int:
+    """正文长度口径：正文逐字符计 1；话题锚点按 ``#name`` + 分隔符计。
+
+    ``#旅行pov[话题]#`` → ``#旅行pov``（6）+ 一个分隔符 = 7。上限 1000。
+    """
+    total = len(str(desc or ""))
+    for tag in tags or ():
+        name = str(tag or "")
+        if name.startswith("#"):
+            name = name[1:]
+        total += len(name) + 2
+    return total
+
+
+def _wall_clock(value: datetime) -> datetime:
+    """墙上时间：aware 输入的 offset 一律忽略（只取它自带的年月日时分）。"""
+    return value.replace(tzinfo=None)
+
+
+def xhs_validate_schedule_time(
+    publish_date: datetime, *, now: datetime | None = None
+) -> datetime:
+    """窗口 ``now + 2h < t <= now + 14d``，墙上时间语义。"""
+    if not isinstance(publish_date, datetime):
+        raise TypeError("publish_date 必须是 datetime 类型或 0")
+    wall = _wall_clock(publish_date)
+    current = _wall_clock(now) if now is not None else datetime.now()
+    if wall <= current:
+        raise ValueError("定时发布时间必须晚于当前时间")
+    if wall <= current + BaseVideoUploader.MIN_SCHEDULE_LEAD_TIME:
+        raise ValueError("定时发布时间必须大于当前时间 2 小时")
+    if wall > current + XHS_MAX_SCHEDULE_LEAD_TIME:
+        raise ValueError("定时发布时间不能晚于当前时间 14 天")
+    return wall
+
+
+def _format_schedule_value(publish_date: datetime) -> str:
+    return _wall_clock(publish_date).strftime("%Y-%m-%d %H:%M")
+
+
+def _parse_schedule_value(raw) -> datetime | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
+
+
+def _same_schedule_minute(left: datetime, right: datetime) -> bool:
+    return left.replace(second=0, microsecond=0) == right.replace(
+        second=0, microsecond=0
+    )
+
+
+async def _element_exists(page: Page, selector: str) -> bool:
+    """节点存在性（只用于集合基数/存在性判据，不判可见、不读文本）。"""
+    try:
+        locator = page.locator(selector)
+    except Exception:
+        return False
+    ok, _reason = await check(locator, "attached")
+    return ok
+
+
+async def _simulator_switch_state(switch) -> bool | None:
+    """读小红书 ``.d-switch-simulator`` 的 class：``checked``/``unchecked``。
+
+    ``None`` = 读不出来（不是「关着」）。真机上开关状态只在 class 上，
+    ``aria-checked`` 常缺席；共享层 ``read_switch_state`` 仍是首选，
+    这里只作平台兜底。
+    """
+    try:
+        simulator = switch.locator(XHS_SCHEDULE_SWITCH_SIMULATOR_SELECTOR).first
+        if await simulator.count() != 1:
+            return None
+        classes = str(await simulator.get_attribute("class") or "")
+    except Exception:
+        return None
+    tokens = classes.split()
+    if "unchecked" in tokens:
+        return False
+    if "checked" in tokens:
+        return True
+    return None
+
+
+async def _schedule_switch_checked(switch) -> bool:
+    """C1/C2/C3 共用：simulator class 含 ``checked`` 且不含 ``unchecked``。"""
+    return (await _simulator_switch_state(switch)) is True
+
+
 def _normalise_topic(value) -> str:
     """话题名归一化（两侧同规则）：去前导 # → strip → 折叠空白 → casefold。"""
     text = str(value or "")
@@ -1463,7 +1631,11 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
-            self.publish_date = self.validate_publish_date(self.publish_date)
+            if isinstance(self.publish_date, datetime):
+                # 墙上时间语义：aware 输入的 offset 不参与校验，也不参与格式化。
+                self.publish_date = xhs_validate_schedule_time(self.publish_date)
+            else:
+                self.publish_date = self.validate_publish_date(self.publish_date)
         else:
             self.publish_date = 0
 
@@ -1478,7 +1650,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         humanizer: Humanizer | None = None,
     ):
         humanizer = humanizer or self._humanizer(page)
-        xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {publish_date.strftime(self.date_format)}"))
+        xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {_format_schedule_value(publish_date)}"))
         switch = await _resolve_anchor(
             page,
             "定时开关",
@@ -1487,8 +1659,19 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             budget=self.publish_budget,
         )
         await humanizer.click(switch.locator)
-        await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
-        publish_date_hour = publish_date.strftime("%Y-%m-%d %H:%M")
+        # C1：点后立刻回读开关状态与时间输入框 attached（不用固定 sleep）。
+        await self._assert_schedule_switch_on(
+            page, switch.locator, stage="C1"
+        )
+        if not await _element_exists(page, XHS_SCHEDULE_DATE_INPUT_SELECTOR):
+            raise ElementUnusableError(
+                "定时时间输入",
+                role="attached",
+                selector=XHS_SCHEDULE_DATE_INPUT_SELECTOR,
+                reason="C1 时间输入框未 attached",
+                publish_clicked=False,
+            )
+
         time_input = await _resolve_anchor(
             page,
             "定时时间输入",
@@ -1496,10 +1679,102 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="editable",
             budget=self.publish_budget,
         )
-        # 原生日期输入框点击会展开日历，这里只聚焦后逐字键入（回读归 ticket 40）。
+        # 原生日期输入框点击会展开日历，这里只聚焦后逐字键入。
         await time_input.locator.focus()
-        await humanizer.type_text(str(publish_date_hour))
-        await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
+        await humanizer.type_text(_format_schedule_value(publish_date))
+        # 失焦只允许 blur()：Tab 会把焦点交给发布按钮，Enter 会触发暂存离开。
+        await time_input.locator.blur()
+        await self._settle(page, XHS_SCHEDULE_READBACK_SETTLE_MS)
+        # C2：blur → 约 300ms → 单次读 input.value，按分钟比较；不重试。
+        await self._assert_schedule_switch_on(
+            page, switch.locator, stage="C2"
+        )
+        await self._assert_schedule_value(
+            page, time_input.locator, publish_date, stage="C2"
+        )
+
+    async def _assert_schedule_switch_on(self, page: Page, switch, *, stage: str):
+        if await _schedule_switch_checked(switch):
+            return
+        raise ElementUnusableError(
+            "定时开关",
+            role="attached",
+            selector=XHS_SCHEDULE_SWITCH_CANDIDATES[0].selector,
+            reason=f"{stage} 开关未选中",
+            publish_clicked=False,
+        )
+
+    async def _assert_schedule_value(
+        self, page: Page, input_locator, publish_date: datetime, *, stage: str
+    ):
+        try:
+            raw = await input_locator.input_value()
+        except Exception as exc:
+            raw = None
+            read_error = exc
+        else:
+            read_error = None
+
+        parsed = _parse_schedule_value(raw)
+        expected = _wall_clock(publish_date)
+        if parsed is None or not _same_schedule_minute(parsed, expected):
+            detail = (
+                f"读取失败: {read_error}"
+                if read_error is not None
+                else f"实际 {raw!r}"
+            )
+            raise ElementUnusableError(
+                "定时发布时间",
+                role="attached",
+                selector=XHS_SCHEDULE_TIME_CANDIDATES[0].selector,
+                reason=(
+                    f"{stage} 回读不一致：期望 "
+                    f"{_format_schedule_value(expected)}，{detail}"
+                ),
+                publish_clicked=False,
+            )
+
+    async def _verify_schedule_before_fire(self, page: Page) -> None:
+        """C3：ARM 就绪后、FIRE 前，再证一次定时开关、值与时效。
+
+        即时发布（``publish_date`` 为空）完全不进入 C1–C3；``--no-publish``
+        干跑同样执行本检查。
+        """
+        if (
+            self.publish_strategy
+            != XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED
+            or self.publish_date == 0
+        ):
+            return
+
+        switch = await _resolve_anchor(
+            page,
+            "定时开关",
+            XHS_SCHEDULE_SWITCH_CANDIDATES,
+            role="attached",
+            budget=self.publish_budget,
+        )
+        await self._assert_schedule_switch_on(page, switch.locator, stage="C3")
+
+        time_input = await _resolve_anchor(
+            page,
+            "定时时间输入",
+            XHS_SCHEDULE_TIME_CANDIDATES,
+            role="attached",
+            budget=self.publish_budget,
+        )
+        await self._assert_schedule_value(
+            page, time_input.locator, self.publish_date, stage="C3"
+        )
+
+        if _wall_clock(self.publish_date) <= datetime.now():
+            raise ElementUnusableError(
+                "定时发布时间",
+                role="attached",
+                selector=XHS_SCHEDULE_TIME_CANDIDATES[0].selector,
+                reason="C3 请求时间已过期（不再晚于本机当前时间）",
+                publish_clicked=False,
+            )
 
     async def set_location(
         self, page: Page, location: str = "青岛市", *, humanizer: Humanizer | None = None
@@ -1581,7 +1856,49 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         )
         # 标题框原本由 Playwright 的瞬间赋值隐式聚焦；改为显式聚焦后逐字键入。
         await title_container.locator.focus()
-        await humanizer.type_text(self.title[:20])
+        # 原样填充：静默截断已删除（越限只在校验期拒绝，见 U8 B）。
+        await humanizer.type_text(self.title)
+        await self._assert_title_not_over_limit(page)
+
+    async def _assert_title_not_over_limit(self, page: Page) -> None:
+        """输入后等 ≥350ms / 轮询至 500ms，再查越限后缀节点的存在性。"""
+        await self._settle(page, XHS_TITLE_WARN_MIN_MS)
+        extra_rounds = max(
+            1,
+            (XHS_TITLE_WARN_WINDOW_MS - XHS_TITLE_WARN_MIN_MS)
+            // XHS_TITLE_WARN_POLL_MS,
+        )
+        for round_index in range(extra_rounds + 1):
+            selector = await self._title_limit_suffix(page)
+            if selector is not None:
+                raise ElementUnusableError(
+                    "标题",
+                    role="attached",
+                    selector=selector,
+                    reason="标题超出平台长度上限（越限后缀节点存在）",
+                    publish_clicked=False,
+                )
+            if round_index == extra_rounds:
+                return
+            await self._settle(page, XHS_TITLE_WARN_POLL_MS)
+
+    async def _title_limit_suffix(self, page: Page) -> str | None:
+        for selector in XHS_TITLE_MAX_SUFFIX_SELECTORS:
+            if await _element_exists(page, selector):
+                return selector
+        return None
+
+    async def _assert_body_not_over_limit(self, page: Page) -> None:
+        """正文 + 话题全部输入完成后，单次检查长度错误节点（存在即失败）。"""
+        if not await _element_exists(page, XHS_BODY_LENGTH_ERROR_SELECTOR):
+            return
+        raise ElementUnusableError(
+            "正文",
+            role="attached",
+            selector=XHS_BODY_LENGTH_ERROR_SELECTOR,
+            reason="正文超出平台长度上限（长度错误节点存在）",
+            publish_clicked=False,
+        )
 
     async def fill_desc(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
         if not getattr(self, "desc", ""):
@@ -1841,6 +2158,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         await self.fill_title(page, humanizer=humanizer)
         await self.fill_desc(page, humanizer=humanizer)
         await self.fill_tags(page, humanizer=humanizer)
+        # 唯一闸门：正文与话题全部输入完成后单次检查越限节点。
+        await self._assert_body_not_over_limit(page)
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
@@ -1891,7 +2210,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         - ``original_declaration`` 为 ``True``/``False`` 时才切换原创开关；
         - ``content_type`` 非空时才打开内容类型声明下拉。
 
-        任一步失败只记 warning，不阻断发布。
+        原创 ``true`` 是硬闸：点前读状态、未开则点击 + 确认弹窗，任一步失败
+        即上抛（退出 1）；原创 ``false`` 与内容类型/封面仍是 warning 继续。
         """
         if self.original_declaration is None and not self.content_type:
             return
@@ -1906,7 +2226,44 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
     async def _set_original_declaration(
         self, page: Page, *, humanizer: Humanizer
     ) -> None:
-        enabled = bool(self.original_declaration)
+        if self.original_declaration is True:
+            await self._enable_original_declaration(page, humanizer=humanizer)
+        else:
+            await self._disable_original_declaration(page, humanizer=humanizer)
+
+    async def _enable_original_declaration(
+        self, page: Page, *, humanizer: Humanizer
+    ) -> None:
+        """原创 true：点前读 → 未开则点击 → 勾选须知 → 声明原创；失败即 1。"""
+        switch = (
+            await _resolve_anchor(
+                page,
+                "原创开关",
+                XHS_ORIGINAL_SWITCH_CANDIDATES,
+                role="interactive",
+                budget=self.publish_budget,
+            )
+        ).locator
+
+        current = await self._read_original_switch_state(switch)
+        if current is True:
+            xiaohongshu_logger.success(_msg("🧾", "原创声明已开启（无需切换）"))
+            return
+
+        if current is None:
+            xiaohongshu_logger.warning(
+                _msg("⚠️", "无法确认原创声明开关状态，按未开启处理并点击")
+            )
+        await humanizer.click(switch)
+        await self._settle(page, XHS_DECLARATION_SETTLE_MS)
+        # 点后不读状态：确认弹窗走完即视为成功；任一步失败上抛（1）。
+        await self._confirm_original_declaration(page, humanizer=humanizer)
+        xiaohongshu_logger.success(_msg("🧾", "原创声明已开启"))
+
+    async def _disable_original_declaration(
+        self, page: Page, *, humanizer: Humanizer
+    ) -> None:
+        """原创 false：开着则点一次关；控件缺失视为已关；失败 warning 继续。"""
         try:
             switch = (
                 await _resolve_anchor(
@@ -1917,40 +2274,36 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                     budget=self.publish_budget,
                 )
             ).locator
+        except (ElementMissingError, ElementUnusableError) as exc:
+            xiaohongshu_logger.warning(
+                _msg("⚠️", f"原创开关不存在或不可用，视为已关闭: {exc}")
+            )
+            return
 
-            current = await self._switch_is_on(switch)
-            if current is None:
-                # 状态未知时只在“开启”场景点击；关闭场景默认页面已经是关的，
-                # 盲目点击反而可能把开关打开。
-                if enabled:
-                    xiaohongshu_logger.warning(
-                        _msg("⚠️", "无法确认原创声明开关状态，尝试点击开启")
-                    )
-                    await humanizer.click(switch)
-                    await self._settle(page, XHS_DECLARATION_SETTLE_MS)
-                    await self._confirm_original_declaration(
-                        page, humanizer=humanizer
-                    )
-                else:
-                    xiaohongshu_logger.warning(
-                        _msg("⚠️", "无法确认原创声明开关状态，跳过关闭")
-                    )
-            elif current is not enabled:
+        try:
+            current = await self._read_original_switch_state(switch)
+            if current is True:
+                # 点后不读，也不二次点击。
                 await humanizer.click(switch)
                 await self._settle(page, XHS_DECLARATION_SETTLE_MS)
-                if enabled:
-                    await self._confirm_original_declaration(
-                        page, humanizer=humanizer
-                    )
-
-            xiaohongshu_logger.success(
-                _msg("🧾", f"原创声明已{'开启' if enabled else '关闭'}")
-            )
+            elif current is None:
+                xiaohongshu_logger.warning(
+                    _msg("⚠️", "无法确认原创声明开关状态，跳过关闭")
+                )
+            xiaohongshu_logger.success(_msg("🧾", "原创声明已关闭"))
         except Exception as exc:
             xiaohongshu_logger.warning(
-                _msg("⚠️", f"设置原创声明失败，跳过继续发布: {exc}")
+                _msg("⚠️", f"关闭原创声明失败，跳过继续发布: {exc}")
             )
             await self._press_escape(page)
+
+    @staticmethod
+    async def _read_original_switch_state(switch) -> bool | None:
+        """点前读状态：共享层优先，平台 simulator class 兜底（三态）。"""
+        current = await read_switch_state(switch)
+        if current is not None:
+            return current
+        return await _simulator_switch_state(switch)
 
     async def _add_content_declaration(
         self, page: Page, *, humanizer: Humanizer
@@ -2122,22 +2475,19 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         """确认「原创声明」弹窗：勾选须知并点击「声明原创」。
 
         点击原创开关后小红书会弹出权益说明和《原创声明须知》勾选框；
-        不处理这个弹窗会一直挡住发布按钮。
+        不处理这个弹窗会一直挡住发布按钮。开启原创时弹窗缺失 = 无法证明
+        声明生效 → 上抛（退出 1），不再静默放过。
         """
-        try:
-            modal = (
-                await _resolve_anchor(
-                    page,
-                    "原创声明弹窗",
-                    XHS_ORIGINAL_MODAL_CANDIDATES,
-                    role="visible",
-                    timeout_ms=XHS_DECLARATION_CONFIRM_TIMEOUT_MS,
-                    budget=self.publish_budget,
-                )
-            ).locator
-        except ElementMissingError:
-            # 有些场景（例如取消原创）点击开关后不弹窗，直接生效。
-            return
+        modal = (
+            await _resolve_anchor(
+                page,
+                "原创声明弹窗",
+                XHS_ORIGINAL_MODAL_CANDIDATES,
+                role="visible",
+                timeout_ms=XHS_DECLARATION_CONFIRM_TIMEOUT_MS,
+                budget=self.publish_budget,
+            )
+        ).locator
 
         checkbox = modal.locator(".d-checkbox").first
         if await checkbox.count():
@@ -2158,34 +2508,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         )
         await humanizer.click(button.locator)
         await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
-
-    @staticmethod
-    async def _switch_is_on(switch) -> bool | None:
-        # 小红书 d-switch 的真实状态在 .d-switch-simulator 的 class 上，
-        # 或者在内层 input[type=checkbox].checked 上。
-        try:
-            simulator = switch.locator(".d-switch-simulator").first
-            if await simulator.count():
-                classes = str(await simulator.get_attribute("class") or "")
-                if "unchecked" in classes:
-                    return False
-                if "checked" in classes:
-                    return True
-        except Exception:
-            pass
-
-        try:
-            checkbox = switch.locator("input[type='checkbox']").first
-            if await checkbox.count():
-                return await checkbox.is_checked()
-        except Exception:
-            pass
-
-        for attr in ("aria-checked", "data-checked"):
-            value = await switch.get_attribute(attr)
-            if value is not None:
-                return str(value).strip().lower() in {"true", "1", "on", "checked"}
-        return None
 
     @staticmethod
     async def _press_escape(page: Page) -> None:
@@ -2238,6 +2560,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         await self.validate_base_args(check_cookie=check_cookie)
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
+        validate_title_length(self.title)
 
         self.file_path = str(self.validate_video_file(self.file_path))
         if self.thumbnail_path:
@@ -2409,6 +2732,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             await _wait_for_arm(
                 page, budget=budget, mode=mode, publish_clicked=publish_clicked
             )
+            await self._verify_schedule_before_fire(page)
             xiaohongshu_logger.success(
                 _msg("🧪", "ARM 就绪，--no-publish 停在发布按钮前（未点击发布）")
             )
@@ -2425,6 +2749,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         await _wait_for_arm(
             page, budget=budget, mode=mode, publish_clicked=publish_clicked
         )
+        # 定时 C3：ARM 就绪后、FIRE 前再证开关/值/时效。
+        await self._verify_schedule_before_fire(page)
         await _fire_publish(
             page, budget=budget, humanizer=humanizer, mode=mode
         )
@@ -2520,7 +2846,18 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         self.note = note or ""
         self.tags = tags or []
         self.desc = desc if desc is not None else self.note
-        self.title = title or ((self.desc or self.note)[:20] if (self.desc or self.note) else "")
+        # 显式标题原样保留（超限在校验期拒绝，绝不静默截断）；自动推导标题
+        # 按同一平台口径截到 ≤20，并在校验期补一条 warning。
+        explicit = bool(title and str(title).strip())
+        if explicit:
+            self.title = title
+            self._title_explicit = True
+            self._title_auto_truncated = False
+        else:
+            derived = self.desc or self.note or ""
+            self.title = xhs_truncate_title(derived, XHS_TITLE_MAX_LENGTH)
+            self._title_explicit = False
+            self._title_auto_truncated = self.title != derived
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
         await self.validate_base_args(check_cookie=check_cookie)
@@ -2528,6 +2865,17 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             raise ValueError("图文模式下，图片是必须的")
         if not self.title or not str(self.title).strip():
             raise ValueError("图文模式下，title 是必须的")
+
+        if getattr(self, "_title_explicit", True):
+            validate_title_length(self.title)
+        elif getattr(self, "_title_auto_truncated", False):
+            xiaohongshu_logger.warning(
+                _msg(
+                    "✂️",
+                    f"自动推导标题超出上限，已按平台口径截到 "
+                    f"{XHS_TITLE_MAX_LENGTH} 字: {self.title}",
+                )
+            )
 
         if isinstance(self.image_paths, (str, Path)):
             self.image_paths = [self.image_paths]
@@ -2586,6 +2934,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             await _wait_for_arm(
                 page, budget=budget, mode=mode, publish_clicked=publish_clicked
             )
+            await self._verify_schedule_before_fire(page)
             xiaohongshu_logger.success(
                 _msg("🧪", "ARM 就绪，--no-publish 停在发布按钮前（未点击发布）")
             )
@@ -2602,6 +2951,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         await _wait_for_arm(
             page, budget=budget, mode=mode, publish_clicked=publish_clicked
         )
+        # 定时 C3：ARM 就绪后、FIRE 前再证开关/值/时效。
+        await self._verify_schedule_before_fire(page)
         await _fire_publish(
             page, budget=budget, humanizer=humanizer, mode=mode
         )
