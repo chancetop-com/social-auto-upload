@@ -20,6 +20,7 @@ module's ``time``/``asyncio`` names and ``tests.fakes_xhs_dom`` records every
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import unittest
 from datetime import datetime, timedelta
@@ -104,6 +105,15 @@ class _AdvancingPage(RecordingPage):
     async def goto(self, url: str, **kwargs):
         await super().goto(url, **kwargs)
         self.clock.advance(self.advance_on_goto)
+
+
+def _fast_humanize():
+    """HUMANIZE=0：预算用例只关心 clamp/退出码，行为层由其自身用例覆盖。
+
+    行为层的时延会真实消耗虚拟时钟，令 31 的整数秒断言失去确定性；快路径是
+    官方支持的对照口径（spec §3 U5 D），因此这里显式使用它。
+    """
+    return patch.dict(os.environ, {"HUMANIZE": "0"})
 
 
 class _AdvancingClickLocator(RecordingLocator):
@@ -298,6 +308,11 @@ def _video_page(clock: FakeClock, *, advance_on_goto: float = 0.0, **overrides):
 
 
 class VideoChainBudgetTests(unittest.TestCase):
+    def setUp(self):
+        patcher = _fast_humanize()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_navigation_upload_and_url_guard_are_clamped(self):
         clock = FakeClock(start=0.0)
         with clock.patch(xhs_main, publish_timeout):
@@ -353,6 +368,11 @@ class VideoChainBudgetTests(unittest.TestCase):
 
 
 class NoteChainBudgetTests(unittest.TestCase):
+    def setUp(self):
+        patcher = _fast_humanize()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_note_upload_waits_are_clamped(self):
         clock = FakeClock(start=0.0)
         image_input = _FileInput("image-input")
@@ -409,6 +429,11 @@ class NoteChainBudgetTests(unittest.TestCase):
 
 
 class NotBeforeBudgetTests(unittest.TestCase):
+    def setUp(self):
+        patcher = _fast_humanize()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_not_before_wait_does_not_consume_the_publish_budget(self):
         clock = FakeClock(start=500.0)
         with clock.patch(xhs_main, publish_timeout):

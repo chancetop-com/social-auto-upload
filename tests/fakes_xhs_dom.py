@@ -242,6 +242,9 @@ class FakeLocator:
         if self._fill_error is not None:
             raise self._fill_error
 
+    async def focus(self, **kwargs: Any) -> None:
+        self.actions.append(("focus",))
+
     async def click(self, **kwargs: Any) -> None:
         # Count the attempt *before* dispatch: FIRE must be able to tell
         # "never dispatched" from "dispatch raised" (spec U2).

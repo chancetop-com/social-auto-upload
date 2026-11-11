@@ -61,6 +61,9 @@ class RecordingKeyboard:
     async def type(self, text, delay=None):
         self.actions.append(("type", text, delay))
 
+    async def insert_text(self, text):
+        self.actions.append(("insert_text", text))
+
 
 class RecordingLocator(FakeLocator):
     def __init__(self, name):
@@ -72,6 +75,9 @@ class RecordingLocator(FakeLocator):
 
     async def click(self):
         self.actions.append(("click",))
+
+    async def focus(self):
+        self.actions.append(("focus",))
 
     async def wait_for(self, **kwargs):
         self.actions.append(("wait_for", kwargs))
@@ -268,18 +274,31 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         )
         page = RecordingPage()
 
-        asyncio.run(app.fill_meta(page))
+        # HUMANIZE=0：快路径（一次 insert_text / 一次普通 click），这里验证的是
+        # 调用点语义（顺序、清理键、话题点击），不是行为层的时延。
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.fill_meta(page))
 
         self.assertEqual(
             page.locators["div.d-input input"].actions,
-            [("fill", "标题内容")],
+            [("focus",)],
         )
         self.assertEqual(
             page.locators['div.tiptap[role="textbox"][contenteditable="true"]'].actions,
             [("click",)],
         )
-        self.assertIn(("type", "描述内容", None), page.keyboard.actions)
-        self.assertIn(("type", "#话题1", 30), page.keyboard.actions)
+        self.assertEqual(
+            page.keyboard.actions,
+            [
+                ("insert_text", "标题内容"),
+                ("press", "Backspace"),
+                ("press", "ControlOrMeta+A"),
+                ("press", "Delete"),
+                ("insert_text", "描述内容"),
+                ("press", "Enter"),
+                ("insert_text", "#话题1"),
+            ],
+        )
         self.assertEqual(
             page.locators['#creator-editor-topic-container .item'].actions,
             [("wait_for", {"state": "visible", "timeout": 4000}), ("click",)],
@@ -295,14 +314,20 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         )
         page = RecordingPage()
 
-        asyncio.run(app.fill_meta(page))
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.fill_meta(page))
 
         self.assertEqual(
             page.locators['div.tiptap[role="textbox"][contenteditable="true"]'].actions,
             [("click",)],
         )
-        self.assertNotIn(("type", "", None), page.keyboard.actions)
-        self.assertIn(("type", "#话题1", 30), page.keyboard.actions)
+        self.assertEqual(
+            page.keyboard.actions,
+            [
+                ("insert_text", "标题内容"),
+                ("insert_text", "#话题1"),
+            ],
+        )
 
     def test_publish_deadline_raises_before_publish_click(self):
         app = xhs_main.XiaoHongShuVideo(
@@ -574,7 +599,8 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             original_declaration=True,
         )
 
-        asyncio.run(app.apply_declarations(FakePage(switch)))
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.apply_declarations(FakePage(switch)))
 
         self.assertTrue(switch.checked)
         self.assertEqual(switch.clicks, 1)
@@ -658,7 +684,8 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             original_declaration=False,
         )
 
-        asyncio.run(app.apply_declarations(FakePage(switch)))
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.apply_declarations(FakePage(switch)))
 
         self.assertFalse(switch.checked)
         self.assertEqual(switch.clicks, 0)
@@ -714,6 +741,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
                 self.locator_calls = []
                 self.source_input = FakeInput()
                 self.confirm = FakeTrigger()
+                self.keyboard = RecordingKeyboard()
 
             def get_by_text(self, text, exact=False):
                 return self.trigger
@@ -745,9 +773,10 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             repost_source=" 某媒体 ",
         )
 
-        asyncio.run(app.apply_declarations(page))
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.apply_declarations(page))
 
-        self.assertEqual(page.source_input.filled, "某媒体")
+        self.assertEqual(page.keyboard.actions, [("insert_text", "某媒体")])
         self.assertEqual(page.confirm.clicks, 1)
         # 打开一级菜单 + 点「内容来源声明」+ 点「来源转载」：
         # 触发器与两个选项都走候选层；选项限定 .declaration-drop-down .d-option。
