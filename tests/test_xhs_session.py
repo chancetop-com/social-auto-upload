@@ -747,6 +747,88 @@ class Decision12SessionLoginRecheckTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
+class Decision13LocalStartupLogTests(_CliCase):
+    """Local runs that launch Chromium directly still emit the shared line."""
+
+    def test_local_check_logs_one_local_session_line(self):
+        playwright_cm = _AsyncCM(FakePlaywright())
+        with (
+            patch.object(
+                xhs_command, "async_playwright", lambda: playwright_cm
+            ),
+            patch.object(xhs_command, "local_session_preflight", return_value=None),
+            patch.object(
+                xhs_command,
+                "probe_session",
+                new=AsyncMock(return_value=("valid", PUBLISH_URL)),
+            ),
+            patch.object(
+                xhs_command, "save_storage_state_atomic", new=AsyncMock()
+            ),
+            patch.object(xhs_command, "log_local_session_ready") as log,
+        ):
+            code, _out, _err = self._run(
+                ["xiaohongshu", "check", "--account", "creator"]
+            )
+
+        self.assertEqual(code, 0)
+        log.assert_called_once()
+        self.assertIs(log.call_args.kwargs["headless"], False)
+        self.assertTrue(
+            str(log.call_args.kwargs["account_file"]).endswith("creator.json")
+        )
+
+    def _app(self, kind):
+        if kind == "note":
+            return xhs_main.XiaoHongShuNote(
+                image_paths=["a.png"],
+                note="",
+                tags=[],
+                publish_date=0,
+                account_file="/tmp/creator.json",
+                title="标题",
+            )
+        return xhs_main.XiaoHongShuVideo(
+            title="标题",
+            file_path="demo.mp4",
+            tags=[],
+            publish_date=0,
+            account_file="/tmp/creator.json",
+        )
+
+    def test_local_upload_logs_once_for_video_and_note(self):
+        for kind in ("video", "note"):
+            with self.subTest(kind=kind):
+                app = self._app(kind)
+                app.validate_upload_args = AsyncMock()
+                app.upload_in = AsyncMock()
+                with (
+                    patch.object(
+                        xhs_main, "save_storage_state_atomic", new=AsyncMock()
+                    ),
+                    patch.object(xhs_main, "log_local_session_ready") as log,
+                ):
+                    asyncio.run(app.upload(FakePlaywright()))
+
+                log.assert_called_once()
+                self.assertEqual(
+                    log.call_args.kwargs["account_file"], "/tmp/creator.json"
+                )
+
+    def test_managed_upload_never_emits_the_local_line(self):
+        app = self._app("video")
+        app.validate_upload_args = AsyncMock()
+        app.upload_in = AsyncMock()
+        session = BrowserSession(
+            browser=object(), context=object(), mode="multilogin"
+        )
+
+        with patch.object(xhs_main, "log_local_session_ready") as log:
+            asyncio.run(app.upload(None, session=session))
+
+        log.assert_not_called()
+
+
 class Decision12SessionDeletedPrecheckTests(unittest.TestCase):
     def setUp(self):
         self.main_source = Path(xhs_main.__file__).read_text(encoding="utf-8")

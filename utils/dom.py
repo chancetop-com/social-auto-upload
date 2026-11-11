@@ -225,8 +225,13 @@ async def _probe(locator: Any) -> tuple[dict[str, Any] | None, str | None]:
     return facts, None
 
 
-def _normalise_point(point: Any) -> tuple[float, float]:
-    """落点用**包围盒内的比例**表示：``(0.5, 0.5)`` 是中心，``(0.65, 0.5)`` 是发布按钮。"""
+def normalise_point(point: Any) -> tuple[float, float]:
+    """落点用**包围盒内的比例**表示：``(0.5, 0.5)`` 是中心，``(0.65, 0.5)`` 是发布按钮。
+
+    ``None`` 表示默认中心落点。共享层只有一个实现，行为层直接 import。
+    """
+    if point is None:
+        return (0.5, 0.5)
     try:
         raw_x, raw_y = point
     except (TypeError, ValueError) as exc:
@@ -389,12 +394,11 @@ async def check(
     role: Role | str,
     *,
     point: tuple[float, float] | None = None,
-    publish_clicked: bool = False,
 ) -> tuple[bool, str | None]:
     """判定 ``locator`` 是否满足 ``role``；见模块文档的返回值约定。"""
     if role not in ROLES:
         raise ValueError(f"unknown role: {role!r}; expected one of {ROLES}")
-    normalised_point = _normalise_point(point) if point is not None else None
+    normalised_point = normalise_point(point)
 
     warning: str | None = None
     facts: dict[str, Any] | None = None
@@ -523,7 +527,6 @@ async def _attempt(
             locator,
             effective_role,
             point=candidate_point,
-            publish_clicked=publish_clicked,
         )
         tried.append((candidate.selector, reason))
         if ok:
@@ -881,6 +884,7 @@ __all__ = [
     "Role",
     "check",
     "clear_overlays",
+    "normalise_point",
     "resolve",
     "wait_dom_quiet",
     "wait_resolved",

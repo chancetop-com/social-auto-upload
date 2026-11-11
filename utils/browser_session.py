@@ -123,6 +123,26 @@ def _startup_line(
     return "browser session ready: " + ", ".join(fields)
 
 
+def log_local_session_ready(
+    *, headless: bool, account_file: str | Path | None
+) -> None:
+    """Emit the one startup line for a local path that launches Chromium itself.
+
+    ``check`` and the two uploader-local branches do not go through
+    :func:`browser_session`, so they call this exactly once after their own
+    launch.  Managed runs already log through the session seam and must not
+    call it again.
+    """
+    identity = (
+        f"account_file:{account_file}"
+        if account_file is not None
+        else "account_file:-"
+    )
+    logger.info(
+        _startup_line(mode="local", headless=headless, identity=identity, ignored=())
+    )
+
+
 def _endpoint_display(url: str) -> str:
     parts = urlsplit(url)
     host = parts.hostname or ""
@@ -277,7 +297,9 @@ async def _local_session(
             context = prepared
 
     identity = (
-        f"account_file:{account_file}" if account_file is not None else "account_file:-"
+        f"account_file:{account_file}"
+        if account_file is not None
+        else "account_file:-"
     )
     logger.info(
         _startup_line(mode="local", headless=headless, identity=identity, ignored=())
@@ -459,4 +481,9 @@ async def _stop_profile(provider: ManagedBrowserProvider) -> None:
             )
 
 
-__all__ = ["BrowserSession", "browser_session", "provider_label"]
+__all__ = [
+    "BrowserSession",
+    "browser_session",
+    "log_local_session_ready",
+    "provider_label",
+]
