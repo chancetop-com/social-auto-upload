@@ -596,28 +596,6 @@ class MultiloginSeamTests(unittest.TestCase):
         self.assertEqual(page.goto_calls[0][0], XHS_VIDEO_URL)
         self.assertEqual(context.storage_state_calls, [])
 
-    def test_xhs_note_captcha_redirect_raises_login_required(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_note(tmp_dir, account_file=None)
-            page = _UploadPage(
-                final_url=(
-                    "https://creator.xiaohongshu.com/website-login/captcha"
-                    "?scene=publish"
-                )
-            )
-            context = _UploadContext(page)
-            session = BrowserSession(browser=MagicMock(), context=context, mode="multilogin")
-
-            with self.assertRaises(LoginRequiredError) as ctx:
-                asyncio.run(app.upload(None, session=session))
-
-        self.assertEqual(ctx.exception.reason, "verification")
-        self.assertIs(ctx.exception.publish_attempted, False)
-        self.assertIn("Multilogin", str(ctx.exception))
-        self.assertIn("人机验证", str(ctx.exception))
-        self.assertEqual(page.goto_calls[0][0], XHS_NOTE_URL)
-        self.assertEqual(context.storage_state_calls, [])
-
     def test_ks_video_login_redirect_raises_login_required(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             app = _make_ks_video(tmp_dir, account_file=None)
@@ -670,15 +648,6 @@ class MultiloginSeamTests(unittest.TestCase):
 
 
 class LoginProbeTests(unittest.TestCase):
-    def _xhs_probe(self, page: _UploadPage) -> tuple[str, str]:
-        context = _UploadContext(page)
-        try:
-            result = asyncio.run(xhs_main.probe_session(context))
-        finally:
-            self.assertEqual(context.new_page_calls, 1)
-            self.assertEqual(page.close_calls, 1)
-        return result
-
     def _ks_probe(self, page: _UploadPage) -> bool:
         context = _UploadContext(page)
         try:
@@ -687,51 +656,6 @@ class LoginProbeTests(unittest.TestCase):
             self.assertEqual(context.new_page_calls, 1)
             self.assertEqual(page.close_calls, 1)
         return result
-
-    def test_xhs_probe_returns_valid_with_positive_upload_anchor(self):
-        page = _UploadPage(final_url=XHS_VIDEO_URL, xhs_upload_anchor=True)
-        kind, evidence = self._xhs_probe(page)
-        self.assertEqual(kind, "valid")
-        self.assertEqual(evidence, XHS_VIDEO_URL)
-        self.assertEqual(page.goto_calls[0][0], XHS_LOGIN_CHECK_URL)
-        timeout = page.goto_calls[0][1]["timeout"]
-        self.assertGreaterEqual(timeout, 15_000)
-        self.assertLessEqual(timeout, 30_000)
-
-    def test_xhs_probe_login_page_and_form_return_login(self):
-        cases = {
-            "login path": _UploadPage(final_url=XHS_LOGIN_REDIRECT),
-            "visible login form": _UploadPage(
-                final_url=XHS_VIDEO_URL, xhs_login_visible=True
-            ),
-        }
-        for label, page in cases.items():
-            with self.subTest(label):
-                self.assertEqual(self._xhs_probe(page)[0], "login")
-
-    def test_xhs_probe_missing_positive_anchor_raises(self):
-        page = _UploadPage(final_url=XHS_VIDEO_URL)
-        context = _UploadContext(page)
-        with self.assertRaisesRegex(RuntimeError, "页面结构异常"):
-            asyncio.run(xhs_main.probe_session(context))
-        self.assertEqual(context.new_page_calls, 1)
-        self.assertEqual(page.close_calls, 1)
-
-    def test_xhs_probe_network_error_server_error_and_unexpected_domain_raise(self):
-        cases = {
-            "network error": _UploadPage(
-                final_url=XHS_VIDEO_URL, goto_error=RuntimeError("net::ERR_RESET")
-            ),
-            "server error": _UploadPage(final_url=XHS_VIDEO_URL, status=503),
-            "unexpected domain": _UploadPage(final_url="https://example.com/elsewhere"),
-        }
-        for label, page in cases.items():
-            with self.subTest(label):
-                context = _UploadContext(page)
-                with self.assertRaises(RuntimeError):
-                    asyncio.run(xhs_main.probe_session(context))
-                self.assertEqual(context.new_page_calls, 1)
-                self.assertEqual(page.close_calls, 1)
 
     def test_ks_logged_in_returns_true(self):
         page = _UploadPage(final_url=KUAISHOU_UPLOAD_URL, ks_upload_button=True)

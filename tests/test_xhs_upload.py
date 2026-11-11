@@ -226,7 +226,7 @@ def _note_page(
 # ---------------------------------------------------------------------------
 
 
-class NoteDispatchTests(unittest.TestCase):
+class Decision09UploadNoteDispatchTests(unittest.TestCase):
     def test_first_image_uses_the_unique_upload_input(self):
         page = _note_page(counts=[1], tiles=[_tile(None)])
         clock = FakeClock()
@@ -356,7 +356,7 @@ class NoteDispatchTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NoteCompletionTests(unittest.TestCase):
+class Decision09UploadNoteCompletionTests(unittest.TestCase):
     def test_tile_count_and_mask_disappearance_complete_the_image(self):
         tile = _tile([1, 1, 0])
         page = _note_page(counts=[0, 1, 1], tiles=[tile])
@@ -414,7 +414,7 @@ class NoteCompletionTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NoteQuietRecheckTests(unittest.TestCase):
+class Decision09UploadNoteQuietRecheckTests(unittest.TestCase):
     def _run(self, page):
         clock = FakeClock()
         with clock.patch(xhs_main, publish_timeout, dom):
@@ -486,7 +486,7 @@ class NoteQuietRecheckTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NoteInputErrorTests(unittest.TestCase):
+class Decision09UploadNoteInputErrorTests(unittest.TestCase):
     def test_ambiguous_input_aborts_without_upload_polling(self):
         page = _note_page(
             counts=[0],
@@ -577,7 +577,7 @@ def _video_page(
     )
 
 
-class VideoGateTests(unittest.TestCase):
+class Decision09UploadVideoGateTests(unittest.TestCase):
     def _run(self, page, *, budget=None):
         clock = FakeClock()
         with clock.patch(xhs_main, publish_timeout, dom):
@@ -680,7 +680,7 @@ class VideoGateTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NoKeywordScanningTests(unittest.TestCase):
+class Decision04RejectionNoKeywordTests(unittest.TestCase):
     KEYWORDS = ("上传成功", "分辨率", "100%", "已上传", "已选择", "重新上传")
     HELPERS = (
         xhs_main._note_upload_gate,

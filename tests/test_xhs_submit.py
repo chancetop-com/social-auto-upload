@@ -187,7 +187,7 @@ def _note_page(button=None, *, url: str = PUBLISH_URL) -> RecordingPage:
 # ---------------------------------------------------------------------------
 
 
-class ArmReadyTests(unittest.TestCase):
+class Decision03SubmitArmReadyTests(unittest.TestCase):
     def test_missing_button_is_not_ready(self):
         page = _button_page(FakeLocator("absent", count=0))
         ready, reason = asyncio.run(
@@ -235,7 +235,7 @@ class ArmReadyTests(unittest.TestCase):
         self.assertTrue(ready)
 
 
-class ArmWaitTests(unittest.TestCase):
+class Decision03SubmitArmWaitTests(unittest.TestCase):
     def test_each_failing_condition_keeps_waiting_then_resolves(self):
         # Every poll re-resolves the button; an old (disabled) element must
         # never be reused.  First round fails, second round is ready.
@@ -357,7 +357,7 @@ class _FailBeforeSubmit(Humanizer):
         raise RuntimeError("pre-submit pause failed")
 
 
-class FireTests(unittest.TestCase):
+class Decision03SubmitFireTests(unittest.TestCase):
     def _budget(self) -> publish_timeout.PublishTimeoutBudget:
         return publish_timeout.PublishTimeoutBudget("小红书")
 
@@ -493,7 +493,7 @@ class FireTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class ObserveTests(unittest.TestCase):
+class Decision03SubmitObserveTests(unittest.TestCase):
     def _budget(self):
         return publish_timeout.PublishTimeoutBudget("小红书")
 
@@ -670,7 +670,7 @@ class _SuccessMouse(RecordingMouse):
         self._page.main_frame.url = SUCCESS_URL
 
 
-class SubmitEntryPointTests(unittest.TestCase):
+class Decision03SubmitEntryPointTests(unittest.TestCase):
     def test_no_publish_runs_to_arm_and_skips_not_before(self):
         button = _PublishButton()
         page = _note_page(button)
@@ -760,7 +760,7 @@ class SubmitEntryPointTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NoTextScanningTests(unittest.TestCase):
+class Decision04RejectionNoTextScanningTests(unittest.TestCase):
     HELPERS = (
         xhs_main._arm_ready,
         xhs_main._wait_for_arm,
@@ -808,7 +808,7 @@ class NoTextScanningTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class CliPublishAttemptedSignalTests(unittest.TestCase):
+class Decision13ParityPublishAttemptedTests(unittest.TestCase):
     def _run(self, error: BaseException) -> tuple[int, str]:
         async def dispatch(_args):
             raise error

@@ -349,7 +349,7 @@ def _run_meta_fill(app, *, title_error: int = 0, body_error: int = 0):
 # ---------------------------------------------------------------------------
 
 
-class TitleMetricTests(unittest.TestCase):
+class Decision11ReadbackTitleMetricTests(unittest.TestCase):
     def test_ascii_counts_one_per_code_unit(self):
         # 平台口径：两个 ASCII 码元 = 1，向上取整。
         self.assertEqual(xhs_main.xhs_title_length("abcde"), 3)
@@ -380,7 +380,7 @@ class TitleMetricTests(unittest.TestCase):
         self.assertLessEqual(xhs_main.xhs_title_length(truncated), 20)
 
 
-class TitleValidationTests(unittest.TestCase):
+class Decision11ReadbackTitleValidationTests(unittest.TestCase):
     def _note_with_image(self, tmp: str, **overrides):
         image = Path(tmp) / "a.png"
         image.write_bytes(b"image")
@@ -420,7 +420,7 @@ class TitleValidationTests(unittest.TestCase):
         self.assertEqual(app.title, "字" * 20)
 
 
-class TitleSuffixGateTests(unittest.TestCase):
+class Decision11ReadbackTitleSuffixTests(unittest.TestCase):
     def test_waits_at_least_350ms_then_polls_to_500ms(self):
         app = _note_app(desc="描述")
         page = RecordingPage(url=NOTE_URL, selectors=_meta_selectors())
@@ -479,7 +479,7 @@ class TitleSuffixGateTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class BodyMetricTests(unittest.TestCase):
+class Decision11ReadbackBodyMetricTests(unittest.TestCase):
     def test_body_counts_each_character_once(self):
         self.assertEqual(xhs_main.xhs_body_length("你好", []), 2)
         self.assertEqual(xhs_main.xhs_body_length("a" * 1000, []), 1000)
@@ -493,7 +493,7 @@ class BodyMetricTests(unittest.TestCase):
         self.assertEqual(xhs_main.XHS_BODY_MAX_LENGTH, 1000)
 
 
-class BodyLengthGateTests(unittest.TestCase):
+class Decision11ReadbackBodyLengthTests(unittest.TestCase):
     def test_length_error_present_after_desc_and_tags_fails(self):
         app = _note_app(desc="正文", tags=["旅行pov"])
         with self.assertRaises(ElementUnusableError):
@@ -528,7 +528,7 @@ class BodyLengthGateTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class ScheduleWindowTests(unittest.TestCase):
+class Decision11ReadbackScheduleWindowTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 11, 12, 10, 0, 0)
 
@@ -595,7 +595,7 @@ class ScheduleWindowTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class ScheduleReadbackTests(unittest.TestCase):
+class Decision11ReadbackScheduleReadbackTests(unittest.TestCase):
     def _app(self, requested: datetime | None = None):
         return _note_app(
             publish_strategy=xhs_main.XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
@@ -725,7 +725,7 @@ class ScheduleReadbackTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class ScheduleEntryPointTests(unittest.TestCase):
+class Decision11ReadbackScheduleEntryTests(unittest.TestCase):
     def test_no_publish_still_runs_c2_and_c3(self):
         requested = _requested()
         page, button, switch, time_input = _note_chain_page(
@@ -848,7 +848,7 @@ def _original_page(
     return RecordingPage(url=NOTE_URL, selectors=selectors)
 
 
-class OriginalDeclarationTests(unittest.TestCase):
+class Decision11ReadbackOriginalTests(unittest.TestCase):
     def _run(self, app, page):
         clock = FakeClock()
         with (

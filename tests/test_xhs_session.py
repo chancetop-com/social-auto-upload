@@ -190,7 +190,7 @@ class _ProbeContext:
 # ---------------------------------------------------------------------------
 
 
-class LocalSessionPreflightTests(unittest.TestCase):
+class Decision12SessionPreflightTests(unittest.TestCase):
     def test_present_unexpired_cookie_passes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "account.json"
@@ -242,7 +242,7 @@ class LocalSessionPreflightTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class ProbeSessionTests(unittest.TestCase):
+class Decision12SessionProbeTests(unittest.TestCase):
     def _probe(self, page: _ProbePage):
         context = _ProbeContext(page)
         result = asyncio.run(xhs_main.probe_session(context))
@@ -306,7 +306,7 @@ class ProbeSessionTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class CheckLocalExitTests(_CliCase):
+class Decision12SessionCheckLocalTests(_CliCase):
     def setUp(self):
         self.playwright_cm = _AsyncCM(FakePlaywright())
         self.entries = (
@@ -405,7 +405,7 @@ class CheckLocalExitTests(_CliCase):
         self.assertIn("页面结构异常", err)
 
 
-class CheckManagedExitTests(_CliCase):
+class Decision12SessionCheckManagedTests(_CliCase):
     def test_valid_probe_prints_valid_and_never_touches_cookies(self):
         _, _, _, session_patch = self._session_patch(xhs_command)
         save = AsyncMock()
@@ -506,7 +506,7 @@ class CheckManagedExitTests(_CliCase):
 # ---------------------------------------------------------------------------
 
 
-class CookieWriteBackMatrixTests(unittest.TestCase):
+class Decision12SessionWriteBackTests(unittest.TestCase):
     def _app(self, tmp_dir: str, *, account_file: str | None) -> xhs_main.XiaoHongShuVideo:
         video = Path(tmp_dir) / "demo.mp4"
         video.write_bytes(b"video")
@@ -593,7 +593,7 @@ class CookieWriteBackMatrixTests(unittest.TestCase):
         preflight.assert_not_called()
 
 
-class AtomicStorageStateTests(unittest.TestCase):
+class Decision12SessionAtomicStateTests(unittest.TestCase):
     def test_writes_via_temp_file_and_replace(self):
         class Context:
             async def storage_state(self):
@@ -624,7 +624,7 @@ class AtomicStorageStateTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class LoginRecheckTests(unittest.TestCase):
+class Decision12SessionLoginRecheckTests(unittest.TestCase):
     def _context(self, page):
         class Context:
             def __init__(self):
@@ -747,7 +747,7 @@ class LoginRecheckTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class DeletedPrecheckTests(unittest.TestCase):
+class Decision12SessionDeletedPrecheckTests(unittest.TestCase):
     def setUp(self):
         self.main_source = Path(xhs_main.__file__).read_text(encoding="utf-8")
         self.command_source = Path(xhs_command.__file__).read_text(encoding="utf-8")

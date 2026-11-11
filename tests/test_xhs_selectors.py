@@ -120,7 +120,7 @@ def resolve_anchor(page, step, candidates, **kwargs):
 # ---------------------------------------------------------------------------
 
 
-class CandidateOrderTests(unittest.TestCase):
+class Decision05SelectorCandidateOrderTests(unittest.TestCase):
     def test_structure_candidate_wins_over_text_fallback(self):
         page = RecordingPage(
             url=NOTE_URL,
@@ -237,7 +237,7 @@ class CandidateOrderTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class FileInputUniquenessTests(unittest.TestCase):
+class Decision05SelectorFileInputTests(unittest.TestCase):
     def test_ambiguous_image_input_is_unusable(self):
         page = RecordingPage(
             url=NOTE_URL,
@@ -335,7 +335,7 @@ class FileInputUniquenessTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class CallSiteAnchorTests(unittest.TestCase):
+class Decision05SelectorCallSiteTests(unittest.TestCase):
     def test_fill_title_uses_the_structural_anchor(self):
         app = xhs_main.XiaoHongShuVideo(
             title="标题内容",
@@ -371,7 +371,7 @@ class CallSiteAnchorTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class DeadAnchorDeletionTests(unittest.TestCase):
+class Decision05SelectorDeadAnchorTests(unittest.TestCase):
     DEAD_ANCHORS = (
         'button:has-text("发布")',
         'button:has-text("定时发布")',
