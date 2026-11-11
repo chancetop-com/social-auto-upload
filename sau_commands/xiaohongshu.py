@@ -15,9 +15,12 @@ from uploader.xiaohongshu_uploader.main import (
     XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
     XiaoHongShuNote,
     XiaoHongShuVideo,
-    cookie_auth as xiaohongshu_cookie_auth,
+    _blocked_message,
+    _xhs_user_agent as xiaohongshu_user_agent,
     format_tag_cap_warning,
-    is_logged_in,
+    local_session_preflight,
+    probe_session,
+    save_storage_state_atomic,
     xiaohongshu_setup,
 )
 from sau_commands.arguments import (
@@ -32,15 +35,15 @@ from sau_commands.arguments import (
 )
 from sau_commands.browser import (
     add_browser_flags,
-    login_required_error,
     managed_ignored_keys,
     reject_managed_login,
     require_local_account,
     resolve_account_label,
     resolve_managed_provider,
 )
+from utils.base_social_media import set_init_script
 from utils.browser_session import browser_session
-from utils.errors import UsageError
+from utils.errors import LoginRequiredError, UsageError
 
 CONTENT_TYPE_CHOICES = tuple(XHS_CONTENT_TYPES)
 CONTENT_TYPE_HELP = (
@@ -237,11 +240,35 @@ async def login_xiaohongshu_account(account_name: str, headless: bool = True) ->
     return await xiaohongshu_setup(str(account_file), handle=True, return_detail=True, headless=headless)
 
 
-async def check_xiaohongshu_account(account_name: str) -> bool:
+async def check_xiaohongshu_account(
+    account_name: str, *, headless: bool = False
+) -> bool:
+    """本地 `check`：零网络前置 → 一次发布页观测 → 成功才原子写回。"""
     account_file = resolve_account_file("xiaohongshu", account_name)
-    if not account_file.exists():
-        return False
-    return await xiaohongshu_cookie_auth(str(account_file))
+    await local_session_preflight(str(account_file))
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            headless=headless, **XHS_LAUNCH_KWARGS
+        )
+        try:
+            context = await browser.new_context(
+                storage_state=str(account_file),
+                user_agent=await xiaohongshu_user_agent(browser),
+                **XHS_CONTEXT_KWARGS,
+            )
+            if XHS_INIT_SCRIPT:
+                context = await set_init_script(context)
+            try:
+                kind, _evidence = await probe_session(context)
+                if kind != "valid":
+                    raise _probe_login_error(kind, "local")
+                await save_storage_state_atomic(context, str(account_file))
+                return True
+            finally:
+                await context.close()
+        finally:
+            await browser.close()
 
 
 def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) -> XiaoHongShuVideo:
@@ -290,8 +317,29 @@ def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) ->
     return app
 
 
-def _raise_login_required(target) -> None:
-    raise login_required_error("小红书", target.profile_id, mode=target.mode)
+def _probe_login_error(kind: str, mode: str) -> LoginRequiredError:
+    return LoginRequiredError(
+        _blocked_message(kind, mode, publish_attempted=False),
+        reason=kind,
+        publish_attempted=False,
+    )
+
+
+async def _check_managed_xiaohongshu(
+    target, *, headless: bool, ignored_keys: tuple[str, ...]
+) -> None:
+    """托管 `check`：同一 context 里导航一次发布页；不读不写 cookie。"""
+    async with async_playwright() as playwright:
+        async with browser_session(
+            playwright,
+            headless=headless,
+            account_file=None,
+            managed=target,
+            extra_ignored=ignored_keys,
+        ) as session:
+            kind, _evidence = await probe_session(session.context)
+    if kind != "valid":
+        raise _probe_login_error(kind, target.mode)
 
 
 async def upload_xiaohongshu_video(
@@ -313,18 +361,10 @@ async def upload_xiaohongshu_video(
                 init_script=XHS_INIT_SCRIPT,
                 extra_ignored=ignored_keys,
             ) as session:
-                if not await is_logged_in(session.context):
-                    _raise_login_required(target)
                 await app.xiaohongshu_upload_video(session=session)
         return None
 
     account_file = resolve_account_file("xiaohongshu", request.account_name)
-    is_ready = await xiaohongshu_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
-        )
-
     app = _build_video_uploader(request, str(account_file))
     await app.main()
     return account_file
@@ -349,18 +389,10 @@ async def upload_xiaohongshu_note(
                 init_script=XHS_INIT_SCRIPT,
                 extra_ignored=ignored_keys,
             ) as session:
-                if not await is_logged_in(session.context):
-                    _raise_login_required(target)
                 await app.xiaohongshu_upload_note(session=session)
         return None
 
     account_file = resolve_account_file("xiaohongshu", request.account_name)
-    is_ready = await xiaohongshu_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Xiaohongshu cookie is missing or expired: {account_file}. Run `sau xiaohongshu login --account {request.account_name}` first."
-        )
-
     app = _build_note_uploader(request, str(account_file))
     await app.main()
     return account_file
@@ -396,20 +428,26 @@ async def run(args):
 
     if args.action == "check":
         if target is not None:
-            async with async_playwright() as playwright:
-                async with browser_session(
-                    playwright,
-                    headless=args.headless,
-                    managed=target,
-                    extra_ignored=ignored_keys,
-                ) as session:
-                    is_valid = await is_logged_in(session.context)
-            if not is_valid:
-                _raise_login_required(target)
+            try:
+                await _check_managed_xiaohongshu(
+                    target,
+                    headless=getattr(args, "headless", False),
+                    ignored_keys=ignored_keys,
+                )
+            except Exception:
+                print("invalid")
+                raise
             print("valid")
             return 0
 
-        is_valid = await check_xiaohongshu_account(account_label)
+        try:
+            is_valid = await check_xiaohongshu_account(
+                account_label,
+                headless=getattr(args, "headless", False),
+            )
+        except Exception:
+            print("invalid")
+            raise
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 

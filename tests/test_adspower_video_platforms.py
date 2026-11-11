@@ -88,10 +88,22 @@ class VideoPlatformCoverageTests(unittest.TestCase):
             async with browser_session(*args, **kwargs) as session:
                 yield session
 
+        if module is xiaohongshu:
+            # XHS no longer has a publish-chain login precheck; ``check`` uses
+            # the publish-page probe seam instead.
+            login_patch = patch.object(
+                module,
+                "probe_session",
+                new=AsyncMock(return_value=("valid", "https://example.test/publish")),
+            )
+        else:
+            login_patch = patch.object(
+                module, "is_logged_in", new=AsyncMock(return_value=True)
+            )
         return calls, (
             patch.object(module, "async_playwright", lambda: _AsyncCM(playwright)),
             patch.object(module, "browser_session", new=recording_browser_session),
-            patch.object(module, "is_logged_in", new=AsyncMock(return_value=True)),
+            login_patch,
             patch.object(
                 module,
                 "resolve_account_file",
