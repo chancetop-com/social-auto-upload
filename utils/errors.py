@@ -9,7 +9,25 @@ from __future__ import annotations
 
 
 class LoginRequiredError(Exception):
-    """Platform login state is invalid; the CLI maps this to exit code 10."""
+    """Platform login state is invalid; the CLI maps this to exit code 10.
+
+    ``reason`` is ``"login"`` or ``"verification"``; ``publish_attempted`` says
+    whether the publish click had already been dispatched (exit 10 must never
+    claim "not published" after a dispatch).  Both default to the pre-dispatch
+    login case so legacy ``LoginRequiredError(message)`` keeps working.
+    """
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        reason: str = "login",
+        publish_attempted: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.reason = reason
+        self.publish_attempted = bool(publish_attempted)
 
 
 class PublishResultUnknownError(Exception):
