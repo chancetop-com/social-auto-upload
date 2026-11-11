@@ -784,7 +784,7 @@ class XhsPublishWiringTests(unittest.TestCase):
         )
 
         with patch.object(xhs_main, "Humanizer", QuietHumanizer):
-            asyncio.run(app.upload_note_content(page, multilogin=False))
+            asyncio.run(app.upload_note_content(page, mode="local"))
 
         # Navigation is followed by exactly one after_navigate pause.
         self.assertEqual(timeline.events[0][0], "sleep")

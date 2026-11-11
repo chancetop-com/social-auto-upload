@@ -18,7 +18,11 @@ from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
+from utils.blocked import BlockedKind
+from utils.blocked import BlockedRules
+from utils.blocked import classify as classify_block
 from utils.browser_session import BrowserSession
+from utils.browser_session import provider_label
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
 from utils.dom import Resolved
@@ -34,7 +38,6 @@ from utils.log import xiaohongshu_logger
 
 XHS_DEFAULT_CREATOR_BASE_URL = "https://creator.xiaohongshu.com"
 XHS_CREATOR_BASE_URL_ENV = "SAU_XHS_CREATOR_BASE_URL"
-XHS_PUBLISH_SUCCESS_URL_PATTERN = "**/publish/success?**"
 XHS_LOGIN_BOX_SELECTOR = "div[class*='login-box']"
 XHS_LOGIN_SWITCH_SELECTOR = "img.css-wemwzq"
 # 登录态正向锚点：零文本、零中文（空状态实机）。发布按钮不是登录证据。
@@ -55,22 +58,9 @@ _XHS_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
 )
 
-# 平台明确拒绝发布时的 toast/弹窗关键词。命中后立即失败，不再重试。
-_XHS_PUBLISH_FAILURE_KEYWORDS = (
-    "禁止发笔记",
-    "违反社区规范",
-    "发布失败",
-    "账号异常",
-    "内容违规",
-    "审核不通过",
-    "无法发布",
-)
 # 「操作频繁」「请稍后再试」属于可恢复的限流提示，保留原有重试逻辑，
 # 由 15 分钟总预算兜底。
 
-
-class XhsPublishRejectedError(RuntimeError):
-    """平台明确拒绝发布（账号或内容受限），区别于结果未知。"""
 
 # 「添加内容类型声明」下拉里的选项。来源声明是二级菜单，其余是顶层选项。
 XHS_CONTENT_TYPE_LABELS = {
@@ -350,23 +340,68 @@ XHS_CONTEXT_KWARGS = {
 }
 XHS_INIT_SCRIPT = True
 
-_LOGIN_URL_MARKERS = ("login", "captcha", "verify", "two-factor", "2fa")
+# ---------------------------------------------------------------------------
+# 登录页 / 人机验证页：唯一判据 + 退出 10 文案（spec §3 U9 B / §3 U10）。
+#
+# 判定器与模式无关；模式只决定文案。文案在 raise 点拼（不做模板体系），
+# ``{App}`` 取公开的 ``provider_label``，不带 profile id。
+# ---------------------------------------------------------------------------
+XHS_BLOCKED_RULES = BlockedRules(
+    login_paths=("/website-login", "/login"),
+    verification_paths=("/website-login/captcha",),
+    login_box_selector=XHS_LOGIN_BOX_SELECTOR,
+)
+
+_XHS_PUBLISH_ATTEMPTED_SUFFIX = "发布可能已发出：重跑前请先确认该笔记是否存在。"
 
 
-def _raise_if_login_required(page: Page) -> None:
-    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+async def classify_blocked(page: Page) -> BlockedKind | None:
+    """小红书唯一的登录/人机验证判据（只读，C1/C2 共用）。"""
+    return await classify_block(page, XHS_BLOCKED_RULES)
 
-    Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour untouched.
-    """
-    url = str(getattr(page, "url", "") or "").lower()
-    if not url:
-        return
-    if any(marker in url for marker in _LOGIN_URL_MARKERS):
-        raise LoginRequiredError(
-            "小红书上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+
+def _blocked_message(
+    kind: BlockedKind, mode: str, *, publish_attempted: bool
+) -> str:
+    """四句文案之一；``publish_attempted`` 只在派发后追加提示。"""
+    if kind == "verification":
+        if mode == "local":
+            message = "小红书要求人机验证：请在浏览器中完成验证后重试。"
+        else:
+            message = (
+                f"小红书要求人机验证：请在 {provider_label(mode)} 中"
+                "完成该 Profile 的验证后重试。"
+            )
+    elif mode == "local":
+        message = (
+            "小红书登录态无效：请运行 sau xiaohongshu login --account <账号名> "
+            "重新扫码后重试。"
         )
+    else:
+        message = (
+            f"小红书登录态无效：请在 {provider_label(mode)} 中登录该 Profile 后重试。"
+        )
+
+    if publish_attempted:
+        message += _XHS_PUBLISH_ATTEMPTED_SUFFIX
+    return message
+
+
+async def _check_blocked(
+    page: Page, mode: str, *, publish_attempted: bool
+) -> None:
+    """检查点：命中即 ``LoginRequiredError``（退出 10）。
+
+    ``publish_attempted`` 由调用点现取 ``publish_clicked`` 变量，禁止硬编码。
+    """
+    kind = await classify_blocked(page)
+    if kind is None:
+        return
+    raise LoginRequiredError(
+        _blocked_message(kind, mode, publish_attempted=publish_attempted),
+        reason=kind,
+        publish_attempted=publish_attempted,
+    )
 
 
 def _build_xhs_creator_url(path: str) -> str:
@@ -1044,48 +1079,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         remaining = max(0.0, self.publish_budget.remaining_seconds())
         await asyncio.sleep(min(seconds, remaining))
 
-    @staticmethod
-    async def _find_publish_failure(page: Page) -> str | None:
-        """查找平台明确拒绝发布的 toast/弹窗，返回命中的文案。"""
-        for selector in (
-            "[class*='toast']",
-            "[class*='message']",
-            "[role='alert']",
-            "[role='dialog']",
-            ".d-toast",
-            ".d-message",
-            ".d-modal",
-        ):
-            try:
-                locator = page.locator(selector)
-                count = await locator.count()
-            except Exception:
-                continue
-
-            for index in range(min(count, 12)):
-                item = locator.nth(index)
-                try:
-                    if not await item.is_visible():
-                        continue
-                    text = (await item.inner_text()).strip()
-                except Exception:
-                    continue
-                if text and any(
-                    keyword in text
-                    for keyword in _XHS_PUBLISH_FAILURE_KEYWORDS
-                ):
-                    return text
-        return None
-
     async def _wait_publish_outcome(
         self, page: Page, *, timeout_ms: int | None = None
     ) -> str:
-        """轮询成功页和失败提示，返回 success 或 timeout。
+        """轮询成功页，返回 success 或 timeout。
 
         观察窗口本身也来自共享预算：点击后预算已经耗尽时窗口收缩到 1ms，
         由外层发布循环统一映射为 ``PublishResultUnknownError``（退出 9）。
-        平台明确拒绝发布时立即抛 :class:`XhsPublishRejectedError`，
-        不进入结果未知分支，也不重试。
         """
         if self.publish_budget.remaining_seconds() <= 0:
             # 点击后预算已耗尽：不再空转，交给发布循环映射为结果未知（退出 9）。
@@ -1098,18 +1098,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         while time.monotonic() < deadline:
             if "publish/success" in str(getattr(page, "url", "")):
                 return "success"
-
-            failure = await self._find_publish_failure(page)
-            if failure:
-                if self.debug:
-                    try:
-                        await page.screenshot(full_page=True)
-                    except Exception:
-                        pass
-                raise XhsPublishRejectedError(
-                    f"小红书拒绝发布：{failure}。账号或内容受限，"
-                    "本次未发布；请先到创作服务平台确认账号状态。"
-                )
 
             await self._sleep(
                 min(
@@ -1433,10 +1421,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         except Exception:
             pass
 
-    async def check_original_declaration(self, page: Page) -> None:
-        """兼容旧调用名；实际行为见 :meth:`apply_declarations`。"""
-        await self.apply_declarations(page)
-
 
 class XiaoHongShuVideo(XiaoHongShuBaseUploader):
     def __init__(
@@ -1485,10 +1469,6 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         self.file_path = str(self.validate_video_file(self.file_path))
         if self.thumbnail_path:
             self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
-
-    async def handle_upload_error(self, page: Page):
-        xiaohongshu_logger.warning(_msg("😵", "视频上传摔了一跤，小人马上重新上传"))
-        await page.locator('div.progress-div [class^="upload-btn-input"]').set_input_files(self.file_path)
 
     async def set_thumbnail(
         self,
@@ -1591,8 +1571,10 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             except Exception:
                 pass
 
-    async def upload_video_content(self, page: Page, *, multilogin: bool = False) -> None:
+    async def upload_video_content(self, page: Page, *, mode: str) -> None:
         budget = self.start_publish_budget()
+        # 唯一的“是否已派发”事实源：检查点现取此变量，禁止按调用点硬编码。
+        publish_clicked = False
         humanizer = self._humanizer(page)
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往视频发布页"))
@@ -1605,8 +1587,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             timeout=budget.clamp_ms(XHS_NAVIGATION_TIMEOUT_MS),
         )
         await humanizer.after_navigate()
-        if multilogin:
-            _raise_if_login_required(page)
+        # C1：导航到发布页后立刻分类（本地/托管同一判据）。
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
         await page.wait_for_url(
             publish_url,
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
@@ -1622,6 +1604,9 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         await upload_input.locator.set_input_files(self.file_path)
 
         while True:
+            # C2：每个可能超过 2s 的等待循环每轮查一次；放在 try 之外，
+            # 命中登录/验证页时不会被下面的宽 except 吞掉。
+            await _check_blocked(page, mode, publish_attempted=publish_clicked)
             budget.check_pre_click()
             # 超时值在 try 之外计算：预算耗尽不能被上传轮询的 except 吞掉。
             wait_ms = budget.clamp_ms(XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS)
@@ -1688,12 +1673,9 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             label="小红书发布",
         )
 
-        publish_clicked = False
         while True:
             # 退出 1（点击前）/ 9（点击后）两个出口只由预算模块产生。
             if budget.remaining_seconds() <= 0:
-                if multilogin:
-                    _raise_if_login_required(page)
                 raise budget.timeout_error(publish_clicked)
 
             try:
@@ -1720,13 +1702,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                     break
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
-            except XhsPublishRejectedError:
-                if multilogin:
-                    _raise_if_login_required(page)
-                raise
             except Exception:
-                if multilogin:
-                    _raise_if_login_required(page)
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
                 if self.debug:
                     await page.screenshot(full_page=True)
@@ -1766,9 +1742,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
-        await self.upload_video_content(
-            page, multilogin=session.managed
-        )
+        await self.upload_video_content(page, mode=session.mode)
 
     async def xiaohongshu_upload_video(self, *, session: BrowserSession | None = None):
         if session is not None:
@@ -1835,8 +1809,10 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             normalized_image_paths.append(str(self.validate_image_file(image_path)))
         self.image_paths = normalized_image_paths
 
-    async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
+    async def upload_note_content(self, page: Page, *, mode: str) -> None:
         budget = self.start_publish_budget()
+        # 唯一的“是否已派发”事实源：检查点现取此变量，禁止按调用点硬编码。
+        publish_clicked = False
         humanizer = self._humanizer(page)
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
@@ -1849,8 +1825,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             timeout=budget.clamp_ms(XHS_NAVIGATION_TIMEOUT_MS),
         )
         await humanizer.after_navigate()
-        if multilogin:
-            _raise_if_login_required(page)
+        # C1：导航到发布页后立刻分类（本地/托管同一判据）。
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
         await page.wait_for_url(
             publish_url,
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
@@ -1868,6 +1844,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         await upload_input.locator.set_input_files(self.image_paths)
 
         while True:
+            # C2：每轮先分类；放在 try 之外，命中不会被宽 except 吞掉。
+            await _check_blocked(page, mode, publish_attempted=publish_clicked)
             budget.check_pre_click()
             # 超时值在 try 之外计算：预算耗尽不能被上传轮询的 except 吞掉。
             ready_ms = budget.clamp_ms(XHS_NOTE_UPLOAD_READY_TIMEOUT_MS)
@@ -1902,12 +1880,9 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             label="小红书发布",
         )
 
-        publish_clicked = False
         while True:
             # 退出 1（点击前）/ 9（点击后）两个出口只由预算模块产生。
             if budget.remaining_seconds() <= 0:
-                if multilogin:
-                    _raise_if_login_required(page)
                 raise budget.timeout_error(publish_clicked)
 
             try:
@@ -1934,13 +1909,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                     xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                     break
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
-            except XhsPublishRejectedError:
-                if multilogin:
-                    _raise_if_login_required(page)
-                raise
             except Exception:
-                if multilogin:
-                    _raise_if_login_required(page)
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 if self.debug:
                     await page.screenshot(full_page=True)
@@ -1980,9 +1949,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
-        await self.upload_note_content(
-            page, multilogin=session.managed
-        )
+        await self.upload_note_content(page, mode=session.mode)
 
     async def xiaohongshu_upload_note(self, *, session: BrowserSession | None = None):
         if session is not None:
