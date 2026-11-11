@@ -19,6 +19,10 @@ from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
+from utils.dom import Candidate
+from utils.dom import ElementMissingError
+from utils.dom import Resolved
+from utils.dom import wait_resolved
 from utils.errors import LoginRequiredError
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -32,11 +36,11 @@ XHS_CREATOR_BASE_URL_ENV = "SAU_XHS_CREATOR_BASE_URL"
 XHS_PUBLISH_SUCCESS_URL_PATTERN = "**/publish/success?**"
 XHS_LOGIN_BOX_SELECTOR = "div[class*='login-box']"
 XHS_LOGIN_SWITCH_SELECTOR = "img.css-wemwzq"
+# 登录态正向锚点：零文本、零中文（空状态实机）。发布按钮不是登录证据。
 XHS_LOGIN_POSITIVE_SELECTORS = (
     "input.upload-input",
     'div.progress-div [class^="upload-btn-input"]',
     "div[class*='upload-content'] input",
-    'button:has-text("发布")',
 )
 XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
@@ -141,6 +145,191 @@ XHS_PUBLISH_RETRY_SECONDS = 0.5
 XHS_PUBLISH_OBSERVE_POLL_SECONDS = 0.3
 XHS_LOGIN_SUCCESS_SETTLE_SECONDS = 2.0
 
+# ---------------------------------------------------------------------------
+# 选择器基线（spec §3 U4，ticket 33）。每个环节一组候选，顺序固定：
+#
+#     structure（结构） → upstream（上游同款结构） → text-zh（中文文本，最后手段）
+#
+# 解析统一走 utils.dom 的 resolve / wait_resolved：每次命中打一条日志，
+# 结构分支 debug，任何非结构分支额外 info（同一行，含环节/种类/选择器/URL）。
+# 主链路零中文依赖：结构候选里不允许出现中文文案。
+# ---------------------------------------------------------------------------
+XHS_ANCHOR_TIMEOUT_MS = 5_000
+XHS_PUBLISH_BUTTON_POINT = (0.65, 0.5)
+
+
+def _zh_css(selector: str, factory=None) -> Candidate:
+    """中文兜底候选：CSS 里含中文文案（placeholder / has-text / get_by_text）。"""
+    return Candidate(
+        selector,
+        kind="text-zh",
+        factory=factory or (lambda scope: scope.locator(selector)),
+    )
+
+
+# 1. 发布按钮（即时/定时共用同一元素）。只有新版 xhs-publish-btn；
+#    ``is-publish`` / ``submit-disabled`` 的就绪谓词归 ticket 36（ARM），
+#    这里只定义选择器与落点。
+XHS_PUBLISH_BUTTON_SELECTOR = "xhs-publish-btn"
+XHS_PUBLISH_BUTTON_CANDIDATES = (Candidate(XHS_PUBLISH_BUTTON_SELECTOR),)
+
+# 2. 标题：div.d-input input 与旧 placeholder 选择器是同一个节点，中文只兜底。
+XHS_TITLE_CANDIDATES = (
+    Candidate("div.d-input input"),
+    _zh_css('input[placeholder*="填写标题"]'),
+)
+
+# 3. 正文：tiptap 编辑区 → ProseMirror → 中文 placeholder 上溯 contenteditable。
+XHS_BODY_CANDIDATES = (
+    Candidate('div.tiptap[role="textbox"][contenteditable="true"]'),
+    Candidate('div.ProseMirror[contenteditable="true"]', kind="upstream"),
+    _zh_css(
+        'p[data-placeholder*="输入正文描述"] ↑ [contenteditable="true"]',
+        factory=lambda scope: scope.locator(
+            'p[data-placeholder*="输入正文描述"]'
+        ).locator("xpath=ancestor-or-self::*[@contenteditable='true'][1]"),
+    ),
+)
+
+# 4/5. 文件输入：命中数必须为 1；多义且无法用容器收窄 → ElementUnusableError。
+#      禁止 .first / .last 猜测（图文首张与视频共用同一个 upload-input）。
+XHS_UPLOAD_INPUT_SELECTOR = "div.upload-content input.upload-input"
+XHS_VIDEO_FILE_CANDIDATES = (
+    Candidate(XHS_UPLOAD_INPUT_SELECTOR),
+    Candidate('input[type="file"][accept*=".mp4"]', kind="upstream"),
+    Candidate('input[type="file"][accept*="video"]', kind="upstream"),
+)
+XHS_NOTE_IMAGE_CANDIDATES = (
+    Candidate(XHS_UPLOAD_INPUT_SELECTOR),
+    Candidate('.img-list .top input[type="file"][multiple]', kind="upstream"),
+)
+
+# 6/7. 话题候选与回读：候选项本身是多义列表（一次 50 项），话题逻辑归 ticket 39；
+#      回读必须限定编辑区（整页会多数一个）。
+XHS_TOPIC_MENU_SELECTOR = "#creator-editor-topic-container"
+XHS_TOPIC_ITEM_SELECTOR = "#creator-editor-topic-container .item"
+XHS_TOPIC_ITEM_NAME_SELECTOR = "#creator-editor-topic-container .item .name"
+XHS_TOPIC_READBACK_CANDIDATES = (
+    Candidate('div.tiptap[role="textbox"] a[data-topic]'),
+)
+
+# 8. 定时开关：中文卡片过滤已删除，两个结构容器都是无文本锚点。
+XHS_SCHEDULE_SWITCH_CANDIDATES = (
+    Candidate(".post-time-wrapper .d-switch"),
+    Candidate(".post-time-switch-container .d-switch", kind="upstream"),
+)
+
+# 9. 定时时间输入：双结构兜底，不设删除期限（两者各 1 实机样本）。
+XHS_SCHEDULE_TIME_CANDIDATES = (
+    Candidate(".d-datepicker-input-filter input.d-text"),
+    Candidate(".date-picker-container input", kind="upstream"),
+)
+
+# 10. 原创开关：结构主候选 → 中文卡片（容器限定 + 精确）。
+XHS_ORIGINAL_SWITCH_CANDIDATES = (
+    Candidate(".original-wrapper .d-switch"),
+    _zh_css(
+        '.custom-switch-card:has-text("原创声明") .d-switch',
+        factory=lambda scope: scope.locator(".custom-switch-card")
+        .filter(has_text="原创声明")
+        .locator(".d-switch"),
+    ),
+)
+
+# 11. 原创确认弹窗：creator 弹窗 → role=dialog（两个账号各出现一次后再删）。
+XHS_ORIGINAL_MODAL_CANDIDATES = (
+    Candidate("div.d-modal.creator-modal-style"),
+    _zh_css(
+        "role=dialog:has-text('声明原创')",
+        factory=lambda scope: scope.get_by_role("dialog").filter(
+            has_text="声明原创"
+        ),
+    ),
+)
+XHS_ORIGINAL_CONFIRM_CANDIDATES = (
+    Candidate("button.custom-button"),
+    Candidate("声明原创", kind="text-zh", exact=True),
+)
+
+# 12. 内容类型声明：容器是 class 不是 id（旧 id 写法恒为 0 命中）。
+#     触发器限定 .publish-container 内 text 的 [tabindex="1"]；选项限定下拉 + 精确文案。
+XHS_DECLARATION_CONTAINER_SELECTOR = ".publish-container"
+XHS_DECLARATION_TRIGGER_CANDIDATES = (
+    _zh_css(
+        '.publish-container [tabindex="1"]:has-text("添加内容类型声明")',
+        factory=lambda scope: scope.locator(
+            '.publish-container [tabindex="1"]'
+        ).filter(has_text="添加内容类型声明"),
+    ),
+    Candidate("添加内容类型声明", kind="text-zh", exact=True),
+)
+XHS_DECLARATION_OPTION_SELECTOR = ".declaration-drop-down .d-option"
+
+
+def _declaration_option_candidates(label: str) -> tuple[Candidate, ...]:
+    """声明下拉选项：结构下拉 + 精确文案 → 裸文案点击。"""
+    pattern = re.compile(rf"^{re.escape(label)}$")
+    return (
+        _zh_css(
+            f'.declaration-drop-down .d-option:text-is("{label}")',
+            factory=lambda scope: scope.locator(
+                XHS_DECLARATION_OPTION_SELECTOR
+            ).filter(has_text=pattern),
+        ),
+        Candidate(label, kind="text-zh", exact=True),
+    )
+
+
+# 13. 封面：入口 .cover-edit-entry（容器 .cover-edit-stack）→ 弹窗；
+#     两个零命中的旧入口（upload-cover / cover-plugin-preview）已删。
+XHS_COVER_ENTRY_SELECTOR = ".cover-edit-stack .cover-edit-entry"
+XHS_COVER_MODAL_SELECTOR = (
+    ".d-modal.cover-modal.creator-modal-style.main-cover-editor-modal"
+)
+XHS_COVER_ENTRY_CANDIDATES = (
+    Candidate(XHS_COVER_ENTRY_SELECTOR),
+    Candidate("编辑封面", kind="text-zh"),
+    Candidate("设置封面", kind="text-zh"),
+)
+XHS_COVER_MODAL_CANDIDATES = (Candidate(XHS_COVER_MODAL_SELECTOR),)
+XHS_COVER_TAB_CANDIDATES = (
+    Candidate("上传封面", kind="text-zh", exact=True),
+    Candidate("上传", kind="text-zh", exact=True),
+)
+XHS_COVER_FILE_INPUT_CANDIDATES = (
+    Candidate('div.upload-wrapper input[type="file"][accept*="image"]'),
+    Candidate('input[type="file"][accept*="image"]', kind="upstream"),
+)
+XHS_COVER_CONFIRM_CANDIDATES = (
+    _zh_css(
+        "div.d-modal-footer 确定",
+        factory=lambda scope: scope.locator(
+            "div.d-modal-footer"
+        ).get_by_text("确定", exact=True),
+    ),
+    Candidate("完成", kind="text-zh", exact=True),
+)
+
+# 14. 登录二维码：切换图标沿用 XHS_LOGIN_SWITCH_SELECTOR，
+#     二维码结构主候选 img.css-1lhmg90 → 文本容器内 img 兜底。
+XHS_LOGIN_QRCODE_CANDIDATES = (
+    Candidate("img.css-1lhmg90"),
+    _zh_css(
+        "APP扫一扫登录 → following-sibling img",
+        factory=lambda scope: scope.locator(".login-box-container")
+        .get_by_text("APP扫一扫登录")
+        .filter(visible=True)
+        .locator("xpath=..//following-sibling::div//img"),
+    ),
+)
+
+# 17. 添加图片瓦片（第 2 张起）：存在性锚点先行；批量分发语义保持不变，
+#     瓦片/file chooser 的上传接线归 ticket 38。
+XHS_NOTE_ADD_IMAGE_TILE_SELECTOR = ".img-preview-area .entry"
+XHS_NOTE_ADD_IMAGE_INPUT_CANDIDATES = (
+    Candidate('.img-list .top input[type="file"][multiple]'),
+)
+
 # Golden local-mode browser options.  ``sau_commands/xiaohongshu.py`` passes the
 # same values to ``browser_session`` in Multilogin mode, so the two paths cannot
 # drift.  Geolocation is a local-only context option: the Multilogin branch must
@@ -230,6 +419,51 @@ async def _js_click_by_text(page: Page, text: str) -> bool:
     )
 
 
+def _anchor_hit_line(step: str, resolved: Resolved, page: Page) -> str:
+    """命中日志的唯一格式：环节 / 候选种类 / 选择器 / URL。"""
+    url = str(getattr(page, "url", "") or "")
+    return (
+        f"锚点命中｜环节={step}｜种类={resolved.kind}"
+        f"｜选择器={resolved.selector}｜URL={url}"
+    )
+
+
+async def _resolve_anchor(
+    page: Page,
+    step: str,
+    candidates: tuple[Candidate, ...],
+    *,
+    role: str = "attached",
+    timeout_ms: int = XHS_ANCHOR_TIMEOUT_MS,
+    scope=None,
+    budget: PublishTimeoutBudget | None = None,
+    point: tuple[float, float] | None = None,
+    publish_clicked: bool = False,
+) -> Resolved:
+    """按矩阵候选解析一个锚点，并打一条命中日志。
+
+    ``scope`` 默认整页；弹窗内的锚点传弹窗 locator，保证选择器被容器限定。
+    结构分支只打 ``debug``；非结构分支（upstream / text-zh）额外打一条
+    ``info``，让真机日志一眼看出是否走了兜底。
+    """
+    target = page if scope is None else scope
+    resolved = await wait_resolved(
+        target,
+        candidates,
+        role=role,
+        timeout_ms=timeout_ms,
+        budget=budget,
+        point=point,
+        publish_clicked=publish_clicked,
+    )
+
+    line = _anchor_hit_line(step, resolved, page)
+    xiaohongshu_logger.debug(_msg("🎯", line))
+    if resolved.kind != "structure":
+        xiaohongshu_logger.info(_msg("🎯", line))
+    return resolved
+
+
 async def _emit_qrcode_callback(qrcode_callback, payload: dict):
     if not qrcode_callback:
         return
@@ -276,12 +510,14 @@ async def _open_xhs_qrcode_panel(page: Page) -> None:
 async def _find_xhs_qrcode_locator(page: Page):
     await _open_xhs_qrcode_panel(page)
 
-    qrcode_img = page.locator('.login-box-container').get_by_text("APP扫一扫登录").filter(visible=True).locator("xpath=..//following-sibling::div//img").nth(0)
-
-    if await qrcode_img.count():
-        return qrcode_img
-
-    raise RuntimeError("未在扫一扫登录区域找到小红书二维码图片")
+    resolved = await _resolve_anchor(
+        page,
+        "登录二维码",
+        XHS_LOGIN_QRCODE_CANDIDATES,
+        role="visible",
+        timeout_ms=XHS_LOGIN_QRCODE_TIMEOUT_MS,
+    )
+    return resolved.locator
 
 
 async def _extract_xhs_qrcode_src(page: Page) -> str:
@@ -580,11 +816,24 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
     async def set_schedule_time_xiaohongshu(self, page: Page, publish_date: datetime):
         xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {publish_date.strftime(self.date_format)}"))
-        await page.locator('.custom-switch-card').filter(has_text="定时发布").locator('.d-switch').click()
+        switch = await _resolve_anchor(
+            page,
+            "定时开关",
+            XHS_SCHEDULE_SWITCH_CANDIDATES,
+            role="interactive",
+            budget=self.publish_budget,
+        )
+        await switch.locator.click()
         await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
         publish_date_hour = publish_date.strftime("%Y-%m-%d %H:%M")
-        time_input = page.locator('.d-datepicker-input-filter input.d-text')
-        await time_input.fill(str(publish_date_hour))
+        time_input = await _resolve_anchor(
+            page,
+            "定时时间输入",
+            XHS_SCHEDULE_TIME_CANDIDATES,
+            role="editable",
+            budget=self.publish_budget,
+        )
+        await time_input.locator.fill(str(publish_date_hour))
         await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
 
     async def set_location(self, page: Page, location: str = "青岛市"):
@@ -653,15 +902,27 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             return False
 
     async def fill_title(self, page: Page) -> None:
-        title_container = page.locator('input[placeholder*="填写标题"]')
-        await title_container.fill(self.title[:20])
+        title_container = await _resolve_anchor(
+            page,
+            "标题",
+            XHS_TITLE_CANDIDATES,
+            role="editable",
+            budget=self.publish_budget,
+        )
+        await title_container.locator.fill(self.title[:20])
 
     async def fill_desc(self, page: Page) -> None:
         if not getattr(self, "desc", ""):
             return
 
-        desc = page.locator('p[data-placeholder*="输入正文描述"]')
-        await desc.click()
+        desc = await _resolve_anchor(
+            page,
+            "正文",
+            XHS_BODY_CANDIDATES,
+            role="editable",
+            budget=self.publish_budget,
+        )
+        await desc.locator.click()
         await page.keyboard.press("Backspace")
         await page.keyboard.press("Control+KeyA")
         await page.keyboard.press("Delete")
@@ -681,19 +942,25 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             self.tags = self.tags[:max_tags]
 
         if not getattr(self, "desc", ""):
-            desc = page.locator('p[data-placeholder*="输入正文描述"]')
-            await desc.click()
+            desc = await _resolve_anchor(
+                page,
+                "正文",
+                XHS_BODY_CANDIDATES,
+                role="editable",
+                budget=self.publish_budget,
+            )
+            await desc.locator.click()
 
         for tag in self.tags:  # 循环处理所有 tags
             # 话题候选下拉框依赖小红书联想接口实时返回，网络抖动/无匹配时会等不到。
             # 标签是可选增强项：等不到候选框就跳过该标签继续，不让整条发布因此失败。
             try:
                 await page.keyboard.type("#" + tag, delay=30)
-                await page.locator('#creator-editor-topic-container').wait_for(
+                await page.locator(XHS_TOPIC_MENU_SELECTOR).wait_for(
                     state="visible",
                     timeout=self._wait_ms(XHS_TOPIC_MENU_TIMEOUT_MS),
                 )
-                first_item = page.locator('#creator-editor-topic-container .item').first
+                first_item = page.locator(XHS_TOPIC_ITEM_SELECTOR).first
                 await first_item.wait_for(
                     state="visible",
                     timeout=self._wait_ms(XHS_TOPIC_ITEM_TIMEOUT_MS),
@@ -844,45 +1111,36 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
     async def _set_original_declaration(self, page: Page) -> None:
         enabled = bool(self.original_declaration)
         try:
-            card = page.locator(".custom-switch-card").filter(
-                has_text="原创声明"
-            ).first
-            if not await card.count():
-                card = page.locator("div").filter(has_text="原创声明").last
-            switch = card.locator(".d-switch").first
-            if not await switch.count():
-                switch = card.locator(
-                    "[role='switch'], input[type='checkbox']"
-                ).first
+            switch = (
+                await _resolve_anchor(
+                    page,
+                    "原创开关",
+                    XHS_ORIGINAL_SWITCH_CANDIDATES,
+                    role="interactive",
+                    budget=self.publish_budget,
+                )
+            ).locator
 
-            if not await switch.count():
-                # 最后兜底：直接点文字卡片，交给页面的点击事件切换。
-                if not await _js_click_by_text(page, "原创声明"):
-                    raise RuntimeError("未找到原创声明开关")
+            current = await self._switch_is_on(switch)
+            if current is None:
+                # 状态未知时只在“开启”场景点击；关闭场景默认页面已经是关的，
+                # 盲目点击反而可能把开关打开。
+                if enabled:
+                    xiaohongshu_logger.warning(
+                        _msg("⚠️", "无法确认原创声明开关状态，尝试点击开启")
+                    )
+                    await switch.click()
+                    await self._settle(page, XHS_DECLARATION_SETTLE_MS)
+                    await self._confirm_original_declaration(page)
+                else:
+                    xiaohongshu_logger.warning(
+                        _msg("⚠️", "无法确认原创声明开关状态，跳过关闭")
+                    )
+            elif current is not enabled:
+                await switch.click()
                 await self._settle(page, XHS_DECLARATION_SETTLE_MS)
                 if enabled:
                     await self._confirm_original_declaration(page)
-            else:
-                current = await self._switch_is_on(switch)
-                if current is None:
-                    # 状态未知时只在“开启”场景点击；关闭场景默认页面已经是关的，
-                    # 盲目点击反而可能把开关打开。
-                    if enabled:
-                        xiaohongshu_logger.warning(
-                            _msg("⚠️", "无法确认原创声明开关状态，尝试点击开启")
-                        )
-                        await switch.click()
-                        await self._settle(page, XHS_DECLARATION_SETTLE_MS)
-                        await self._confirm_original_declaration(page)
-                    else:
-                        xiaohongshu_logger.warning(
-                            _msg("⚠️", "无法确认原创声明开关状态，跳过关闭")
-                        )
-                elif current is not enabled:
-                    await switch.click()
-                    await self._settle(page, XHS_DECLARATION_SETTLE_MS)
-                    if enabled:
-                        await self._confirm_original_declaration(page)
 
             xiaohongshu_logger.success(
                 _msg("🧾", f"原创声明已{'开启' if enabled else '关闭'}")
@@ -928,27 +1186,31 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             await self._press_escape(page)
 
     async def _open_content_declaration_menu(self, page: Page) -> None:
-        trigger = page.get_by_text("添加内容类型声明", exact=True).first
-        if not await trigger.count():
-            trigger = page.get_by_text("添加内容类型声明", exact=False).first
+        trigger = await _resolve_anchor(
+            page,
+            "内容类型声明入口",
+            XHS_DECLARATION_TRIGGER_CANDIDATES,
+            role="visible",
+            budget=self.publish_budget,
+        )
         try:
-            await trigger.scroll_into_view_if_needed(
+            await trigger.locator.scroll_into_view_if_needed(
                 timeout=self._wait_ms(XHS_DECLARATION_SCROLL_TIMEOUT_MS)
             )
         except Exception:
             pass
-        await trigger.click(force=True)
+        await trigger.locator.click(force=True)
         await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
     async def _click_declaration_option(self, page: Page, label: str) -> None:
-        option = page.locator("#publish-container div").filter(
-            has_text=re.compile(rf"^{re.escape(label)}$")
-        ).last
-        if await option.count():
-            await option.click(force=True)
-            return
-        if not await _js_click_by_text(page, label):
-            raise RuntimeError(f"未找到声明选项: {label}")
+        option = await _resolve_anchor(
+            page,
+            f"声明选项:{label}",
+            _declaration_option_candidates(label),
+            role="visible",
+            budget=self.publish_budget,
+        )
+        await option.locator.click(force=True)
 
     async def _fill_self_shot(self, page: Page) -> None:
         """填写「自主拍摄」弹窗的拍摄地点和拍摄日期并确认。"""
@@ -1038,15 +1300,18 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         点击原创开关后小红书会弹出权益说明和《原创声明须知》勾选框；
         不处理这个弹窗会一直挡住发布按钮。
         """
-        modal = page.locator("[role='dialog'], .d-modal, .d-dialog").filter(
-            has_text="声明原创"
-        ).last
         try:
-            await modal.wait_for(
-                state="visible",
-                timeout=self._wait_ms(XHS_DECLARATION_CONFIRM_TIMEOUT_MS),
-            )
-        except Exception:
+            modal = (
+                await _resolve_anchor(
+                    page,
+                    "原创声明弹窗",
+                    XHS_ORIGINAL_MODAL_CANDIDATES,
+                    role="visible",
+                    timeout_ms=XHS_DECLARATION_CONFIRM_TIMEOUT_MS,
+                    budget=self.publish_budget,
+                )
+            ).locator
+        except ElementMissingError:
             # 有些场景（例如取消原创）点击开关后不弹窗，直接生效。
             return
 
@@ -1059,12 +1324,15 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 await agreement.click(force=True)
         await self._settle(page, XHS_DECLARATION_FILL_SETTLE_MS)
 
-        button = modal.get_by_role("button", name="声明原创").first
-        if not await button.count():
-            button = modal.get_by_text("声明原创", exact=True).first
-        if not await button.count():
-            raise RuntimeError("未找到「声明原创」按钮，无法完成原创声明")
-        await button.click()
+        button = await _resolve_anchor(
+            page,
+            "声明原创按钮",
+            XHS_ORIGINAL_CONFIRM_CANDIDATES,
+            role="visible",
+            scope=modal,
+            budget=self.publish_budget,
+        )
+        await button.locator.click()
         await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
     @staticmethod
@@ -1167,55 +1435,76 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
         # 封面设置为增强步骤：失败时记 warning 跳过、继续发布（用视频首帧兜底）。
         try:
-            # 发布页封面区域内嵌，点击 div.upload-cover 打开封面弹窗（d-modal）。
-            cover_section = page.locator("text=设置封面").first
+            # 1. 封面入口 .cover-edit-entry（容器 .cover-edit-stack），文本仅兜底；
+            #    打开封面弹窗。
+            entry = await _resolve_anchor(
+                page,
+                "封面入口",
+                XHS_COVER_ENTRY_CANDIDATES,
+                role="visible",
+                budget=self.publish_budget,
+            )
             try:
-                await cover_section.scroll_into_view_if_needed(
+                await entry.locator.scroll_into_view_if_needed(
                     timeout=self._wait_ms(XHS_COVER_SCROLL_TIMEOUT_MS)
                 )
             except Exception:
                 pass
             await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
-
-            # 1. 点击 div.upload-cover 打开封面弹窗
-            upload_cover = page.locator("div.upload-cover").first
-            if not await upload_cover.count():
-                upload_cover = page.locator("div.cover-plugin-preview div.default.pointer").first
-            await upload_cover.click(force=True)
+            await entry.locator.click(force=True)
             await self._settle(page, XHS_COVER_MODAL_SETTLE_MS)
 
-            # 2. 切换到「上传封面」tab（默认在「截取封面」）
-            upload_tab = page.get_by_text("上传封面", exact=True).first
-            await upload_tab.wait_for(
-                state="visible",
-                timeout=self._wait_ms(XHS_COVER_TAB_TIMEOUT_MS),
+            # 2. 封面弹窗：后续锚点全部限定在弹窗内。
+            modal = await _resolve_anchor(
+                page,
+                "封面弹窗",
+                XHS_COVER_MODAL_CANDIDATES,
+                role="visible",
+                timeout_ms=XHS_COVER_TAB_TIMEOUT_MS,
+                budget=self.publish_budget,
             )
-            await upload_tab.click()
+
+            # 3. 切换到「上传封面」tab（默认在「截取封面」）
+            upload_tab = await _resolve_anchor(
+                page,
+                "封面-上传 tab",
+                XHS_COVER_TAB_CANDIDATES,
+                role="visible",
+                scope=modal.locator,
+                timeout_ms=XHS_COVER_TAB_TIMEOUT_MS,
+                budget=self.publish_budget,
+            )
+            await upload_tab.locator.click()
             await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
 
-            # 3. 找到图片 file input（parent class: upload-wrapper）并上传
-            file_input = page.locator('div.upload-wrapper input[type="file"][accept*="image"]').first
-            if not await file_input.count():
-                file_input = page.locator('input[type="file"][accept*="image"]').last
-            await file_input.set_input_files(thumbnail_path)
+            # 4. 封面图片 file input：限定弹窗内，命中数必须为 1（禁止 .first/.last）。
+            file_input = await _resolve_anchor(
+                page,
+                "封面文件输入",
+                XHS_COVER_FILE_INPUT_CANDIDATES,
+                role="attached",
+                scope=modal.locator,
+                budget=self.publish_budget,
+            )
+            await file_input.locator.set_input_files(thumbnail_path)
             # 等图片加载+裁剪渲染
             await self._settle(page, XHS_COVER_RENDER_SETTLE_MS)
 
-            # 4. 点「确定」按钮
-            modal_footer = page.locator("div.d-modal-footer")
-            confirm = modal_footer.get_by_text("确定", exact=True).first
-            if not await confirm.count():
-                confirm = page.get_by_role("button", name="确定").first
-            await confirm.wait_for(
-                state="visible",
-                timeout=self._wait_ms(XHS_COVER_CONFIRM_TIMEOUT_MS),
+            # 5. 点「确定」按钮（新界面为「完成」）
+            confirm = await _resolve_anchor(
+                page,
+                "封面确定",
+                XHS_COVER_CONFIRM_CANDIDATES,
+                role="visible",
+                scope=modal.locator,
+                timeout_ms=XHS_COVER_CONFIRM_TIMEOUT_MS,
+                budget=self.publish_budget,
             )
-            await confirm.click()
+            await confirm.locator.click()
 
-            # 5. 等弹窗关闭
-            modal = page.locator("div.d-modal")
+            # 6. 等弹窗关闭
             try:
-                await modal.first.wait_for(
+                await modal.locator.wait_for(
                     state="hidden",
                     timeout=self._wait_ms(XHS_COVER_MODAL_CLOSE_TIMEOUT_MS),
                 )
@@ -1248,7 +1537,15 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             publish_url,
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
         )
-        await page.locator("div[class^='upload-content'] input[class='upload-input']").set_input_files(self.file_path)
+        upload_input = await _resolve_anchor(
+            page,
+            "视频上传输入",
+            XHS_VIDEO_FILE_CANDIDATES,
+            role="attached",
+            timeout_ms=XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS,
+            budget=budget,
+        )
+        await upload_input.locator.set_input_files(self.file_path)
 
         while True:
             budget.check_pre_click()
@@ -1325,14 +1622,20 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
             try:
                 if not publish_clicked:
-                    if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
-                        await page.locator('button:has-text("定时发布")').click(
-                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
-                        )
-                    else:
-                        await page.locator('button:has-text("发布")').click(
-                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
-                        )
+                    # 即时/定时共用同一个 xhs-publish-btn；is-publish /
+                    # submit-disabled 的就绪谓词归 ticket 36（ARM）。
+                    publish_button = await _resolve_anchor(
+                        page,
+                        "发布按钮",
+                        XHS_PUBLISH_BUTTON_CANDIDATES,
+                        role="interactive",
+                        budget=budget,
+                        point=XHS_PUBLISH_BUTTON_POINT,
+                        publish_clicked=publish_clicked,
+                    )
+                    await publish_button.locator.click(
+                        timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                    )
                     publish_clicked = True
                 outcome = await self._wait_publish_outcome(page)
                 if outcome == "success":
@@ -1473,16 +1776,16 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
         )
 
-        upload_input = page.locator('input[type="file"][accept*="image"]').first
-        if not await upload_input.count():
-            upload_input = page.locator("div[class^='upload-content'] input[class='upload-input']").first
-
-        await upload_input.wait_for(
-            state="attached",
-            timeout=budget.clamp_ms(XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS),
+        upload_input = await _resolve_anchor(
+            page,
+            "图文上传输入",
+            XHS_NOTE_IMAGE_CANDIDATES,
+            role="attached",
+            timeout_ms=XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS,
+            budget=budget,
         )
         xiaohongshu_logger.info(_msg("📤", "小人正在上传图片"))
-        await upload_input.set_input_files(self.image_paths)
+        await upload_input.locator.set_input_files(self.image_paths)
 
         while True:
             budget.check_pre_click()
@@ -1527,14 +1830,20 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
 
             try:
                 if not publish_clicked:
-                    if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
-                        await page.locator('button:has-text("定时发布")').click(
-                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
-                        )
-                    else:
-                        await page.locator('button:has-text("发布")').click(
-                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
-                        )
+                    # 即时/定时共用同一个 xhs-publish-btn；is-publish /
+                    # submit-disabled 的就绪谓词归 ticket 36（ARM）。
+                    publish_button = await _resolve_anchor(
+                        page,
+                        "发布按钮",
+                        XHS_PUBLISH_BUTTON_CANDIDATES,
+                        role="interactive",
+                        budget=budget,
+                        point=XHS_PUBLISH_BUTTON_POINT,
+                        publish_clicked=publish_clicked,
+                    )
+                    await publish_button.locator.click(
+                        timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                    )
                     publish_clicked = True
                 outcome = await self._wait_publish_outcome(page)
                 if outcome == "success":
