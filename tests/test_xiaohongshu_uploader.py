@@ -86,6 +86,7 @@ class RecordingLocator(FakeLocator):
 class RecordingPage:
     def __init__(self):
         self.keyboard = RecordingKeyboard()
+        self.waits: list[float] = []
         self.locators = {
             "div.d-input input": RecordingLocator("title"),
             'div.tiptap[role="textbox"][contenteditable="true"]': RecordingLocator(
@@ -97,6 +98,9 @@ class RecordingPage:
 
     def locator(self, selector):
         return self.locators[selector]
+
+    async def wait_for_timeout(self, milliseconds):
+        self.waits.append(milliseconds)
 
 
 class XiaohongshuUploaderTests(unittest.TestCase):
@@ -462,16 +466,69 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             async def count(self):
                 return 0
 
+        class Clickable:
+            def __init__(self, name):
+                self.name = name
+                self.clicks = 0
+
+            @property
+            def first(self):
+                return self
+
+            async def count(self):
+                return 1
+
+            async def is_visible(self):
+                return True
+
+            async def evaluate(self, expression, arg=None):
+                return {}
+
+            async def click(self):
+                self.clicks += 1
+
+        class FakeModal:
+            def __init__(self):
+                self.checkbox = Clickable("checkbox")
+                self.confirm = Clickable("confirm")
+                self.clicks = 0
+
+            @property
+            def first(self):
+                return self
+
+            async def count(self):
+                return 1
+
+            async def is_visible(self):
+                return True
+
+            async def evaluate(self, expression, arg=None):
+                return {}
+
+            def locator(self, selector):
+                if selector == ".d-checkbox":
+                    return self.checkbox
+                if selector == "button.custom-button":
+                    return self.confirm
+                return AbsentLocator()
+
+            def get_by_text(self, text, exact=False):
+                return AbsentLocator()
+
         class FakePage:
             def __init__(self, switch):
                 self.card = FakeCard(switch)
                 self.switch = switch
+                self.modal = FakeModal()
 
             def locator(self, selector):
                 if selector == xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector:
                     return self.switch
                 if selector == ".custom-switch-card":
                     return self.card
+                if selector == xhs_main.XHS_ORIGINAL_MODAL_CANDIDATES[0].selector:
+                    return self.modal
                 # 取消原创不弹窗：弹窗锚点保持 0 命中。
                 return AbsentLocator()
 
