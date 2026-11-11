@@ -284,19 +284,9 @@ class LocationControl:
             observed += f'（共 {len(labels)} 条，仅列前 {MAX_REPORTED_CANDIDATES} 条）'
         return f'Instagram 地点没有精确匹配：请求「{requested}」；观察到的候选：{observed}'
 
-    async def _chip_text(self, entry: Locator) -> str | None:
-        """输入框为空时读地点区块文本，剔除清除按钮的图标文本。
-
-        ``_abgh/_aw1v`` 是 Instagram 的旧版语义类名（非哈希类名），仅作防御性
-        兜底：实测选中后输入框保留标签值，走不到这里；若结构再变则退到最近的
-        祖先容器。
-        """
-        section = entry.locator(
-            'xpath=ancestor::div'
-            '[contains(concat(" ", normalize-space(@class), " "), " _abgh ")][1]'
-        )
-        if not await section.count():
-            section = entry.locator('xpath=ancestor::div[1]')
+    @staticmethod
+    async def _container_text(section: Locator) -> str | None:
+        """读取容器文本，剔除清除按钮等图标节点。"""
         try:
             text = await section.first.evaluate(
                 """(el) => {
@@ -311,3 +301,11 @@ class LocationControl:
         except Exception:
             return None
         return str(text or '').strip() or None
+
+    async def _chip_text(self, entry: Locator) -> str | None:
+        """输入框为空时读地点区块文本，剔除清除按钮的图标文本。
+
+        只用最近祖先容器（结构），不使用任何 hash 类名。
+        """
+        section = entry.locator('xpath=ancestor::div[1]')
+        return await self._container_text(section)

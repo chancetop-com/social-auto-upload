@@ -109,9 +109,9 @@ class InstagramContractTests(unittest.TestCase):
                 page = await browser.new_page()
                 release = asyncio.Event()
                 try:
-                    html = '''<div role="dialog"><div class="_ac76">
-                        <div role="button" onclick="fetch('/api/v1/media/configure_to_clips/', {method:'POST'})">任意语言</div>
-                        </div><div role="textbox" contenteditable="true" data-lexical-editor="true"></div></div>'''
+                    html = '''<div role="dialog">
+                        <div role="button" onclick="fetch('/api/v1/media/configure_to_clips/', {method:'POST'})">Share</div>
+                        <div role="textbox" contenteditable="true" data-lexical-editor="true"></div></div>'''
                     async def route(request):
                         if '/configure_to_clips/' in request.request.url:
                             await release.wait()
@@ -254,7 +254,6 @@ _NAVIGATION_HTML = ''.join(
 _DELAYED_NOTIFICATION_SCRIPT = """
       function picked(input) {
         const row = document.createElement('div');
-        row.className = '_ac76';
         const button = document.createElement('div');
         button.setAttribute('role', 'button');
         button.textContent = 'Next';
@@ -320,7 +319,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         `<div role="dialog"><input type="file" accept="image/jpeg,video/mp4" onchange="upload()"></div>`);}
                       function upload(){setTimeout(()=>{
                         document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend',
-                          '<div class="_ac76"><div role="button">Next</div></div>');
+                          '<div role="button">Next</div>');
                         if(document.body.dataset.prompts==='true') document.body.insertAdjacentHTML('beforeend',
                           `<div role="dialog"><img src="https://static.cdninstagram.com/rsrc/reels_nux_icon.png?test">
                           <div class="_a9-z"><div><div><span><button onclick="throw Error('wrong action')">詳しく見る</button></span></div>
@@ -344,7 +343,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                                 page, budget=app.start_publish_budget()
                             )
                         self.assertEqual(await page.get_by_role('dialog').count(), 1)
-                        self.assertEqual(await page.locator('._ac76 [role=button]').count(), 1)
+                        self.assertEqual(await page.get_by_role('button', name='Next').count(), 1)
                     await page.set_content('<div role="dialog"><button>Unrelated dialog</button></div>')
                     known = page.get_by_role('dialog').filter(has=page.locator('img[src*="reels_nux_icon"]'))
                     self.assertFalse(await _dismiss_optional_prompt(known, known.get_by_role('button')))
@@ -377,13 +376,13 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         await app._upload_files(page, budget=app.start_publish_budget())
                     # 提示先挡住创建入口，素材弹窗随后才挂载；等待期间必须主动关闭提示。
                     self.assertEqual(await page.locator('#notify').count(), 0)
-                    self.assertEqual(await page.locator('._ac76 [role=button]').count(), 1)
+                    self.assertEqual(await page.get_by_role('button', name='Next').count(), 1)
                 finally:
                     await browser.close()
         asyncio.run(scenario())
 
     def test_composer_without_hash_classes_uses_heading_and_action_roles(self):
-        """`_ac76` 缺失时，标题与主动作仍能靠 role + 可访问名推进两步。"""
+        """没有 hash 标题栏时，标题与主动作仍能靠 role + 可访问名推进两步。"""
         async def scenario():
             async with async_playwright() as p:
                 browser = await p.chromium.launch(channel='chrome', headless=True)
@@ -478,8 +477,8 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     await browser.close()
         asyncio.run(scenario())
 
-    def test_create_entry_prefers_label_inside_measured_nav_group(self):
-        """结构组仍是 4 个入口时，组内优先用 New post 标签，而不是盲取第二项。"""
+    def test_create_entry_uses_label_as_primary_selector(self):
+        """4 个入口同时存在时，仍以 New post 标签为主，不盲取第二项。"""
         async def scenario():
             async with async_playwright() as p:
                 browser = await p.chromium.launch(channel='chrome', headless=True)
@@ -521,8 +520,8 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                 page = await browser.new_page()
                 try:
                     html = '''<input type="file" accept="image/jpeg,image/png" id="outside">
-                      <div role="dialog"><div class="_ac76"><div role="heading">crop</div>
-                      <button role="button" onclick="advance()">任意语言</button></div><section id="media"></section></div>
+                      <div role="dialog"><div role="heading">crop</div>
+                      <div role="button" onclick="advance()">Next</div><section id="media"></section></div>
                       <script>let step=0;function advance(){step++;
                         const h=document.querySelector('[role=heading]');
                         if(step===1){h.textContent='edit'; document.querySelector('#media').innerHTML=
@@ -586,9 +585,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     verified = await find_instagram_post(page, post_url='https://www.instagram.com/p/ABC/', expected_text='same caption', owner_id='42')
                     self.assertEqual(verified['content_id'], '123_42')
                     await page.unroute_all()
-                    html = '''<div role="dialog"><div class="_ac76">
-                        <div role="button" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1); submitPost()">任意语言</div>
-                        </div><div role="textbox" contenteditable="true" data-lexical-editor="true"></div></div>
+                    html = '''<div role="dialog">
+                        <div role="button" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1); submitPost()">Share</div>
+                        <div role="textbox" contenteditable="true" data-lexical-editor="true"></div></div>
                         <script>async function submitPost() {
                           await fetch('/api/v1/media/configure_to_clips/', {method:'POST'});
                           document.body.dataset.processing='true';

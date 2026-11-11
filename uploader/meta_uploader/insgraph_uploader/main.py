@@ -54,13 +54,11 @@ INSTAGRAM_PROXY = os.environ.get("SAU_INSTAGRAM_PROXY")
 # 创建弹窗在选素材阶段只有一个 file input（编辑页的封面 input 此时尚未挂载）。
 # 用类型定位而不是 accept 文案顺序，避免 accept 改成仅 quicktime/仅图片时失效。
 INSTAGRAM_MEDIA_INPUT = 'input[type="file"]'
-# _ac76 是已观察中/英文裁剪、编辑、配文页共用的向导标题栏组件；主动作不含 SVG，返回按钮含 SVG。
-INSTAGRAM_PRIMARY_ACTION = '._ac76 [role="button"]:not(:has(svg))'
-# hash 组件缺失时按标题栏动作的可访问名回退；英文为主，中文回退。
+# 主定位一律用 role/可访问名；不再使用任何 hash 类名，哪怕作为兜底。
+# 主动作以可访问名（Next/Share/中文）定位；找不到即按漂移失败，不猜 hash 容器。
 INSTAGRAM_PRIMARY_ACTION_NAME = re.compile(
     r'^(Next|Share|Post|下一步|分享|发布)$', re.IGNORECASE
 )
-INSTAGRAM_COMPOSER_HEADING = '._ac76 [role="heading"]'
 # 可选提示的明确关闭文案；未命中时退回对话框最后一个按钮。
 PROMPT_DISMISS_TEXT = re.compile(
     r'^(Not Now|Not now|Later|OK|Got it|Continue|以后再说|稍后|暂不|知道了|好的|关闭|取消)$',
@@ -81,8 +79,8 @@ INSTAGRAM_COVER_INPUT_FALLBACK = 'input[type="file"][accept="image/jpeg,image/pn
 INSTAGRAM_COVER_INPUTS = (
     f'{INSTAGRAM_COVER_INPUT}, {INSTAGRAM_COVER_INPUT_FALLBACK}'
 )
-# 创建入口优先按导航图标的 aria-label（可访问名，属于结构/role 层）定位；
-# 旧版无 aria-label 时保留实测的下标回退。不含 Story 文案：本轮不支持 Story。
+# 创建入口以导航图标的 aria-label 为主；无 aria-label 时才退回无 hash 的
+# “四个 a[href="#"] + aria-selected 入口，创建是第二项”。不含 Story 文案。
 INSTAGRAM_CREATE_ENTRY_LABELS = ('New post', 'Create', '新帖子', '创建')
 
 INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS = 20_000
@@ -168,19 +166,13 @@ async def _first_present(primary: Locator, fallback: Locator) -> Locator:
 
 
 async def _composer_heading(dialog: Locator) -> Locator:
-    """返回向导标题；hash 组件缺失时退回 role=heading。"""
-    return await _first_present(
-        dialog.locator(INSTAGRAM_COMPOSER_HEADING),
-        dialog.get_by_role('heading'),
-    )
+    """返回向导标题：只按 role=heading 定位，不使用 hash 类名。"""
+    return dialog.get_by_role('heading')
 
 
 async def _primary_action(dialog: Locator) -> Locator:
-    """返回向导主动作；hash 组件缺失时按 Next/Share 的可访问名回退。"""
-    return await _first_present(
-        dialog.locator(INSTAGRAM_PRIMARY_ACTION),
-        dialog.get_by_role('button', name=INSTAGRAM_PRIMARY_ACTION_NAME),
-    )
+    """返回向导主动作：只按可访问名（Next/Share/中文）定位，不使用 hash 类名。"""
+    return dialog.get_by_role('button', name=INSTAGRAM_PRIMARY_ACTION_NAME)
 
 
 async def _caption_editor(dialog: Locator) -> Locator:
@@ -194,26 +186,10 @@ async def _caption_editor(dialog: Locator) -> Locator:
 async def _create_entry(page: Page, *, budget: PublishTimeoutBudget | None) -> Locator:
     """返回首页“创建”导航入口。
 
-    优先级遵循 spec §4.4：先结构（已实测的四个导航弹出入口），在结构组内用
-    aria-label 消歧，最后才按实测下标取第二项。结构组数量变化时，才退到页面
-    级的 aria-label（英文/中文）；仍找不到则保留原有数量断言，明确报告漂移。
+    首选导航图标的 aria-label（可访问名），不再把 hash 类名当首选；标签全部
+    缺失时才退回无 hash 的结构：四个 ``a[href="#"]`` + ``[aria-selected]``，
+    创建是第二项。数量不符时保留原断言，明确报告漂移。
     """
-    navigation_popups = page.locator('a._a6hd[href="#"]').filter(
-        has=page.locator('[aria-selected]')
-    )
-    timeout_ms = budget.clamp_ms(30_000) if budget else 30_000
-    try:
-        if await navigation_popups.count() == 4:
-            for label in INSTAGRAM_CREATE_ENTRY_LABELS:
-                candidate = navigation_popups.filter(
-                    has=page.locator(f'svg[aria-label="{label}" i]')
-                )
-                if await candidate.count():
-                    return candidate
-            # 实测顺序：通知、创建、设置、Meta；结构组未变时创建是第二项。
-            return navigation_popups.nth(1)
-    except Exception:
-        pass
     for label in INSTAGRAM_CREATE_ENTRY_LABELS:
         candidate = page.locator(
             f'a[href="#"]:has(svg[aria-label="{label}" i])'
@@ -223,7 +199,12 @@ async def _create_entry(page: Page, *, budget: PublishTimeoutBudget | None) -> L
                 return candidate
         except Exception:
             continue
+    navigation_popups = page.locator('a[href="#"]').filter(
+        has=page.locator('[aria-selected]')
+    )
+    timeout_ms = budget.clamp_ms(30_000) if budget else 30_000
     await expect(navigation_popups).to_have_count(4, timeout=timeout_ms)
+    # 实测顺序：通知、创建、设置、Meta；结构组未变时创建是第二项。
     return navigation_popups.nth(1)
 
 

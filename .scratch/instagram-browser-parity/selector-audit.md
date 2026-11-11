@@ -9,9 +9,9 @@
 | 位置 | 选择器 | 评分 | 问题 | 本轮处理 |
 |---|---|---|---|---|
 | 素材入口 | `input[type=file][accept*="video/mp4"]` | 中 | 只认 mp4；accept 变更/仅 quicktime 时失效 | 改 `accept*="video/"`，补 `[multiple]` 与任意 file input |
-| 向导主动作 | `._ac76 [role=button]:not(:has(svg))` | 高 | hash 类名，改版即失效 | 保留实测首选，补 aria 名称回退（Next/Share/中文） |
-| 向导标题 | `._ac76 [role=heading]` | 高 | hash 类名 | 保留实测首选，补 `role=heading` 回退 |
-| 创建入口 | `a._a6hd[href="#"]` + count=4 + nth(1) | 高 | hash 类名 + 固定数量/下标 | 优先 `svg[aria-label=New post]` 语义定位，保留旧回退 |
+| 向导主动作 | `._ac76 [role=button]:not(:has(svg))` | 高 | hash 类名，改版即失效 | **改为可访问名（Next/Share/中文）唯一首选**，不再使用 `._ac76` |
+| 向导标题 | `._ac76 [role=heading]` | 高 | hash 类名 | **改为 `role=heading` 唯一首选**，不再使用 `._ac76` |
+| 创建入口 | `a._a6hd[href="#"]` + count=4 + nth(1) | 高 | hash 类名 + 固定数量/下标 | **改为 `svg[aria-label=New post]` 首选**；回退去掉 `_a6hd`，只用 `a[href="#"]` + `[aria-selected]` |
 | 通知图标 | `img[src^="/images/instagram/xig/ico/xxhdpi_launcher.png"]` | 中 | 精确路径 | 改 `src*="launcher"` |
 | 通知关闭 | `._a9-z > button` nth(1) | 高 | hash 类名 + 固定下标 | 改“对话框最后一个 button”，角色级且在通知/Reels 均成立 |
 | Reels 图标 | `img[src^="/images/instagram/clips/reels_nux_icon.png"]` | 中 | 精确路径 | 改 `src*="reels_nux"` |
@@ -28,7 +28,7 @@
 |---|---|---|---|---|
 | 地点入口 | placeholder / aria-label | 低 | 语义属性 | 补 `input[name="creation-location-input"]` |
 | 地点联想 | 几何 + 精确文本（无 ARIA role） | 中 | 依赖尺寸/位置常量 | 保持（实测无 role；已用输入框锚点） |
-| 地点 chip | `._abgh` 祖先 | 中 | 旧语义类名 | 仅防御性兜底，保持 |
+| 地点 chip | `._abgh` 祖先 | 中 | 旧语义类名 | **改为最近祖先容器唯一首选**，不再使用 `_abgh` |
 | Alt 入口 | `Accessibility` 精确文本 + role=button 祖先 | 低 | 文本 + 结构 | 保持 |
 | Alt 输入 | 精确 aria-label/placeholder | 中 | 文案变体 | 扩为大小写不敏感子串 + textarea |
 | 开关 | `[role=switch] / [role=checkbox]` + 标签文本 | 低 | ARIA role + 文本 | 保持 |
@@ -39,7 +39,7 @@
 
 | 位置 | 选择器 | 评分 | 问题 | 本轮处理 |
 |---|---|---|---|---|
-| 菜单按钮 | `[role=button][aria-haspopup=dialog]` + `svg circle` | 中 | 依赖 SVG 形状 | 补 More options/更多选项 文案回退 |
+| 菜单按钮 | `[role=button][aria-haspopup=dialog]` + `svg circle` | 中 | 依赖 SVG 形状 | 保持结构定位；找不到即失败关闭，不用文案回退误命中评论菜单 |
 | 菜单删除项 | 精确文案 `Delete/删除` | 低 | 文本 | 保持 |
 | 确认框 | `aria-modal` + heading | 低 | 语义 | 保持 |
 | 确认删除按钮 | `buttons.nth(0)` | 高 | 固定下标，若 Cancel 在前会误点取消 | 只按 `Delete/删除` 文案点击；文案缺失直接失败关闭，绝不猜下标 |
@@ -48,8 +48,8 @@
 
 第一轮加固后，两个独立 review agent 又发现并已修正：
 
-1. **创建入口恢复 spec §4.4 优先级**：先结构（4 个导航弹出入口），组内用
-   `aria-label` 消歧，最后才用实测下标；只有结构组数量变化时才走页面级标签。
+1. **创建入口以语义为主**：`svg[aria-label=New post]` 首选；无标签时才退回
+   `a[href="#"]` + `[aria-selected]` 的 4 项结构，不再依赖 `._a6hd` 类名。
 2. **素材入口保留 accept 哨兵**：不再直接把 `input[type=file]` 当唯一主选择器；
    按 `accept*="video/"` → `[multiple]` → 任意 file input 的优先级，在弹窗挂载后
    逐轮解析，返回具体选择器，`to_have_count(1)` 仍是真实哨兵。
@@ -70,8 +70,8 @@
 | 高 | 无（无真机条件下可安全消除的项已消除） | — |
 | 中 | 地点联想列表无 ARIA role，仍靠几何 + 精确文本 | 实测 DOM 限制；输入框锚点 + 精确匹配，永不点模糊项 |
 | 中 | 通知/Reels 提示仍靠特定图标文件名识别 | 图标名片段 + 文案优先关闭；图标改名会被真实 DOM 哨兵捕获 |
-| 中 | `_ac76` / `_a6hd` / `_abgh` 等 hash 类名仍作为首选 | 均已有语义回退，hash 变化时可继续 |
+| 无 | 选择器中已无 hash 类名 | `._ac76` / `_a6hd` / `_a9-z` / `_abgh` 全部移除；主路径只依赖 role/可访问名/结构 |
 | 低 | 登录态、meta、API 路径、ARIA role、可见文案 | 语义选择器，保持 |
 
-选择器已从“单点 hash/下标”改为“实测首选 + 语义回退 + 失败关闭”，在无真机
-回归的条件下已达到相对可靠。
+选择器已从“单点 hash/下标”改为“语义首选 + 结构回退 + 失败关闭”，并且
+**不再包含任何 hash 类名**；在无真机回归的条件下已达到相对可靠。

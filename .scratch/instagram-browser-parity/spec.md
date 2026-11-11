@@ -234,7 +234,8 @@ sau instagram upload-note --account creator --images 1.jpg 2.jpg --title "标题
 
 ### 4.4 语言与漂移
 
-- 06 只在 English (US) 下实测；中文文案为回退，未验证。定位优先级：结构 / `placeholder` / `role` → 英文文案 → 中文文案。
+- 06 只在 English (US) 下实测；中文文案为回退，未验证。定位优先级：结构 / `placeholder` / `role` / 可访问名 → 英文文案 → 中文文案。
+- **不使用 hash 类名**（包括 `._ac76`、`._a6hd`、`._a9-z`、`._abgh` 等）作为选择器；hash 变化时按漂移失败，不猜 DOM。
 - 所有“入口缺失”分支都是显式结果（`unsupported`），不是崩溃；选择器漂移会先表现为 `entry_missing`，并被真实 DOM 哨兵（§7.3）捕获。
 - 不引入 manifest、不引入选择器注册表、不做自动修复。
 
