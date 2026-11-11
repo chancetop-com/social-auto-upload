@@ -8,6 +8,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from patchright.async_api import BrowserContext
 from patchright.async_api import Page
@@ -25,9 +26,13 @@ from utils.browser_session import BrowserSession
 from utils.browser_session import provider_label
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
+from utils.dom import ElementUnusableError
 from utils.dom import Resolved
+from utils.dom import check as check_dom
 from utils.dom import wait_resolved
 from utils.errors import LoginRequiredError
+from utils.humanize import MAYBE_DISPATCHED
+from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.humanize import Humanizer
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -89,7 +94,6 @@ XHS_URL_GUARD_TIMEOUT_MS = 30_000
 XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS = 3_000
 XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS = 30_000
 XHS_NOTE_UPLOAD_READY_TIMEOUT_MS = 3_000
-XHS_PUBLISH_OBSERVE_WINDOW_MS = 3_000
 XHS_LOCATION_INPUT_TIMEOUT_MS = 30_000
 XHS_LOCATION_DROPDOWN_TIMEOUT_MS = 3_000
 XHS_LOCATION_OPTION_TIMEOUT_MS = 3_000
@@ -109,6 +113,18 @@ XHS_COVER_MODAL_CLOSE_TIMEOUT_MS = 15_000
 XHS_LOGIN_PANEL_TIMEOUT_MS = 30_000
 XHS_LOGIN_SWITCH_TIMEOUT_MS = 10_000
 XHS_LOGIN_QRCODE_TIMEOUT_MS = 30_000
+
+# ---------------------------------------------------------------------------
+# 提交语义（spec §3 U2）：ARM → FIRE → OBSERVE。
+#
+# 只有这三个窗口参与发布判定；任何等待都以「确定未派发 / 可能已派发」为
+# 分界，绝不按文案猜测结果。
+# ---------------------------------------------------------------------------
+XHS_ARM_WINDOW_SECONDS = 60.0
+XHS_ARM_POLL_SECONDS = 1.0
+XHS_OBSERVE_WINDOW_SECONDS = 15.0
+XHS_OBSERVE_POLL_SECONDS = 0.5
+XHS_PUBLISH_PATH = "/publish/publish"
 
 # ---------------------------------------------------------------------------
 # 固定 UI 静置/轮询间隔。它们不是超时判据：只覆盖点击/输入后的界面动画与
@@ -131,8 +147,6 @@ XHS_LOGIN_SETTLE_MS = 3_000
 # 轮询/重试间隔（秒）：全部经 PublishTimeoutBudget.clamp_seconds() 收缩。
 XHS_VIDEO_UPLOAD_POLL_SECONDS = 2.0
 XHS_NOTE_UPLOAD_POLL_SECONDS = 1.0
-XHS_PUBLISH_RETRY_SECONDS = 0.5
-XHS_PUBLISH_OBSERVE_POLL_SECONDS = 0.3
 XHS_LOGIN_SUCCESS_SETTLE_SECONDS = 2.0
 
 # ---------------------------------------------------------------------------
@@ -402,6 +416,177 @@ async def _check_blocked(
         reason=kind,
         publish_attempted=publish_attempted,
     )
+
+
+# ---------------------------------------------------------------------------
+# 提交语义（spec §3 U2）
+# ---------------------------------------------------------------------------
+
+
+async def _read_bool_attr(locator, name: str) -> str | None:
+    """读取按钮的布尔属性；缺失或读失败都返回 ``None``（视为通过）。"""
+    try:
+        value = await locator.get_attribute(name)
+    except Exception:
+        return None
+    if value is None:
+        return None
+    return str(value).strip().lower()
+
+
+def _current_path(page: Page) -> str | None:
+    """OBSERVE 的唯一判据来源：``page.url`` 的 path；读失败返回 ``None``。
+
+    ``None`` 不表示成功（读不到 URL 时按仍在页面上处理，最终由窗口
+    超时映射为退出 9）。
+    """
+    try:
+        url = page.url
+    except Exception:
+        return None
+    if not isinstance(url, str) or not url:
+        return None
+    try:
+        return urlsplit(url).path
+    except ValueError:
+        return None
+
+
+async def _arm_ready(
+    page: Page, *, budget: PublishTimeoutBudget | None
+) -> tuple[bool, str | None]:
+    """唯一的发布就绪谓词（spec §3 U2）。
+
+    四个条件全部满足才算就绪：
+
+    1. ``xhs-publish-btn`` 存在且唯一；
+    2. 按 ``interactive`` 档可用（disabled / pointer-events / 落点 hit-test）；
+    3. ``is-publish != "false"``（属性缺失视为通过）；
+    4. ``submit-disabled != "true"``（属性缺失视为通过）。
+
+    每次调用都重新解析 locator，绝不缓存、绝不回落到旧版按钮；``budget``
+    只用于契约对齐（谓词本身无等待）。
+    """
+    locator = page.locator(XHS_PUBLISH_BUTTON_SELECTOR)
+    ready, reason = await check_dom(
+        locator,
+        "interactive",
+        point=XHS_PUBLISH_BUTTON_POINT,
+    )
+    if not ready:
+        return False, reason
+
+    if await _read_bool_attr(locator, "is-publish") == "false":
+        return False, "is-publish-false"
+    if await _read_bool_attr(locator, "submit-disabled") == "true":
+        return False, "submit-disabled-true"
+    return True, reason
+
+
+async def _wait_for_arm(
+    page: Page,
+    *,
+    budget: PublishTimeoutBudget,
+    mode: str,
+    publish_clicked: bool,
+) -> None:
+    """ARM：1s 轮询就绪谓词，窗口 ``min(60s, 剩余预算)``。
+
+    窗口或预算用尽都意味着**确定未派发**（退出 1）。每轮先跑 C2 分类：
+    命中登录/验证页 → ``publish_attempted=False`` 的 ``LoginRequiredError``。
+    """
+    started = time.monotonic()
+    while True:
+        # C2 优先于预算出口：命中登录/验证页时永远是 10，而不是 1。
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
+        budget.check_pre_click()
+        ready, _reason = await _arm_ready(page, budget=budget)
+        if ready:
+            return
+
+        elapsed = time.monotonic() - started
+        remaining_budget = budget.remaining_seconds()
+        window_left = XHS_ARM_WINDOW_SECONDS - elapsed
+        if window_left <= 0:
+            # 确定没有点击：沿用预算模块的点击前出口（退出 1）。
+            raise budget.pre_click_error()
+        await asyncio.sleep(
+            min(XHS_ARM_POLL_SECONDS, window_left, remaining_budget)
+        )
+
+
+async def _fire_publish(
+    page: Page,
+    *,
+    budget: PublishTimeoutBudget,
+    humanizer: Humanizer,
+    mode: str,
+) -> None:
+    """FIRE：先置位再派发，单次运行至多一次 ``mouse.down``。
+
+    派发前严格顺序：``before_submit`` 停顿 → 重新解析/落点复核 → 人类化
+    点击。``mouse.down`` 之前任何异常 = 确定未派发（原样上抛，退出 1）；
+    之后任何异常 = 可能已派发，只分类一次：命中登录/验证 → 10（带
+    ``publish_attempted``），否则 → 9。派发后绝不再次触碰按钮。
+    """
+    publish_clicked = False
+    try:
+        await humanizer.before_submit()
+        # 停顿可能吃掉最后的预算：派发前再确认一次（退出 1）。
+        budget.check_pre_click()
+        ready, reason = await _arm_ready(page, budget=budget)
+        if not ready:
+            raise ElementUnusableError(
+                "发布按钮",
+                role="interactive",
+                selector=XHS_PUBLISH_BUTTON_SELECTOR,
+                reason=reason or "not-ready",
+                publish_clicked=publish_clicked,
+            )
+        locator = page.locator(XHS_PUBLISH_BUTTON_SELECTOR)
+        # 不变量：置位在不可回退点（mouse.down）之前。
+        publish_clicked = True
+        await humanizer.click(locator, point=XHS_PUBLISH_BUTTON_POINT)
+    except Exception as exc:
+        if not publish_clicked:
+            raise
+        if getattr(exc, MAYBE_DISPATCHED, None) != MAYBE_DISPATCHED_VALUE:
+            # 人类化点击在 mouse.down 之前失败：确定未派发。
+            raise
+        # 可能已派发：分类优先于结果未知（10 而不是 9）。
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
+        raise budget.timeout_error(publish_clicked) from exc
+
+
+async def _observe_publish(
+    page: Page,
+    *,
+    budget: PublishTimeoutBudget,
+    publish_clicked: bool,
+    mode: str,
+) -> None:
+    """OBSERVE：500ms 轮询，窗口 ``min(15s, 剩余预算)``。
+
+    每轮顺序固定：先 C4 分类（命中 → 10 + ``publish_attempted``），再看
+    URL。判据只认 ``urlsplit(page.url).path``：不再包含 ``/publish/publish``
+    即成功（0）；15s 或预算用尽仍在页面上 → 9。这里不做任何文案扫描。
+    """
+    started = time.monotonic()
+    while True:
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
+
+        path = _current_path(page)
+        if path is not None and XHS_PUBLISH_PATH not in path:
+            return
+
+        elapsed = time.monotonic() - started
+        remaining_budget = budget.remaining_seconds()
+        window_left = XHS_OBSERVE_WINDOW_SECONDS - elapsed
+        if remaining_budget <= 0 or window_left <= 0:
+            raise budget.timeout_error(publish_clicked)
+        await asyncio.sleep(
+            min(XHS_OBSERVE_POLL_SECONDS, window_left, remaining_budget)
+        )
 
 
 def _build_xhs_creator_url(path: str) -> str:
@@ -1048,16 +1233,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             return budget.post_click_timeout_ms(default_ms)
         return budget.clamp_ms(default_ms)
 
-    async def _sleep(
-        self, seconds: float, *, publish_clicked: bool = False
-    ) -> None:
-        """轮询/重试间隔同样受预算约束，任何一次 sleep 都不会越过 deadline。"""
-        budget = self.publish_budget
-        if publish_clicked:
-            await asyncio.sleep(max(0.0, min(seconds, budget.remaining_seconds())))
-            return
-        await asyncio.sleep(budget.clamp_seconds(seconds))
-
     async def _settle(self, page: Page, milliseconds: int) -> None:
         """固定 UI 静置（点击/输入后的界面动画），不是就绪判据。"""
         await page.wait_for_timeout(self._wait_ms(milliseconds))
@@ -1073,41 +1248,11 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
     async def _humanize_pause(self, seconds: float) -> None:
         """行为层时延只吃预算上限，从不自己抛超时（ticket 15 §2）。
 
-        与 ``_sleep`` 的区别只有一个：预算耗尽时收缩到 0 而不是抛
-        ``pre_click_error``。真正的超时判据仍然只发生在锚点/轮询处。
+        预算耗尽时收缩到 0 而不是抛 ``pre_click_error``。真正的超时判据
+        仍然只发生在锚点/ARM/OBSERVE 处。
         """
         remaining = max(0.0, self.publish_budget.remaining_seconds())
         await asyncio.sleep(min(seconds, remaining))
-
-    async def _wait_publish_outcome(
-        self, page: Page, *, timeout_ms: int | None = None
-    ) -> str:
-        """轮询成功页，返回 success 或 timeout。
-
-        观察窗口本身也来自共享预算：点击后预算已经耗尽时窗口收缩到 1ms，
-        由外层发布循环统一映射为 ``PublishResultUnknownError``（退出 9）。
-        """
-        if self.publish_budget.remaining_seconds() <= 0:
-            # 点击后预算已耗尽：不再空转，交给发布循环映射为结果未知（退出 9）。
-            return "timeout"
-        window_ms = self._wait_ms(
-            XHS_PUBLISH_OBSERVE_WINDOW_MS if timeout_ms is None else timeout_ms,
-            publish_clicked=True,
-        )
-        deadline = time.monotonic() + window_ms / 1000
-        while time.monotonic() < deadline:
-            if "publish/success" in str(getattr(page, "url", "")):
-                return "success"
-
-            await self._sleep(
-                min(
-                    XHS_PUBLISH_OBSERVE_POLL_SECONDS,
-                    max(0.0, deadline - time.monotonic()),
-                ),
-                publish_clicked=True,
-            )
-
-        return "timeout"
 
     async def apply_declarations(
         self, page: Page, *, humanizer: Humanizer | None = None
@@ -1664,7 +1809,15 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             )
 
         if self.no_publish:
-            xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
+            # 干跑升级为「跑到 ARM 就绪」：跳过 --not-before 等待，
+            # 但仍执行 C1/C2/C3 与定时回读；不进入 FIRE。
+            await _check_blocked(page, mode, publish_attempted=publish_clicked)
+            await _wait_for_arm(
+                page, budget=budget, mode=mode, publish_clicked=publish_clicked
+            )
+            xiaohongshu_logger.success(
+                _msg("🧪", "ARM 就绪，--no-publish 停在发布按钮前（未点击发布）")
+            )
             return
 
         await budget.wait_until_allowed(
@@ -1673,42 +1826,23 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             label="小红书发布",
         )
 
-        while True:
-            # 退出 1（点击前）/ 9（点击后）两个出口只由预算模块产生。
-            if budget.remaining_seconds() <= 0:
-                raise budget.timeout_error(publish_clicked)
-
-            try:
-                if not publish_clicked:
-                    # 即时/定时共用同一个 xhs-publish-btn；is-publish /
-                    # submit-disabled 的就绪谓词归 ticket 36（ARM）。
-                    publish_button = await _resolve_anchor(
-                        page,
-                        "发布按钮",
-                        XHS_PUBLISH_BUTTON_CANDIDATES,
-                        role="interactive",
-                        budget=budget,
-                        point=XHS_PUBLISH_BUTTON_POINT,
-                        publish_clicked=publish_clicked,
-                    )
-                    await humanizer.before_submit()
-                    await humanizer.click(
-                        publish_button.locator,
-                        point=XHS_PUBLISH_BUTTON_POINT,
-                    )
-                    publish_clicked = True
-                outcome = await self._wait_publish_outcome(page)
-                if outcome == "success":
-                    xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
-                    break
-                xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
-            except Exception:
-                xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
-                if self.debug:
-                    await page.screenshot(full_page=True)
-            await self._sleep(
-                XHS_PUBLISH_RETRY_SECONDS, publish_clicked=publish_clicked
-            )
+        # C3：--not-before 等待之后、ARM 之前必查（未派发）。
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
+        await _wait_for_arm(
+            page, budget=budget, mode=mode, publish_clicked=publish_clicked
+        )
+        await _fire_publish(
+            page, budget=budget, humanizer=humanizer, mode=mode
+        )
+        # 派发成功后置位；结果观察与分类都从这里现取。
+        publish_clicked = True
+        await _observe_publish(
+            page,
+            budget=budget,
+            publish_clicked=publish_clicked,
+            mode=mode,
+        )
+        xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:
@@ -1871,7 +2005,15 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             )
 
         if self.no_publish:
-            xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
+            # 干跑升级为「跑到 ARM 就绪」：跳过 --not-before 等待，
+            # 但仍执行 C1/C2/C3 与定时回读；不进入 FIRE。
+            await _check_blocked(page, mode, publish_attempted=publish_clicked)
+            await _wait_for_arm(
+                page, budget=budget, mode=mode, publish_clicked=publish_clicked
+            )
+            xiaohongshu_logger.success(
+                _msg("🧪", "ARM 就绪，--no-publish 停在发布按钮前（未点击发布）")
+            )
             return
 
         await budget.wait_until_allowed(
@@ -1880,42 +2022,23 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             label="小红书发布",
         )
 
-        while True:
-            # 退出 1（点击前）/ 9（点击后）两个出口只由预算模块产生。
-            if budget.remaining_seconds() <= 0:
-                raise budget.timeout_error(publish_clicked)
-
-            try:
-                if not publish_clicked:
-                    # 即时/定时共用同一个 xhs-publish-btn；is-publish /
-                    # submit-disabled 的就绪谓词归 ticket 36（ARM）。
-                    publish_button = await _resolve_anchor(
-                        page,
-                        "发布按钮",
-                        XHS_PUBLISH_BUTTON_CANDIDATES,
-                        role="interactive",
-                        budget=budget,
-                        point=XHS_PUBLISH_BUTTON_POINT,
-                        publish_clicked=publish_clicked,
-                    )
-                    await humanizer.before_submit()
-                    await humanizer.click(
-                        publish_button.locator,
-                        point=XHS_PUBLISH_BUTTON_POINT,
-                    )
-                    publish_clicked = True
-                outcome = await self._wait_publish_outcome(page)
-                if outcome == "success":
-                    xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
-                    break
-                xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
-            except Exception:
-                xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
-                if self.debug:
-                    await page.screenshot(full_page=True)
-            await self._sleep(
-                XHS_PUBLISH_RETRY_SECONDS, publish_clicked=publish_clicked
-            )
+        # C3：--not-before 等待之后、ARM 之前必查（未派发）。
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
+        await _wait_for_arm(
+            page, budget=budget, mode=mode, publish_clicked=publish_clicked
+        )
+        await _fire_publish(
+            page, budget=budget, humanizer=humanizer, mode=mode
+        )
+        # 派发成功后置位；结果观察与分类都从这里现取。
+        publish_clicked = True
+        await _observe_publish(
+            page,
+            budget=budget,
+            publish_clicked=publish_clicked,
+            mode=mode,
+        )
+        xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:

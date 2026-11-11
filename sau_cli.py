@@ -83,6 +83,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(dispatch(args))
     except LoginRequiredError as exc:
         print(str(exc), file=sys.stderr)
+        # Machine signal: only exit 10 *after* dispatch prints the standalone
+        # token line.  No prefix, no timestamp, no leading text.
+        if getattr(exc, "publish_attempted", False):
+            print("publish_attempted=true", file=sys.stderr)
         return 10
     except RateLimitedError as exc:
         print(str(exc), file=sys.stderr)

@@ -29,6 +29,7 @@ from unittest.mock import patch
 
 import sau_cli
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.errors import (
     LoginRequiredError,
     PublishResultUnknownError,
@@ -113,6 +114,58 @@ ROWS: tuple[ExitRow, ...] = (
         note="pre-dispatch: no publish_attempted line",
     ),
     ExitRow(
+        scenario="verification-before-dispatch",
+        expected_code=10,
+        outcome=_raises(
+            LoginRequiredError(
+                "小红书要求人机验证：请在浏览器中完成验证后重试。",
+                reason="verification",
+                publish_attempted=False,
+            )
+        ),
+        stderr_contains=("人机验证",),
+        stderr_excludes=("publish_attempted=true",),
+        note="pre-dispatch C1/C2/C3 hit: no machine signal",
+    ),
+    ExitRow(
+        scenario="login-after-dispatch",
+        expected_code=10,
+        outcome=_raises(
+            LoginRequiredError(
+                "小红书登录态无效：请重新扫码后重试。"
+                "发布可能已发出：重跑前请先确认该笔记是否存在。",
+                reason="login",
+                publish_attempted=True,
+            )
+        ),
+        stderr_contains=("登录态无效", "publish_attempted=true"),
+        note="post-dispatch 10 carries the standalone stderr line",
+    ),
+    ExitRow(
+        scenario="verification-after-dispatch",
+        expected_code=10,
+        outcome=_raises(
+            LoginRequiredError(
+                "小红书要求人机验证：请在浏览器中完成验证后重试。"
+                "发布可能已发出：重跑前请先确认该笔记是否存在。",
+                reason="verification",
+                publish_attempted=True,
+            )
+        ),
+        stderr_contains=("人机验证", "publish_attempted=true"),
+        note="post-dispatch verification keeps publish_attempted=true",
+    ),
+    ExitRow(
+        scenario="arm-window-exhausted",
+        expected_code=1,
+        outcome=_raises(
+            PublishTimeoutBudget("小红书").pre_click_error()
+        ),
+        stderr_contains=("尚未点击发布",),
+        stderr_excludes=("publish_attempted=true",),
+        note="ARM window/budget exhaustion is a definite non-publish",
+    ),
+    ExitRow(
         scenario="preflight-local-failure",
         expected_code=10,
         outcome=_raises(LoginRequiredError("账号文件不存在：cookies/xhs.json")),
@@ -190,21 +243,6 @@ ROWS: tuple[ExitRow, ...] = (
 #: ticket that will move the row into :data:`ROWS`; the meta-test keeps this
 #: list honest and it must be empty at ticket 41.
 PENDING: dict[str, str] = {
-    "login-after-dispatch": (
-        "tickets 35/36: LoginRequiredError(reason=..., publish_attempted=True) "
-        "plus the standalone stderr line"
-    ),
-    "verification-before-dispatch": (
-        "ticket 35: LoginRequiredError(reason='verification', "
-        "publish_attempted=False)"
-    ),
-    "verification-after-dispatch": (
-        "tickets 35/36: reason='verification' with publish_attempted=True and "
-        "the stderr line"
-    ),
-    "arm-window-exhausted": (
-        "ticket 36: ARM readiness window exhausted, budget.pre_click_error()"
-    ),
     "topic-mismatch": (
         "ticket 39: RuntimeError with reason=topic-mismatch / topic-multi-insert"
     ),

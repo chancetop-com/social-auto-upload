@@ -346,7 +346,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         self.assertIn("15 分钟", str(ctx.exception))
         self.assertIn("尚未点击发布", str(ctx.exception))
 
-    def test_wait_publish_outcome_returns_success_on_success_url(self):
+    def test_observe_publish_returns_immediately_on_a_left_publish_page(self):
         class FakePage:
             url = "https://creator.xiaohongshu.com/publish/success?target=image"
 
@@ -362,9 +362,14 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             title="标题",
         )
 
-        outcome = asyncio.run(app._wait_publish_outcome(FakePage(), timeout_ms=500))
-
-        self.assertEqual(outcome, "success")
+        asyncio.run(
+            xhs_main._observe_publish(
+                FakePage(),
+                budget=app.start_publish_budget(),
+                publish_clicked=True,
+                mode="local",
+            )
+        )
 
     def test_publish_timeout_error_distinguishes_click_state(self):
         app = xhs_main.XiaoHongShuVideo(
