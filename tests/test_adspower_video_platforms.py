@@ -116,7 +116,7 @@ class VideoPlatformCoverageTests(unittest.TestCase):
         self.assertIsNone(kwargs.get("account_file"))
         self.assertNotIn("multilogin", kwargs)
 
-        self.assertEqual(client.start_calls, [(PROFILE, True)])
+        self.assertEqual(client.start_calls, [(PROFILE, False)])
         self.assertEqual(client.stop_calls, [PROFILE])
         self.assertEqual(playwright.chromium.launch_calls, [])
         self.assertEqual(len(playwright.chromium.connect_calls), 1)

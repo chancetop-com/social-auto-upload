@@ -146,7 +146,7 @@ class ParserContractTests(unittest.TestCase):
         self.assertIsNone(args.account)
         self.assertEqual(args.folder_id, "folder")
         self.assertEqual(args.profile_id, "profile")
-        self.assertTrue(args.headless)
+        self.assertFalse(args.headless)
 
     def test_documented_check_headed_example_parses(self):
         args = sau_cli.build_parser().parse_args(

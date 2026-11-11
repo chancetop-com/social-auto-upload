@@ -158,7 +158,7 @@ class BrowserCliParserTests(unittest.TestCase):
         self.assertEqual(args.title, "图文标题")
         self.assertEqual(args.note, "图文正文")
 
-    def test_xiaohongshu_upload_video_defaults_to_headless(self):
+    def test_xiaohongshu_upload_video_defaults_to_headed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
             video_path.write_bytes(b"video")
@@ -177,7 +177,7 @@ class BrowserCliParserTests(unittest.TestCase):
                 ]
             )
 
-        self.assertTrue(args.headless)
+        self.assertFalse(args.headless)
 
     def test_xiaohongshu_upload_note_accepts_headed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

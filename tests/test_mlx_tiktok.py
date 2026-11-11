@@ -191,7 +191,7 @@ class TiktokParserTests(unittest.TestCase):
         self.assertEqual(args.thumbnail, thumb)
         self.assertEqual(args.folder_id, "folder")
         self.assertEqual(args.profile_id, "profile")
-        self.assertTrue(args.headless)
+        self.assertFalse(args.headless)
         self.assertIsNone(args.account)
 
     def test_unknown_subcommand_still_exits_2(self):
@@ -230,7 +230,7 @@ class LocalModeTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("valid", out)
         setup.assert_awaited_once_with(
-            str(account_file), handle=False, headless=True
+            str(account_file), handle=False, headless=False
         )
 
     def test_check_local_passes_headed_flag(self):
@@ -374,7 +374,7 @@ class LocalModeTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("TikTok video upload submitted", out)
         setup.assert_awaited_once_with(
-            str(account_file), handle=False, headless=True
+            str(account_file), handle=False, headless=False
         )
         self.assertEqual(builder.call_args.args[0].account_file, account_file)
         app.upload.assert_awaited_once_with(playwright)
@@ -1107,7 +1107,7 @@ class TiktokCheckCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
-        self.assertEqual(factory.call_args.kwargs["headless"], True)
+        self.assertEqual(factory.call_args.kwargs["headless"], False)
         self.assertEqual(
             factory.call_args.kwargs["managed"].target.profile_id, "profile"
         )
@@ -1511,7 +1511,7 @@ class StopOwnershipTests(unittest.TestCase):
         client = _FakeClient.instances[0]
         self.assertEqual(client.token, TOKEN)
         self.assertEqual(client.probe_calls, 1)
-        self.assertEqual(client.start_calls, [("folder", "profile", True)])
+        self.assertEqual(client.start_calls, [("folder", "profile", False)])
         self.assertEqual(client.stop_calls, ["profile"])
         self.assertEqual(playwright.chromium.connect_calls[0]["url"], "http://127.0.0.1:9222")
         self.assertTrue(browser.closed)
