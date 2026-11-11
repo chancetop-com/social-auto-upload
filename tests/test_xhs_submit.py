@@ -33,7 +33,7 @@ import sau_cli
 import uploader.publish_timeout as publish_timeout
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_clock import FakeClock
-from tests.fakes_xhs_dom import FakeLocator, RecordingLocator, RecordingMouse, RecordingPage
+from tests.fakes_xhs_dom import FakeLocator, RecordingLocator, RecordingMouse, RecordingPage, preview_tiles
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 
@@ -43,6 +43,7 @@ PUBLISH_URL = (
     "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image"
 )
 SUCCESS_URL = "https://creator.xiaohongshu.com/publish/success?target=image"
+NOTE_TILES_SELECTOR = ".img-preview-area .pr"
 LOGIN_URL = "https://creator.xiaohongshu.com/login?redirect=%2Fpublish"
 VERIFICATION_URL = (
     "https://creator.xiaohongshu.com/website-login/captcha?redirectPath=%2Fpublish"
@@ -168,6 +169,7 @@ def _note_page(button=None, *, url: str = PUBLISH_URL) -> RecordingPage:
         url=url,
         selectors={
             "div.upload-content input.upload-input": _FileInput("image-input"),
+            NOTE_TILES_SELECTOR: preview_tiles(1),
             'input[placeholder*="填写标题"]': FakeLocator(
                 "title-zh", computed_style=dict(INPUT_FACTS)
             ),

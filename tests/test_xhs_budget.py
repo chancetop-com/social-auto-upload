@@ -30,7 +30,7 @@ from unittest.mock import patch
 import uploader.publish_timeout as publish_timeout
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_clock import FakeClock
-from tests.fakes_xhs_dom import FakeLocator, RecordingLocator, RecordingPage
+from tests.fakes_xhs_dom import FakeLocator, RecordingLocator, RecordingPage, preview_tiles
 from utils import dom
 from utils.dom import ElementMissingError
 from utils.errors import PublishResultUnknownError
@@ -49,6 +49,9 @@ TITLE_STRUCTURE_SELECTOR = "div.d-input input"
 NOTE_IMAGE_INPUT_SELECTOR = "div.upload-content input.upload-input"
 NOTE_IMAGE_INPUT_FALLBACK = '.img-list .top input[type="file"][multiple]'
 PUBLISH_BUTTON_SELECTOR = "xhs-publish-btn"
+NOTE_TILES_SELECTOR = ".img-preview-area .pr"
+VIDEO_FAIL_SELECTOR = xhs_main.XHS_VIDEO_FAIL_SELECTOR
+VIDEO_LOADING_TEXT_SELECTOR = xhs_main.XHS_VIDEO_LOADING_TEXT_SELECTOR
 
 INPUT_FACTS = {
     "tag": "input",
@@ -84,9 +87,9 @@ class _FileInput(FakeLocator):
 
 
 class _UploadInput(_FileInput):
-    """``input.upload-input`` double that reports a finished video upload."""
+    """``div.upload-content input.upload-input`` double for the video chain."""
 
-    def __init__(self, *, preview_text: str = "上传成功 分辨率 1080P"):
+    def __init__(self, *, preview_text: str = ""):
         super().__init__("upload-input")
         self._preview = FakeLocator("preview", text=preview_text)
 
@@ -296,6 +299,8 @@ def _video_page(clock: FakeClock, *, advance_on_goto: float = 0.0, **overrides):
             "title-structure", computed_style=INPUT_FACTS
         ),
         PUBLISH_BUTTON_SELECTOR: _AdvancingClickLocator("publish", clock),
+        VIDEO_FAIL_SELECTOR: FakeLocator("video-fail", count=0),
+        VIDEO_LOADING_TEXT_SELECTOR: FakeLocator("video-loading", count=0),
     }
     selectors.update(overrides.pop("selectors", {}))
     page = _AdvancingPage(
@@ -326,7 +331,6 @@ class VideoChainBudgetTests(unittest.TestCase):
 
         # goto 花掉 880 秒后只剩 20 秒：URL 守卫必须收缩到这个剩余量。
         self.assertEqual(page.timeouts("wait_for_url"), [20_000])
-        self.assertEqual(page.timeouts("wait_for_selector"), [3_000])
         self.assertTrue(
             all(isinstance(value, int) for value in page.timeouts()),
             f"all waits must be budget-derived ints: {page.wait_calls}",
@@ -385,6 +389,7 @@ class NoteChainBudgetTests(unittest.TestCase):
                 url="about:blank",
                 selectors={
                     NOTE_IMAGE_INPUT_SELECTOR: image_input,
+                    NOTE_TILES_SELECTOR: preview_tiles(1),
                     TITLE_SELECTOR: title,
                     TITLE_STRUCTURE_SELECTOR: FakeLocator(
                         "title-structure", computed_style=INPUT_FACTS
@@ -394,15 +399,14 @@ class NoteChainBudgetTests(unittest.TestCase):
             )
             asyncio.run(_note_app().upload_note_content(page, mode="local"))
 
-        # 上传入口改由 wait_resolved 解析（不再 locator.wait_for），
-        # 就绪判定仍然走预算：goto 花掉 890 秒后只剩 10 秒。
-        self.assertEqual(image_input.wait_calls, [])
+        # 上传入口改由单趟解析（缺失/多义立即中止），逐张派发 + 逐瓦片完成。
+        # 「标题框出现即放行」已删：就绪判定不再等标题框。
         self.assertEqual(image_input.files, [["a.png"]])
-        self.assertEqual(title.wait_calls[0].timeout, 3_000)
+        self.assertEqual(title.wait_calls, [])
         _url, goto_kwargs = page.goto_calls[0]
         self.assertEqual(goto_kwargs["wait_until"], "domcontentloaded")
 
-    def test_note_upload_input_resolution_timeout_is_clamped(self):
+    def test_missing_upload_input_aborts_without_waiting(self):
         clock = FakeClock(start=0.0)
         with clock.patch(xhs_main, publish_timeout, dom):
             page = _AdvancingPage(
@@ -421,8 +425,8 @@ class NoteChainBudgetTests(unittest.TestCase):
                     _note_app().upload_note_content(page, mode="local")
                 )
 
-        # 附件 input 的 30 秒上限收缩到剩余的 10 秒：虚拟时间里正好等 10 秒。
-        self.assertAlmostEqual(sum(clock.sleep_calls), 10.0, places=3)
+        # spec §3 U6：上传入口缺失 → 立即中止，不进入任何轮询窗口。
+        self.assertEqual(clock.sleep_calls, [])
 
 
 # ---------------------------------------------------------------------------
