@@ -201,7 +201,7 @@ class HelperTests(unittest.TestCase):
                 multilogin.resolve_account_label(
                     Namespace(account="creator", profile_id="profile")
                 ),
-                "creator",
+                "profile",
             )
 
     def test_local_missing_account_is_usage_error(self):

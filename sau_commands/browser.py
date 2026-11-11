@@ -234,14 +234,29 @@ def resolve_managed_provider(
 def resolve_account_label(args: argparse.Namespace) -> str | None:
     """Return the log/output account label.
 
-    Managed mode defaults the label to ``profile_id``; local mode keeps the
-    user-supplied ``--account``.  The label never participates in identity
-    checks and never becomes a cookie path in managed mode.
+    Managed mode always labels the run with ``profile_id``: ``--account`` is
+    neither read nor validated there (see :func:`managed_ignored_keys`) and
+    never becomes a cookie path.  Local mode keeps the user-supplied
+    ``--account``.
     """
     if managed_enabled():
-        account = getattr(args, "account", None)
-        return account or getattr(args, "profile_id", None)
+        return getattr(args, "profile_id", None)
     return getattr(args, "account", None)
+
+
+def managed_ignored_keys(args: argparse.Namespace) -> tuple[str, ...]:
+    """Return the CLI keys managed mode drops, e.g. ``("account",)``.
+
+    ``--account`` names a local cookie file, so a managed run cannot honour it.
+    It is reported once per run through the browser-session warning instead of
+    silently changing the identity label.  Empty values never count.
+    """
+    if not managed_enabled():
+        return ()
+    account = getattr(args, "account", None)
+    if account is None or not str(account).strip():
+        return ()
+    return ("account",)
 
 
 def require_local_account(args: argparse.Namespace) -> None:
@@ -361,6 +376,7 @@ __all__ = [
     "login_required_error",
     "managed_app_label",
     "managed_enabled",
+    "managed_ignored_keys",
     "managed_timezone_hint",
     "multilogin_enabled",
     "reject_managed_login",
