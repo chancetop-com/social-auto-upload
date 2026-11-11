@@ -24,6 +24,7 @@ import ast
 import asyncio
 import inspect
 import io
+import os
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -164,6 +165,20 @@ def _note_app(**overrides):
     return xhs_main.XiaoHongShuNote(**values)
 
 
+def _video_app(**overrides):
+    values = {
+        "title": "标题",
+        "file_path": "demo.mp4",
+        "tags": [],
+        "publish_date": 0,
+        "account_file": "account.json",
+        "desc": "",
+        "no_publish": True,
+    }
+    values.update(overrides)
+    return xhs_main.XiaoHongShuVideo(**values)
+
+
 def _note_page(button=None, *, url: str = PUBLISH_URL) -> RecordingPage:
     return RecordingPage(
         url=url,
@@ -176,8 +191,46 @@ def _note_page(button=None, *, url: str = PUBLISH_URL) -> RecordingPage:
             "div.d-input input": FakeLocator(
                 "title", computed_style=dict(INPUT_FACTS)
             ),
+            'div.tiptap[role="textbox"][contenteditable="true"]': FakeLocator(
+                "desc", computed_style=dict(INPUT_FACTS)
+            ),
+            xhs_main.XHS_BODY_LENGTH_ERROR_SELECTOR: FakeLocator(
+                "body-error", count=0
+            ),
             PUBLISH_SELECTOR: button if button is not None else _PublishButton(),
             LOGIN_BOX: FakeLocator("login-box", count=0),
+        },
+    )
+
+
+class _EventFileInput(_FileInput):
+    """File input that records its dispatch into the page event stream."""
+
+    def __init__(self, name: str = "file-input", events=None) -> None:
+        super().__init__(name)
+        self.events = events
+
+    async def set_input_files(self, files, **kwargs) -> None:
+        if self.events is not None:
+            self.events.append("upload")
+        await super().set_input_files(files, **kwargs)
+
+
+def _video_page(button=None, *, upload=None) -> RecordingPage:
+    return RecordingPage(
+        url=PUBLISH_URL,
+        selectors={
+            "div.upload-content input.upload-input": upload
+            if upload is not None
+            else _FileInput("video-input"),
+            PUBLISH_SELECTOR: button if button is not None else _PublishButton(),
+            LOGIN_BOX: FakeLocator("login-box", count=0),
+            "div.d-input input": FakeLocator(
+                "title", computed_style=dict(INPUT_FACTS)
+            ),
+            xhs_main.XHS_BODY_LENGTH_ERROR_SELECTOR: FakeLocator(
+                "body-error", count=0
+            ),
         },
     )
 
@@ -463,6 +516,28 @@ class Decision03SubmitFireTests(unittest.TestCase):
             )
 
         self.assertNotIsInstance(ctx.exception, LoginRequiredError)
+        self.assertEqual(page.mouse.down_count, 0)
+
+    def test_humanize_zero_click_failure_is_result_unknown(self):
+        # Fast path delegates to ``locator.click``; a throw cannot prove the
+        # click did not land, so FIRE must map it to 9 (possible publish).
+        button = _PublishButton("boom")
+        button._click_error = RuntimeError("driver lost mid-click")
+        page = _button_page(button)
+
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            humanizer = Humanizer(page)
+            with self.assertRaises(PublishResultUnknownError):
+                asyncio.run(
+                    xhs_main._fire_publish(
+                        page,
+                        budget=self._budget(),
+                        humanizer=humanizer,
+                        mode="local",
+                    )
+                )
+
+        self.assertEqual(button.click_count, 1)
         self.assertEqual(page.mouse.down_count, 0)
 
     def test_budget_expiring_during_before_submit_blocks_the_dispatch(self):
@@ -753,6 +828,149 @@ class Decision03SubmitEntryPointTests(unittest.TestCase):
         self.assertEqual(page.mouse.down_count, 1)
         self.assertEqual(page.mouse.up_count, 1)
         self.assertEqual(button.click_count, 0)
+
+
+class Decision06ReadinessWiringTests(unittest.TestCase):
+    """U3 page-readiness wiring: one quiet gate + data-driven overlay clearing."""
+
+    def test_overlay_registry_is_data_with_three_known_layers(self):
+        rules = {rule.selector: rule for rule in xhs_main.XHS_OVERLAY_RULES}
+        guide = rules[".feature-guide__btn"]
+        self.assertEqual(guide.action, "click")
+        dialog = next(
+            rule
+            for selector, rule in rules.items()
+            if "图片可以编辑啦" in selector and "dialog" in selector
+        )
+        self.assertEqual(dialog.action, "click-child")
+        self.assertTrue(dialog.target_selector)
+        popover = rules["div.d-popover"]
+        self.assertEqual(popover.action, "esc")
+
+        self.assertEqual(
+            [rule.selector for rule in xhs_main.XHS_TYPING_OVERLAY_RULES],
+            [".feature-guide__btn"],
+            "body typing may only clear the guide button",
+        )
+
+    def test_video_flow_quiet_gate_then_overlay_clear_before_first_interaction(self):
+        page = _video_page()
+        upload = _EventFileInput("video-input", events=page.events)
+        page._selectors["div.upload-content input.upload-input"] = upload
+        app = _video_app(no_publish=True)
+
+        async def quiet(*_args, **_kwargs):
+            page.events.append("quiet")
+            return True
+
+        async def overlay(_page, rules, **_kwargs):
+            page.events.append(("overlay", tuple(rule.selector for rule in rules)))
+
+        with (
+            patch.object(xhs_main, "Humanizer", _QuietHumanizer),
+            patch.object(xhs_main, "wait_dom_quiet", new=quiet),
+            patch.object(xhs_main, "clear_overlays", new=overlay),
+        ):
+            asyncio.run(app.upload_video_content(page, mode="local"))
+
+        self.assertEqual(page.events.count("quiet"), 1)
+        overlays = [
+            event
+            for event in page.events
+            if isinstance(event, tuple) and event[0] == "overlay"
+        ]
+        overlay_positions = [
+            index
+            for index, event in enumerate(page.events)
+            if isinstance(event, tuple) and event[0] == "overlay"
+        ]
+        self.assertEqual(
+            len(overlays), 2, "one first-interaction sweep + one before ARM"
+        )
+        self.assertLess(page.events.index("quiet"), page.events.index("upload"))
+        self.assertLess(overlay_positions[0], page.events.index("upload"))
+        self.assertGreater(overlay_positions[1], page.events.index("upload"))
+        self.assertEqual(
+            overlays[0][1],
+            tuple(rule.selector for rule in xhs_main.XHS_OVERLAY_RULES),
+        )
+
+    def test_note_flow_quiet_gate_and_overlay_clear_before_first_upload(self):
+        page = _note_page()
+        page._selectors["div.upload-content input.upload-input"] = _EventFileInput(
+            "image-input", events=page.events
+        )
+        app = _note_app(no_publish=True)
+
+        async def quiet(*_args, **_kwargs):
+            page.events.append("quiet")
+            return True
+
+        async def overlay(_page, rules, **_kwargs):
+            page.events.append(("overlay", tuple(rule.selector for rule in rules)))
+
+        with (
+            patch.object(xhs_main, "Humanizer", _QuietHumanizer),
+            patch.object(xhs_main, "wait_dom_quiet", new=quiet),
+            patch.object(xhs_main, "clear_overlays", new=overlay),
+        ):
+            asyncio.run(app.upload_note_content(page, mode="local"))
+
+        overlays = [
+            event
+            for event in page.events
+            if isinstance(event, tuple) and event[0] == "overlay"
+        ]
+        self.assertEqual(len(overlays), 1, "notes have no cover step")
+        self.assertLess(page.events.index("quiet"), page.events.index("upload"))
+        self.assertLess(
+            next(
+                index
+                for index, event in enumerate(page.events)
+                if isinstance(event, tuple) and event[0] == "overlay"
+            ),
+            page.events.index("upload"),
+        )
+        # Second quiet call is the U6 upload-completion recheck, not readiness.
+        self.assertEqual(page.events.count("quiet"), 2)
+        self.assertGreater(
+            page.events.index("quiet", page.events.index("quiet") + 1),
+            page.events.index("upload"),
+        )
+
+    def test_dom_not_quiet_only_warns_and_publishing_continues(self):
+        button = _PublishButton()
+        page = _video_page(button)
+        app = _video_app(no_publish=True)
+
+        with (
+            patch.object(xhs_main, "Humanizer", _QuietHumanizer),
+            patch.object(
+                xhs_main, "wait_dom_quiet", new=AsyncMock(return_value=False)
+            ),
+            patch.object(
+                xhs_main, "clear_overlays", new=AsyncMock(return_value=None)
+            ),
+        ):
+            asyncio.run(app.upload_video_content(page, mode="local"))
+
+        self.assertGreaterEqual(button.box_calls, 1, "ARM still ran")
+        self.assertEqual(page.mouse.down_count, 0)
+
+    def test_body_typing_only_uses_the_guide_overlay_rule(self):
+        page = _note_page()
+        app = _note_app(desc="正文", tags=[])
+        clear = AsyncMock(return_value=None)
+
+        with (
+            patch.dict(os.environ, {"HUMANIZE": "0"}),
+            patch.object(xhs_main, "clear_overlays", new=clear),
+        ):
+            asyncio.run(app.fill_desc(page))
+
+        clear.assert_awaited()
+        for call in clear.await_args_list:
+            self.assertEqual(call.args[1], xhs_main.XHS_TYPING_OVERLAY_RULES)
 
 
 # ---------------------------------------------------------------------------

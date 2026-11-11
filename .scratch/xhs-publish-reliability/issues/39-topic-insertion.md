@@ -4,7 +4,7 @@
 
 **Blocked by:** 33（候选、编辑区与回读锚点）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 **候选匹配**
 

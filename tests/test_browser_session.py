@@ -23,7 +23,12 @@ from tests.fakes import (
     FakePlaywright,
     ForbiddenApiError,
 )
-from utils.browser_session import BrowserSession, browser_session, provider_label
+from utils.browser_session import (
+    BrowserSession,
+    browser_session,
+    log_local_session_ready,
+    provider_label,
+)
 from utils.multilogin import MultiloginProvider, MultiloginTarget
 
 TOKEN = "ticket15-secret-token"
@@ -873,6 +878,20 @@ class StartupLogTests(unittest.TestCase):
     def test_local_startup_log_has_mode_headless_identity_and_ignored(self):
         with patch("utils.browser_session.logger.info") as info:
             self._run_local(headless=False)
+
+        startup = self._startup_calls(info)
+        self.assertEqual(len(startup), 1)
+        self.assertEqual(
+            startup[0].args[0],
+            "browser session ready: mode=local, headless=headed, "
+            "identity=account_file:/tmp/cookie.json, ignored=-",
+        )
+
+    def test_local_helper_emits_the_same_single_line(self):
+        with patch("utils.browser_session.logger.info") as info:
+            log_local_session_ready(
+                headless=False, account_file="/tmp/cookie.json"
+            )
 
         startup = self._startup_calls(info)
         self.assertEqual(len(startup), 1)

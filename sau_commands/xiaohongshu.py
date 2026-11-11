@@ -43,6 +43,7 @@ from sau_commands.browser import (
 )
 from utils.base_social_media import set_init_script
 from utils.browser_session import browser_session
+from utils.browser_session import log_local_session_ready
 from utils.errors import LoginRequiredError, UsageError
 
 CONTENT_TYPE_CHOICES = tuple(XHS_CONTENT_TYPES)
@@ -204,8 +205,8 @@ class XiaohongshuVideoUploadRequest:
     publish_date: datetime | int
     thumbnail_file: Path | None = None
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
-    debug: bool = True
-    headless: bool = True
+    debug: bool = False
+    headless: bool = False
     original_declaration: bool | None = None
     content_type: str | None = None
     repost_source: str | None = None
@@ -224,8 +225,8 @@ class XiaohongshuNoteUploadRequest:
     tags: list[str]
     publish_date: datetime | int
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
-    debug: bool = True
-    headless: bool = True
+    debug: bool = False
+    headless: bool = False
     original_declaration: bool | None = None
     content_type: str | None = None
     repost_source: str | None = None
@@ -259,6 +260,9 @@ async def check_xiaohongshu_account(
             )
             if XHS_INIT_SCRIPT:
                 context = await set_init_script(context)
+            log_local_session_ready(
+                headless=headless, account_file=str(account_file)
+            )
             try:
                 kind, _evidence = await probe_session(context)
                 if kind != "valid":

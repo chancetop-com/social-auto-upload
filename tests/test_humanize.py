@@ -627,6 +627,27 @@ class FastPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.keyboard.actions, [("press", "ControlOrMeta+A")])
         self.assertEqual(timeline.sleeps(), [])
 
+    async def test_fast_path_click_failure_is_marked_maybe_dispatched(self):
+        # The fast path delegates to ``locator.click``, which cannot prove the
+        # click did not land.  FIRE must therefore treat the throw as
+        # "possibly dispatched" instead of "definitely not dispatched".
+        timeline = Timeline()
+        locator = RecordingLocator(
+            "target", click_error=RuntimeError("driver lost mid-click")
+        )
+        page = _page(timeline, **{"#target": locator})
+
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            humanizer = humanize.Humanizer(page, sleep=timeline.sleep)
+            with self.assertRaises(RuntimeError) as ctx:
+                await humanizer.click(locator)
+
+        self.assertEqual(locator.click_count, 1)
+        self.assertEqual(
+            getattr(ctx.exception, humanize.MAYBE_DISPATCHED, None),
+            humanize.MAYBE_DISPATCHED_VALUE,
+        )
+
 
 # ---------------------------------------------------------------------------
 # 6. Shared-layer boundary and the XHS static gates

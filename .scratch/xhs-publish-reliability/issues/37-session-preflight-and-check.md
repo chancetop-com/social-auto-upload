@@ -4,7 +4,7 @@
 
 **Blocked by:** 32（`attached` 判定）、35（分类器与文案）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 ## 发布前预检（只有一条零网络快路）
 

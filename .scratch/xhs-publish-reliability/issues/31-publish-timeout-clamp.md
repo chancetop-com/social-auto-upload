@@ -4,7 +4,7 @@
 
 **Blocked by:** 28（需要虚拟时钟断言剩余预算收缩）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 - [x] 发布链路内零裸 `timeout=<数字>` 字面量（含导航、`wait_for_url`、`wait_for_selector`、元素 `wait_for`、上传等待与观察窗）
 - [x] 每次等待前先查预算；`clamp` 返回 ≤0 时按点击前超时处理

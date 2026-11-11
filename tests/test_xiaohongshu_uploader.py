@@ -3,10 +3,15 @@ import os
 import tempfile
 import time
 import unittest
+from dataclasses import fields
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import uploader.xiaohongshu_uploader.main as xhs_main
+from sau_commands.xiaohongshu import (
+    XiaohongshuNoteUploadRequest,
+    XiaohongshuVideoUploadRequest,
+)
 from utils.errors import PublishResultUnknownError
 
 # Decision map (spec U12 F): this legacy-file class mixes decisions, so it keeps
@@ -107,6 +112,23 @@ class RecordingPage:
 
     async def wait_for_timeout(self, milliseconds):
         self.waits.append(milliseconds)
+
+
+class XiaohongshuRequestDefaultTests(unittest.TestCase):
+    """Request dataclasses mirror the CLI contract: headed, debug off."""
+
+    def _defaults(self, request_type):
+        return {field.name: field.default for field in fields(request_type)}
+
+    def test_video_request_defaults_to_headed_and_debug_off(self):
+        defaults = self._defaults(XiaohongshuVideoUploadRequest)
+        self.assertIs(defaults["debug"], False)
+        self.assertIs(defaults["headless"], False)
+
+    def test_note_request_defaults_to_headed_and_debug_off(self):
+        defaults = self._defaults(XiaohongshuNoteUploadRequest)
+        self.assertIs(defaults["debug"], False)
+        self.assertIs(defaults["headless"], False)
 
 
 class XiaohongshuUploaderTests(unittest.TestCase):

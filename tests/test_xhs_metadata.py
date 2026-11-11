@@ -465,6 +465,23 @@ class Decision11ReadbackTitleSuffixTests(unittest.TestCase):
         ):
             asyncio.run(app.fill_title(page))
 
+    def test_duplicate_suffix_nodes_still_count_as_over_limit(self):
+        # Any node present means over-limit: ambiguity must never read as
+        # "absent" and let the gate pass (spec §3 U8 D).
+        app = _note_app(desc="描述")
+        selectors = _meta_selectors()
+        selectors[xhs_main.XHS_TITLE_MAX_SUFFIX_SELECTORS[0]] = FakeLocator(
+            "title-suffix-dup", count=2
+        )
+        clock = FakeClock()
+        page = RecordingPage(url=NOTE_URL, selectors=selectors)
+        with (
+            patch.object(xhs_main, "Humanizer", _QuietHumanizer),
+            clock.patch(xhs_main),
+            self.assertRaises(ElementUnusableError),
+        ):
+            asyncio.run(app.fill_title(page))
+
     def test_explicit_title_is_typed_verbatim(self):
         title = "字" * 21
         app = _note_app(desc="描述", title=title)
@@ -521,6 +538,20 @@ class Decision11ReadbackBodyLengthTests(unittest.TestCase):
     def test_absent_length_error_passes(self):
         app = _note_app(desc="正文", tags=["旅行pov"])
         _run_meta_fill(app, body_error=0)
+
+    def test_duplicate_length_error_nodes_still_fail(self):
+        # Two matching nodes are still "present" — never treated as absent.
+        app = _note_app(desc="正文", tags=[])
+        selectors = _meta_selectors()
+        selectors[xhs_main.XHS_BODY_LENGTH_ERROR_SELECTOR] = FakeLocator(
+            "body-error-dup", count=2
+        )
+        page = RecordingPage(url=NOTE_URL, selectors=selectors)
+        with (
+            patch.dict(os.environ, {"HUMANIZE": "0"}),
+            self.assertRaises(ElementUnusableError),
+        ):
+            asyncio.run(app.fill_meta(page))
 
 
 # ---------------------------------------------------------------------------

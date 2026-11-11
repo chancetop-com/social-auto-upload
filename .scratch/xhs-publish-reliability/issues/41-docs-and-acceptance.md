@@ -4,7 +4,7 @@
 
 **Blocked by:** 29–40（全部）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 **文档回写（派生投影，母本是规格 §4）**
 
@@ -46,11 +46,43 @@
 
 ## Follow-ups
 
-- 详细待办见 [`follow-ups.md`](../follow-ups.md)：TikTok / Instagram 的 `--no-publish` 必须先升级为「跑到 ARM 就绪」，再做 U11 步 2/3 真机验收。
-- 同文件登记了规格 §8.3 中值得在硬件上复检的项（真实验证页 path、login-box 假阳性、定时 2h/14d 边界、慢成功观察窗、定时成功后跳转等）。
+### 硬前置：TikTok / Instagram 的 `--no-publish` 语义
+
+- **现状**：TikTok 与 Instagram 的 `--no-publish` 仍是「填表完成即返回」，没有「跑到 ARM 就绪」。
+- **要求**：升级为与小红书相同语义——完成上传、元数据、声明/选项与定时设置后，等待发布按钮存在、可交互（hit-test）且未被禁用/遮挡，再返回成功；不进入 FIRE/OBSERVE。
+- **原因**：U11 步 2/3 的真机验收若只到「填表完成」，无法证明选择器、就绪判据与上传完成判定在真实页面上成立，验收会退化为假阳性。
+- **连带**：升级后同步改写各自 `docs/CLI.md` 段落与 skill 契约镜像（`--no-publish` 措辞、超时/观察窗语义）。
+
+### 真机复检：规格 §8.3 中仍有价值、但本轮无环境验证的项
+
+以下编号沿用 `spec.md` §8.3；本轮全部为「未验证（无真机环境）」。
+
+| # | 项 | 下一次真机复检动作 |
+| --- | --- | --- |
+| 1 | `/website-login*` 与真实验证页 path 未观察到 | 制造一次登录失效，记录真实跳转 path；确认 `/website-login/captcha` 分支是否死代码 |
+| 2 | 正常发布页上 `login-box` 的 count/可见性未单验 | 正常发布页观察一次，确认不会产生假 `10` |
+| 3 | 定时回读只证客户端接受，不证服务端受理；2h/14d 边界未真机验证 | 用 2h、14d 边界各发一次定时，到点核对平台是否按设定时间发布 |
+| 4 | C3 时效是粗判，不保证平台最小提前量 | 接近最小提前量时观察平台是否拒绝或回滚 |
+| 6 | 观察窗 15s 对「慢成功」是否够用 | 真机记录发布成功实际离开 `/publish/publish` 的耗时分布 |
+| 7 | 定时发布成功后是否跳转 `publish/success` | 真机确认；若不跳转，每次定时发布都会等到预算/窗口耗尽 → `9` |
+| 8 | `--no-publish` 升级到 ARM 是前置改动 | 先完成上方「硬前置」，再做 §9.3 第 1–3 项 |
+| 10 | 点击后落登录页的真实频率 | 统计派发后 `publish_attempted=true` 的实际发生率 |
+| 12 | 登录后同 context 复核若页面未就绪 → `1` | 扫码成功后立刻重跑一次，确认运维可解释该 `1` |
+| 15 | `type_horizon_chars=1000` 对部分编辑器可能被截断 | 用长正文真机确认编辑器不截断，或截断即按点击前 `1` 处理 |
+
+§8.3 #5（`9` 与限流不可区分）、#9（humanize 效果不设断言）、#13（本地只写成功）属于设计/残留风险，不做真机断言；#11 已有实机证据；#14 托管为可选项。
+
+### 文档与验收遗留
+
+- 本轮 `spec.md` §9.3 九行全部标记 `未验证（无真机环境）`，不得当作通过证据。
+- 小红书 `--account` 在托管下已改为「忽略、身份由 profile 决定」；若其它平台文档仍写「仅日志标签」，迁移时一并修正。
 
 ## Comments
 
 - 真机验收 §9.3 第 1–9 项全部**未执行**：当前环境没有账号、cookie 与桌面浏览器。`spec.md` §9.3「实际结果」列统一填 `未验证（无真机环境）`，不得当成通过证据。
 - 离线验收：`python -m unittest tests.test_xiaohongshu_uploader tests.test_xhs_exit_contract tests.test_mlx_xhs_kuaishou tests.test_publish_timeout -v` → `Ran 76 tests ... OK`；全量 `python -m unittest discover -s tests -t .` → `Ran 1447 tests ... OK (skipped=2)`。集成分支基线为 1451 条；本轮按票删除 5 条（XHS 登录探针 4 + 验证码跳转 1）、新增 1 条 `PENDING` 守卫，故净减 4。
 - 机制消失用例核对：拒绝词 3 条与 `cookie_auth` 1 条已不存在；`test_mlx_xhs_kuaishou.py` 中 XHS 登录探针 4 条与 `test_xhs_note_captcha_redirect_raises_login_required` 已删除（探针行为由 `tests/test_xhs_session.py` 的 `Decision12SessionProbeTests` 覆盖）；Kuaishou 用例与 `tests/test_publish_timeout.py` 未改动。
+- 代码评审已判定**不修**的项（judgement call，登记理由而非隐式忽略）：
+  - `upload_video_content` / `upload_note_content` 末尾重复的 ARM→FIRE→OBSERVE 尾段：规格定义了两条独立流程，二者共用已测试的 helper；抽取会改变错误归属与 C3 时序，收益不足以抵消回归风险，延后为独立重构。
+  - 轮询循环形状重复、请求 dataclass 字段块重复、测试内 fixture 重复、`_wait_ms` 包装、`_page_path`/`_current_path`、`_PROVIDER_LABELS` 重复：均属可读性整理；当前实现有真实回归风险而收益有限。
+  - `BlockedKind` / `classify_blocked` 命名：规格 U10/U11 明确使用这两个名字；用户可见术语仍是 glossary 的 `Login required`，不改。

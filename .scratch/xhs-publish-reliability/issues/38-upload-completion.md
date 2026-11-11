@@ -4,7 +4,7 @@
 
 **Blocked by:** 33（上传入口与"+"瓦片锚点）、36（复用 ARM 谓词）。
 
-**Status:** ready-for-agent
+Status: resolved
 
 **图文**
 

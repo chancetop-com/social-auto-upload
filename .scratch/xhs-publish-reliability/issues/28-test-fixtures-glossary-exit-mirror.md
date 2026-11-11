@@ -6,7 +6,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+Status: resolved
 
 - [x] `FakeLocator` 覆盖 `count`/`first`/`nth`/`get_attribute`/`is_visible`/计算样式/子节点/文本；**未 scripted 的选择器直接抛错**（防止假夹具把真实选择器漂移掩盖成"未命中"）
 - [x] `RecordingPage` 可写 `url` 与 `main_frame.url`，记录 `goto`、`evaluate`（含 `elementFromPoint` 落点）、`mouse.*`、`keyboard.*`、`screenshot`、以及每次 `wait_for_*` 的 timeout 实参

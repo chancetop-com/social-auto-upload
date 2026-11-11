@@ -49,7 +49,7 @@ from typing import Any, Awaitable, Callable, Iterator
 
 from loguru import logger
 
-from utils.dom import ElementUnusableError, check
+from utils.dom import ElementUnusableError, check, normalise_point
 
 #: 关闭整个人类化层：``HUMANIZE=0`` 与 ``profile.enabled=False`` 等价。
 HUMANIZE_ENV = "HUMANIZE"
@@ -115,23 +115,6 @@ DEFAULT_PROFILE = HumanizeProfile(
 
 def _env_disabled() -> bool:
     return os.environ.get(HUMANIZE_ENV, "").strip() == "0"
-
-
-def _normalise_point(point: Any) -> tuple[float, float]:
-    """落点是包围盒内的比例（``0.0-1.0``），默认 ``(0.5, 0.5)``。"""
-    if point is None:
-        return (0.5, 0.5)
-    try:
-        raw_x, raw_y = point
-    except (TypeError, ValueError) as exc:
-        raise ValueError("point must be an (x, y) fractional pair") from exc
-    x, y = float(raw_x), float(raw_y)
-    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
-        raise ValueError(
-            "point is fractional within the bounding box; use 0.0-1.0, "
-            f"got ({x}, {y})"
-        )
-    return (x, y)
 
 
 def _same_box(first: Any, second: Any, *, tolerance: float) -> bool:
@@ -262,10 +245,16 @@ class Humanizer:
     async def click(self, locator: Any, *, point: tuple[float, float] | None = None) -> None:
         """坐标点击：移动 → 停顿 → stillOn 复核 → 按下 → 保持 → 抬起。"""
         if not self.enabled:
-            await locator.click()
+            # Fast path: ``locator.click`` may fail *after* the browser already
+            # dispatched the event, so we cannot prove "not dispatched".
+            try:
+                await locator.click()
+            except Exception as exc:
+                _mark_maybe_dispatched(exc)
+                raise
             return
 
-        ratio = _normalise_point(point)
+        ratio = normalise_point(point)
         box = await locator.bounding_box()
         if not box:
             raise _not_dispatched("no-bounding-box")

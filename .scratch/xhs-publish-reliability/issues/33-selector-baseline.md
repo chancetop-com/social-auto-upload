@@ -4,7 +4,7 @@
 
 **Blocked by:** 31（接线处的等待要 clamp）、32（统一解析器与角色判定）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 - [x] 发布按钮只保留 `xhs-publish-btn`（配合 `is-publish` / `submit-disabled`）；三条中文 `has-text` 与旧版按钮分支**本票直接删除**，过渡期常量断言同批删除
 - [x] 图文与视频上传入口、标题、正文、话题候选、话题回读、定时开关、定时时间、原创开关、原创确认弹窗、内容类型声明、封面入口与弹窗、登录二维码、登录态正向锚点逐项按矩阵落位
