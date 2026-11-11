@@ -32,6 +32,8 @@ from utils.dom import ElementMissingError
 from utils.dom import ElementUnusableError
 from utils.dom import Resolved
 from utils.dom import check
+from utils.dom import resolve
+from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
 from utils.errors import LoginRequiredError
 from utils.humanize import MAYBE_DISPATCHED
@@ -99,9 +101,6 @@ XHS_PROBE_SETTLE_MS = XHS_LOGIN_CHECK_SETTLE_MS
 # ---------------------------------------------------------------------------
 XHS_NAVIGATION_TIMEOUT_MS = 30_000
 XHS_URL_GUARD_TIMEOUT_MS = 30_000
-XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS = 3_000
-XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS = 30_000
-XHS_NOTE_UPLOAD_READY_TIMEOUT_MS = 3_000
 XHS_LOCATION_INPUT_TIMEOUT_MS = 30_000
 XHS_LOCATION_DROPDOWN_TIMEOUT_MS = 3_000
 XHS_LOCATION_OPTION_TIMEOUT_MS = 3_000
@@ -136,6 +135,27 @@ XHS_OBSERVE_POLL_SECONDS = 0.5
 XHS_PUBLISH_PATH = "/publish/publish"
 
 # ---------------------------------------------------------------------------
+# 上传完成闸（spec §3 U6）：素材就绪是填元数据的前置闸。
+#
+# 图文按「第 i 张= 瓦片数 ≥ i+1 且该瓦片无 .mask.uploading」逐张判定；
+# 视频复用 U2 的 ARM 谓词，窗口 min(600s, 剩余预算)。失败一律点击前 1。
+# ---------------------------------------------------------------------------
+XHS_NOTE_PREVIEW_TILE_SELECTOR = ".img-preview-area .pr"
+XHS_NOTE_TILE_UPLOADING_MASK_SELECTOR = ".mask.uploading"
+XHS_NOTE_IMAGE_WINDOW_SECONDS = 60.0
+XHS_NOTE_IMAGE_POLL_SECONDS = 0.5
+XHS_NOTE_IMAGE_GAP_SECONDS = 1.0
+XHS_DOM_QUIET_MS = 500
+XHS_DOM_QUIET_CAP_MS = 3_000
+XHS_FILE_CHOOSER_TIMEOUT_MS = 5_000
+XHS_VIDEO_READY_WINDOW_SECONDS = 600.0
+XHS_VIDEO_READY_POLL_SECONDS = 1.0
+# 失败态只认 class 恰为 fail 的 div（ticket 24 实机）；用属性等值选择器
+# 表达「恰为」，避免命中 fail-* 之类的新增类名。
+XHS_VIDEO_FAIL_SELECTOR = "div[class='fail']"
+XHS_VIDEO_LOADING_TEXT_SELECTOR = ".video-container-loading-text"
+
+# ---------------------------------------------------------------------------
 # 固定 UI 静置/轮询间隔。它们不是超时判据：只覆盖点击/输入后的界面动画与
 # 网络往返，因此保留固定值，但必须是具名常量（不允许裸数字 sleep）。
 # ---------------------------------------------------------------------------
@@ -153,8 +173,6 @@ XHS_COVER_RENDER_SETTLE_MS = 4_000
 XHS_ESCAPE_SETTLE_MS = 500
 
 # 轮询/重试间隔（秒）：全部经 PublishTimeoutBudget.clamp_seconds() 收缩。
-XHS_VIDEO_UPLOAD_POLL_SECONDS = 2.0
-XHS_NOTE_UPLOAD_POLL_SECONDS = 1.0
 XHS_LOGIN_SUCCESS_SETTLE_SECONDS = 2.0
 # 话题候选 200ms、编辑区回读 50ms（spec §3 U7）。
 XHS_TOPIC_POLL_SECONDS = 0.2
@@ -349,8 +367,8 @@ XHS_LOGIN_QRCODE_CANDIDATES = (
     ),
 )
 
-# 17. 添加图片瓦片（第 2 张起）：存在性锚点先行；批量分发语义保持不变，
-#     瓦片/file chooser 的上传接线归 ticket 38。
+# 17. 添加图片瓦片（第 2 张起）：「+」瓦片点击触发 file chooser；
+#     备选是编辑器里唯一的 multiple 图片 input（ticket 24 实测）。
 XHS_NOTE_ADD_IMAGE_TILE_SELECTOR = ".img-preview-area .entry"
 XHS_NOTE_ADD_IMAGE_INPUT_CANDIDATES = (
     Candidate('.img-list .top input[type="file"][multiple]'),
@@ -605,6 +623,316 @@ async def _observe_publish(
         )
 
 
+async def _note_preview_tile_count(page: Page) -> int | None:
+    """读预览瓦片数；读失败返回 ``None``（本轮不算完成）。"""
+    try:
+        return int(await page.locator(XHS_NOTE_PREVIEW_TILE_SELECTOR).count())
+    except Exception:
+        return None
+
+
+async def _note_tile_uploading(page: Page, index: int) -> bool | None:
+    """第 ``index`` 个瓦片是否仍带进行中遮罩；读失败返回 ``None``。"""
+    try:
+        tile = page.locator(XHS_NOTE_PREVIEW_TILE_SELECTOR).nth(index)
+        mask = tile.locator(XHS_NOTE_TILE_UPLOADING_MASK_SELECTOR)
+        return (await mask.count()) > 0
+    except Exception:
+        return None
+
+
+async def _note_image_ready(page: Page, index: int) -> bool:
+    """第 ``index`` 张的完成判据（spec §3 U6）。
+
+    瓦片数必须 ≥ ``index + 1``，**且** 该瓦片自身的 ``.mask.uploading``
+    已消失。绝不看全局遮罩数：多张并发时全局计数无法定位第 i 张。
+    """
+    count = await _note_preview_tile_count(page)
+    if count is None or count < index + 1:
+        return False
+    uploading = await _note_tile_uploading(page, index)
+    return uploading is False
+
+
+def _note_image_abort(index: int, total: int) -> ElementUnusableError:
+    """单张 60s 窗口耗尽：点击前、确定未发布（退出 1）。"""
+    return ElementUnusableError(
+        "图文素材上传",
+        role="attached",
+        selector=XHS_NOTE_PREVIEW_TILE_SELECTOR,
+        reason=f"第 {index + 1} 张 / 共 {total} 张上传未完成",
+        publish_clicked=False,
+    )
+
+
+async def _dispatch_note_image(
+    page: Page,
+    index: int,
+    path,
+    *,
+    budget: PublishTimeoutBudget,
+    humanizer: Humanizer,
+) -> None:
+    """逐张派发：首张走唯一上传入口，第 2 张起走「+」瓦片的文件选择器。
+
+    禁止 ``inputs[0]`` / ``.first`` 兜底（会把视频 input 当图片 input）；
+    任何一次派发失败都立即上抛 ``RuntimeError``（missing/unusable），不重传。
+    """
+    payload = [str(path)]
+    if index == 0:
+        resolved = await _resolve_anchor(
+            page,
+            "图文上传输入",
+            XHS_NOTE_IMAGE_CANDIDATES,
+            role="attached",
+            budget=budget,
+            wait=False,
+        )
+        try:
+            await resolved.locator.set_input_files(payload)
+        except Exception as exc:
+            raise ElementUnusableError(
+                "图文素材派发",
+                role="attached",
+                selector=resolved.selector,
+                reason=f"set_input_files 失败：{exc}",
+                publish_clicked=False,
+            ) from exc
+        return
+
+    chooser = None
+    try:
+        tile = await _resolve_anchor(
+            page,
+            "添加图片瓦片",
+            (Candidate(XHS_NOTE_ADD_IMAGE_TILE_SELECTOR),),
+            role="attached",
+            budget=budget,
+            wait=False,
+        )
+        async with page.expect_file_chooser(
+            timeout=budget.clamp_ms(XHS_FILE_CHOOSER_TIMEOUT_MS)
+        ) as chooser_info:
+            await humanizer.click(tile.locator)
+        chooser = await chooser_info.value
+    except Exception as exc:
+        # mouse.down 之后失败 = 点击可能已派发：不许再走备选（避免双派发）。
+        if getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE:
+            raise ElementUnusableError(
+                "添加图片瓦片",
+                role="interactive",
+                selector=XHS_NOTE_ADD_IMAGE_TILE_SELECTOR,
+                reason=f"文件选择器未出现：{exc}",
+                publish_clicked=False,
+            ) from exc
+        chooser = None
+
+    if chooser is not None:
+        try:
+            await chooser.set_files(payload)
+        except Exception as exc:
+            raise ElementUnusableError(
+                "图文素材派发",
+                role="attached",
+                selector=XHS_NOTE_ADD_IMAGE_TILE_SELECTOR,
+                reason=f"文件选择器 set_files 失败：{exc}",
+                publish_clicked=False,
+            ) from exc
+        return
+
+    # 备选：编辑器里唯一的 multiple 图片 input（ticket 24 实测）。
+    fallback = await _resolve_anchor(
+        page,
+        "图片追加输入",
+        XHS_NOTE_ADD_IMAGE_INPUT_CANDIDATES,
+        role="attached",
+        budget=budget,
+        wait=False,
+    )
+    try:
+        await fallback.locator.set_input_files(payload)
+    except Exception as exc:
+        raise ElementUnusableError(
+            "图文素材派发",
+            role="attached",
+            selector=fallback.selector,
+            reason=f"set_input_files 失败：{exc}",
+            publish_clicked=False,
+        ) from exc
+
+
+async def _wait_note_image(
+    page: Page,
+    *,
+    index: int,
+    total: int,
+    budget: PublishTimeoutBudget,
+    mode: str,
+    started: float,
+) -> None:
+    """等第 ``index`` 张完成：500ms 轮询，窗口 60s（按剩余预算收紧）。"""
+    while True:
+        await _check_blocked(page, mode, publish_attempted=False)
+        budget.check_pre_click()
+        if await _note_image_ready(page, index):
+            return
+
+        elapsed = time.monotonic() - started
+        window_left = XHS_NOTE_IMAGE_WINDOW_SECONDS - elapsed
+        if window_left <= 0:
+            raise _note_image_abort(index, total)
+        await asyncio.sleep(
+            min(
+                XHS_NOTE_IMAGE_POLL_SECONDS,
+                window_left,
+                budget.clamp_seconds(XHS_NOTE_IMAGE_POLL_SECONDS),
+            )
+        )
+
+
+async def _note_upload_gate(
+    page: Page,
+    image_paths,
+    *,
+    budget: PublishTimeoutBudget,
+    mode: str,
+    humanizer: Humanizer,
+) -> None:
+    """图文上传完成闸：逐张派发 + 逐瓦片完成 + 最后一张后静默复检。"""
+    total = len(image_paths)
+    if total == 0:
+        return
+
+    started = time.monotonic()
+    for index, path in enumerate(image_paths):
+        await _check_blocked(page, mode, publish_attempted=False)
+        budget.check_pre_click()
+        if index:
+            await asyncio.sleep(
+                min(
+                    XHS_NOTE_IMAGE_GAP_SECONDS,
+                    budget.clamp_seconds(XHS_NOTE_IMAGE_GAP_SECONDS),
+                )
+            )
+        started = time.monotonic()
+        await _dispatch_note_image(
+            page, index, path, budget=budget, humanizer=humanizer
+        )
+        await _wait_note_image(
+            page,
+            index=index,
+            total=total,
+            budget=budget,
+            mode=mode,
+            started=started,
+        )
+        xiaohongshu_logger.debug(
+            _msg("🖼️", f"第 {index + 1} 张 / 共 {total} 张上传完成")
+        )
+
+    # 收口：最后一张后只做一次 DOM 静默复检（500ms / 上限 3s）。
+    quiet = await wait_dom_quiet(
+        page,
+        quiet_ms=XHS_DOM_QUIET_MS,
+        cap_ms=XHS_DOM_QUIET_CAP_MS,
+        budget=budget,
+    )
+    if not quiet:
+        xiaohongshu_logger.warning(
+            _msg("🕳️", "上传收口未等到 DOM 静默（dom-not-quiet），按预览计数继续复检")
+        )
+
+    count = await _note_preview_tile_count(page)
+    if count is not None and count > total:
+        xiaohongshu_logger.warning(
+            _msg(
+                "🖼️",
+                f"预览瓦片 {count} 张多于待发 {total} 张，按多图继续（可人工删）",
+            )
+        )
+        return
+    if count is not None and count >= total:
+        xiaohongshu_logger.success(_msg("🥳", "图文素材已经传完，可以开始填写内容了"))
+        return
+
+    # 静默后计数掉回 N 以下：继续等至最后一张的 60s 窗口耗尽。
+    await _wait_note_image(
+        page,
+        index=total - 1,
+        total=total,
+        budget=budget,
+        mode=mode,
+        started=started,
+    )
+
+
+async def _video_upload_failure(page: Page) -> str | None:
+    """视频的唯一即时失败信号（ticket 24 实机）：结构节点，零文案依赖。
+
+    ``div.fail``（class 恰为 fail）或 ``.video-container-loading-text``
+    出现即失败。``input.upload-input`` 恒在、``submit-disabled`` 失败态恒
+    ``true``，二者都不能当信号。
+    """
+    try:
+        if await page.locator(XHS_VIDEO_FAIL_SELECTOR).count() > 0:
+            return "视频上传失败（div.fail）"
+        if await page.locator(XHS_VIDEO_LOADING_TEXT_SELECTOR).count() > 0:
+            return "视频上传失败（video-container-loading-text）"
+    except Exception:
+        return None
+    return None
+
+
+async def _video_upload_gate(
+    page: Page, *, budget: PublishTimeoutBudget, mode: str
+) -> None:
+    """视频上传完成闸：完成判据 = ARM 谓词满足。
+
+    窗口 ``min(600s, 剩余预算)``、1s 轮询；``div.fail`` /
+    ``.video-container-loading-text`` 立即中止（不等到窗口耗尽）。
+    """
+    started = time.monotonic()
+    reason = None
+    while True:
+        # 上传闸永远在派发之前：publish_attempted 恒为 False。
+        await _check_blocked(page, mode, publish_attempted=False)
+        budget.check_pre_click()
+        failure = await _video_upload_failure(page)
+        if failure is not None:
+            raise ElementUnusableError(
+                "视频素材上传",
+                role="interactive",
+                selector=XHS_VIDEO_FAIL_SELECTOR,
+                reason=failure,
+                publish_clicked=False,
+            )
+
+        ready, reason = await _arm_ready(page, budget=budget)
+        if ready:
+            return
+
+        elapsed = time.monotonic() - started
+        window_left = XHS_VIDEO_READY_WINDOW_SECONDS - elapsed
+        if window_left <= 0:
+            raise ElementUnusableError(
+                "视频素材上传",
+                role="interactive",
+                selector=XHS_PUBLISH_BUTTON_SELECTOR,
+                reason=(
+                    f"{int(XHS_VIDEO_READY_WINDOW_SECONDS)} 秒内未就绪："
+                    f"{reason or 'unknown'}"
+                ),
+                publish_clicked=False,
+            )
+        await asyncio.sleep(
+            min(
+                XHS_VIDEO_READY_POLL_SECONDS,
+                window_left,
+                budget.clamp_seconds(XHS_VIDEO_READY_POLL_SECONDS),
+            )
+        )
+
+
 def _build_xhs_creator_url(path: str) -> str:
     base_url = os.getenv(
         XHS_CREATOR_BASE_URL_ENV,
@@ -718,23 +1046,38 @@ async def _resolve_anchor(
     budget: PublishTimeoutBudget | None = None,
     point: tuple[float, float] | None = None,
     publish_clicked: bool = False,
+    wait: bool = True,
 ) -> Resolved:
     """按矩阵候选解析一个锚点，并打一条命中日志。
 
     ``scope`` 默认整页；弹窗内的锚点传弹窗 locator，保证选择器被容器限定。
     结构分支只打 ``debug``；非结构分支（upstream / text-zh）额外打一条
     ``info``，让真机日志一眼看出是否走了兜底。
+
+    ``wait=False`` 是单趟解析：上传入口/「+」瓦片缺失或多义时必须立即中止
+    （spec §3 U6「不等待」），不进入任何轮询窗口。
     """
     target = page if scope is None else scope
-    resolved = await wait_resolved(
-        target,
-        candidates,
-        role=role,
-        timeout_ms=timeout_ms,
-        budget=budget,
-        point=point,
-        publish_clicked=publish_clicked,
-    )
+    if wait:
+        resolved = await wait_resolved(
+            target,
+            candidates,
+            role=role,
+            timeout_ms=timeout_ms,
+            budget=budget,
+            point=point,
+            publish_clicked=publish_clicked,
+        )
+    else:
+        resolved = await resolve(
+            target,
+            candidates,
+            role=role,
+            timeout_ms=timeout_ms,
+            budget=budget,
+            point=point,
+            publish_clicked=publish_clicked,
+        )
 
     line = _anchor_hit_line(step, resolved, page)
     xiaohongshu_logger.debug(_msg("🎯", line))
@@ -2028,56 +2371,22 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             "视频上传输入",
             XHS_VIDEO_FILE_CANDIDATES,
             role="attached",
-            timeout_ms=XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS,
             budget=budget,
+            wait=False,
         )
-        await upload_input.locator.set_input_files(self.file_path)
+        try:
+            await upload_input.locator.set_input_files(self.file_path)
+        except Exception as exc:
+            raise ElementUnusableError(
+                "视频素材派发",
+                role="attached",
+                selector=upload_input.selector,
+                reason=f"set_input_files 失败：{exc}",
+                publish_clicked=False,
+            ) from exc
 
-        while True:
-            # C2：每个可能超过 2s 的等待循环每轮查一次；放在 try 之外，
-            # 命中登录/验证页时不会被下面的宽 except 吞掉。
-            await _check_blocked(page, mode, publish_attempted=publish_clicked)
-            budget.check_pre_click()
-            # 超时值在 try 之外计算：预算耗尽不能被上传轮询的 except 吞掉。
-            wait_ms = budget.clamp_ms(XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS)
-            try:
-                upload_input = await page.wait_for_selector(
-                    'input.upload-input', timeout=wait_ms
-                )
-                preview_new = await upload_input.query_selector(
-                    'xpath=following-sibling::div[contains(@class, "preview-new")]')
-                if preview_new:
-                    # 获取整个预览区域的文本，更鲁棒地判断上传状态
-                    all_text = await preview_new.inner_text()
-                    upload_success = any(keyword in all_text for keyword in ['上传成功', '分辨率', '重新上传', '编辑封面', '已上传', '已选择', '100%'])
-                    
-                    if not upload_success:
-                        # 检查是否有特定的状态码或百分比
-                        stage_elements = await preview_new.query_selector_all('div.stage')
-                        for stage in stage_elements:
-                            text_content = await page.evaluate('(element) => element.textContent', stage)
-                            if '上传成功' in text_content or '分辨率' in text_content:
-                                upload_success = True
-                                break
-                    
-                    if upload_success:
-                        xiaohongshu_logger.success(_msg("🥳", "视频已经传完啦"))
-                        break
-                    
-                    if self.debug:
-                        normalized_text = all_text.strip().replace("\n", " ")
-                        xiaohongshu_logger.debug(_msg("🧍", f"预览区域内容: {normalized_text}"))
-                    xiaohongshu_logger.debug(_msg("🧍", "还没看到上传成功标识，小人继续等一会"))
-                else:
-                    # 尝试检查标题输入框是否已经出现，如果是，说明已经进入编辑状态
-                    title_container = page.locator('input[placeholder*="填写标题"]')
-                    if await title_container.count() > 0 and await title_container.is_visible():
-                        xiaohongshu_logger.success(_msg("🥳", "虽然没看到预览区，但标题框出来了，小人继续"))
-                        break
-                    xiaohongshu_logger.debug(_msg("🧍", "还没拿到预览区域，小人继续等一会"))
-            except Exception as e:
-                xiaohongshu_logger.debug(_msg("😵", f"上传状态还没稳定下来，小人继续观察: {e}"))
-            await asyncio.sleep(budget.clamp_seconds(XHS_VIDEO_UPLOAD_POLL_SECONDS))
+        await _video_upload_gate(page, budget=budget, mode=mode)
+        xiaohongshu_logger.success(_msg("🥳", "视频已经传完啦"))
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page, humanizer=humanizer)
@@ -2251,33 +2560,14 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
         )
 
-        upload_input = await _resolve_anchor(
+        xiaohongshu_logger.info(_msg("📤", "小人正在逐张上传图片"))
+        await _note_upload_gate(
             page,
-            "图文上传输入",
-            XHS_NOTE_IMAGE_CANDIDATES,
-            role="attached",
-            timeout_ms=XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS,
+            self.image_paths,
             budget=budget,
+            mode=mode,
+            humanizer=humanizer,
         )
-        xiaohongshu_logger.info(_msg("📤", "小人正在上传图片"))
-        await upload_input.locator.set_input_files(self.image_paths)
-
-        while True:
-            # C2：每轮先分类；放在 try 之外，命中不会被宽 except 吞掉。
-            await _check_blocked(page, mode, publish_attempted=publish_clicked)
-            budget.check_pre_click()
-            # 超时值在 try 之外计算：预算耗尽不能被上传轮询的 except 吞掉。
-            ready_ms = budget.clamp_ms(XHS_NOTE_UPLOAD_READY_TIMEOUT_MS)
-            try:
-                title_container = page.locator('input[placeholder*="填写标题"]').first
-                await title_container.wait_for(state="visible", timeout=ready_ms)
-                xiaohongshu_logger.success(_msg("🥳", "图文素材已经传完，可以开始填写内容了"))
-                break
-            except Exception:
-                xiaohongshu_logger.debug(_msg("🧍", "图文素材还在上传，小人继续等一会"))
-                await asyncio.sleep(
-                    budget.clamp_seconds(XHS_NOTE_UPLOAD_POLL_SECONDS)
-                )
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page, humanizer=humanizer)

@@ -32,7 +32,12 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.fakes_xhs_dom import RecordingLocator, RecordingMouse, RecordingPage
+from tests.fakes_xhs_dom import (
+    RecordingLocator,
+    RecordingMouse,
+    RecordingPage,
+    preview_tiles,
+)
 from utils import humanize
 from utils.dom import ElementUnusableError
 
@@ -695,6 +700,7 @@ class XhsStaticGateTests(unittest.TestCase):
 NOTE_URL = "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image"
 SUCCESS_URL = "https://creator.xiaohongshu.com/publish/success?target=image"
 NOTE_IMAGE_INPUT = "div.upload-content input.upload-input"
+NOTE_TILES = ".img-preview-area .pr"
 TITLE_INPUT = 'input[placeholder*="填写标题"]'
 TITLE_STRUCTURE = "div.d-input input"
 PUBLISH_BUTTON = "xhs-publish-btn"
@@ -753,6 +759,7 @@ class XhsPublishWiringTests(unittest.TestCase):
             url=NOTE_URL,
             selectors={
                 NOTE_IMAGE_INPUT: image_input,
+                NOTE_TILES: preview_tiles(1),
                 TITLE_INPUT: title,
                 TITLE_STRUCTURE: title_structure,
                 PUBLISH_BUTTON: publish,

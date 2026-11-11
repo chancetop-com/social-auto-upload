@@ -287,6 +287,33 @@ class RecordingLocator(FakeLocator):
     """Explicitly named locator double; ``click`` counts attempts."""
 
 
+def preview_tiles(count: int = 1) -> FakeLocator:
+    """A ready ``.img-preview-area .pr`` set (ticket 38 upload gate).
+
+    ``count`` tiles exist and none of them carries ``.mask.uploading``; use
+    :func:`preview_tiles_uploading` when one tile must still look in-progress.
+    """
+    return FakeLocator(
+        "preview-tiles",
+        items=[
+            FakeLocator(
+                f"tile-{index}",
+                children={".mask.uploading": FakeLocator("mask", count=0)},
+            )
+            for index in range(count)
+        ],
+    )
+
+
+def preview_tiles_uploading(index: int, *, count: int = 1) -> FakeLocator:
+    """``preview_tiles`` where tile ``index`` still shows the uploading mask."""
+    tiles = preview_tiles(count)
+    tiles._items[index]._children[".mask.uploading"] = FakeLocator(
+        "mask", count=1
+    )
+    return tiles
+
+
 class RecordingMouse:
     """Scripted ``page.mouse``; ``down_count`` proves how many dispatches ran."""
 
@@ -358,6 +385,50 @@ class RecordingFrame:
         return self._page.locator(selector)
 
 
+class FakeFileChooser:
+    """Scripted ``FileChooser``: records every ``set_files`` payload.
+
+    A ``+`` tile click is the only way the publish chain can add an image, so
+    ``files`` proves exactly which single path went through the chooser.
+    """
+
+    def __init__(self, name: str = "file-chooser") -> None:
+        self.name = name
+        self.files: list[object] = []
+        self.set_files_error: BaseException | None = None
+
+    async def set_files(self, files, **kwargs: Any) -> None:
+        self.files.append(files)
+        if self.set_files_error is not None:
+            raise self.set_files_error
+
+
+class _FileChooserInfo:
+    """``page.expect_file_chooser()`` async context manager double."""
+
+    def __init__(self, page: "RecordingPage") -> None:
+        self._page = page
+
+    async def __aenter__(self) -> "_FileChooserInfo":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    @property
+    def value(self):
+        async def _resolve() -> FakeFileChooser:
+            error = self._page.fail_file_chooser
+            if error is not None:
+                raise error
+            chooser = self._page.file_chooser
+            if chooser is None:
+                raise AssertionError("page: no file chooser scripted")
+            return chooser
+
+        return _resolve()
+
+
 class RecordingPage:
     """Scripted Playwright ``Page`` double that records every interaction."""
 
@@ -371,6 +442,7 @@ class RecordingPage:
         evaluate_handler: Callable[..., Any] | None = None,
         hit_test_target: Any = _UNSET,
         screenshot_error: BaseException | None = None,
+        file_chooser: FakeFileChooser | None = None,
     ) -> None:
         self.url = url
         self.main_frame = RecordingFrame(
@@ -383,6 +455,9 @@ class RecordingPage:
         self._evaluate_handler = evaluate_handler
         self._hit_test_target = hit_test_target
         self._screenshot_error = screenshot_error
+        self.file_chooser = file_chooser or FakeFileChooser()
+        self.fail_file_chooser: BaseException | None = None
+        self.expect_file_chooser_calls = 0
 
         self.goto_calls: list[tuple[str, dict[str, Any]]] = []
         self.evaluate_calls: list[tuple[Any, Any]] = []
@@ -533,6 +608,18 @@ class RecordingPage:
         **kwargs: Any,
     ) -> None:
         self._record_wait("wait_for_event", timeout, (event,), dict(kwargs))
+
+    def expect_file_chooser(
+        self, *, timeout: float | int | None = None
+    ) -> _FileChooserInfo:
+        """Return the chooser async-context double for a ``+`` tile click."""
+        self.expect_file_chooser_calls += 1
+        self._record_wait("expect_file_chooser", timeout, (), {})
+        return _FileChooserInfo(self)
+
+    def file_chooser_files(self) -> list[object]:
+        """Every payload passed to ``FileChooser.set_files``."""
+        return list(self.file_chooser.files)
 
     def timeouts(self, method: str | None = None) -> list[float | int | None]:
         """Every recorded timeout, optionally filtered by method name."""

@@ -45,8 +45,6 @@ PUBLISH_URL_NOTE = (
 LOGIN_BOX = xhs_main.XHS_LOGIN_BOX_SELECTOR
 VIDEO_UPLOAD_INPUT = "div.upload-content input.upload-input"
 NOTE_IMAGE_INPUT = "div.upload-content input.upload-input"
-TITLE_INPUT = 'input[placeholder*="填写标题"]'
-VIDEO_PREVIEW_INPUT = "input.upload-input"
 
 #: 与 utils.dom 的 ``_DEFAULT_FACTS`` 同形的可见元素事实。
 VISIBLE_FACTS = {
@@ -394,23 +392,22 @@ class CheckpointTests(unittest.TestCase):
         # 未派发：连发布按钮都没查，更没有点击。
         self.assertEqual(page.goto_calls[0][0], PUBLISH_URL_VIDEO)
 
-    def test_video_preview_loop_hit_is_not_swallowed(self):
-        class _FlipAfterPreviewWait(RecordingPage):
-            async def wait_for_selector(self, selector, **kwargs):
-                await super().wait_for_selector(selector, **kwargs)
-                self.url = LOGIN_URL
-                self.main_frame.url = LOGIN_URL
-                # 宽 except 的典型异常：轮询这一轮没就绪。
-                raise RuntimeError("preview not ready")
+    def test_video_upload_loop_hit_is_not_swallowed(self):
+        class _LoginFlipInput(_FileInput):
+            """派发成功后把页面切到登录页：闸门的轮内 C2 必须命中。"""
 
-        page = _FlipAfterPreviewWait(
-            url=PUBLISH_URL_VIDEO,
-            selectors={
-                VIDEO_UPLOAD_INPUT: _FileInput("video-input"),
-                VIDEO_PREVIEW_INPUT: _FileInput("video-preview"),
-                LOGIN_BOX: _absent_box(),
-            },
-        )
+            def __init__(self, page: RecordingPage) -> None:
+                super().__init__("video-input")
+                self._page = page
+
+            async def set_input_files(self, files, **kwargs) -> None:
+                await super().set_input_files(files, **kwargs)
+                self._page.url = LOGIN_URL
+                self._page.main_frame.url = LOGIN_URL
+
+        page = RecordingPage(url=PUBLISH_URL_VIDEO)
+        page._selectors[VIDEO_UPLOAD_INPUT] = _LoginFlipInput(page)
+        page._selectors[LOGIN_BOX] = _absent_box()
 
         app = _video_app()
         clock = FakeClock()
@@ -420,22 +417,26 @@ class CheckpointTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.reason, "login")
         self.assertIs(ctx.exception.publish_attempted, False)
-        self.assertGreaterEqual(clock.sleep_calls, [2.0])
 
-    def test_note_title_wait_hit_is_not_swallowed(self):
-        class _FlipAfterTitleWait(FakeLocator):
+    def test_note_upload_loop_hit_is_not_swallowed(self):
+        class _FlipTiles(FakeLocator):
+            """第一次计数时把页面切到登录页：下一轮 C2 必须命中。"""
+
             def __init__(self, page: RecordingPage) -> None:
-                super().__init__("title-input", computed_style=dict(VISIBLE_FACTS))
+                super().__init__("preview-tiles")
                 self._page = page
+                self._flipped = False
 
-            async def wait_for(self, **kwargs) -> None:
-                self._page.url = LOGIN_URL
-                self._page.main_frame.url = LOGIN_URL
-                raise RuntimeError("title not ready")
+            async def count(self) -> int:
+                if not self._flipped:
+                    self._flipped = True
+                    self._page.url = LOGIN_URL
+                    self._page.main_frame.url = LOGIN_URL
+                return 0
 
         page = RecordingPage(url=PUBLISH_URL_NOTE)
         page._selectors[NOTE_IMAGE_INPUT] = _FileInput("note-input")
-        page._selectors[TITLE_INPUT] = _FlipAfterTitleWait(page)
+        page._selectors[".img-preview-area .pr"] = _FlipTiles(page)
         page._selectors[LOGIN_BOX] = _absent_box()
 
         app = _note_app()
