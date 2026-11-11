@@ -84,6 +84,63 @@ XHS_CONTENT_TYPES = tuple(XHS_CONTENT_TYPE_LABELS) + tuple(
 XHS_LOGIN_CHECK_TIMEOUT_MS = 20_000
 XHS_LOGIN_CHECK_SETTLE_MS = 3_000
 
+# ---------------------------------------------------------------------------
+# 发布链路的等待上限（毫秒）。这些常量只是「上限」：真正传给 Playwright 的
+# timeout 一律经 PublishTimeoutBudget.clamp_ms() 收缩到 15 分钟 deadline 内，
+# 因此本模块不允许出现裸的 timeout=<数字> 字面量（见 tests/test_xhs_budget.py）。
+# ---------------------------------------------------------------------------
+XHS_NAVIGATION_TIMEOUT_MS = 30_000
+XHS_URL_GUARD_TIMEOUT_MS = 30_000
+XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS = 3_000
+XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS = 30_000
+XHS_NOTE_UPLOAD_READY_TIMEOUT_MS = 3_000
+XHS_PUBLISH_CLICK_TIMEOUT_MS = 10_000
+XHS_PUBLISH_OBSERVE_WINDOW_MS = 3_000
+XHS_LOCATION_INPUT_TIMEOUT_MS = 30_000
+XHS_LOCATION_DROPDOWN_TIMEOUT_MS = 3_000
+XHS_LOCATION_OPTION_TIMEOUT_MS = 3_000
+XHS_LOCATION_FALLBACK_TIMEOUT_MS = 2_000
+XHS_TOPIC_MENU_TIMEOUT_MS = 6_000
+XHS_TOPIC_ITEM_TIMEOUT_MS = 4_000
+XHS_DECLARATION_SCROLL_TIMEOUT_MS = 5_000
+XHS_DECLARATION_MODAL_TIMEOUT_MS = 8_000
+XHS_DECLARATION_SUGGESTION_TIMEOUT_MS = 10_000
+XHS_DECLARATION_CONFIRM_TIMEOUT_MS = 5_000
+XHS_COVER_SCROLL_TIMEOUT_MS = 5_000
+XHS_COVER_TAB_TIMEOUT_MS = 10_000
+XHS_COVER_CONFIRM_TIMEOUT_MS = 10_000
+XHS_COVER_MODAL_CLOSE_TIMEOUT_MS = 15_000
+
+# 登录二维码流程的固定上限（不属于 15 分钟发布预算）。
+XHS_LOGIN_PANEL_TIMEOUT_MS = 30_000
+XHS_LOGIN_SWITCH_TIMEOUT_MS = 10_000
+XHS_LOGIN_QRCODE_TIMEOUT_MS = 30_000
+
+# ---------------------------------------------------------------------------
+# 固定 UI 静置/轮询间隔。它们不是超时判据：只覆盖点击/输入后的界面动画与
+# 网络往返，因此保留固定值，但必须是具名常量（不允许裸数字 sleep）。
+# ---------------------------------------------------------------------------
+XHS_SCHEDULE_SETTLE_MS = 1_000
+XHS_LOCATION_INPUT_SETTLE_MS = 1_000
+XHS_LOCATION_SUGGEST_SETTLE_MS = 2_000
+XHS_LOCATION_OPTIONS_SETTLE_MS = 3_000
+XHS_DECLARATION_SETTLE_MS = 800
+XHS_DECLARATION_DATE_SETTLE_MS = 300
+XHS_DECLARATION_FILL_SETTLE_MS = 500
+XHS_DECLARATION_CONFIRM_SETTLE_MS = 1_000
+XHS_COVER_OPEN_SETTLE_MS = 2_000
+XHS_COVER_MODAL_SETTLE_MS = 3_000
+XHS_COVER_RENDER_SETTLE_MS = 4_000
+XHS_ESCAPE_SETTLE_MS = 500
+XHS_LOGIN_SETTLE_MS = 3_000
+
+# 轮询/重试间隔（秒）：全部经 PublishTimeoutBudget.clamp_seconds() 收缩。
+XHS_VIDEO_UPLOAD_POLL_SECONDS = 2.0
+XHS_NOTE_UPLOAD_POLL_SECONDS = 1.0
+XHS_PUBLISH_RETRY_SECONDS = 0.5
+XHS_PUBLISH_OBSERVE_POLL_SECONDS = 0.3
+XHS_LOGIN_SUCCESS_SETTLE_SECONDS = 2.0
+
 # Golden local-mode browser options.  ``sau_commands/xiaohongshu.py`` passes the
 # same values to ``browser_session`` in Multilogin mode, so the two paths cannot
 # drift.  Geolocation is a local-only context option: the Multilogin branch must
@@ -202,16 +259,18 @@ def _build_login_result(
 
 async def _open_xhs_qrcode_panel(page: Page) -> None:
     login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
-    await login_box.wait_for(state="visible", timeout=30000)
+    await login_box.wait_for(state="visible", timeout=XHS_LOGIN_PANEL_TIMEOUT_MS)
 
     scan_text = login_box.locator("div:has-text('扫一扫')").first
     if await scan_text.count():
         return
 
     switch_img = login_box.locator(XHS_LOGIN_SWITCH_SELECTOR).first
-    await switch_img.wait_for(state="visible", timeout=10000)
+    await switch_img.wait_for(state="visible", timeout=XHS_LOGIN_SWITCH_TIMEOUT_MS)
     await switch_img.click()
-    await login_box.locator("div:has-text('扫一扫')").first.wait_for(state="visible", timeout=10000)
+    await login_box.locator("div:has-text('扫一扫')").first.wait_for(
+        state="visible", timeout=XHS_LOGIN_SWITCH_TIMEOUT_MS
+    )
 
 
 async def _find_xhs_qrcode_locator(page: Page):
@@ -227,7 +286,7 @@ async def _find_xhs_qrcode_locator(page: Page):
 
 async def _extract_xhs_qrcode_src(page: Page) -> str:
     qrcode_img = await _find_xhs_qrcode_locator(page)
-    await qrcode_img.wait_for(state="visible", timeout=30000)
+    await qrcode_img.wait_for(state="visible", timeout=XHS_LOGIN_QRCODE_TIMEOUT_MS)
     qrcode_src = await qrcode_img.get_attribute("src")
     if not qrcode_src:
         raise RuntimeError("未获取到小红书登录二维码地址")
@@ -354,7 +413,7 @@ async def cookie_auth(account_file):
                     "/publish/publish?from=homepage&target=video"
                 )
             )
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(XHS_LOGIN_SETTLE_MS)
 
             if page.url.startswith(_build_xhs_creator_url("/login")):
                 xiaohongshu_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
@@ -433,7 +492,7 @@ async def xiaohongshu_cookie_gen(
 
             for _ in range(max_checks):
                 if await _is_xhs_login_completed(page):
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(XHS_LOGIN_SUCCESS_SETTLE_SECONDS)
                     await context.storage_state(path=account_file)
                     if await cookie_auth(account_file):
                         xiaohongshu_logger.success(_msg("🥳", "小红书扫码登录成功，小人开心收工"))
@@ -522,39 +581,45 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
     async def set_schedule_time_xiaohongshu(self, page: Page, publish_date: datetime):
         xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {publish_date.strftime(self.date_format)}"))
         await page.locator('.custom-switch-card').filter(has_text="定时发布").locator('.d-switch').click()
-        await asyncio.sleep(1)
+        await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
         publish_date_hour = publish_date.strftime("%Y-%m-%d %H:%M")
         time_input = page.locator('.d-datepicker-input-filter input.d-text')
         await time_input.fill(str(publish_date_hour))
-        await asyncio.sleep(1)
+        await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
 
     async def set_location(self, page: Page, location: str = "青岛市"):
         if not location:
             return True
 
         xiaohongshu_logger.info(_msg("📍", f"小人准备设置位置: {location}"))
-        loc_ele = await page.wait_for_selector('div.d-text.d-select-placeholder.d-text-ellipsis.d-text-nowrap')
+        loc_ele = await page.wait_for_selector(
+            'div.d-text.d-select-placeholder.d-text-ellipsis.d-text-nowrap',
+            timeout=self._wait_ms(XHS_LOCATION_INPUT_TIMEOUT_MS),
+        )
         await loc_ele.click()
-        await page.wait_for_timeout(1000)
+        await self._settle(page, XHS_LOCATION_INPUT_SETTLE_MS)
         await page.keyboard.type(location)
         dropdown_selector = 'div.d-popover.d-popover-default.d-dropdown.--size-min-width-large'
-        await page.wait_for_timeout(2000)
+        await self._settle(page, XHS_LOCATION_SUGGEST_SETTLE_MS)
         try:
-            await page.wait_for_selector(dropdown_selector, timeout=3000)
+            await page.wait_for_selector(
+                dropdown_selector,
+                timeout=self._wait_ms(XHS_LOCATION_DROPDOWN_TIMEOUT_MS),
+            )
         except Exception:
             xiaohongshu_logger.warning(_msg("😵", "位置下拉列表没按预期出现，小人继续按旧逻辑查找"))
-        await page.wait_for_timeout(1000)
+        await self._settle(page, XHS_LOCATION_INPUT_SETTLE_MS)
         flexible_xpath = (
             f'//div[contains(@class, "d-popover") and contains(@class, "d-dropdown")]'
             f'//div[contains(@class, "d-options-wrapper")]'
             f'//div[contains(@class, "d-grid") and contains(@class, "d-options")]'
             f'//div[contains(@class, "name") and text()="{location}"]'
         )
-        await page.wait_for_timeout(3000)
+        await self._settle(page, XHS_LOCATION_OPTIONS_SETTLE_MS)
         try:
             location_option = await page.wait_for_selector(
                 flexible_xpath,
-                timeout=3000
+                timeout=self._wait_ms(XHS_LOCATION_OPTION_TIMEOUT_MS),
             )
 
             if not location_option:
@@ -563,7 +628,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                     f'//div[contains(@class, "d-options-wrapper")]'
                     f'//div[contains(@class, "d-grid") and contains(@class, "d-options")]'
                     f'/div[1]//div[contains(@class, "name") and text()="{location}"]',
-                    timeout=2000
+                    timeout=self._wait_ms(XHS_LOCATION_FALLBACK_TIMEOUT_MS),
                 )
 
             await location_option.scroll_into_view_if_needed()
@@ -626,10 +691,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 await page.keyboard.type("#" + tag, delay=30)
                 await page.locator('#creator-editor-topic-container').wait_for(
                     state="visible",
-                    timeout=6000
+                    timeout=self._wait_ms(XHS_TOPIC_MENU_TIMEOUT_MS),
                 )
                 first_item = page.locator('#creator-editor-topic-container .item').first
-                await first_item.wait_for(state="visible", timeout=4000)
+                await first_item.wait_for(
+                    state="visible",
+                    timeout=self._wait_ms(XHS_TOPIC_ITEM_TIMEOUT_MS),
+                )
                 await first_item.click()
             except Exception as exc:
                 xiaohongshu_logger.warning(
@@ -652,6 +720,31 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             result_unknown_message=_XHS_PUBLISH_RESULT_UNKNOWN_MESSAGE,
         )
         return self._publish_budget
+
+    def _wait_ms(self, default_ms: int, *, publish_clicked: bool = False) -> int:
+        """把一次等待收缩到共享预算内；这是发布链路唯一的时间来源。
+
+        点击前预算耗尽 -> ``budget.pre_click_error()``（退出 1）；
+        点击后预算耗尽 -> 返回极小值，由发布循环统一映射为结果未知（退出 9）。
+        """
+        budget = self.publish_budget
+        if publish_clicked:
+            return budget.post_click_timeout_ms(default_ms)
+        return budget.clamp_ms(default_ms)
+
+    async def _sleep(
+        self, seconds: float, *, publish_clicked: bool = False
+    ) -> None:
+        """轮询/重试间隔同样受预算约束，任何一次 sleep 都不会越过 deadline。"""
+        budget = self.publish_budget
+        if publish_clicked:
+            await asyncio.sleep(max(0.0, min(seconds, budget.remaining_seconds())))
+            return
+        await asyncio.sleep(budget.clamp_seconds(seconds))
+
+    async def _settle(self, page: Page, milliseconds: int) -> None:
+        """固定 UI 静置（点击/输入后的界面动画），不是就绪判据。"""
+        await page.wait_for_timeout(self._wait_ms(milliseconds))
 
     @staticmethod
     async def _find_publish_failure(page: Page) -> str | None:
@@ -687,14 +780,23 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         return None
 
     async def _wait_publish_outcome(
-        self, page: Page, *, timeout_ms: int = 3000
+        self, page: Page, *, timeout_ms: int | None = None
     ) -> str:
         """轮询成功页和失败提示，返回 success 或 timeout。
 
+        观察窗口本身也来自共享预算：点击后预算已经耗尽时窗口收缩到 1ms，
+        由外层发布循环统一映射为 ``PublishResultUnknownError``（退出 9）。
         平台明确拒绝发布时立即抛 :class:`XhsPublishRejectedError`，
         不进入结果未知分支，也不重试。
         """
-        deadline = time.monotonic() + timeout_ms / 1000
+        if self.publish_budget.remaining_seconds() <= 0:
+            # 点击后预算已耗尽：不再空转，交给发布循环映射为结果未知（退出 9）。
+            return "timeout"
+        window_ms = self._wait_ms(
+            XHS_PUBLISH_OBSERVE_WINDOW_MS if timeout_ms is None else timeout_ms,
+            publish_clicked=True,
+        )
+        deadline = time.monotonic() + window_ms / 1000
         while time.monotonic() < deadline:
             if "publish/success" in str(getattr(page, "url", "")):
                 return "success"
@@ -711,7 +813,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                     "本次未发布；请先到创作服务平台确认账号状态。"
                 )
 
-            await asyncio.sleep(0.3)
+            await self._sleep(
+                min(
+                    XHS_PUBLISH_OBSERVE_POLL_SECONDS,
+                    max(0.0, deadline - time.monotonic()),
+                ),
+                publish_clicked=True,
+            )
 
         return "timeout"
 
@@ -751,7 +859,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 # 最后兜底：直接点文字卡片，交给页面的点击事件切换。
                 if not await _js_click_by_text(page, "原创声明"):
                     raise RuntimeError("未找到原创声明开关")
-                await page.wait_for_timeout(800)
+                await self._settle(page, XHS_DECLARATION_SETTLE_MS)
                 if enabled:
                     await self._confirm_original_declaration(page)
             else:
@@ -764,7 +872,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                             _msg("⚠️", "无法确认原创声明开关状态，尝试点击开启")
                         )
                         await switch.click()
-                        await page.wait_for_timeout(800)
+                        await self._settle(page, XHS_DECLARATION_SETTLE_MS)
                         await self._confirm_original_declaration(page)
                     else:
                         xiaohongshu_logger.warning(
@@ -772,7 +880,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                         )
                 elif current is not enabled:
                     await switch.click()
-                    await page.wait_for_timeout(800)
+                    await self._settle(page, XHS_DECLARATION_SETTLE_MS)
                     if enabled:
                         await self._confirm_original_declaration(page)
 
@@ -799,11 +907,11 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             await self._open_content_declaration_menu(page)
             if source_label:
                 await self._click_declaration_option(page, "内容来源声明")
-                await page.wait_for_timeout(800)
+                await self._settle(page, XHS_DECLARATION_SETTLE_MS)
                 await self._click_declaration_option(page, source_label)
             else:
                 await self._click_declaration_option(page, label)
-            await page.wait_for_timeout(800)
+            await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
             if content_type == "self-shot":
                 await self._fill_self_shot(page)
@@ -824,11 +932,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         if not await trigger.count():
             trigger = page.get_by_text("添加内容类型声明", exact=False).first
         try:
-            await trigger.scroll_into_view_if_needed(timeout=5000)
+            await trigger.scroll_into_view_if_needed(
+                timeout=self._wait_ms(XHS_DECLARATION_SCROLL_TIMEOUT_MS)
+            )
         except Exception:
             pass
         await trigger.click(force=True)
-        await page.wait_for_timeout(800)
+        await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
     async def _click_declaration_option(self, page: Page, label: str) -> None:
         option = page.locator("#publish-container div").filter(
@@ -848,7 +958,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         modal = page.locator("[role='dialog'], .d-modal, .d-dialog").filter(
             has_text="拍摄地点"
         ).last
-        await modal.wait_for(state="visible", timeout=8000)
+        await modal.wait_for(
+            state="visible",
+            timeout=self._wait_ms(XHS_DECLARATION_MODAL_TIMEOUT_MS),
+        )
 
         # 1. 拍摄地点：Element UI autocomplete，输入关键词后点第一条建议。
         location = modal.locator('input[placeholder="下拉选择地点"]').first
@@ -865,24 +978,27 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 has_text=re.compile(r"\S")
             )
         suggestion = suggestions.first
-        await suggestion.wait_for(state="visible", timeout=10000)
+        await suggestion.wait_for(
+            state="visible",
+            timeout=self._wait_ms(XHS_DECLARATION_SUGGESTION_TIMEOUT_MS),
+        )
         await suggestion.click(force=True)
-        await page.wait_for_timeout(800)
+        await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
         # 2. 拍摄日期：日期选择器内置过滤输入框，输入 YYYY-MM-DD 后回车。
         date_input = modal.locator('input[placeholder="下拉选择日期"]').first
         if not await date_input.count():
             raise RuntimeError("未找到「拍摄日期」输入框")
         await date_input.click(force=True)
-        await page.wait_for_timeout(1000)
+        await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
         date_filter = page.locator(".d-datepicker-input-filter input").first
         if not await date_filter.count():
             raise RuntimeError("未找到拍摄日期选择器")
         await date_filter.fill(self.shoot_date)
-        await page.wait_for_timeout(300)
+        await self._settle(page, XHS_DECLARATION_DATE_SETTLE_MS)
         await page.keyboard.press("Enter")
-        await page.wait_for_timeout(800)
+        await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
         # 3. 点弹窗内的「确认」。
         confirm = modal.get_by_role("button", name="确认").first
@@ -891,21 +1007,27 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         if not await confirm.count():
             raise RuntimeError("未找到自主拍摄「确认」按钮")
         await confirm.click(force=True)
-        await page.wait_for_timeout(1000)
+        await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
     async def _fill_repost_source(self, page: Page) -> None:
         if not self.repost_source:
             raise RuntimeError("来源转载缺少媒体名称")
 
         source_input = page.get_by_placeholder("请输入媒体名称").first
-        await source_input.wait_for(state="visible", timeout=8000)
+        await source_input.wait_for(
+            state="visible",
+            timeout=self._wait_ms(XHS_DECLARATION_MODAL_TIMEOUT_MS),
+        )
         await source_input.click()
         await source_input.fill(self.repost_source)
-        await page.wait_for_timeout(500)
+        await self._settle(page, XHS_DECLARATION_FILL_SETTLE_MS)
 
         confirm = page.get_by_role("button", name="确认").first
         try:
-            await confirm.wait_for(state="visible", timeout=5000)
+            await confirm.wait_for(
+                state="visible",
+                timeout=self._wait_ms(XHS_DECLARATION_CONFIRM_TIMEOUT_MS),
+            )
             await confirm.click()
         except Exception:
             await _js_click_by_text(page, "确认")
@@ -920,7 +1042,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             has_text="声明原创"
         ).last
         try:
-            await modal.wait_for(state="visible", timeout=5000)
+            await modal.wait_for(
+                state="visible",
+                timeout=self._wait_ms(XHS_DECLARATION_CONFIRM_TIMEOUT_MS),
+            )
         except Exception:
             # 有些场景（例如取消原创）点击开关后不弹窗，直接生效。
             return
@@ -932,7 +1057,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             agreement = modal.get_by_text("我已阅读并同意", exact=False).first
             if await agreement.count():
                 await agreement.click(force=True)
-        await page.wait_for_timeout(500)
+        await self._settle(page, XHS_DECLARATION_FILL_SETTLE_MS)
 
         button = modal.get_by_role("button", name="声明原创").first
         if not await button.count():
@@ -940,7 +1065,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         if not await button.count():
             raise RuntimeError("未找到「声明原创」按钮，无法完成原创声明")
         await button.click()
-        await page.wait_for_timeout(1000)
+        await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
     @staticmethod
     async def _switch_is_on(switch) -> bool | None:
@@ -1045,43 +1170,55 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             # 发布页封面区域内嵌，点击 div.upload-cover 打开封面弹窗（d-modal）。
             cover_section = page.locator("text=设置封面").first
             try:
-                await cover_section.scroll_into_view_if_needed(timeout=5000)
+                await cover_section.scroll_into_view_if_needed(
+                    timeout=self._wait_ms(XHS_COVER_SCROLL_TIMEOUT_MS)
+                )
             except Exception:
                 pass
-            await page.wait_for_timeout(2000)
+            await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
 
             # 1. 点击 div.upload-cover 打开封面弹窗
             upload_cover = page.locator("div.upload-cover").first
             if not await upload_cover.count():
                 upload_cover = page.locator("div.cover-plugin-preview div.default.pointer").first
             await upload_cover.click(force=True)
-            await page.wait_for_timeout(3000)
+            await self._settle(page, XHS_COVER_MODAL_SETTLE_MS)
 
             # 2. 切换到「上传封面」tab（默认在「截取封面」）
             upload_tab = page.get_by_text("上传封面", exact=True).first
-            await upload_tab.wait_for(state="visible", timeout=10000)
+            await upload_tab.wait_for(
+                state="visible",
+                timeout=self._wait_ms(XHS_COVER_TAB_TIMEOUT_MS),
+            )
             await upload_tab.click()
-            await page.wait_for_timeout(2000)
+            await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
 
             # 3. 找到图片 file input（parent class: upload-wrapper）并上传
             file_input = page.locator('div.upload-wrapper input[type="file"][accept*="image"]').first
             if not await file_input.count():
                 file_input = page.locator('input[type="file"][accept*="image"]').last
             await file_input.set_input_files(thumbnail_path)
-            await page.wait_for_timeout(4000)  # 等图片加载+裁剪渲染
+            # 等图片加载+裁剪渲染
+            await self._settle(page, XHS_COVER_RENDER_SETTLE_MS)
 
             # 4. 点「确定」按钮
             modal_footer = page.locator("div.d-modal-footer")
             confirm = modal_footer.get_by_text("确定", exact=True).first
             if not await confirm.count():
                 confirm = page.get_by_role("button", name="确定").first
-            await confirm.wait_for(state="visible", timeout=10000)
+            await confirm.wait_for(
+                state="visible",
+                timeout=self._wait_ms(XHS_COVER_CONFIRM_TIMEOUT_MS),
+            )
             await confirm.click()
 
             # 5. 等弹窗关闭
             modal = page.locator("div.d-modal")
             try:
-                await modal.first.wait_for(state="hidden", timeout=15000)
+                await modal.first.wait_for(
+                    state="hidden",
+                    timeout=self._wait_ms(XHS_COVER_MODAL_CLOSE_TIMEOUT_MS),
+                )
             except Exception:
                 pass
             xiaohongshu_logger.success(_msg("🥳", "封面已经设置完成"))
@@ -1089,7 +1226,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             xiaohongshu_logger.warning(_msg("🖼️", f"封面设置失败，跳过该步骤继续发布（用视频首帧）：{exc}"))
             try:
                 await page.keyboard.press("Escape")
-                await page.wait_for_timeout(500)
+                await self._settle(page, XHS_ESCAPE_SETTLE_MS)
             except Exception:
                 pass
 
@@ -1100,16 +1237,27 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         publish_url = _build_xhs_creator_url(
             "/publish/publish?from=homepage&target=video"
         )
-        await page.goto(publish_url)
+        await page.goto(
+            publish_url,
+            wait_until="domcontentloaded",
+            timeout=budget.clamp_ms(XHS_NAVIGATION_TIMEOUT_MS),
+        )
         if multilogin:
             _raise_if_login_required(page)
-        await page.wait_for_url(publish_url)
+        await page.wait_for_url(
+            publish_url,
+            timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
+        )
         await page.locator("div[class^='upload-content'] input[class='upload-input']").set_input_files(self.file_path)
 
         while True:
             budget.check_pre_click()
+            # 超时值在 try 之外计算：预算耗尽不能被上传轮询的 except 吞掉。
+            wait_ms = budget.clamp_ms(XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS)
             try:
-                upload_input = await page.wait_for_selector('input.upload-input', timeout=3000)
+                upload_input = await page.wait_for_selector(
+                    'input.upload-input', timeout=wait_ms
+                )
                 preview_new = await upload_input.query_selector(
                     'xpath=following-sibling::div[contains(@class, "preview-new")]')
                 if preview_new:
@@ -1143,7 +1291,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     xiaohongshu_logger.debug(_msg("🧍", "还没拿到预览区域，小人继续等一会"))
             except Exception as e:
                 xiaohongshu_logger.debug(_msg("😵", f"上传状态还没稳定下来，小人继续观察: {e}"))
-            await asyncio.sleep(2)
+            await asyncio.sleep(budget.clamp_seconds(XHS_VIDEO_UPLOAD_POLL_SECONDS))
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page)
@@ -1169,6 +1317,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
         publish_clicked = False
         while True:
+            # 退出 1（点击前）/ 9（点击后）两个出口只由预算模块产生。
             if budget.remaining_seconds() <= 0:
                 if multilogin:
                     _raise_if_login_required(page)
@@ -1177,13 +1326,15 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             try:
                 if not publish_clicked:
                     if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
-                        await page.locator('button:has-text("定时发布")').click()
+                        await page.locator('button:has-text("定时发布")').click(
+                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                        )
                     else:
-                        await page.locator('button:has-text("发布")').click()
+                        await page.locator('button:has-text("发布")').click(
+                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                        )
                     publish_clicked = True
-                outcome = await self._wait_publish_outcome(
-                    page, timeout_ms=3000
-                )
+                outcome = await self._wait_publish_outcome(page)
                 if outcome == "success":
                     xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                     break
@@ -1198,7 +1349,9 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
                 if self.debug:
                     await page.screenshot(full_page=True)
-            await asyncio.sleep(0.5)
+            await self._sleep(
+                XHS_PUBLISH_RETRY_SECONDS, publish_clicked=publish_clicked
+            )
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:
@@ -1308,29 +1461,43 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         publish_url = _build_xhs_creator_url(
             "/publish/publish?from=homepage&target=image"
         )
-        await page.goto(publish_url)
+        await page.goto(
+            publish_url,
+            wait_until="domcontentloaded",
+            timeout=budget.clamp_ms(XHS_NAVIGATION_TIMEOUT_MS),
+        )
         if multilogin:
             _raise_if_login_required(page)
-        await page.wait_for_url(publish_url)
+        await page.wait_for_url(
+            publish_url,
+            timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
+        )
 
         upload_input = page.locator('input[type="file"][accept*="image"]').first
         if not await upload_input.count():
             upload_input = page.locator("div[class^='upload-content'] input[class='upload-input']").first
 
-        await upload_input.wait_for(state="attached", timeout=30000)
+        await upload_input.wait_for(
+            state="attached",
+            timeout=budget.clamp_ms(XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS),
+        )
         xiaohongshu_logger.info(_msg("📤", "小人正在上传图片"))
         await upload_input.set_input_files(self.image_paths)
 
         while True:
             budget.check_pre_click()
+            # 超时值在 try 之外计算：预算耗尽不能被上传轮询的 except 吞掉。
+            ready_ms = budget.clamp_ms(XHS_NOTE_UPLOAD_READY_TIMEOUT_MS)
             try:
                 title_container = page.locator('input[placeholder*="填写标题"]').first
-                await title_container.wait_for(state="visible", timeout=3000)
+                await title_container.wait_for(state="visible", timeout=ready_ms)
                 xiaohongshu_logger.success(_msg("🥳", "图文素材已经传完，可以开始填写内容了"))
                 break
             except Exception:
                 xiaohongshu_logger.debug(_msg("🧍", "图文素材还在上传，小人继续等一会"))
-                await asyncio.sleep(1)
+                await asyncio.sleep(
+                    budget.clamp_seconds(XHS_NOTE_UPLOAD_POLL_SECONDS)
+                )
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page)
@@ -1352,6 +1519,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
 
         publish_clicked = False
         while True:
+            # 退出 1（点击前）/ 9（点击后）两个出口只由预算模块产生。
             if budget.remaining_seconds() <= 0:
                 if multilogin:
                     _raise_if_login_required(page)
@@ -1360,13 +1528,15 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             try:
                 if not publish_clicked:
                     if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
-                        await page.locator('button:has-text("定时发布")').click()
+                        await page.locator('button:has-text("定时发布")').click(
+                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                        )
                     else:
-                        await page.locator('button:has-text("发布")').click()
+                        await page.locator('button:has-text("发布")').click(
+                            timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                        )
                     publish_clicked = True
-                outcome = await self._wait_publish_outcome(
-                    page, timeout_ms=3000
-                )
+                outcome = await self._wait_publish_outcome(page)
                 if outcome == "success":
                     xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                     break
@@ -1381,7 +1551,9 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 xiaohongshu_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 if self.debug:
                     await page.screenshot(full_page=True)
-            await asyncio.sleep(0.5)
+            await self._sleep(
+                XHS_PUBLISH_RETRY_SECONDS, publish_clicked=publish_clicked
+            )
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:
