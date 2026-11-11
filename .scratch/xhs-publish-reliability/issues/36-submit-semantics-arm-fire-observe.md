@@ -4,7 +4,7 @@
 
 **Blocked by:** 31（预算）、33（发布按钮锚点）、34（点击接口与按下前后判定）、35（分类器与文案）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 **ARM（唯一就绪谓词，上传完成票复用）**
 

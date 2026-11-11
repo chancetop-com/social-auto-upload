@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+Status: resolved
 
 - [x] `--headed` / `--headless` / 都不传，三种组合得到预期的 `headless` 值；**都不传 = 有头**
 - [x] `debug` 默认关；删除配置项 `DEBUG_MODE` 及三处 uploader 默认值来源；静态检索后除变更日志外无残留

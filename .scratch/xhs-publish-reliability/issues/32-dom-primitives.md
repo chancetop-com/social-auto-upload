@@ -4,7 +4,7 @@
 
 **Blocked by:** 28（虚拟时钟与 DOM 夹具）.
 
-**Status:** done
+Status: resolved
 
 - [x] 四档角色各有明确判据与 reason：`attached`（在 DOM 且 connected，集合基数必须为 1，多义返回 `ambiguous:N` 且禁止 `.first`）、`visible`（自身可见 + 祖先链 display/visibility/opacity 计算样式 + 自身 `aria-hidden`）、`interactive`（在 visible 之上加非 disabled、`pointer-events != none`、真实落点 `elementFromPoint` 命中自身或后代）、`editable`（在 visible 之上加可写）
 - [x] 落点默认取包围盒中心；发布按钮取 65% x 处

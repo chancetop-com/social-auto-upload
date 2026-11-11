@@ -4,7 +4,7 @@
 
 **Blocked by:** 33（控件锚点）、34（逐字输入）、39（正文与话题全部输入完之后才检查长度）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 **标题**
 

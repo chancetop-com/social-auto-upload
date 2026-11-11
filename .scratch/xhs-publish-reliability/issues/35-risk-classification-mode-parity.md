@@ -4,7 +4,7 @@
 
 **Blocked by:** 33（登录锚点与可见性判定）.
 
-**Status:** ready-for-agent
+Status: resolved
 
 **分类器判据（唯一一份，只读、不注入脚本）**
 

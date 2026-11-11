@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+Status: resolved
 
 - [x] `provider_label(mode)` 公开可用，三种模式各自返回正确标签（AdsPower 不得显示为 Multilogin）
 - [x] 托管模式下一次 run 恰好一条 WARNING；只报**键名**，不报值；空值（`False`/`{}`/`None`）不计入；本地模式零条

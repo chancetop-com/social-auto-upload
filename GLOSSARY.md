@@ -92,7 +92,7 @@ AdsPower 的 Profile 标识。CLI 通过 `--profile-id` 传入；AdsPower V2 请
 
 ## 元素角色（attached/visible/interactive/editable）
 
-判定一个元素能否用于当前动作的四档递进语义。**attached**：在 DOM 中且已连接，只要求唯一命中（多义即失败，不得用 `.first` 蒙混）。**visible**：自身与祖先链未被 `display`/`visibility` 隐藏，`opacity` 连乘不低于阈值，且没有 `aria-hidden="true"`。**interactive**：在 `visible` 之上还要求未禁用、`pointer-events` 不为 `none`，并按落点做 `elementFromPoint` 命中自身或后代（反遮挡的最终判据）。**editable**：在 `visible` 之上要求可写（`input`/`textarea` 或 `contenteditable="true"`，且非 `readonly`/`disabled`）。
+判定元素能否用于当前动作的四档递进语义。**attached**：元素确实存在于页面结构中，且指向唯一目标。**visible**：用户能看到它。**interactive**：用户能点到它，没有被遮挡或禁用。**editable**：用户能向它输入。后一档以前一档为前提；任何一档不成立都按“不可用”处理，而不是退回上一档。
 
 ## 入口缺失（entry_missing）
 
@@ -112,7 +112,7 @@ AdsPower 的 Profile 标识。CLI 通过 `--profile-id` 传入；AdsPower V2 请
 
 ## publish_attempted
 
-本次运行是否已经越过不可回退点（提交动作的派发）。该字段在派发前即置位，因此 `True` 只证明“可能已提交”，不证明成功。退出码为 `10` 且该字段为 `True` 时，CLI 额外向 stderr 打单独一行 `publish_attempted=true`；其余任何退出码都不打这一行。
+本次运行是否已经越过不可回退点（提交动作已派发）。`True` 只证明“可能已提交”，不证明成功；它决定调用方必须先核对帖子是否存在，而不是直接重跑。派发前的失败为 `False`。
 
 ## ARM / FIRE / OBSERVE（发布提交三段）
 
