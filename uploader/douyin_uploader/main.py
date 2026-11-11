@@ -12,7 +12,7 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
@@ -417,7 +417,7 @@ class DouYinBaseUploader(BaseVideoUploader):
         publish_date: datetime | int,
         account_file,
         publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
     ):
         self.publish_date = publish_date
@@ -728,7 +728,7 @@ class DouYinVideo(DouYinBaseUploader):
         desc: str | None = None,
         collection_name: str | None = None,
         publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
         declaration: str | None = None,
     ):
@@ -1278,7 +1278,7 @@ class DouYinNote(DouYinBaseUploader):
         account_file,
         title: str | None = None,
         publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
         bgm: str = "",
     ):

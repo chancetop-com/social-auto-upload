@@ -87,4 +87,4 @@ def add_runtime_flags(parser: argparse.ArgumentParser) -> None:
     headless_group = parser.add_mutually_exclusive_group()
     headless_group.add_argument("--headed", dest="headless", action="store_false", help="Run with browser UI")
     headless_group.add_argument("--headless", dest="headless", action="store_true", help="Run in headless mode")
-    parser.set_defaults(headless=True)
+    parser.set_defaults(headless=False)

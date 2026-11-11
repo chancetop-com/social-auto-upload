@@ -16,7 +16,6 @@ from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright
 
-from conf import DEBUG_MODE
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
@@ -305,7 +304,7 @@ class YouTubeVideo(BaseVideoUploader):
 
     def __init__(self, title, file_path, tags, account_file, *,
                  description="", thumbnail_path=None, playlist=None,
-                 visibility="public", debug=DEBUG_MODE, headless=False):
+                 visibility="public", debug=False, headless=False):
         self.title = title
         self.file_path = str(file_path)
         self.tags = tags or []

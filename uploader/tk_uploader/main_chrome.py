@@ -3035,7 +3035,7 @@ class TiktokNote(TiktokBaseUploader):
         *,
         title=None,
         options=None,
-        debug=True,
+        debug=False,
         headless=True,
     ):
         self.image_paths = list(image_paths)
