@@ -295,6 +295,7 @@ def _video_page(clock: FakeClock, *, advance_on_goto: float = 0.0, **overrides):
         TITLE_STRUCTURE_SELECTOR: FakeLocator(
             "title-structure", computed_style=INPUT_FACTS
         ),
+        PUBLISH_BUTTON_SELECTOR: _AdvancingClickLocator("publish", clock),
     }
     selectors.update(overrides.pop("selectors", {}))
     page = _AdvancingPage(
@@ -388,6 +389,7 @@ class NoteChainBudgetTests(unittest.TestCase):
                     TITLE_STRUCTURE_SELECTOR: FakeLocator(
                         "title-structure", computed_style=INPUT_FACTS
                     ),
+                    PUBLISH_BUTTON_SELECTOR: _AdvancingClickLocator("publish", clock),
                 },
             )
             asyncio.run(_note_app().upload_note_content(page, mode="local"))

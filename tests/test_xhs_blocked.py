@@ -519,7 +519,12 @@ class DeletedCodeTests(unittest.TestCase):
         self.assertEqual(self.source.count("mode=session.mode"), 2)
 
     def test_both_entry_points_call_c1_and_c2(self):
-        self.assertEqual(self.source.count("_check_blocked("), 5)
+        # C1/C2/C3 在两个入口内联；ARM/FIRE/OBSERVE 是共享 helper。
+        self.assertEqual(self.source.count("# C3："), 2)
+        self.assertEqual(self.source.count("await _wait_for_arm("), 4)
+        self.assertEqual(self.source.count("await _fire_publish("), 2)
+        self.assertEqual(self.source.count("await _observe_publish("), 2)
+        self.assertGreaterEqual(self.source.count("_check_blocked("), 12)
 
 
 if __name__ == "__main__":
