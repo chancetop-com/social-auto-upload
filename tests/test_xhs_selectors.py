@@ -329,7 +329,7 @@ class FileInputUniquenessTests(unittest.TestCase):
         with patch.object(
             xhs_main, "XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS", 150
         ), self.assertRaises(ElementUnusableError):
-            asyncio.run(app.upload_note_content(page, multilogin=False))
+            asyncio.run(app.upload_note_content(page, mode="local"))
 
 
 # ---------------------------------------------------------------------------

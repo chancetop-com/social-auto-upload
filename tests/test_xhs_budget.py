@@ -317,7 +317,7 @@ class VideoChainBudgetTests(unittest.TestCase):
         clock = FakeClock(start=0.0)
         with clock.patch(xhs_main, publish_timeout):
             page, _upload_input = _video_page(clock, advance_on_goto=880.0)
-            asyncio.run(_video_app().upload_video_content(page, multilogin=False))
+            asyncio.run(_video_app().upload_video_content(page, mode="local"))
 
         _url, goto_kwargs = page.goto_calls[0]
         self.assertEqual(goto_kwargs["wait_until"], "domcontentloaded")
@@ -337,7 +337,7 @@ class VideoChainBudgetTests(unittest.TestCase):
             page, _upload_input = _video_page(clock, advance_on_goto=901.0)
             app = _video_app()
             with self.assertRaises(RuntimeError) as ctx:
-                asyncio.run(app.upload_video_content(page, multilogin=False))
+                asyncio.run(app.upload_video_content(page, mode="local"))
 
         self.assertIn(REQUIRED_PRE_CLICK_WORDING, str(ctx.exception))
         self.assertEqual(str(ctx.exception), str(app._publish_budget.pre_click_error()))
@@ -355,7 +355,7 @@ class VideoChainBudgetTests(unittest.TestCase):
             )
             app = _video_app(no_publish=False)
             with self.assertRaises(PublishResultUnknownError) as ctx:
-                asyncio.run(app.upload_video_content(page, multilogin=False))
+                asyncio.run(app.upload_video_content(page, mode="local"))
 
         self.assertEqual(str(ctx.exception), str(app._publish_budget.timeout_error(True)))
         self.assertIn("禁止自动重发", str(ctx.exception))
@@ -390,7 +390,7 @@ class NoteChainBudgetTests(unittest.TestCase):
                     ),
                 },
             )
-            asyncio.run(_note_app().upload_note_content(page, multilogin=False))
+            asyncio.run(_note_app().upload_note_content(page, mode="local"))
 
         # 上传入口改由 wait_resolved 解析（不再 locator.wait_for），
         # 就绪判定仍然走预算：goto 花掉 890 秒后只剩 10 秒。
@@ -416,7 +416,7 @@ class NoteChainBudgetTests(unittest.TestCase):
             )
             with self.assertRaises(ElementMissingError):
                 asyncio.run(
-                    _note_app().upload_note_content(page, multilogin=False)
+                    _note_app().upload_note_content(page, mode="local")
                 )
 
         # 附件 input 的 30 秒上限收缩到剩余的 10 秒：虚拟时间里正好等 10 秒。
@@ -452,7 +452,7 @@ class NotBeforeBudgetTests(unittest.TestCase):
                 "wait_until_publish_allowed",
                 fake_not_before_wait,
             ):
-                asyncio.run(app.upload_video_content(page, multilogin=False))
+                asyncio.run(app.upload_video_content(page, mode="local"))
 
             # 900 秒预算 - 300 秒导航 = 600 秒；--not-before 的 120 秒已顺延。
             remaining = app._publish_budget.remaining_seconds()

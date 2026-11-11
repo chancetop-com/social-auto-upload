@@ -451,7 +451,7 @@ class MultiloginSeamTests(unittest.TestCase):
         self.assertEqual(context.add_init_script_calls, [])
         self.assertEqual(context.forbidden_calls, [])
         content.assert_awaited_once()
-        self.assertEqual(content.await_args.kwargs, {"multilogin": True})
+        self.assertEqual(content.await_args.kwargs, {"mode": "multilogin"})
         self.assertIsNone(app.account_file)
 
     def test_xhs_note_consumes_injected_session_without_forbidden_api(self):
@@ -470,7 +470,7 @@ class MultiloginSeamTests(unittest.TestCase):
         self.assertEqual(context.add_init_script_calls, [])
         self.assertEqual(context.forbidden_calls, [])
         content.assert_awaited_once()
-        self.assertEqual(content.await_args.kwargs, {"multilogin": True})
+        self.assertEqual(content.await_args.kwargs, {"mode": "multilogin"})
         self.assertIsNone(app.account_file)
 
     def test_xhs_mlx_never_reads_cookies(self):
@@ -597,14 +597,21 @@ class MultiloginSeamTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             app = _make_xhs_note(tmp_dir, account_file=None)
             page = _UploadPage(
-                final_url="https://creator.xiaohongshu.com/captcha/verify?scene=publish"
+                final_url=(
+                    "https://creator.xiaohongshu.com/website-login/captcha"
+                    "?scene=publish"
+                )
             )
             context = _UploadContext(page)
             session = BrowserSession(browser=MagicMock(), context=context, mode="multilogin")
 
-            with self.assertRaises(LoginRequiredError):
+            with self.assertRaises(LoginRequiredError) as ctx:
                 asyncio.run(app.upload(None, session=session))
 
+        self.assertEqual(ctx.exception.reason, "verification")
+        self.assertIs(ctx.exception.publish_attempted, False)
+        self.assertIn("Multilogin", str(ctx.exception))
+        self.assertIn("人机验证", str(ctx.exception))
         self.assertEqual(page.goto_calls[0][0], XHS_NOTE_URL)
         self.assertEqual(context.storage_state_calls, [])
 
@@ -645,19 +652,18 @@ class MultiloginSeamTests(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # is_logged_in
 # --------------------------------------------------------------------------- #
-    def test_login_markers_mid_upload_raise_login_required(self):
+    def test_ks_login_markers_mid_upload_raise_login_required(self):
         cases = {
-            "login": "https://creator.xiaohongshu.com/login?redirect=%2Fpublish",
+            "login": KS_LOGIN_REDIRECT,
             "captcha": "https://cp.kuaishou.com/captcha/verify?scene=publish",
             "two-factor": "https://cp.kuaishou.com/two-factor/challenge",
         }
-        for module in (xhs_main, ks_main):
-            for label, url in cases.items():
-                with self.subTest(module=module.__name__, marker=label):
-                    page = _UploadPage(final_url=url)
-                    page.url = url
-                    with self.assertRaises(LoginRequiredError):
-                        module._raise_if_login_required(page)
+        for label, url in cases.items():
+            with self.subTest(marker=label):
+                page = _UploadPage(final_url=url)
+                page.url = url
+                with self.assertRaises(LoginRequiredError):
+                    ks_main._raise_if_login_required(page)
 
 
 class LoginProbeTests(unittest.TestCase):
