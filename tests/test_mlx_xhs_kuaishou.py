@@ -920,6 +920,105 @@ class XhsCliTests(_CliCase):
         self.assertEqual(session_cm.exit_calls, 1)
         self.assertEqual(playwright_cm.enter_calls, 1)
 
+    def test_managed_check_without_account_ignores_nothing(self):
+        playwright_cm = _AsyncCM(object())
+        _, _, factory, session_patch = self._session_patch(xhs_command)
+
+        with (
+            patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
+            session_patch,
+            patch.object(
+                xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
+            ),
+        ):
+            code, _, _ = self._run(
+                [
+                    "xiaohongshu",
+                    "check",
+                    "--folder-id",
+                    "folder",
+                    "--profile-id",
+                    "profile",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(factory.call_args.kwargs["extra_ignored"], ())
+
+    def test_managed_check_reports_account_as_an_ignored_key(self):
+        playwright_cm = _AsyncCM(object())
+        _, _, factory, session_patch = self._session_patch(xhs_command)
+
+        with (
+            patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
+            session_patch,
+            patch.object(
+                xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
+            ),
+        ):
+            code, _, _ = self._run(
+                [
+                    "xiaohongshu",
+                    "check",
+                    "--folder-id",
+                    "folder",
+                    "--profile-id",
+                    "profile",
+                    "--account",
+                    "creator",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(factory.call_args.kwargs["extra_ignored"], ("account",))
+
+    def test_managed_upload_video_forwards_every_dropped_key(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "demo.mp4"
+            video_path.write_bytes(b"video")
+
+            _, _, factory, session_patch = self._session_patch(xhs_command)
+            fake_app = MagicMock()
+            fake_app.xiaohongshu_upload_video = AsyncMock()
+
+            with (
+                patch.object(
+                    xhs_command, "async_playwright", lambda: _AsyncCM(object())
+                ),
+                session_patch,
+                patch.object(
+                    xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
+                ),
+                patch.object(
+                    xhs_command,
+                    "_build_video_uploader",
+                    new=MagicMock(return_value=fake_app),
+                ),
+            ):
+                code, _, _ = self._run(
+                    [
+                        "xiaohongshu",
+                        "upload-video",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--account",
+                        "creator",
+                        "--file",
+                        str(video_path),
+                        "--title",
+                        "标题",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        kwargs = factory.call_args.kwargs
+        self.assertEqual(kwargs["extra_ignored"], ("account",))
+        self.assertEqual(kwargs["launch_kwargs"], XHS_LAUNCH_KWARGS)
+        self.assertEqual(kwargs["context_kwargs"], XHS_CONTEXT_KWARGS)
+        self.assertTrue(kwargs["init_script"])
+
     def test_upload_note_mlx_passes_none_account_and_session(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             image_path = Path(tmp_dir) / "image.png"

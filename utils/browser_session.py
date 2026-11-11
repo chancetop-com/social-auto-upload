@@ -141,10 +141,10 @@ def _port_display(url: str) -> str:
 
 
 def _mlx_folder_id(provider: ManagedBrowserProvider) -> str:
-    """Read the MLX folder id back for its legacy lifecycle log line.
+    """Read the MLX folder id shown in the managed startup line.
 
     The generic protocol only guarantees ``profile_id``; MLX's provider also
-    exposes its target, and its pre-refactor log line included ``folder_id``.
+    exposes its target, and the startup line keeps reporting ``folder_id``.
     """
     target = getattr(provider, "target", None)
     value = getattr(target, "folder_id", "")

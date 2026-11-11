@@ -31,6 +31,7 @@ from sau_commands.arguments import (
 from sau_commands.browser import (
     add_browser_flags,
     login_required_error,
+    managed_ignored_keys,
     reject_managed_login,
     require_local_account,
     resolve_account_label,
@@ -291,7 +292,12 @@ def _raise_login_required(target) -> None:
     raise login_required_error("小红书", target.profile_id, mode=target.mode)
 
 
-async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest, *, target=None) -> Path | None:
+async def upload_xiaohongshu_video(
+    request: XiaohongshuVideoUploadRequest,
+    *,
+    target=None,
+    ignored_keys: tuple[str, ...] = (),
+) -> Path | None:
     if target is not None:
         app = _build_video_uploader(request, None)
         async with async_playwright() as playwright:
@@ -303,6 +309,7 @@ async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest, *, ta
                 launch_kwargs=XHS_LAUNCH_KWARGS,
                 context_kwargs=XHS_CONTEXT_KWARGS,
                 init_script=XHS_INIT_SCRIPT,
+                extra_ignored=ignored_keys,
             ) as session:
                 if not await is_logged_in(session.context):
                     _raise_login_required(target)
@@ -321,7 +328,12 @@ async def upload_xiaohongshu_video(request: XiaohongshuVideoUploadRequest, *, ta
     return account_file
 
 
-async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest, *, target=None) -> Path | None:
+async def upload_xiaohongshu_note(
+    request: XiaohongshuNoteUploadRequest,
+    *,
+    target=None,
+    ignored_keys: tuple[str, ...] = (),
+) -> Path | None:
     if target is not None:
         app = _build_note_uploader(request, None)
         async with async_playwright() as playwright:
@@ -333,6 +345,7 @@ async def upload_xiaohongshu_note(request: XiaohongshuNoteUploadRequest, *, targ
                 launch_kwargs=XHS_LAUNCH_KWARGS,
                 context_kwargs=XHS_CONTEXT_KWARGS,
                 init_script=XHS_INIT_SCRIPT,
+                extra_ignored=ignored_keys,
             ) as session:
                 if not await is_logged_in(session.context):
                     _raise_login_required(target)
@@ -376,6 +389,8 @@ async def run(args):
     target = resolve_managed_provider(args)
     require_local_account(args)
     account_label = resolve_account_label(args)
+    # Managed mode cannot honour --account; report it in the session warning.
+    ignored_keys = managed_ignored_keys(args)
 
     if args.action == "check":
         if target is not None:
@@ -384,6 +399,7 @@ async def run(args):
                     playwright,
                     headless=args.headless,
                     managed=target,
+                    extra_ignored=ignored_keys,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
             if not is_valid:
@@ -423,7 +439,9 @@ async def run(args):
             no_publish=getattr(args, "no_publish", False),
             publish_not_before=args.not_before,
         )
-        await upload_xiaohongshu_video(request, target=target)
+        await upload_xiaohongshu_video(
+            request, target=target, ignored_keys=ignored_keys
+        )
         print(f"Xiaohongshu video upload submitted: {request.video_file}")
         return 0
 
@@ -450,7 +468,9 @@ async def run(args):
             no_publish=getattr(args, "no_publish", False),
             publish_not_before=args.not_before,
         )
-        await upload_xiaohongshu_note(request, target=target)
+        await upload_xiaohongshu_note(
+            request, target=target, ignored_keys=ignored_keys
+        )
         print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")
         return 0
 
