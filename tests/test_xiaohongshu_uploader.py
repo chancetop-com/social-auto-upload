@@ -297,11 +297,13 @@ class XiaohongshuUploaderTests(unittest.TestCase):
                 ("insert_text", "描述内容"),
                 ("press", "Enter"),
                 ("insert_text", "#话题1"),
+                # 候选没有可读的 .name → 判无候选 → 降级保留纯文本 + 一个空格。
+                ("press", "Space"),
             ],
         )
         self.assertEqual(
             page.locators['#creator-editor-topic-container .item'].actions,
-            [("wait_for", {"state": "visible", "timeout": 4000}), ("click",)],
+            [],
         )
 
     def test_video_fill_meta_can_fill_first_tag_without_desc(self):
@@ -326,6 +328,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             [
                 ("insert_text", "标题内容"),
                 ("insert_text", "#话题1"),
+                ("press", "Space"),
             ],
         )
 
