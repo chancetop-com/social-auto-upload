@@ -553,6 +553,49 @@ class Decision08TopicBudgetTests(TopicTestBase):
         self.assertEqual(clock.sleep_calls[0], 0.2)
         self.assertAlmostEqual(clock.sleep_calls[-1], 0.05, delta=0.002)
 
+    def test_budget_exhaustion_between_tags_raises_pre_click_error(self):
+        # Exhaustion must surface the budget exit (exit 1), not a silent
+        # 0-window topic loop that keeps degrading tags.
+        env = TopicEnv()
+        env.menu.clear()
+        app = self.app(["旅行", "治愈"])
+        clock = FakeClock(start=100.0)
+
+        class _SpaceAdvancingKeyboard(RecordingKeyboard):
+            """Advance virtual time when the first tag degrades."""
+
+            async def press(self, key: str, **kwargs) -> None:
+                await super().press(key, **kwargs)
+                if key == "Space":
+                    clock.advance(0.05)
+
+        env.page.keyboard = _SpaceAdvancingKeyboard()
+
+        with clock.patch(xhs_main, publish_timeout), _fast_humanize():
+            budget = app.start_publish_budget()
+            budget.deadline = clock.now + 0.1
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(app.fill_tags(env.page))
+
+        self.assertEqual(str(ctx.exception), str(budget.pre_click_error()))
+        space = [a for a in env.page.keyboard.actions if a == ("press", "Space")]
+        self.assertEqual(len(space), 1, "only the first tag may degrade")
+
+    def test_topic_window_raises_when_budget_is_exhausted(self):
+        env = TopicEnv()
+        app = self.app(["旅行"])
+        clock = FakeClock(start=100.0)
+
+        with clock.patch(xhs_main):
+            app.start_publish_budget()
+            app.publish_budget.deadline = clock.now
+            with self.assertRaises(RuntimeError) as ctx:
+                app._topic_window_ms(5_000)
+
+        self.assertEqual(
+            str(ctx.exception), str(app.publish_budget.pre_click_error())
+        )
+
 
 class Decision08TopicTagCapTests(TopicTestBase):
     def test_validation_caps_tags_and_names_dropped_items(self):

@@ -27,13 +27,16 @@ from utils.blocked import BlockedKind
 from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
 from utils.browser_session import BrowserSession
+from utils.browser_session import log_local_session_ready
 from utils.browser_session import provider_label
 from utils.controls import read_switch_state
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
 from utils.dom import ElementUnusableError
+from utils.dom import OverlayRule
 from utils.dom import Resolved
 from utils.dom import check
+from utils.dom import clear_overlays
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
@@ -69,9 +72,6 @@ _XHS_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "禁止自动重发。请先到小红书创作服务平台 → 笔记管理，"
     "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
 )
-
-# 「操作频繁」「请稍后再试」属于可恢复的限流提示，保留原有重试逻辑，
-# 由 15 分钟总预算兜底。
 
 
 # 「添加内容类型声明」下拉里的选项。来源声明是二级菜单，其余是顶层选项。
@@ -207,6 +207,32 @@ def _zh_css(selector: str, factory=None) -> Candidate:
 #    这里只定义选择器与落点。
 XHS_PUBLISH_BUTTON_SELECTOR = "xhs-publish-btn"
 XHS_PUBLISH_BUTTON_CANDIDATES = (Candidate(XHS_PUBLISH_BUTTON_SELECTOR),)
+
+# U3 D 覆盖层注册表：数据驱动，共享层不认识这些选择器。
+# 只做「点已知节点 / 按 Esc」，永不摘节点、注样式或点空白。
+XHS_OVERLAY_GUIDE_RULE = OverlayRule(
+    ".feature-guide__btn",
+    action="click",
+    label="新手引导按钮",
+)
+XHS_OVERLAY_NOTE_EDITOR_RULE = OverlayRule(
+    'div[role="dialog"]:has-text("图片可以编辑啦")',
+    action="click-child",
+    target_selector="button",
+    label="图片可编辑提示",
+)
+XHS_OVERLAY_POPOVER_RULE = OverlayRule(
+    "div.d-popover",
+    action="esc",
+    label="浮层",
+)
+XHS_OVERLAY_RULES = (
+    XHS_OVERLAY_GUIDE_RULE,
+    XHS_OVERLAY_NOTE_EDITOR_RULE,
+    XHS_OVERLAY_POPOVER_RULE,
+)
+# 正文字段输入期间只允许清「我知道了」引导按钮（数据子集，不是模式开关）。
+XHS_TYPING_OVERLAY_RULES = (XHS_OVERLAY_GUIDE_RULE,)
 
 # 2. 标题：div.d-input input 与旧 placeholder 选择器是同一个节点，中文只兜底。
 XHS_TITLE_CANDIDATES = (
@@ -981,6 +1007,33 @@ def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 
 
+async def _run_dom_quiet_gate(
+    page: Page, *, budget: PublishTimeoutBudget
+) -> None:
+    """首次交互前的一次性 DOM 静默门（spec §3 U3 A.2/A.3）。
+
+    连续 500ms 无变更通过，总上限 3s；未静默只打 ``dom-not-quiet``
+    warning，**绝不失败、绝不重试**。整条链路只调用一次。
+    """
+    quiet = await wait_dom_quiet(
+        page,
+        quiet_ms=XHS_DOM_QUIET_MS,
+        cap_ms=XHS_DOM_QUIET_CAP_MS,
+        budget=budget,
+    )
+    if not quiet:
+        xiaohongshu_logger.warning(
+            _msg("🕳️", "页面未在 3 秒内静默（dom-not-quiet），继续后续动作")
+        )
+
+
+async def _clear_known_overlays(
+    page: Page, rules: tuple[OverlayRule, ...], *, budget: PublishTimeoutBudget
+) -> None:
+    """按注册表清障；覆盖层处理保持 best-effort（见 ``utils.dom``）。"""
+    await clear_overlays(page, rules, budget=budget)
+
+
 def format_tag_cap_warning(tags) -> str:
     """标签超限的唯一文案：CLI 与上传器校验期共用（spec §3 U7）。"""
     items = list(tags or [])
@@ -1048,6 +1101,10 @@ def xhs_body_length(desc: str, tags=None) -> int:
     """正文长度口径：正文逐字符计 1；话题锚点按 ``#name`` + 分隔符计。
 
     ``#旅行pov[话题]#`` → ``#旅行pov``（6）+ 一个分隔符 = 7。上限 1000。
+
+    这个函数与 ``XHS_BODY_MAX_LENGTH`` 一起编码 spec §3 U8 D 的计数规则
+    （正文逐字符、话题按 ``#name`` 另加分隔符），离线测试据此断言；它不是
+    页面状态回读的一部分。
     """
     total = len(str(desc or ""))
     for tag in tags or ():
@@ -1103,13 +1160,17 @@ def _same_schedule_minute(left: datetime, right: datetime) -> bool:
 
 
 async def _element_exists(page: Page, selector: str) -> bool:
-    """节点存在性（只用于集合基数/存在性判据，不判可见、不读文本）。"""
+    """节点存在性（只用于集合基数/存在性判据，不判可见、不读文本）。
+
+    判据是 ``count() >= 1``：出现即失败。多义（``ambiguous:N``）同样是
+    「存在」，绝不能因为 ``check(..., "attached")`` 拒绝歧义就把越限节点
+    当成不存在而放行（spec §3 U8 D）。
+    """
     try:
         locator = page.locator(selector)
+        return int(await locator.count()) >= 1
     except Exception:
         return False
-    ok, _reason = await check(locator, "attached")
-    return ok
 
 
 async def _simulator_switch_state(switch) -> bool | None:
@@ -1905,6 +1966,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             return
 
         humanizer = humanizer or self._humanizer(page)
+        # 输入期间只允许清「我知道了」引导按钮（不点空白、不摘节点）。
+        await _clear_known_overlays(
+            page, XHS_TYPING_OVERLAY_RULES, budget=self.publish_budget
+        )
         desc = await _resolve_anchor(
             page,
             "正文",
@@ -1925,6 +1990,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
         humanizer = humanizer or self._humanizer(page)
         if not getattr(self, "desc", ""):
+            await _clear_known_overlays(
+                page, XHS_TYPING_OVERLAY_RULES, budget=self.publish_budget
+            )
             desc = await _resolve_anchor(
                 page,
                 "正文",
@@ -1936,13 +2004,18 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
         for tag in self.tags:
             # 话题是增强项：插入失败降级为纯文本，绝不因此中止发布（spec §3 U7）。
+            # 但预算耗尽不是「话题失败」：先走点击前预算出口（exit 1）。
+            self.publish_budget.check_pre_click()
             await humanizer.type_text("#" + tag)
             await self._insert_topic(page, tag, humanizer)
 
     def _topic_window_ms(self, default_ms: int) -> int:
-        """把话题窗口收紧到剩余预算；预算耗尽时窗口为 0（读一次即判定）。"""
-        remaining_ms = max(0, int(self.publish_budget.remaining_seconds() * 1000))
-        return min(default_ms, remaining_ms)
+        """把话题窗口收紧到剩余预算；预算耗尽直接抛 ``pre_click_error()``。
+
+        绝不允许返回 0 制造「窗口为 0 → 静默降级」的假成功：话题阶段仍在
+        点击发布之前，预算耗尽必须退出 1（spec §3 U1/U7）。
+        """
+        return self.publish_budget.clamp_ms(default_ms)
 
     async def _scan_topic_candidate(self, page: Page, tag: str):
         """顺序扫描全部渲染候选项，返回 ``(item, item_count)``。
@@ -2072,6 +2145,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         baseline: list[str] | None = None
 
         while attempts < XHS_TOPIC_MAX_CLICKS and time.monotonic() < deadline:
+            # 每次重试前都过预算闸：耗尽 → pre_click_error（exit 1）。
+            self.publish_budget.check_pre_click()
             candidate, item_count = await self._scan_topic_candidate(page, tag)
             if candidate is None:
                 if attempts > 0 or item_count > 0:
@@ -2689,6 +2764,9 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             publish_url,
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
         )
+        # 首次交互前的一次性 DOM 静默门 + 已知覆盖层清障（spec §3 U3 D）。
+        await _run_dom_quiet_gate(page, budget=budget)
+        await _clear_known_overlays(page, XHS_OVERLAY_RULES, budget=budget)
         upload_input = await _resolve_anchor(
             page,
             "视频上传输入",
@@ -2724,6 +2802,9 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             await self.set_schedule_time_xiaohongshu(
                 page, self.publish_date, humanizer=humanizer
             )
+
+        # 封面步骤可能留下弹窗；解析/点击发布按钮前再清一次已知覆盖层。
+        await _clear_known_overlays(page, XHS_OVERLAY_RULES, budget=budget)
 
         if self.no_publish:
             # 干跑升级为「跑到 ARM 就绪」：跳过 --not-before 等待，
@@ -2783,6 +2864,9 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             **XHS_CONTEXT_KWARGS,
         )
         context = await set_init_script(context)
+        log_local_session_ready(
+            headless=self.headless, account_file=self.account_file
+        )
 
         try:
             await self.upload_in(
@@ -2908,6 +2992,10 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             timeout=budget.clamp_ms(XHS_URL_GUARD_TIMEOUT_MS),
         )
 
+        # 首次交互前的一次性 DOM 静默门 + 已知覆盖层清障（spec §3 U3 D）。
+        await _run_dom_quiet_gate(page, budget=budget)
+        await _clear_known_overlays(page, XHS_OVERLAY_RULES, budget=budget)
+
         xiaohongshu_logger.info(_msg("📤", "小人正在逐张上传图片"))
         await _note_upload_gate(
             page,
@@ -2985,6 +3073,9 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             **XHS_CONTEXT_KWARGS,
         )
         context = await set_init_script(context)
+        log_local_session_ready(
+            headless=self.headless, account_file=self.account_file
+        )
 
         try:
             await self.upload_in(
