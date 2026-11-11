@@ -24,6 +24,7 @@ from utils.dom import ElementMissingError
 from utils.dom import Resolved
 from utils.dom import wait_resolved
 from utils.errors import LoginRequiredError
+from utils.humanize import Humanizer
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
@@ -98,7 +99,6 @@ XHS_URL_GUARD_TIMEOUT_MS = 30_000
 XHS_VIDEO_UPLOAD_INPUT_TIMEOUT_MS = 3_000
 XHS_NOTE_UPLOAD_INPUT_TIMEOUT_MS = 30_000
 XHS_NOTE_UPLOAD_READY_TIMEOUT_MS = 3_000
-XHS_PUBLISH_CLICK_TIMEOUT_MS = 10_000
 XHS_PUBLISH_OBSERVE_WINDOW_MS = 3_000
 XHS_LOCATION_INPUT_TIMEOUT_MS = 30_000
 XHS_LOCATION_DROPDOWN_TIMEOUT_MS = 3_000
@@ -264,6 +264,12 @@ XHS_DECLARATION_TRIGGER_CANDIDATES = (
     Candidate("添加内容类型声明", kind="text-zh", exact=True),
 )
 XHS_DECLARATION_OPTION_SELECTOR = ".declaration-drop-down .d-option"
+# 声明弹窗的「确认」按钮：结构 button.custom-button → 中文精确文案。
+# 这里同时是转载声明里原先 JS 文本点击兜底的替代路径（禁止注入脚本点击）。
+XHS_DECLARATION_CONFIRM_CANDIDATES = (
+    Candidate("button.custom-button"),
+    Candidate("确认", kind="text-zh", exact=True),
+)
 
 
 def _declaration_option_candidates(label: str) -> tuple[Candidate, ...]:
@@ -399,26 +405,6 @@ async def _xhs_user_agent(browser) -> str:
     return user_agent.replace("HeadlessChrome", "Chrome")
 
 
-async def _js_click_by_text(page: Page, text: str) -> bool:
-    """用 JS 找到文字完全匹配的最内层元素并点击它及其祖先（绕过 span pointer-events:none / 遮罩拦截）。
-
-    小红书很多可点项文字在 <span class="d-text"> 里，pointer-events 常被禁用，
-    Playwright 常规 click 会超时。用原生 click 冒泡触发 Vue 事件更可靠。
-    """
-    return await page.evaluate(
-        """(t) => {
-            const nodes = [...document.querySelectorAll('*')].filter(
-                e => e.children.length === 0 && (e.textContent || '').trim() === t
-            );
-            if (!nodes.length) return false;
-            let el = nodes[nodes.length - 1];
-            for (let i = 0; i < 4 && el; i++) { try { el.click(); } catch (e) {} el = el.parentElement; }
-            return true;
-        }""",
-        text,
-    )
-
-
 def _anchor_hit_line(step: str, resolved: Resolved, page: Page) -> str:
     """命中日志的唯一格式：环节 / 候选种类 / 选择器 / URL。"""
     url = str(getattr(page, "url", "") or "")
@@ -491,7 +477,9 @@ def _build_login_result(
     }
 
 
-async def _open_xhs_qrcode_panel(page: Page) -> None:
+async def _open_xhs_qrcode_panel(
+    page: Page, *, humanizer: Humanizer | None = None
+) -> None:
     login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
     await login_box.wait_for(state="visible", timeout=XHS_LOGIN_PANEL_TIMEOUT_MS)
 
@@ -501,14 +489,16 @@ async def _open_xhs_qrcode_panel(page: Page) -> None:
 
     switch_img = login_box.locator(XHS_LOGIN_SWITCH_SELECTOR).first
     await switch_img.wait_for(state="visible", timeout=XHS_LOGIN_SWITCH_TIMEOUT_MS)
-    await switch_img.click()
+    if humanizer is None:
+        humanizer = Humanizer(page)
+    await humanizer.click(switch_img)
     await login_box.locator("div:has-text('扫一扫')").first.wait_for(
         state="visible", timeout=XHS_LOGIN_SWITCH_TIMEOUT_MS
     )
 
 
-async def _find_xhs_qrcode_locator(page: Page):
-    await _open_xhs_qrcode_panel(page)
+async def _find_xhs_qrcode_locator(page: Page, *, humanizer: Humanizer | None = None):
+    await _open_xhs_qrcode_panel(page, humanizer=humanizer)
 
     resolved = await _resolve_anchor(
         page,
@@ -520,8 +510,10 @@ async def _find_xhs_qrcode_locator(page: Page):
     return resolved.locator
 
 
-async def _extract_xhs_qrcode_src(page: Page) -> str:
-    qrcode_img = await _find_xhs_qrcode_locator(page)
+async def _extract_xhs_qrcode_src(
+    page: Page, *, humanizer: Humanizer | None = None
+) -> str:
+    qrcode_img = await _find_xhs_qrcode_locator(page, humanizer=humanizer)
     await qrcode_img.wait_for(state="visible", timeout=XHS_LOGIN_QRCODE_TIMEOUT_MS)
     qrcode_src = await qrcode_img.get_attribute("src")
     if not qrcode_src:
@@ -535,9 +527,10 @@ async def _save_xhs_qrcode(
     previous_qrcode_path: Path | None = None,
     qrcode_callback=None,
 ) -> dict:
-    qrcode_src = await _extract_xhs_qrcode_src(page)
+    humanizer = Humanizer(page)
+    qrcode_src = await _extract_xhs_qrcode_src(page, humanizer=humanizer)
     qrcode_path = build_login_qrcode_path(account_file, suffix="xhs_login_qrcode")
-    qrcode_img = await _find_xhs_qrcode_locator(page)
+    qrcode_img = await _find_xhs_qrcode_locator(page, humanizer=humanizer)
 
     if qrcode_src.startswith("data:image/"):
         save_data_url_image(qrcode_src, qrcode_path)
@@ -649,6 +642,7 @@ async def cookie_auth(account_file):
                     "/publish/publish?from=homepage&target=video"
                 )
             )
+            await Humanizer(page).after_navigate()
             await page.wait_for_timeout(XHS_LOGIN_SETTLE_MS)
 
             if page.url.startswith(_build_xhs_creator_url("/login")):
@@ -722,6 +716,7 @@ async def xiaohongshu_cookie_gen(
         try:
             page = await context.new_page()
             await page.goto(_build_xhs_creator_url("/login"))
+            await Humanizer(page).after_navigate()
             qrcode_info = await _save_xhs_qrcode(page, account_file, qrcode_callback=qrcode_callback)
             qrcode_path = Path(qrcode_info["image_path"])
             xiaohongshu_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
@@ -814,7 +809,14 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         else:
             self.publish_date = 0
 
-    async def set_schedule_time_xiaohongshu(self, page: Page, publish_date: datetime):
+    async def set_schedule_time_xiaohongshu(
+        self,
+        page: Page,
+        publish_date: datetime,
+        *,
+        humanizer: Humanizer | None = None,
+    ):
+        humanizer = humanizer or self._humanizer(page)
         xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {publish_date.strftime(self.date_format)}"))
         switch = await _resolve_anchor(
             page,
@@ -823,7 +825,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="interactive",
             budget=self.publish_budget,
         )
-        await switch.locator.click()
+        await humanizer.click(switch.locator)
         await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
         publish_date_hour = publish_date.strftime("%Y-%m-%d %H:%M")
         time_input = await _resolve_anchor(
@@ -833,21 +835,26 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="editable",
             budget=self.publish_budget,
         )
-        await time_input.locator.fill(str(publish_date_hour))
+        # 原生日期输入框点击会展开日历，这里只聚焦后逐字键入（回读归 ticket 40）。
+        await time_input.locator.focus()
+        await humanizer.type_text(str(publish_date_hour))
         await self._settle(page, XHS_SCHEDULE_SETTLE_MS)
 
-    async def set_location(self, page: Page, location: str = "青岛市"):
+    async def set_location(
+        self, page: Page, location: str = "青岛市", *, humanizer: Humanizer | None = None
+    ):
         if not location:
             return True
 
+        humanizer = humanizer or self._humanizer(page)
         xiaohongshu_logger.info(_msg("📍", f"小人准备设置位置: {location}"))
         loc_ele = await page.wait_for_selector(
             'div.d-text.d-select-placeholder.d-text-ellipsis.d-text-nowrap',
             timeout=self._wait_ms(XHS_LOCATION_INPUT_TIMEOUT_MS),
         )
-        await loc_ele.click()
+        await humanizer.click(loc_ele)
         await self._settle(page, XHS_LOCATION_INPUT_SETTLE_MS)
-        await page.keyboard.type(location)
+        await humanizer.type_text(location)
         dropdown_selector = 'div.d-popover.d-popover-default.d-dropdown.--size-min-width-large'
         await self._settle(page, XHS_LOCATION_SUGGEST_SETTLE_MS)
         try:
@@ -881,7 +888,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 )
 
             await location_option.scroll_into_view_if_needed()
-            await location_option.click()
+            await humanizer.between_scroll()
+            await humanizer.click(location_option)
             xiaohongshu_logger.success(_msg("🥳", f"位置已经设置成 {location}"))
             return True
         except Exception as e:
@@ -901,7 +909,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 xiaohongshu_logger.debug(_msg("😵", f"读取位置候选列表失败: {inner_e}"))
             return False
 
-    async def fill_title(self, page: Page) -> None:
+    async def fill_title(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
+        humanizer = humanizer or self._humanizer(page)
         title_container = await _resolve_anchor(
             page,
             "标题",
@@ -909,12 +918,15 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="editable",
             budget=self.publish_budget,
         )
-        await title_container.locator.fill(self.title[:20])
+        # 标题框原本由 Playwright 的瞬间赋值隐式聚焦；改为显式聚焦后逐字键入。
+        await title_container.locator.focus()
+        await humanizer.type_text(self.title[:20])
 
-    async def fill_desc(self, page: Page) -> None:
+    async def fill_desc(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
         if not getattr(self, "desc", ""):
             return
 
+        humanizer = humanizer or self._humanizer(page)
         desc = await _resolve_anchor(
             page,
             "正文",
@@ -922,17 +934,18 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="editable",
             budget=self.publish_budget,
         )
-        await desc.locator.click()
-        await page.keyboard.press("Backspace")
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.press("Delete")
-        await page.keyboard.type(self.desc)
-        await page.keyboard.press("Enter")
+        await humanizer.click(desc.locator)
+        await humanizer.press("Backspace")
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(self.desc)
+        await humanizer.press("Enter")
 
-    async def fill_tags(self, page: Page) -> None:
+    async def fill_tags(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
         if not getattr(self, "tags", None):
             return
 
+        humanizer = humanizer or self._humanizer(page)
         # 小红书标签上限为 10 个，超过会导致死循环卡住发布
         max_tags = 10
         if len(self.tags) > max_tags:
@@ -949,13 +962,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 role="editable",
                 budget=self.publish_budget,
             )
-            await desc.locator.click()
+            await humanizer.click(desc.locator)
 
         for tag in self.tags:  # 循环处理所有 tags
             # 话题候选下拉框依赖小红书联想接口实时返回，网络抖动/无匹配时会等不到。
             # 标签是可选增强项：等不到候选框就跳过该标签继续，不让整条发布因此失败。
             try:
-                await page.keyboard.type("#" + tag, delay=30)
+                await humanizer.type_text("#" + tag)
                 await page.locator(XHS_TOPIC_MENU_SELECTOR).wait_for(
                     state="visible",
                     timeout=self._wait_ms(XHS_TOPIC_MENU_TIMEOUT_MS),
@@ -965,20 +978,21 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                     state="visible",
                     timeout=self._wait_ms(XHS_TOPIC_ITEM_TIMEOUT_MS),
                 )
-                await first_item.click()
+                await humanizer.click(first_item)
             except Exception as exc:
                 xiaohongshu_logger.warning(
                     _msg("🏷️", f"话题『{tag}』未出现候选，跳过该标签继续发布: {exc}")
                 )
                 # 清掉已键入但未成词的 "#tag" 文本，避免它残留进正文
                 for _ in range(len("#" + tag)):
-                    await page.keyboard.press("Backspace")
+                    await humanizer.press("Backspace")
                 continue
 
-    async def fill_meta(self, page: Page) -> None:
-        await self.fill_title(page)
-        await self.fill_desc(page)
-        await self.fill_tags(page)
+    async def fill_meta(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
+        humanizer = humanizer or self._humanizer(page)
+        await self.fill_title(page, humanizer=humanizer)
+        await self.fill_desc(page, humanizer=humanizer)
+        await self.fill_tags(page, humanizer=humanizer)
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
@@ -1012,6 +1026,23 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
     async def _settle(self, page: Page, milliseconds: int) -> None:
         """固定 UI 静置（点击/输入后的界面动画），不是就绪判据。"""
         await page.wait_for_timeout(self._wait_ms(milliseconds))
+
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """行为层时延只吃预算上限，从不自己抛超时（ticket 15 §2）。
+
+        与 ``_sleep`` 的区别只有一个：预算耗尽时收缩到 0 而不是抛
+        ``pre_click_error``。真正的超时判据仍然只发生在锚点/轮询处。
+        """
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        await asyncio.sleep(min(seconds, remaining))
 
     @staticmethod
     async def _find_publish_failure(page: Page) -> str | None:
@@ -1090,7 +1121,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
         return "timeout"
 
-    async def apply_declarations(self, page: Page) -> None:
+    async def apply_declarations(
+        self, page: Page, *, humanizer: Humanizer | None = None
+    ) -> None:
         """按需设置「原创声明」和「添加内容类型声明」。
 
         两项能力默认都不操作页面（保持平台默认）：
@@ -1102,13 +1135,16 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         if self.original_declaration is None and not self.content_type:
             return
 
+        humanizer = humanizer or self._humanizer(page)
         if self.original_declaration is not None:
-            await self._set_original_declaration(page)
+            await self._set_original_declaration(page, humanizer=humanizer)
 
         if self.content_type:
-            await self._add_content_declaration(page)
+            await self._add_content_declaration(page, humanizer=humanizer)
 
-    async def _set_original_declaration(self, page: Page) -> None:
+    async def _set_original_declaration(
+        self, page: Page, *, humanizer: Humanizer
+    ) -> None:
         enabled = bool(self.original_declaration)
         try:
             switch = (
@@ -1129,18 +1165,22 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                     xiaohongshu_logger.warning(
                         _msg("⚠️", "无法确认原创声明开关状态，尝试点击开启")
                     )
-                    await switch.click()
+                    await humanizer.click(switch)
                     await self._settle(page, XHS_DECLARATION_SETTLE_MS)
-                    await self._confirm_original_declaration(page)
+                    await self._confirm_original_declaration(
+                        page, humanizer=humanizer
+                    )
                 else:
                     xiaohongshu_logger.warning(
                         _msg("⚠️", "无法确认原创声明开关状态，跳过关闭")
                     )
             elif current is not enabled:
-                await switch.click()
+                await humanizer.click(switch)
                 await self._settle(page, XHS_DECLARATION_SETTLE_MS)
                 if enabled:
-                    await self._confirm_original_declaration(page)
+                    await self._confirm_original_declaration(
+                        page, humanizer=humanizer
+                    )
 
             xiaohongshu_logger.success(
                 _msg("🧾", f"原创声明已{'开启' if enabled else '关闭'}")
@@ -1151,7 +1191,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             )
             await self._press_escape(page)
 
-    async def _add_content_declaration(self, page: Page) -> None:
+    async def _add_content_declaration(
+        self, page: Page, *, humanizer: Humanizer
+    ) -> None:
         content_type = self.content_type
         label = XHS_CONTENT_TYPE_LABELS.get(content_type)
         source_label = XHS_SOURCE_DECLARATION_LABELS.get(content_type)
@@ -1162,19 +1204,23 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             return
 
         try:
-            await self._open_content_declaration_menu(page)
+            await self._open_content_declaration_menu(page, humanizer=humanizer)
             if source_label:
-                await self._click_declaration_option(page, "内容来源声明")
+                await self._click_declaration_option(
+                    page, "内容来源声明", humanizer=humanizer
+                )
                 await self._settle(page, XHS_DECLARATION_SETTLE_MS)
-                await self._click_declaration_option(page, source_label)
+                await self._click_declaration_option(
+                    page, source_label, humanizer=humanizer
+                )
             else:
-                await self._click_declaration_option(page, label)
+                await self._click_declaration_option(page, label, humanizer=humanizer)
             await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
             if content_type == "self-shot":
-                await self._fill_self_shot(page)
+                await self._fill_self_shot(page, humanizer=humanizer)
             elif content_type == "repost":
-                await self._fill_repost_source(page)
+                await self._fill_repost_source(page, humanizer=humanizer)
 
             xiaohongshu_logger.success(
                 _msg("🧾", f"内容类型声明已设置：{source_label or label}")
@@ -1185,7 +1231,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             )
             await self._press_escape(page)
 
-    async def _open_content_declaration_menu(self, page: Page) -> None:
+    async def _open_content_declaration_menu(
+        self, page: Page, *, humanizer: Humanizer
+    ) -> None:
         trigger = await _resolve_anchor(
             page,
             "内容类型声明入口",
@@ -1199,10 +1247,14 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             )
         except Exception:
             pass
-        await trigger.locator.click(force=True)
+        else:
+            await humanizer.between_scroll()
+        await humanizer.click(trigger.locator)
         await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
-    async def _click_declaration_option(self, page: Page, label: str) -> None:
+    async def _click_declaration_option(
+        self, page: Page, label: str, *, humanizer: Humanizer
+    ) -> None:
         option = await _resolve_anchor(
             page,
             f"声明选项:{label}",
@@ -1210,9 +1262,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="visible",
             budget=self.publish_budget,
         )
-        await option.locator.click(force=True)
+        await humanizer.click(option.locator)
 
-    async def _fill_self_shot(self, page: Page) -> None:
+    async def _fill_self_shot(self, page: Page, *, humanizer: Humanizer) -> None:
         """填写「自主拍摄」弹窗的拍摄地点和拍摄日期并确认。"""
         if not self.shoot_location or not self.shoot_date:
             raise RuntimeError("自主拍摄缺少拍摄地点或拍摄日期")
@@ -1229,8 +1281,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         location = modal.locator('input[placeholder="下拉选择地点"]').first
         if not await location.count():
             raise RuntimeError("未找到「拍摄地点」输入框")
-        await location.click(force=True)
-        await location.fill(self.shoot_location)
+        await humanizer.click(location)
+        await humanizer.type_text(self.shoot_location)
 
         suggestions = page.locator(".el-autocomplete-suggestion li").filter(
             has_text=self.shoot_location
@@ -1244,22 +1296,23 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             state="visible",
             timeout=self._wait_ms(XHS_DECLARATION_SUGGESTION_TIMEOUT_MS),
         )
-        await suggestion.click(force=True)
+        await humanizer.click(suggestion)
         await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
         # 2. 拍摄日期：日期选择器内置过滤输入框，输入 YYYY-MM-DD 后回车。
         date_input = modal.locator('input[placeholder="下拉选择日期"]').first
         if not await date_input.count():
             raise RuntimeError("未找到「拍摄日期」输入框")
-        await date_input.click(force=True)
+        await humanizer.click(date_input)
         await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
         date_filter = page.locator(".d-datepicker-input-filter input").first
         if not await date_filter.count():
             raise RuntimeError("未找到拍摄日期选择器")
-        await date_filter.fill(self.shoot_date)
+        await date_filter.focus()
+        await humanizer.type_text(self.shoot_date)
         await self._settle(page, XHS_DECLARATION_DATE_SETTLE_MS)
-        await page.keyboard.press("Enter")
+        await humanizer.press("Enter")
         await self._settle(page, XHS_DECLARATION_SETTLE_MS)
 
         # 3. 点弹窗内的「确认」。
@@ -1268,10 +1321,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             confirm = modal.get_by_text("确认", exact=True).first
         if not await confirm.count():
             raise RuntimeError("未找到自主拍摄「确认」按钮")
-        await confirm.click(force=True)
+        await humanizer.click(confirm)
         await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
-    async def _fill_repost_source(self, page: Page) -> None:
+    async def _fill_repost_source(self, page: Page, *, humanizer: Humanizer) -> None:
         if not self.repost_source:
             raise RuntimeError("来源转载缺少媒体名称")
 
@@ -1280,8 +1333,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             state="visible",
             timeout=self._wait_ms(XHS_DECLARATION_MODAL_TIMEOUT_MS),
         )
-        await source_input.click()
-        await source_input.fill(self.repost_source)
+        await humanizer.click(source_input)
+        await humanizer.type_text(self.repost_source)
         await self._settle(page, XHS_DECLARATION_FILL_SETTLE_MS)
 
         confirm = page.get_by_role("button", name="确认").first
@@ -1290,11 +1343,21 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 state="visible",
                 timeout=self._wait_ms(XHS_DECLARATION_CONFIRM_TIMEOUT_MS),
             )
-            await confirm.click()
+            await humanizer.click(confirm)
         except Exception:
-            await _js_click_by_text(page, "确认")
+            # 弹窗按钮结构兜底：候选层解析（结构 → 中文精确），不再注入 JS 点击。
+            resolved = await _resolve_anchor(
+                page,
+                "转载声明确认按钮",
+                XHS_DECLARATION_CONFIRM_CANDIDATES,
+                role="visible",
+                budget=self.publish_budget,
+            )
+            await humanizer.click(resolved.locator)
 
-    async def _confirm_original_declaration(self, page: Page) -> None:
+    async def _confirm_original_declaration(
+        self, page: Page, *, humanizer: Humanizer
+    ) -> None:
         """确认「原创声明」弹窗：勾选须知并点击「声明原创」。
 
         点击原创开关后小红书会弹出权益说明和《原创声明须知》勾选框；
@@ -1317,11 +1380,11 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
         checkbox = modal.locator(".d-checkbox").first
         if await checkbox.count():
-            await checkbox.click(force=True)
+            await humanizer.click(checkbox)
         else:
             agreement = modal.get_by_text("我已阅读并同意", exact=False).first
             if await agreement.count():
-                await agreement.click(force=True)
+                await humanizer.click(agreement)
         await self._settle(page, XHS_DECLARATION_FILL_SETTLE_MS)
 
         button = await _resolve_anchor(
@@ -1332,7 +1395,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             scope=modal,
             budget=self.publish_budget,
         )
-        await button.locator.click()
+        await humanizer.click(button.locator)
         await self._settle(page, XHS_DECLARATION_CONFIRM_SETTLE_MS)
 
     @staticmethod
@@ -1427,10 +1490,17 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         xiaohongshu_logger.warning(_msg("😵", "视频上传摔了一跤，小人马上重新上传"))
         await page.locator('div.progress-div [class^="upload-btn-input"]').set_input_files(self.file_path)
 
-    async def set_thumbnail(self, page: Page, thumbnail_path: str):
+    async def set_thumbnail(
+        self,
+        page: Page,
+        thumbnail_path: str,
+        *,
+        humanizer: Humanizer | None = None,
+    ):
         if not thumbnail_path:
             return
 
+        humanizer = humanizer or self._humanizer(page)
         xiaohongshu_logger.info(_msg("🖼️", "小人准备设置封面"))
 
         # 封面设置为增强步骤：失败时记 warning 跳过、继续发布（用视频首帧兜底）。
@@ -1450,8 +1520,10 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 )
             except Exception:
                 pass
+            else:
+                await humanizer.between_scroll()
             await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
-            await entry.locator.click(force=True)
+            await humanizer.click(entry.locator)
             await self._settle(page, XHS_COVER_MODAL_SETTLE_MS)
 
             # 2. 封面弹窗：后续锚点全部限定在弹窗内。
@@ -1474,7 +1546,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 timeout_ms=XHS_COVER_TAB_TIMEOUT_MS,
                 budget=self.publish_budget,
             )
-            await upload_tab.locator.click()
+            await humanizer.click(upload_tab.locator)
             await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
 
             # 4. 封面图片 file input：限定弹窗内，命中数必须为 1（禁止 .first/.last）。
@@ -1500,7 +1572,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 timeout_ms=XHS_COVER_CONFIRM_TIMEOUT_MS,
                 budget=self.publish_budget,
             )
-            await confirm.locator.click()
+            await humanizer.click(confirm.locator)
 
             # 6. 等弹窗关闭
             try:
@@ -1521,6 +1593,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
     async def upload_video_content(self, page: Page, *, multilogin: bool = False) -> None:
         budget = self.start_publish_budget()
+        humanizer = self._humanizer(page)
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往视频发布页"))
         publish_url = _build_xhs_creator_url(
@@ -1531,6 +1604,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             wait_until="domcontentloaded",
             timeout=budget.clamp_ms(XHS_NAVIGATION_TIMEOUT_MS),
         )
+        await humanizer.after_navigate()
         if multilogin:
             _raise_if_login_required(page)
         await page.wait_for_url(
@@ -1591,16 +1665,18 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             await asyncio.sleep(budget.clamp_seconds(XHS_VIDEO_UPLOAD_POLL_SECONDS))
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
-        await self.fill_meta(page)
+        await self.fill_meta(page, humanizer=humanizer)
 
-        await self.set_thumbnail(page, self.thumbnail_path)
+        await self.set_thumbnail(page, self.thumbnail_path, humanizer=humanizer)
 
         # await self.set_location(page, "青岛市")
 
-        await self.apply_declarations(page)
+        await self.apply_declarations(page, humanizer=humanizer)
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-            await self.set_schedule_time_xiaohongshu(page, self.publish_date)
+            await self.set_schedule_time_xiaohongshu(
+                page, self.publish_date, humanizer=humanizer
+            )
 
         if self.no_publish:
             xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
@@ -1633,8 +1709,10 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                         point=XHS_PUBLISH_BUTTON_POINT,
                         publish_clicked=publish_clicked,
                     )
-                    await publish_button.locator.click(
-                        timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                    await humanizer.before_submit()
+                    await humanizer.click(
+                        publish_button.locator,
+                        point=XHS_PUBLISH_BUTTON_POINT,
                     )
                     publish_clicked = True
                 outcome = await self._wait_publish_outcome(page)
@@ -1759,6 +1837,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
 
     async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
         budget = self.start_publish_budget()
+        humanizer = self._humanizer(page)
         xiaohongshu_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         xiaohongshu_logger.info(_msg("🧭", "小人正在赶往图文发布页"))
         publish_url = _build_xhs_creator_url(
@@ -1769,6 +1848,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             wait_until="domcontentloaded",
             timeout=budget.clamp_ms(XHS_NAVIGATION_TIMEOUT_MS),
         )
+        await humanizer.after_navigate()
         if multilogin:
             _raise_if_login_required(page)
         await page.wait_for_url(
@@ -1803,12 +1883,14 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                 )
 
         xiaohongshu_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
-        await self.fill_meta(page)
+        await self.fill_meta(page, humanizer=humanizer)
 
-        await self.apply_declarations(page)
+        await self.apply_declarations(page, humanizer=humanizer)
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-            await self.set_schedule_time_xiaohongshu(page, self.publish_date)
+            await self.set_schedule_time_xiaohongshu(
+                page, self.publish_date, humanizer=humanizer
+            )
 
         if self.no_publish:
             xiaohongshu_logger.success(_msg("🧪", "已设置完成，--no-publish 跳过发布"))
@@ -1841,8 +1923,10 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                         point=XHS_PUBLISH_BUTTON_POINT,
                         publish_clicked=publish_clicked,
                     )
-                    await publish_button.locator.click(
-                        timeout=budget.clamp_ms(XHS_PUBLISH_CLICK_TIMEOUT_MS)
+                    await humanizer.before_submit()
+                    await humanizer.click(
+                        publish_button.locator,
+                        point=XHS_PUBLISH_BUTTON_POINT,
                     )
                     publish_clicked = True
                 outcome = await self._wait_publish_outcome(page)

@@ -20,6 +20,7 @@ Nothing here touches a browser or the network.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import unittest
 from pathlib import Path
@@ -356,9 +357,14 @@ class CallSiteAnchorTests(unittest.TestCase):
             selectors={TITLE_PRIMARY: primary, TITLE_FALLBACK: fallback},
         )
 
-        asyncio.run(app.fill_title(page))
+        # HUMANIZE=0：这里只验证命中的结构候选与"聚焦后键入"，时延由
+        # tests/test_humanize.py 覆盖。
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.fill_title(page))
 
-        self.assertEqual(primary.actions, [("fill", "标题内容")])
+        self.assertEqual(primary.actions, [("focus",)])
+        self.assertEqual(primary.click_count, 0)
+        self.assertEqual(page.keyboard.actions, [("insert_text", "标题内容")])
         self.assertEqual(fallback.actions, [])
 
 
