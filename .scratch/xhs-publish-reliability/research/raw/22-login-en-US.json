@@ -1,0 +1,46 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "text/html; charset=UTF-8"
+  },
+  "finalUrl": "https://creator.xiaohongshu.com/login?source=&redirectReason=401&lastUrl=%252Fpublish%252Fpublish%253Ffrom%253Dhomepage%2526target%253Dimage",
+  "capture": {
+    "url": "https://creator.xiaohongshu.com/login?source=&redirectReason=401&lastUrl=%252Fpublish%252Fpublish%253Ffrom%253Dhomepage%2526target%253Dimage",
+    "docLang": null,
+    "navLang": "en-US",
+    "navLangs": [
+      "en-US"
+    ],
+    "intlLocale": "en-US",
+    "titlePlaceholders": [
+      {
+        "placeholder": "请选择选项",
+        "visible": true,
+        "cls": "css-1skbtim css-fkqjnb dyn"
+      },
+      {
+        "placeholder": "手机号",
+        "visible": true,
+        "cls": "css-1skbtim css-66a7wx dyn"
+      },
+      {
+        "placeholder": "验证码",
+        "visible": true,
+        "cls": "css-1skbtim css-1ge5flv dyn"
+      }
+    ],
+    "bodyPlaceholders": [],
+    "switchCards": [],
+    "selects": [],
+    "publishBtn": null,
+    "guideButtons": [],
+    "modals": [],
+    "popovers": [],
+    "coverSection": [],
+    "bodyText": "创作服务平台 创作百科 加入我们 解锁创作者专属功能 让创作发布、数据分析、商业变现更高效。 短信登录 发送验证码 收不到验证码？ 登 录 登录即同意 用户协议 和 隐私政策 关于小红书 沪ICP备 13030189号 Copyright © 2014-2026 行吟信息科技（上海）有限公司",
+    "bodyTextHash": "1a27ce65c4afdf47"
+  },
+  "loginBoxCount": 1,
+  "loginBoxVisible": true,
+  "loginBoxText": "短信登录 | 发送验证码 | 收不到验证码？ | 登 录 | 登录即同意 | 用户协议 | 和 | 隐私政策"
+}

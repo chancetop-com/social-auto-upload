@@ -1,0 +1,37 @@
+{
+  "ticket": 26,
+  "schedule_off": {
+    "attrs": {
+      "data-v-7a28df78": "",
+      "data-v-74e5df5a-s": "",
+      "is-publish": "true",
+      "is-save-draft": "true",
+      "submit-text": "发布",
+      "save-text": "暂存离开",
+      "submit-disabled": "false",
+      "submit-loading": "false",
+      "save-disabled": "false"
+    },
+    "text": "",
+    "html": "<xhs-publish-btn data-v-7a28df78=\"\" data-v-74e5df5a-s=\"\" is-publish=\"true\" is-save-draft=\"true\" submit-text=\"发布\" save-text=\"暂存离开\" submit-disabled=\"false\" submit-loading=\"false\" save-disabled=\"false\"></xhs-publish-btn>",
+    "buttons": [],
+    "shadom_buttons": null
+  },
+  "schedule_on": {
+    "attrs": {
+      "data-v-7a28df78": "",
+      "data-v-74e5df5a-s": "",
+      "is-publish": "true",
+      "is-save-draft": "true",
+      "submit-text": "定时发布",
+      "save-text": "暂存离开",
+      "submit-disabled": "false",
+      "submit-loading": "false",
+      "save-disabled": "false"
+    },
+    "text": "",
+    "html": "<xhs-publish-btn data-v-7a28df78=\"\" data-v-74e5df5a-s=\"\" is-publish=\"true\" is-save-draft=\"true\" submit-text=\"定时发布\" save-text=\"暂存离开\" submit-disabled=\"false\" submit-loading=\"false\" save-disabled=\"false\"></xhs-publish-btn>",
+    "buttons": [],
+    "shadom_buttons": null
+  }
+}

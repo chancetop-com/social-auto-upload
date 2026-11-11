@@ -1,0 +1,4487 @@
+{
+  "samples": [
+    {
+      "t": 0,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null,
+      "changedFrom": -1,
+      "snapshot": []
+    },
+    {
+      "t": 296,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 501,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 751,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 1001,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 1285,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 1501,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 1751,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 2015,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 1,
+      "btn": null,
+      "areaHtmlLen": null
+    },
+    {
+      "t": 2251,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 2501,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 2752,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 3001,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 3252,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 3502,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 3751,
+      "pr": 0,
+      "items": [],
+      "entry": 0,
+      "inputs": 0,
+      "btn": {
+        "isPublish": "false",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": null
+    },
+    {
+      "t": 4076,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": false,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536,
+      "changedFrom": 0,
+      "snapshot": [
+        "<div data-v-1dbc6cff=\"\" class=\"pr\" data-draggable=\"true\"><div data-v-1dbc6cff=\"\" class=\"feature-guide-anchor\"><div data-v-1d1800ff=\"\" data-v-1dbc6cff=\"\" class=\"img-container\" aria-busy=\"false\"><div data-v-9d88f6a0=\"\" data-v-1d1800ff=\"\" class=\"format-img\"><img data-v-9d88f6a0=\"\" src=\"blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6\" alt=\"\" class=\"img preview\" style=\"object-fit: cover;\"></div><!----><div data-v-1d1800ff=\"\" class=\"img-idx\">1</div><div data-v-1d1800ff=\"\" class=\"mask uploading\"><div data-v-1d1800ff=\"\" class=\"progress-container\"><svg data-v-19062004=\"\" data-v-1d1800ff=\"\" width=\"20\" height=\"20\" viewBox=\"0 0 18 20\" fill=\"none\" class=\"spinner-red\"><path data-v-19062004=\"\" d=\"M10 18.75C10 19.4404 9.4382 20.0081 8.75323 19.922C7.47815 19.7618 6.24185 19.3567 5.11379 18.725C3.62095 17.8889 2.36759 16.6839 1.4736 15.225C0.579607 13.7661 0.0748843 12.1023 0.00771088 10.3926C-0.0594625 8.68292 0.31316 6.98461 1.08994 5.4601C1.86671 3.93559 3.02166 2.63589 4.4443 1.68531C5.86694 0.734728 7.50969 0.165073 9.21541 0.0308295C10.9211 -0.103414 12.6328 0.202246 14.1866 0.918571C15.3608 1.45986 16.4151 2.22197 17.2942 3.15935C17.7665 3.66291 17.6374 4.4511 17.0789 4.85688C16.5204 5.26266 15.745 5.12954 15.2522 4.64609C14.6393 4.04479 13.9253 3.551 13.1399 3.18893C11.9746 2.65168 10.6908 2.42244 9.41156 2.52312C8.13227 2.62381 6.90021 3.05105 5.83322 3.76398C4.76624 4.47691 3.90003 5.45169 3.31745 6.59507C2.73487 7.73846 2.4554 9.01219 2.50578 10.2945C2.55616 11.5767 2.93471 12.8246 3.6052 13.9187C4.27569 15.0129 5.21571 15.9167 6.33534 16.5437C7.0899 16.9663 7.90902 17.2536 8.75576 17.3961C9.43655 17.5106 10 18.0596 10 18.75Z\" fill=\"#FF2442\"></path></svg></div></div><!----><!----><!----></div></div><!----></div>"
+      ]
+    },
+    {
+      "t": 4251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": false,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 4503,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 5187,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 5259,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 5517,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 5751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 6001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 6250,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 6501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 6751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 7002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 7252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 7501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 7751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 8001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 8252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 8502,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 8751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 9001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 9251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 9501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 9752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 10002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 10252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 10502,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 10751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 11002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 11251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 11502,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 11751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 12002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 12251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 12501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 12751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 13001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 13252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 13501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 13751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 14002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 14293,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 14501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 14752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 15001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 15251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 15502,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 15751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 16001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 16251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 16501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 16750,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 17001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 17254,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 17501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 17751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 18001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 18251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 18502,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 18751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 19001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 19251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 19501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 19752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 20001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 20252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 20502,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 20752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 21002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 21252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 21501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 21752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 22000,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 22252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 22501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 22752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 23002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 23251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 23501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 23752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 24002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 24259,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 24500,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 24755,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 25001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 25252,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 25501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "1",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1698,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 2536
+    },
+    {
+      "t": 25752,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 26002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 26251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 26501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 26751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 27001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 27253,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 27501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 27751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 28001,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 28251,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 28501,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 28751,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    },
+    {
+      "t": 29002,
+      "pr": 1,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 3381
+    }
+  ],
+  "mutations": [
+    {
+      "t": 4068,
+      "type": "childList",
+      "target": "pr",
+      "added": [],
+      "removed": 1,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 4068,
+      "type": "childList",
+      "target": "pr",
+      "added": [
+        null
+      ],
+      "removed": 0,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 4068,
+      "type": "childList",
+      "target": "pr",
+      "added": [
+        null
+      ],
+      "removed": 0,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 25527,
+      "type": "childList",
+      "target": "feature-guide-anchor",
+      "added": [],
+      "removed": 1,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 25527,
+      "type": "childList",
+      "target": "feature-guide-anchor",
+      "added": [
+        "img-container"
+      ],
+      "removed": 0,
+      "attr": null,
+      "attrVal": null
+    }
+  ],
+  "mutationsTotal": 400
+}

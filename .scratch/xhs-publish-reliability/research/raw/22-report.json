@@ -1,0 +1,950 @@
+{
+  "account": "cookies/xiaohongshu_180.json",
+  "locales": {
+    "zh-CN": {
+      "localeParam": "zh-CN",
+      "image": {
+        "base": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+          "docLang": null,
+          "navLang": "zh-CN",
+          "navLangs": [
+            "zh-CN"
+          ],
+          "intlLocale": "zh-CN",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "允许正文复制",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [
+            {
+              "text": "我知道了",
+              "visible": true
+            }
+          ],
+          "modals": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "visible": true,
+              "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+            }
+          ],
+          "popovers": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "cls": "d-popover d-popover-default"
+            }
+          ],
+          "coverSection": [],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 图片编辑 1/18 获取封面建议 1 编辑 智能标题 话题 用户 表情 0 /1000 内容设置 收起 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 选择文件 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 允许正文复制 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 编辑于 刚刚 图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+          "bodyTextHash": "b6ae877c90c8b978"
+        },
+        "declarationOpened": true,
+        "declaration": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+          "docLang": null,
+          "navLang": "zh-CN",
+          "navLangs": [
+            "zh-CN"
+          ],
+          "intlLocale": "zh-CN",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "允许正文复制",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [
+            {
+              "text": "我知道了",
+              "visible": true
+            }
+          ],
+          "modals": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "visible": true,
+              "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+            }
+          ],
+          "popovers": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "cls": "d-popover d-popover-default"
+            }
+          ],
+          "coverSection": [],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 图片编辑 1/18 获取封面建议 1 编辑 智能标题 话题 用户 表情 0 /1000 内容设置 收起 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 选择文件 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 允许正文复制 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 编辑于 刚刚 图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+          "bodyTextHash": "b6ae877c90c8b978"
+        },
+        "originalAttempts": [
+          {
+            "index": 0,
+            "card": "原创声明",
+            "modals": [
+              {
+                "text": "笔记完成原创声明后，将获得以下权益 1. 获得原创笔记标记 2. 平台保护你的作品，识别并打击搬运 我已阅读并同意 《原创声明须知》 ，如滥用声明，平台将驳回并予以相关处置 声明原创",
+                "visible": true,
+                "cls": "d-modal d-modal-centered d-modal-no-footer creator-modal-style"
+              },
+              {
+                "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+                "visible": true,
+                "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+              }
+            ]
+          }
+        ]
+      },
+      "video": {
+        "ready": true,
+        "base": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video",
+          "docLang": null,
+          "navLang": "zh-CN",
+          "navLangs": [
+            "zh-CN"
+          ],
+          "intlLocale": "zh-CN",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [],
+          "modals": [
+            {
+              "text": "视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了",
+              "visible": true,
+              "cls": "pk-cover-guide-popover"
+            }
+          ],
+          "popovers": [],
+          "coverSection": [
+            {
+              "text": "设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面",
+              "visible": true
+            }
+          ],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 视频文件 重新上传 demo.mp4 视频分辨率较低，建议上传1080P及以上分辨率的视频，有利于提升观看时长 设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面 智能标题 #绿幕素材 #原创视频 #免费素材 #视频制作 #素材分享 更多 话题 用户 表情 0 /1000 内容设置 收起 添加章节 清晰的视频结构能提升观看体验，有助于完播率 视频时长不足15秒，不支持添加章节 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 关注 编辑于 刚刚 · 公开可见",
+          "bodyTextHash": "2ec0c732f7d92f72"
+        },
+        "coverOpened": true,
+        "cover": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video",
+          "docLang": null,
+          "navLang": "zh-CN",
+          "navLangs": [
+            "zh-CN"
+          ],
+          "intlLocale": "zh-CN",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [],
+          "modals": [
+            {
+              "text": "视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了",
+              "visible": true,
+              "cls": "pk-cover-guide-popover"
+            }
+          ],
+          "popovers": [],
+          "coverSection": [
+            {
+              "text": "设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面",
+              "visible": true
+            }
+          ],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 视频文件 重新上传 demo.mp4 视频分辨率较低，建议上传1080P及以上分辨率的视频，有利于提升观看时长 设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面 智能标题 #绿幕素材 #原创视频 #免费素材 #视频制作 #素材分享 更多 话题 用户 表情 0 /1000 内容设置 收起 添加章节 清晰的视频结构能提升观看体验，有助于完播率 视频时长不足15秒，不支持添加章节 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 关注 编辑于 刚刚 · 公开可见",
+          "bodyTextHash": "2ec0c732f7d92f72"
+        }
+      }
+    },
+    "en-US": {
+      "localeParam": "en-US",
+      "image": {
+        "base": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+          "docLang": null,
+          "navLang": "en-US",
+          "navLangs": [
+            "en-US"
+          ],
+          "intlLocale": "en-US",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "允许正文复制",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [
+            {
+              "text": "我知道了",
+              "visible": true
+            }
+          ],
+          "modals": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "visible": true,
+              "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+            }
+          ],
+          "popovers": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "cls": "d-popover d-popover-default"
+            }
+          ],
+          "coverSection": [],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 图片编辑 1/18 获取封面建议 1 编辑 智能标题 话题 用户 表情 0 /1000 内容设置 收起 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 选择文件 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 允许正文复制 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 编辑于 刚刚 图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+          "bodyTextHash": "b6ae877c90c8b978"
+        },
+        "declarationOpened": true,
+        "declaration": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+          "docLang": null,
+          "navLang": "en-US",
+          "navLangs": [
+            "en-US"
+          ],
+          "intlLocale": "en-US",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "允许正文复制",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [
+            {
+              "text": "我知道了",
+              "visible": true
+            }
+          ],
+          "modals": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "visible": true,
+              "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+            }
+          ],
+          "popovers": [
+            {
+              "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+              "cls": "d-popover d-popover-default"
+            }
+          ],
+          "coverSection": [],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 图片编辑 1/18 获取封面建议 1 编辑 智能标题 #vibecoding #图形 #眼睛视力大挑战 #贴图 #颗粒度对齐 更多 话题 用户 表情 0 /1000 内容设置 收起 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 选择文件 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 允许正文复制 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 编辑于 刚刚 图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+          "bodyTextHash": "7d8df70bc606f2f1"
+        },
+        "originalAttempts": [
+          {
+            "index": 0,
+            "card": "原创声明",
+            "modals": [
+              {
+                "text": "笔记完成原创声明后，将获得以下权益 1. 获得原创笔记标记 2. 平台保护你的作品，识别并打击搬运 我已阅读并同意 《原创声明须知》 ，如滥用声明，平台将驳回并予以相关处置 声明原创",
+                "visible": true,
+                "cls": "d-modal d-modal-centered d-modal-no-footer creator-modal-style"
+              },
+              {
+                "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+                "visible": true,
+                "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+              }
+            ]
+          }
+        ]
+      },
+      "video": {
+        "ready": true,
+        "base": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video",
+          "docLang": null,
+          "navLang": "en-US",
+          "navLangs": [
+            "en-US"
+          ],
+          "intlLocale": "en-US",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [],
+          "modals": [
+            {
+              "text": "视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了",
+              "visible": true,
+              "cls": "pk-cover-guide-popover"
+            }
+          ],
+          "popovers": [],
+          "coverSection": [
+            {
+              "text": "设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面",
+              "visible": true
+            }
+          ],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 视频文件 重新上传 demo.mp4 视频分辨率较低，建议上传1080P及以上分辨率的视频，有利于提升观看时长 设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面 智能标题 话题 用户 表情 0 /1000 内容设置 收起 添加章节 清晰的视频结构能提升观看体验，有助于完播率 视频时长不足15秒，不支持添加章节 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 关注 编辑于 刚刚 · 公开可见",
+          "bodyTextHash": "f5a8b175f23b4659"
+        },
+        "coverOpened": true,
+        "cover": {
+          "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video",
+          "docLang": null,
+          "navLang": "en-US",
+          "navLangs": [
+            "en-US"
+          ],
+          "intlLocale": "en-US",
+          "titlePlaceholders": [
+            {
+              "placeholder": "填写标题会有更多赞哦",
+              "visible": true,
+              "cls": "d-text"
+            }
+          ],
+          "bodyPlaceholders": [
+            {
+              "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+              "text": "",
+              "visible": true
+            }
+          ],
+          "switchCards": [
+            {
+              "text": "原创声明",
+              "visible": true
+            },
+            {
+              "text": "定时发布",
+              "visible": true
+            }
+          ],
+          "selects": [
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加内容类型声明",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "添加地点",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "选择群聊",
+              "visible": true,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            },
+            {
+              "text": "公开可见",
+              "visible": true,
+              "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+            },
+            {
+              "text": "",
+              "visible": false,
+              "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+            }
+          ],
+          "publishBtn": {
+            "text": "",
+            "attrs": {
+              "is-publish": "true",
+              "submit-disabled": "false"
+            }
+          },
+          "guideButtons": [],
+          "modals": [
+            {
+              "text": "视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了",
+              "visible": true,
+              "cls": "pk-cover-guide-popover"
+            }
+          ],
+          "popovers": [],
+          "coverSection": [
+            {
+              "text": "设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面",
+              "visible": true
+            }
+          ],
+          "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 视频文件 重新上传 demo.mp4 视频分辨率较低，建议上传1080P及以上分辨率的视频，有利于提升观看时长 设置封面 默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记 优质封面示例 智能推荐封面 基于视频内容与热门封面库，为你智能匹配三套设计方案 一键生成 PK封面 视频可以PK封面啦，快来试试吧 开启后，发现页会给不同观众展示更合适的封面，提升点击率；个人主页、笔记分享等仍展示主封面。发布满72小时后PK结束，点击率最高的一张会自动成为主封面。 我知道了 最近封面点击表现一般？试试PK封面，自动选择更优封面 智能标题 #绿幕素材 #原创视频 #免费素材 #视频制作 #素材分享 更多 话题 用户 表情 0 /1000 内容设置 收起 添加章节 清晰的视频结构能提升观看体验，有助于完播率 视频时长不足15秒，不支持添加章节 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 关注 编辑于 刚刚 · 公开可见",
+          "bodyTextHash": "2ec0c732f7d92f72"
+        }
+      }
+    }
+  },
+  "login": {
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=UTF-8"
+    },
+    "finalUrl": "https://creator.xiaohongshu.com/login?source=&redirectReason=401&lastUrl=%252Fpublish%252Fpublish%253Ffrom%253Dhomepage%2526target%253Dimage",
+    "capture": {
+      "url": "https://creator.xiaohongshu.com/login?source=&redirectReason=401&lastUrl=%252Fpublish%252Fpublish%253Ffrom%253Dhomepage%2526target%253Dimage",
+      "docLang": null,
+      "navLang": "en-US",
+      "navLangs": [
+        "en-US"
+      ],
+      "intlLocale": "en-US",
+      "titlePlaceholders": [
+        {
+          "placeholder": "请选择选项",
+          "visible": true,
+          "cls": "css-1skbtim css-fkqjnb dyn"
+        },
+        {
+          "placeholder": "手机号",
+          "visible": true,
+          "cls": "css-1skbtim css-66a7wx dyn"
+        },
+        {
+          "placeholder": "验证码",
+          "visible": true,
+          "cls": "css-1skbtim css-1ge5flv dyn"
+        }
+      ],
+      "bodyPlaceholders": [],
+      "switchCards": [],
+      "selects": [],
+      "publishBtn": null,
+      "guideButtons": [],
+      "modals": [],
+      "popovers": [],
+      "coverSection": [],
+      "bodyText": "创作服务平台 创作百科 加入我们 解锁创作者专属功能 让创作发布、数据分析、商业变现更高效。 短信登录 发送验证码 收不到验证码？ 登 录 登录即同意 用户协议 和 隐私政策 关于小红书 沪ICP备 13030189号 Copyright © 2014-2026 行吟信息科技（上海）有限公司",
+      "bodyTextHash": "1a27ce65c4afdf47"
+    },
+    "loginBoxCount": 1,
+    "loginBoxVisible": true,
+    "loginBoxText": "短信登录 | 发送验证码 | 收不到验证码？ | 登 录 | 登录即同意 | 用户协议 | 和 | 隐私政策"
+  },
+  "diff": {
+    "navLang": {
+      "zh-CN": "zh-CN",
+      "en-US": "en-US"
+    },
+    "navLangs": {
+      "zh-CN": [
+        "zh-CN"
+      ],
+      "en-US": [
+        "en-US"
+      ]
+    }
+  },
+  "identicalBodyText": true
+}

@@ -1,0 +1,149 @@
+{
+  "ticket": 26,
+  "round": "d",
+  "started": "2026-11-11T19:06:40",
+  "note": "全程未点击发布按钮，未提交任何内容；失焦用 JS blur，不用点击",
+  "after_switch_on": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-11 20:07",
+    "wrapper_text": "定时发布\n2026-11-11 20:07",
+    "active": {
+      "tag": "body",
+      "cls": "",
+      "text": "创作服务平台\n小红薯6AF26ACE\n发布笔记\n首页\n笔记管理\nBuilder hub\n小工具\nRed Skill\n数据",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "valid_target": "2026-11-14 10:00",
+  "typed_valid": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-14 10:00",
+    "wrapper_text": "定时发布\n2026-11-14 10:00",
+    "active": {
+      "tag": "input",
+      "cls": "d-text",
+      "text": "",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "after_tab": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-14 10:00",
+    "wrapper_text": "定时发布\n2026-11-14 10:00",
+    "active": {
+      "tag": "xhs-publish-btn",
+      "cls": "",
+      "text": "",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "after_js_blur": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-14 10:00",
+    "wrapper_text": "定时发布\n2026-11-14 10:00",
+    "active": {
+      "tag": "body",
+      "cls": "",
+      "text": "创作服务平台\n小红薯6AF26ACE\n发布笔记\n首页\n笔记管理\nBuilder hub\n小工具\nRed Skill\n数据",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "typed_past": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-01-01 10:00",
+    "wrapper_text": "定时发布\n2026-01-01 10:00",
+    "active": {
+      "tag": "input",
+      "cls": "d-text",
+      "text": "",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "past_after_tab": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-14 10:00",
+    "wrapper_text": "定时发布\n2026-11-14 10:00",
+    "active": {
+      "tag": "xhs-publish-btn",
+      "cls": "",
+      "text": "",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "typed_garbage": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "abc",
+    "wrapper_text": "定时发布\nabc",
+    "active": {
+      "tag": "input",
+      "cls": "d-text",
+      "text": "",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "garbage_after_blur": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-14 10:00",
+    "wrapper_text": "定时发布\n2026-11-14 10:00",
+    "active": {
+      "tag": "body",
+      "cls": "",
+      "text": "创作服务平台\n小红薯6AF26ACE\n发布笔记\n首页\n笔记管理\nBuilder hub\n小工具\nRed Skill\n数据",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "visible_errorish": [],
+  "before_enter": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 1,
+    "date_input_count": 1,
+    "value": "2026-11-14 10:00",
+    "wrapper_text": "定时发布\n2026-11-14 10:00",
+    "active": {
+      "tag": "xhs-publish-btn",
+      "cls": "",
+      "text": "",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "after_enter": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "title_inputs": 0,
+    "date_input_count": 0,
+    "value": null,
+    "wrapper_text": null,
+    "active": {
+      "tag": "body",
+      "cls": "",
+      "text": "创作服务平台\n小红薯6AF26ACE\n发布笔记\n首页\n笔记管理\nBuilder hub\n小工具\nRed Skill\n数据",
+      "aria": null
+    },
+    "draft_modal": 0
+  },
+  "finished": "2026-11-11T19:06:57"
+}

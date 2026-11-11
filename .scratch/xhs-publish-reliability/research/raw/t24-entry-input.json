@@ -1,0 +1,152 @@
+{
+  "ticket": 24,
+  "phase": "entry-input",
+  "inputs_empty": [
+    {
+      "index": 0,
+      "accept": ".jpg,.jpeg,.png,.webp",
+      "multiple": true,
+      "id": "",
+      "name": "",
+      "display": "block",
+      "chain": [
+        {
+          "tag": "input",
+          "cls": "upload-input"
+        },
+        {
+          "tag": "div",
+          "cls": "drag-over"
+        },
+        {
+          "tag": "div",
+          "cls": "upload-wrapper"
+        },
+        {
+          "tag": "div",
+          "cls": "upload-content"
+        },
+        {
+          "tag": "div",
+          "cls": "upload-container"
+        }
+      ],
+      "uniqueSelector": ".img-list .top input[type=file][multiple]"
+    }
+  ],
+  "inputs_editor": [
+    {
+      "index": 0,
+      "accept": ".jpg,.jpeg,.png,.webp",
+      "multiple": true,
+      "id": "",
+      "name": "",
+      "display": "none",
+      "chain": [
+        {
+          "tag": "input",
+          "cls": ""
+        },
+        {
+          "tag": "div",
+          "cls": "top"
+        },
+        {
+          "tag": "div",
+          "cls": "img-list"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content-media-content mt0"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content-media"
+        }
+      ],
+      "uniqueSelector": ".img-list .top input[type=file][multiple]"
+    },
+    {
+      "index": 1,
+      "accept": ".jpg,.jpeg,.png,.webp",
+      "multiple": false,
+      "id": "",
+      "name": "",
+      "display": "none",
+      "chain": [
+        {
+          "tag": "input",
+          "cls": ""
+        },
+        {
+          "tag": "div",
+          "cls": "top"
+        },
+        {
+          "tag": "div",
+          "cls": "img-list"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content-media-content mt0"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content-media"
+        }
+      ],
+      "uniqueSelector": ".img-list .top input[type=file]:not([multiple])"
+    },
+    {
+      "index": 2,
+      "accept": ".pdf,.doc,.docx,.ppt,.pptx",
+      "multiple": false,
+      "id": "",
+      "name": "",
+      "display": "none",
+      "chain": [
+        {
+          "tag": "input",
+          "cls": ""
+        },
+        {
+          "tag": "div",
+          "cls": "file-relation-container"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content-component-content"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content-content-extra"
+        },
+        {
+          "tag": "div",
+          "cls": "publish-page-content"
+        }
+      ],
+      "uniqueSelector": ".img-list .top input[type=file]:not([multiple])"
+    }
+  ],
+  "entry_click": {
+    "chooser": true,
+    "chooser_element": {
+      "accept": ".jpg,.jpeg,.png,.webp",
+      "multiple": true,
+      "id": null,
+      "parentCls": "top",
+      "grandparentCls": "img-list"
+    },
+    "clicked_inputs": [
+      {
+        "accept": ".jpg,.jpeg,.png,.webp",
+        "multiple": true,
+        "id": null,
+        "display": "none",
+        "parentCls": "top",
+        "grandparentCls": "img-list"
+      }
+    ]
+  }
+}

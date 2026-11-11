@@ -1,0 +1,108 @@
+{
+  "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+  "docLang": null,
+  "navLang": "en-US",
+  "navLangs": [
+    "en-US"
+  ],
+  "intlLocale": "en-US",
+  "titlePlaceholders": [
+    {
+      "placeholder": "填写标题会有更多赞哦",
+      "visible": true,
+      "cls": "d-text"
+    }
+  ],
+  "bodyPlaceholders": [
+    {
+      "placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+      "text": "",
+      "visible": true
+    }
+  ],
+  "switchCards": [
+    {
+      "text": "原创声明",
+      "visible": true
+    },
+    {
+      "text": "允许正文复制",
+      "visible": true
+    },
+    {
+      "text": "定时发布",
+      "visible": true
+    }
+  ],
+  "selects": [
+    {
+      "text": "",
+      "visible": false,
+      "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+    },
+    {
+      "text": "添加内容类型声明",
+      "visible": true,
+      "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+    },
+    {
+      "text": "",
+      "visible": false,
+      "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+    },
+    {
+      "text": "添加地点",
+      "visible": true,
+      "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+    },
+    {
+      "text": "",
+      "visible": false,
+      "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+    },
+    {
+      "text": "选择群聊",
+      "visible": true,
+      "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+    },
+    {
+      "text": "公开可见",
+      "visible": true,
+      "cls": "d-text d-text-nowrap  d-select-description --color-text-title"
+    },
+    {
+      "text": "",
+      "visible": false,
+      "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap"
+    }
+  ],
+  "publishBtn": {
+    "text": "",
+    "attrs": {
+      "is-publish": "true",
+      "submit-disabled": "false"
+    }
+  },
+  "guideButtons": [
+    {
+      "text": "我知道了",
+      "visible": true
+    }
+  ],
+  "modals": [
+    {
+      "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+      "visible": true,
+      "cls": "feature-guide feature-guide--with-arrow image-editor-ai-guide"
+    }
+  ],
+  "popovers": [
+    {
+      "text": "图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+      "cls": "d-popover d-popover-default"
+    }
+  ],
+  "coverSection": [],
+  "bodyText": "创作服务平台 小红薯6AF26ACE 发布笔记 首页 笔记管理 Builder hub 小工具 Red Skill 数据看板 活动中心 笔记灵感 创作学院 创作百科 收起侧边栏 图片编辑 1/18 获取封面建议 1 编辑 智能标题 话题 用户 表情 0 /1000 内容设置 收起 加入合集 汇集系列视频，有利于连续性观看 创建合集 原创声明 添加内容类型声明 添加组件 添加地点 选择群聊 引用笔记 添加投票 标记地点或标记朋友 添加路线 选择文件 关联活动 更多 RED11月精选作者投稿 11-04 至 11-25 关联 马路生活节 10-23 至 11-30 关联 更多设置 收起 允许正文复制 公开可见 定时发布 笔记预览 封面预览 小红薯6AF26ACE 编辑于 刚刚 图片可以编辑啦，快来试试吧 你可以通过AI修改图片、裁剪图片大小、选择模版或滤镜、添加贴纸和文字 我知道了",
+  "bodyTextHash": "b6ae877c90c8b978"
+}

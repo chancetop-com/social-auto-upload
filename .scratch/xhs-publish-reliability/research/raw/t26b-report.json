@@ -1,0 +1,1421 @@
+{
+  "ticket": 26,
+  "round": "b",
+  "started": "2026-11-11T18:59:51",
+  "note": "全程未点击发布按钮，未提交任何内容",
+  "a_body": {
+    "baseline": {
+      "counter": 0,
+      "counter_text": "0\n/1000",
+      "wrapper_cls": "editor-length-wrapper",
+      "max_cls": "max-length",
+      "max_color": "rgb(192, 196, 204)",
+      "length_error": 0,
+      "length_error_scoped": 0,
+      "max_suffix": 0,
+      "edit_html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5.86563H11.9284L10.8209 9.99898H12.0667C12.398 9.99898 12.6667 10.2676 12.6667 10.599C12.6667 10.9304 12.398 11.199 12.0667 11.199H10.4994L9.88228 13.502C9.78698 13.8576 9.42143 14.0687 9.06578 13.9734C8.71014 13.8781 8.49908 13.5125 8.59438 13.1569L9.119 11.199H7.26667C6.9353 11.199 6.66667 10.9304 6.66667 10.599C6.66667 10.2676 6.9353 9.99898 7.26667 9.99898H9.44053L10.5481 5.86563H6.59521L4.5485 13.5041C4.45321 13.8597 4.08765 14.0708 3.732 13.9755C3.37636 13.8802 3.1653 13.5146 3.2606 13.159L3.78578 11.199H2.6C2.26863 11.199 2 10.9303 2 10.599C2 10.2676 2.26863 9.99897 2.6 9.99897H4.06667C4.08021 9.99897 4.09364 9.99942 4.10696 10.0003L5.21484 5.86563H3.93333C3.60196 5.86563 3.33333 5.597 3.33333 5.26563C3.33333 4.93426 3.60196 4.66563 3.93333 4.66563H5.53638L6.11819 2.49429Z\" fill=\"currentColor\" fill-opacity=\"0.8\"></path></svg> &nbsp;话题 </button><button data-v-5c94c884=\"\" class=\"topicTemplate\"><svg data-v-5c94c884=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65",
+      "errish": [
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper",
+          "text": "0\n/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        }
+      ],
+      "publish_btn": {
+        "attrs": {
+          "data-v-7a28df78": "",
+          "data-v-74e5df5a-s": "",
+          "is-publish": "true",
+          "is-save-draft": "true",
+          "submit-text": "发布",
+          "save-text": "暂存离开",
+          "submit-disabled": "false",
+          "submit-loading": "false",
+          "save-disabled": "false"
+        },
+        "text": ""
+      },
+      "body_innerText_len": 1
+    },
+    "steps": [
+      {
+        "inserted": 80,
+        "counter": 80,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 160,
+        "counter": 160,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 240,
+        "counter": 240,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 320,
+        "counter": 320,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 400,
+        "counter": 400,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 480,
+        "counter": 480,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 560,
+        "counter": 560,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 640,
+        "counter": 640,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 720,
+        "counter": 720,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 800,
+        "counter": 800,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 880,
+        "counter": 880,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 960,
+        "counter": 960,
+        "length_error": 0,
+        "length_error_scoped": 0,
+        "wrapper_cls": "editor-length-wrapper",
+        "max_cls": "max-length",
+        "max_color": "rgb(192, 196, 204)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(192, 196, 204)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      },
+      {
+        "inserted": 1040,
+        "counter": 1040,
+        "length_error": 1,
+        "length_error_scoped": 1,
+        "wrapper_cls": "editor-length-wrapper length-error",
+        "max_cls": "max-length",
+        "max_color": "rgb(255, 82, 93)",
+        "errish": [
+          {
+            "tag": "span",
+            "cls": "max-length",
+            "text": "/1000",
+            "visible": true,
+            "color": "rgb(255, 82, 93)"
+          }
+        ],
+        "publish_btn": {
+          "attrs": {
+            "data-v-7a28df78": "",
+            "data-v-74e5df5a-s": "",
+            "is-publish": "true",
+            "is-save-draft": "true",
+            "submit-text": "发布",
+            "save-text": "暂存离开",
+            "submit-disabled": "false",
+            "submit-loading": "false",
+            "save-disabled": "false"
+          },
+          "text": ""
+        }
+      }
+    ],
+    "mutations": [
+      {
+        "t": 10362,
+        "kind": "remove",
+        "tag": "br",
+        "cls": "ProseMirror-trailingBreak",
+        "text": ""
+      },
+      {
+        "t": 10362,
+        "kind": "attr",
+        "tag": "p",
+        "cls": "",
+        "attr": "class",
+        "old": "is-empty is-editor-empty",
+        "now": null
+      },
+      {
+        "t": 10362,
+        "kind": "attr",
+        "tag": "p",
+        "cls": "",
+        "attr": "class",
+        "old": "is-editor-empty",
+        "now": null
+      },
+      {
+        "t": 10362,
+        "kind": "attr",
+        "tag": "p",
+        "cls": "",
+        "attr": "class",
+        "old": "",
+        "now": null
+      },
+      {
+        "t": 10362,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 10686,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 11003,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 11419,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 11766,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 12074,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 12384,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 12697,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 13013,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 13340,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 13682,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 13861,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#vibecoding",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#vibecoding</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#视觉",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#视觉</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#花型设计",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#花型设计</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#图形",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#图形</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#会动的线条",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#会动的线条</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#灵感",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#灵感</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#创作灵感",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#创作灵感</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#生成艺术",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#生成艺术</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#数字化艺术",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#数字化艺术</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#颗粒度对齐",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\">#颗粒度对齐</span>"
+      },
+      {
+        "t": 13862,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#vibecoding",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;67c0e68e00000000040164b0&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&"
+      },
+      {
+        "t": 13863,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#视觉",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;5c1205ea02e26b0001572310&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&"
+      },
+      {
+        "t": 13863,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#花型设计",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;5dd28f540000000001008867&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&"
+      },
+      {
+        "t": 13863,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#图形",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;5c88ca66000000000e031646&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&"
+      },
+      {
+        "t": 13863,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#会动的线条",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;622effdb0000000001001bf5&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&"
+      },
+      {
+        "t": 13863,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "#灵感",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;5d0a00fe000000000f025780&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&"
+      },
+      {
+        "t": 13863,
+        "kind": "add",
+        "tag": "span",
+        "cls": "tag",
+        "text": "更多",
+        "html": "<span data-v-461a49ca=\"\" class=\"tag\"> 更多 <svg data-v-461a49ca=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65828 9.64475C7.64854 9.65469 7.64854 9.65469 7.63859 9.66444C7.28389 10.0083 6.71763 9.99944 6.37381 9.64475L2.50067 5.66596C2.27643 5.43463 2.28218 5.06533 2.51351 4.8411C2.74483 4.61687 3.11413 4.62262 3.33837 4.85394L6.84801 8.45851Z\" fill=\"currentColor\"></path></svg>"
+      },
+      {
+        "t": 13991,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 14310,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "tiptap ProseMirror ProseMirror-focused",
+        "attr": "class",
+        "old": "tiptap ProseMirror ProseMirror-focused",
+        "now": "tiptap ProseMirror ProseMirror-focused"
+      },
+      {
+        "t": 14311,
+        "kind": "attr",
+        "tag": "div",
+        "cls": "editor-length-wrapper length-error",
+        "attr": "class",
+        "old": "editor-length-wrapper",
+        "now": "editor-length-wrapper length-error"
+      }
+    ],
+    "over_state": {
+      "counter": 1040,
+      "counter_text": "1040\n/1000",
+      "wrapper_cls": "editor-length-wrapper length-error",
+      "max_cls": "max-length",
+      "max_color": "rgb(255, 82, 93)",
+      "length_error": 1,
+      "length_error_scoped": 1,
+      "max_suffix": 0,
+      "edit_html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5.86563H11.9284L10.8209 9.99898H12.0667C12.398 9.99898 12.6667 10.2676 12.6667 10.599C12.6667 10.9304 12.398 11.199 12.0667 11.199H10.4994L9.88228 13.502C9.78698 13.8576 9.42143 14.0687 9.06578 13.9734C8.71014 13.8781 8.49908 13.5125 8.59438 13.1569L9.119 11.199H7.26667C6.9353 11.199 6.66667 10.9304 6.66667 10.599C6.66667 10.2676 6.9353 9.99898 7.26667 9.99898H9.44053L10.5481 5.86563H6.59521L4.5485 13.5041C4.45321 13.8597 4.08765 14.0708 3.732 13.9755C3.37636 13.8802 3.1653 13.5146 3.2606 13.159L3.78578 11.199H2.6C2.26863 11.199 2 10.9303 2 10.599C2 10.2676 2.26863 9.99897 2.6 9.99897H4.06667C4.08021 9.99897 4.09364 9.99942 4.10696 10.0003L5.21484 5.86563H3.93333C3.60196 5.86563 3.33333 5.597 3.33333 5.26563C3.33333 4.93426 3.60196 4.66563 3.93333 4.66563H5.53638L6.11819 2.49429Z\" fill=\"currentColor\" fill-opacity=\"0.8\"></path></svg> &nbsp;话题 </button><button data-v-5c94c884=\"\" class=\"topicTemplate\"><svg data-v-5c94c884=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65",
+      "errish": [
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper length-error",
+          "text": "1040\n/1000",
+          "visible": true,
+          "color": "rgb(255, 82, 93)"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "visible": true,
+          "color": "rgb(255, 82, 93)"
+        }
+      ],
+      "publish_btn": {
+        "attrs": {
+          "data-v-7a28df78": "",
+          "data-v-74e5df5a-s": "",
+          "is-publish": "true",
+          "is-save-draft": "true",
+          "submit-text": "发布",
+          "save-text": "暂存离开",
+          "submit-disabled": "false",
+          "submit-loading": "false",
+          "save-disabled": "false"
+        },
+        "text": ""
+      },
+      "body_innerText_len": 1040
+    },
+    "at_1000": {
+      "counter": 1000,
+      "counter_text": "1000\n/1000",
+      "wrapper_cls": "editor-length-wrapper",
+      "max_cls": "max-length",
+      "max_color": "rgb(192, 196, 204)",
+      "length_error": 0,
+      "length_error_scoped": 0,
+      "max_suffix": 0,
+      "edit_html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5.86563H11.9284L10.8209 9.99898H12.0667C12.398 9.99898 12.6667 10.2676 12.6667 10.599C12.6667 10.9304 12.398 11.199 12.0667 11.199H10.4994L9.88228 13.502C9.78698 13.8576 9.42143 14.0687 9.06578 13.9734C8.71014 13.8781 8.49908 13.5125 8.59438 13.1569L9.119 11.199H7.26667C6.9353 11.199 6.66667 10.9304 6.66667 10.599C6.66667 10.2676 6.9353 9.99898 7.26667 9.99898H9.44053L10.5481 5.86563H6.59521L4.5485 13.5041C4.45321 13.8597 4.08765 14.0708 3.732 13.9755C3.37636 13.8802 3.1653 13.5146 3.2606 13.159L3.78578 11.199H2.6C2.26863 11.199 2 10.9303 2 10.599C2 10.2676 2.26863 9.99897 2.6 9.99897H4.06667C4.08021 9.99897 4.09364 9.99942 4.10696 10.0003L5.21484 5.86563H3.93333C3.60196 5.86563 3.33333 5.597 3.33333 5.26563C3.33333 4.93426 3.60196 4.66563 3.93333 4.66563H5.53638L6.11819 2.49429Z\" fill=\"currentColor\" fill-opacity=\"0.8\"></path></svg> &nbsp;话题 </button><button data-v-5c94c884=\"\" class=\"topicTemplate\"><svg data-v-5c94c884=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65",
+      "errish": [
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper",
+          "text": "1000\n/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        }
+      ],
+      "publish_btn": {
+        "attrs": {
+          "data-v-7a28df78": "",
+          "data-v-74e5df5a-s": "",
+          "is-publish": "true",
+          "is-save-draft": "true",
+          "submit-text": "发布",
+          "save-text": "暂存离开",
+          "submit-disabled": "false",
+          "submit-loading": "false",
+          "save-disabled": "false"
+        },
+        "text": ""
+      },
+      "body_innerText_len": 1000
+    },
+    "at_1001": {
+      "counter": 1001,
+      "counter_text": "1001\n/1000",
+      "wrapper_cls": "editor-length-wrapper length-error",
+      "max_cls": "max-length",
+      "max_color": "rgb(255, 82, 93)",
+      "length_error": 1,
+      "length_error_scoped": 1,
+      "max_suffix": 0,
+      "edit_html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5.86563H11.9284L10.8209 9.99898H12.0667C12.398 9.99898 12.6667 10.2676 12.6667 10.599C12.6667 10.9304 12.398 11.199 12.0667 11.199H10.4994L9.88228 13.502C9.78698 13.8576 9.42143 14.0687 9.06578 13.9734C8.71014 13.8781 8.49908 13.5125 8.59438 13.1569L9.119 11.199H7.26667C6.9353 11.199 6.66667 10.9304 6.66667 10.599C6.66667 10.2676 6.9353 9.99898 7.26667 9.99898H9.44053L10.5481 5.86563H6.59521L4.5485 13.5041C4.45321 13.8597 4.08765 14.0708 3.732 13.9755C3.37636 13.8802 3.1653 13.5146 3.2606 13.159L3.78578 11.199H2.6C2.26863 11.199 2 10.9303 2 10.599C2 10.2676 2.26863 9.99897 2.6 9.99897H4.06667C4.08021 9.99897 4.09364 9.99942 4.10696 10.0003L5.21484 5.86563H3.93333C3.60196 5.86563 3.33333 5.597 3.33333 5.26563C3.33333 4.93426 3.60196 4.66563 3.93333 4.66563H5.53638L6.11819 2.49429Z\" fill=\"currentColor\" fill-opacity=\"0.8\"></path></svg> &nbsp;话题 </button><button data-v-5c94c884=\"\" class=\"topicTemplate\"><svg data-v-5c94c884=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65",
+      "errish": [
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper length-error",
+          "text": "1001\n/1000",
+          "visible": true,
+          "color": "rgb(255, 82, 93)"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "visible": true,
+          "color": "rgb(255, 82, 93)"
+        }
+      ],
+      "publish_btn": {
+        "attrs": {
+          "data-v-7a28df78": "",
+          "data-v-74e5df5a-s": "",
+          "is-publish": "true",
+          "is-save-draft": "true",
+          "submit-text": "发布",
+          "save-text": "暂存离开",
+          "submit-disabled": "false",
+          "submit-loading": "false",
+          "save-disabled": "false"
+        },
+        "text": ""
+      },
+      "body_innerText_len": 1001
+    },
+    "topic_suggestions": 50,
+    "topic_anchor_text": {
+      "text": "#旅行pov[话题]#",
+      "len": 11
+    },
+    "topic_state": {
+      "counter": 7,
+      "counter_text": "7\n/1000",
+      "wrapper_cls": "editor-length-wrapper",
+      "max_cls": "max-length",
+      "max_color": "rgb(192, 196, 204)",
+      "length_error": 0,
+      "length_error_scoped": 0,
+      "max_suffix": 0,
+      "edit_html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5.86563H11.9284L10.8209 9.99898H12.0667C12.398 9.99898 12.6667 10.2676 12.6667 10.599C12.6667 10.9304 12.398 11.199 12.0667 11.199H10.4994L9.88228 13.502C9.78698 13.8576 9.42143 14.0687 9.06578 13.9734C8.71014 13.8781 8.49908 13.5125 8.59438 13.1569L9.119 11.199H7.26667C6.9353 11.199 6.66667 10.9304 6.66667 10.599C6.66667 10.2676 6.9353 9.99898 7.26667 9.99898H9.44053L10.5481 5.86563H6.59521L4.5485 13.5041C4.45321 13.8597 4.08765 14.0708 3.732 13.9755C3.37636 13.8802 3.1653 13.5146 3.2606 13.159L3.78578 11.199H2.6C2.26863 11.199 2 10.9303 2 10.599C2 10.2676 2.26863 9.99897 2.6 9.99897H4.06667C4.08021 9.99897 4.09364 9.99942 4.10696 10.0003L5.21484 5.86563H3.93333C3.60196 5.86563 3.33333 5.597 3.33333 5.26563C3.33333 4.93426 3.60196 4.66563 3.93333 4.66563H5.53638L6.11819 2.49429Z\" fill=\"currentColor\" fill-opacity=\"0.8\"></path></svg> &nbsp;话题 </button><button data-v-5c94c884=\"\" class=\"topicTemplate\"><svg data-v-5c94c884=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65",
+      "errish": [
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper",
+          "text": "7\n/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        }
+      ],
+      "publish_btn": {
+        "attrs": {
+          "data-v-7a28df78": "",
+          "data-v-74e5df5a-s": "",
+          "is-publish": "true",
+          "is-save-draft": "true",
+          "submit-text": "发布",
+          "save-text": "暂存离开",
+          "submit-disabled": "false",
+          "submit-loading": "false",
+          "save-disabled": "false"
+        },
+        "text": ""
+      },
+      "body_innerText_len": 12
+    },
+    "topic_counter_delta_one_char": 1,
+    "topic_state_after_one_char": {
+      "counter": 8,
+      "counter_text": "8\n/1000",
+      "wrapper_cls": "editor-length-wrapper",
+      "max_cls": "max-length",
+      "max_color": "rgb(192, 196, 204)",
+      "length_error": 0,
+      "length_error_scoped": 0,
+      "max_suffix": 0,
+      "edit_html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5.86563H11.9284L10.8209 9.99898H12.0667C12.398 9.99898 12.6667 10.2676 12.6667 10.599C12.6667 10.9304 12.398 11.199 12.0667 11.199H10.4994L9.88228 13.502C9.78698 13.8576 9.42143 14.0687 9.06578 13.9734C8.71014 13.8781 8.49908 13.5125 8.59438 13.1569L9.119 11.199H7.26667C6.9353 11.199 6.66667 10.9304 6.66667 10.599C6.66667 10.2676 6.9353 9.99898 7.26667 9.99898H9.44053L10.5481 5.86563H6.59521L4.5485 13.5041C4.45321 13.8597 4.08765 14.0708 3.732 13.9755C3.37636 13.8802 3.1653 13.5146 3.2606 13.159L3.78578 11.199H2.6C2.26863 11.199 2 10.9303 2 10.599C2 10.2676 2.26863 9.99897 2.6 9.99897H4.06667C4.08021 9.99897 4.09364 9.99942 4.10696 10.0003L5.21484 5.86563H3.93333C3.60196 5.86563 3.33333 5.597 3.33333 5.26563C3.33333 4.93426 3.60196 4.66563 3.93333 4.66563H5.53638L6.11819 2.49429Z\" fill=\"currentColor\" fill-opacity=\"0.8\"></path></svg> &nbsp;话题 </button><button data-v-5c94c884=\"\" class=\"topicTemplate\"><svg data-v-5c94c884=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.84801 8.45851C6.84974 8.46028 6.85149 8.46202 6.85327 8.46374C6.94605 8.55316 7.09377 8.55044 7.18319 8.45766L10.6661 4.84401C10.8903 4.61269 11.2596 4.60694 11.4909 4.83117C11.7222 5.0554 11.728 5.4247 11.5038 5.65603L7.65",
+      "errish": [
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper",
+          "text": "8\n/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "visible": true,
+          "color": "rgb(192, 196, 204)"
+        }
+      ],
+      "publish_btn": {
+        "attrs": {
+          "data-v-7a28df78": "",
+          "data-v-74e5df5a-s": "",
+          "is-publish": "true",
+          "is-save-draft": "true",
+          "submit-text": "发布",
+          "save-text": "暂存离开",
+          "submit-disabled": "false",
+          "submit-loading": "false",
+          "save-disabled": "false"
+        },
+        "text": ""
+      },
+      "body_innerText_len": 13
+    }
+  },
+  "b_schedule": {
+    "before_html": "<div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\" stroke-linecap=\"round\"></path></svg></div><div data-v-298c3e02=\"\" class=\"custom-switch-text-content\"><span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span><!----><div data-v-298c3e02=\"\" class=\"custom-switch-text-desc\"></div></div><div data-v-298c3e02=\"\" class=\"custom-switch-switch\"><div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator unchecked --color-bg-fill\"><input type=\"checkbox\" value=\"true\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div><!----></div></div></div></div><!---->",
+    "before_text": "定时发布",
+    "before_switch": [
+      {
+        "tag": "div",
+        "cls": "d-switch d-clickable d-switch-default d-inline-block",
+        "text": "",
+        "visible": true,
+        "attrs": {
+          "data-v-298c3e02": "",
+          "class": "d-switch d-clickable d-switch-default d-inline-block"
+        }
+      }
+    ],
+    "before_date_inputs": [
+      {
+        "tag": "input",
+        "cls": "",
+        "text": "",
+        "visible": false,
+        "attrs": {
+          "type": "checkbox",
+          "value": "true"
+        }
+      }
+    ],
+    "on_switch": [
+      {
+        "tag": "div",
+        "cls": "d-switch d-clickable d-switch-default d-inline-block",
+        "text": "",
+        "visible": true,
+        "attrs": {
+          "data-v-298c3e02": "",
+          "class": "d-switch d-clickable d-switch-default d-inline-block"
+        }
+      }
+    ],
+    "on_simulator": [
+      {
+        "tag": "span",
+        "cls": "d-switch-simulator checked --color-bg-primary",
+        "text": "",
+        "visible": true,
+        "attrs": {
+          "class": "d-switch-simulator checked --color-bg-primary"
+        }
+      }
+    ],
+    "on_date_inputs": [
+      {
+        "tag": "input",
+        "cls": "",
+        "text": "",
+        "visible": false,
+        "attrs": {
+          "type": "checkbox",
+          "value": "true",
+          "checked": ""
+        }
+      },
+      {
+        "tag": "input",
+        "cls": "d-text",
+        "text": "",
+        "visible": true,
+        "attrs": {
+          "class": "d-text",
+          "value": "2026-11-11 20:01"
+        }
+      }
+    ],
+    "on_html": "<div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\" stroke-linecap=\"round\"></path></svg></div><div data-v-298c3e02=\"\" class=\"custom-switch-text-content\"><span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span><!----><div data-v-298c3e02=\"\" class=\"custom-switch-text-desc\"></div></div><div data-v-298c3e02=\"\" class=\"custom-switch-switch\"><div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" checked=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div><!----></div></div></div></div><div data-v-2476ce24=\"\" class=\"date-picker-container\"><div data-v-1bc39e8c=\"\" data-v-2476ce24=\"\" tabindex=\"1\" class=\"d-datepicker-wrapper d-inline-block custom-date-picker-44\"><div class=\"d-datepicker --color-text-title --color-bg-fill\"><div class=\"d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title\" style=\"display: grid;\"><!----><div class=\"d-datepicker-content\"><!----><div class=\"d-datepicker-input-filter show\"><input class=\"d-text\" value=\"2026-11-11 20:01\"><div class=\"d-text d-text-nowrap d-datepicker-input-filter-shadow\">2026-11-11 20:01</div></div></div><div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div><div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M9 3C9 2.44772 8.55228 2 8 2C7.44772 2 7 2.44772 7 3H6C4.34315 3 3 4.34315 3 6V18C3 19.6569 4.34315 21 6 21H18C19.6569 21 21 19.6569 21 18V6C21 4.34315 19.6569 3 18 3H17C17 2.44772 16.5523 2 16 2C15.4477 2 15 2.44772 15 3H9ZM15 5H9V6C9 6.55228 8.55228 7 8 7C7.44772 7 7 6.55228 7 6V5H6C5.44772 5 5 5.44772 5 6V9H19V6C19 5.44772 18.5523 5 18 5H17V6C17 6.55228 16.5523 7 16 7C15.4477 7 15 6.55228 15 6V5ZM5 11H19V18C19 18.5523 18.5523 19 18 19H6C5.44772 19 5 18.5523 5 18V11Z\" fill=\"currentColor\"></path></svg></span></div></div></div><!----></div></div>",
+    "valid_target": "2026-11-14 10:00",
+    "valid": {
+      "label": "date-valid",
+      "target": "2026-11-14 10:00",
+      "set": {
+        "ok": true,
+        "value": "2026-11-14 10:00"
+      },
+      "after_0ms": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00"
+      },
+      "after_500ms": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00"
+      },
+      "blur": {
+        "ok": true
+      },
+      "after_blur": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00",
+        "wrapper_html": "<div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\" stroke-linecap=\"round\"></path></svg></div><div data-v-298c3e02=\"\" class=\"custom-switch-text-content\"><span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span><!----><div data-v-298c3e02=\"\" class=\"custom-switch-text-desc\"></div></div><div data-v-298c3e02=\"\" class=\"custom-switch-switch\"><div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" checked=\"\" style=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div><!----></div></div></div></div><div data-v-2476ce24=\"\" class=\"date-picker-container\"><div data-v-1bc39e8c=\"\" data-v-2476ce24=\"\" tabindex=\"1\" class=\"d-datepicker-wrapper d-inline-block custom-date-picker-44\"><div class=\"d-datepicker --color-text-title --color-bg-fill\"><div class=\"d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title\" style=\"display: grid;\"><!----><div class=\"d-datepicker-content\"><!----><div class=\"d-datepicker-input-filter show\"><input class=\"d-text\" value=\"2026-11-14 10:00\" style=\"\"><div class=\"d-text d-text-nowrap d-datepicker-input-filter-shadow\">2026-11-14 10:00</div></div></div><div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div><div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M9 3C9 2.44772 8.55228 2 8 2C7.44772 2 7 2.44772 7 3H6C4.34315 3 3 4.34315 3 6V18C3 19.6569 4.34315 21 6 21H18C19.6569 21 21 19.6569 21 18V6C21 4.34315 19.6569 3 18 3H17C17 2.44772 16.5523 2 16 2C15.4477 2 15 2.44772 15 3H9ZM15 5H9V6"
+      }
+    },
+    "after_valid_errors": [
+      {
+        "tag": "span",
+        "cls": "has-tips",
+        "text": "定时发布",
+        "visible": true,
+        "attrs": {
+          "data-v-298c3e02": "",
+          "class": "has-tips"
+        }
+      }
+    ],
+    "invalid_past": {
+      "label": "date-past",
+      "target": "2026-01-01 10:00",
+      "set": {
+        "ok": true,
+        "value": "2026-01-01 10:00"
+      },
+      "after_0ms": {
+        "input_count": 1,
+        "input_value": "2026-01-01 10:00",
+        "wrapper_text": "定时发布\n2026-01-01 10:00"
+      },
+      "after_500ms": {
+        "input_count": 1,
+        "input_value": "2026-01-01 10:00",
+        "wrapper_text": "定时发布\n2026-01-01 10:00"
+      },
+      "blur": {
+        "ok": true
+      },
+      "after_blur": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00",
+        "wrapper_html": "<div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\" stroke-linecap=\"round\"></path></svg></div><div data-v-298c3e02=\"\" class=\"custom-switch-text-content\"><span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span><!----><div data-v-298c3e02=\"\" class=\"custom-switch-text-desc\"></div></div><div data-v-298c3e02=\"\" class=\"custom-switch-switch\"><div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" checked=\"\" style=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div><!----></div></div></div></div><div data-v-2476ce24=\"\" class=\"date-picker-container\"><div data-v-1bc39e8c=\"\" data-v-2476ce24=\"\" tabindex=\"1\" class=\"d-datepicker-wrapper d-inline-block custom-date-picker-44\"><div class=\"d-datepicker --color-text-title --color-bg-fill\"><div class=\"d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title\" style=\"display: grid;\"><!----><div class=\"d-datepicker-content\"><!----><div class=\"d-datepicker-input-filter show\"><input class=\"d-text\" value=\"2026-11-14 10:00\" style=\"\"><div class=\"d-text d-text-nowrap d-datepicker-input-filter-shadow\">2026-11-14 10:00</div></div></div><div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div><div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M9 3C9 2.44772 8.55228 2 8 2C7.44772 2 7 2.44772 7 3H6C4.34315 3 3 4.34315 3 6V18C3 19.6569 4.34315 21 6 21H18C19.6569 21 21 19.6569 21 18V6C21 4.34315 19.6569 3 18 3H17C17 2.44772 16.5523 2 16 2C15.4477 2 15 2.44772 15 3H9ZM15 5H9V6"
+      }
+    },
+    "after_past_errors": [
+      {
+        "tag": "span",
+        "cls": "has-tips",
+        "text": "定时发布",
+        "visible": true,
+        "attrs": {
+          "data-v-298c3e02": "",
+          "class": "has-tips"
+        }
+      },
+      {
+        "tag": "div",
+        "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44 declaration-drop-down",
+        "text": "虚构演绎，仅供娱乐笔记含AI合成内容内容包含营销广告内容来源声明",
+        "visible": false,
+        "attrs": {
+          "class": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44 declaration-drop-down",
+          "style": "border-radius: 12px; max-height: 290px; display: none; min-width: 308px; max-width: 308px; top: 0px; left: 0px; transform: translate3d(312px, 798px, 0px);"
+        }
+      },
+      {
+        "tag": "div",
+        "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+        "text": "自主拍摄来源转载",
+        "visible": false,
+        "attrs": {
+          "class": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+          "style": "max-height: 290px; display: none; max-width: 308px; top: 0px; left: 0px; transform: translate3d(12px, 0px, 0px);"
+        }
+      },
+      {
+        "tag": "div",
+        "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+        "text": "请先输入并搜索地点",
+        "visible": false,
+        "attrs": {
+          "class": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+          "style": "max-height: 262px; display: none; min-width: 308px; max-width: 308px; top: 0px; left: 0px; transform: translate3d(312px, 906px, 0px);"
+        }
+      },
+      {
+        "tag": "div",
+        "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+        "text": "暂无群聊请在app端消息-发现群聊-创建群聊后使用",
+        "visible": false,
+        "attrs": {
+          "class": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+          "style": "max-height: 262px; display: none; min-width: 308px; max-width: 308px; top: 0px; left: 0px; transform: translate3d(636px, 906px, 0px);"
+        }
+      },
+      {
+        "tag": "div",
+        "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+        "text": "公开可见仅自己可见仅互关好友可见只给谁看不给谁看",
+        "visible": false,
+        "attrs": {
+          "class": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+          "style": "border-radius: 12px; max-height: 290px; display: none; min-width: 308px; max-width: 308px; top: 0px; left: 0px; transform: translate3d(312px, 1314px, 0px);"
+        }
+      }
+    ],
+    "invalid_garbage": {
+      "label": "date-garbage",
+      "target": "abc",
+      "set": {
+        "ok": true,
+        "value": "abc"
+      },
+      "after_0ms": {
+        "input_count": 1,
+        "input_value": "abc",
+        "wrapper_text": "定时发布\nabc"
+      },
+      "after_500ms": {
+        "input_count": 1,
+        "input_value": "abc",
+        "wrapper_text": "定时发布\nabc"
+      },
+      "blur": {
+        "ok": true
+      },
+      "after_blur": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00",
+        "wrapper_html": "<div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\" stroke-linecap=\"round\"></path></svg></div><div data-v-298c3e02=\"\" class=\"custom-switch-text-content\"><span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span><!----><div data-v-298c3e02=\"\" class=\"custom-switch-text-desc\"></div></div><div data-v-298c3e02=\"\" class=\"custom-switch-switch\"><div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" checked=\"\" style=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div><!----></div></div></div></div><div data-v-2476ce24=\"\" class=\"date-picker-container\"><div data-v-1bc39e8c=\"\" data-v-2476ce24=\"\" tabindex=\"1\" class=\"d-datepicker-wrapper d-inline-block custom-date-picker-44\"><div class=\"d-datepicker --color-text-title --color-bg-fill\"><div class=\"d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title\" style=\"display: grid;\"><!----><div class=\"d-datepicker-content\"><!----><div class=\"d-datepicker-input-filter show\"><input class=\"d-text\" value=\"2026-11-14 10:00\" style=\"\"><div class=\"d-text d-text-nowrap d-datepicker-input-filter-shadow\">2026-11-14 10:00</div></div></div><div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div><div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M9 3C9 2.44772 8.55228 2 8 2C7.44772 2 7 2.44772 7 3H6C4.34315 3 3 4.34315 3 6V18C3 19.6569 4.34315 21 6 21H18C19.6569 21 21 19.6569 21 18V6C21 4.34315 19.6569 3 18 3H17C17 2.44772 16.5523 2 16 2C15.4477 2 15 2.44772 15 3H9ZM15 5H9V6"
+      }
+    },
+    "after_garbage_errors": [
+      {
+        "tag": "span",
+        "cls": "has-tips",
+        "text": "定时发布",
+        "visible": true,
+        "attrs": {
+          "data-v-298c3e02": "",
+          "class": "has-tips"
+        }
+      }
+    ],
+    "restore": {
+      "label": "date-restore",
+      "target": "2026-11-14 10:00",
+      "set": {
+        "ok": true,
+        "value": "2026-11-14 10:00"
+      },
+      "after_0ms": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00"
+      },
+      "after_500ms": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00"
+      },
+      "blur": {
+        "ok": true
+      },
+      "after_blur": {
+        "input_count": 1,
+        "input_value": "2026-11-14 10:00",
+        "wrapper_text": "定时发布\n2026-11-14 10:00",
+        "wrapper_html": "<div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\" stroke-linecap=\"round\"></path></svg></div><div data-v-298c3e02=\"\" class=\"custom-switch-text-content\"><span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span><!----><div data-v-298c3e02=\"\" class=\"custom-switch-text-desc\"></div></div><div data-v-298c3e02=\"\" class=\"custom-switch-switch\"><div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" checked=\"\" style=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div><!----></div></div></div></div><div data-v-2476ce24=\"\" class=\"date-picker-container\"><div data-v-1bc39e8c=\"\" data-v-2476ce24=\"\" tabindex=\"1\" class=\"d-datepicker-wrapper d-inline-block custom-date-picker-44\"><div class=\"d-datepicker --color-text-title --color-bg-fill\"><div class=\"d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title\" style=\"display: grid;\"><!----><div class=\"d-datepicker-content\"><!----><div class=\"d-datepicker-input-filter show\"><input class=\"d-text\" value=\"2026-11-14 10:00\" style=\"\"><div class=\"d-text d-text-nowrap d-datepicker-input-filter-shadow\">2026-11-14 10:00</div></div></div><div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div><div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M9 3C9 2.44772 8.55228 2 8 2C7.44772 2 7 2.44772 7 3H6C4.34315 3 3 4.34315 3 6V18C3 19.6569 4.34315 21 6 21H18C19.6569 21 21 19.6569 21 18V6C21 4.34315 19.6569 3 18 3H17C17 2.44772 16.5523 2 16 2C15.4477 2 15 2.44772 15 3H9ZM15 5H9V6"
+      }
+    },
+    "off_simulator": [
+      {
+        "tag": "span",
+        "cls": "d-switch-simulator unchecked --color-bg-fill",
+        "text": "",
+        "visible": true,
+        "attrs": {
+          "class": "d-switch-simulator unchecked --color-bg-fill"
+        }
+      }
+    ],
+    "off_date_inputs": [
+      {
+        "tag": "input",
+        "cls": "",
+        "text": "",
+        "visible": false,
+        "attrs": {
+          "type": "checkbox",
+          "value": "true",
+          "style": ""
+        }
+      }
+    ],
+    "off_text": "定时发布"
+  },
+  "c_original_declaration": {
+    "original_before": {
+      "exists": true,
+      "simulator_cls": "d-switch-simulator unchecked --color-bg-fill",
+      "switch_cls": "d-switch d-clickable d-switch-default d-inline-block",
+      "switch_aria": null,
+      "text": "原创声明"
+    },
+    "modal": {
+      "text": "笔记完成原创声明后，将获得以下权益\n1. 获得原创笔记标记\n2. 平台保护你的作品，识别并打击搬运\n我已阅读并同意 《原创声明须知》 ，如滥用声明，平台将驳回并予以相关处置\n声明原创",
+      "buttons": [
+        "声明原创"
+      ],
+      "checkboxes": 2
+    },
+    "confirm_clicked": true,
+    "original_after_900ms": {
+      "simulator_cls": "d-switch-simulator checked --color-bg-primary",
+      "switch_cls": "d-switch d-clickable d-switch-default d-inline-block",
+      "switch_aria": null,
+      "modal_count": 0,
+      "text": "原创声明"
+    },
+    "original_after_1600ms": {
+      "simulator_cls": "d-switch-simulator checked --color-bg-primary",
+      "modal_count": 0
+    },
+    "original_after_blur": {
+      "simulator_cls": "d-switch-simulator checked --color-bg-primary",
+      "modal_count": 0
+    },
+    "declaration_before": [
+      {
+        "text": "添加内容类型声明",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-fa1a9f1a=\"\" data-v-2710ae6d-s=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><g><path d=\"M12.7007 11.0385C12.7007 12.0912 11.5329 12.7242 10.6509 12.1496C9.18844 11.197 7.48188 10.6555 5.74798 10.6457C5.88934 11.6186 6.27107 12.5215 6.82229 13.1865C6.9985 13.3992 6.96899 13.7144 6.75637 13.8906C6.54376 14.0668 6.22856 14.0373 6.05235 13.8247C5.34396 12.9699 4.88647 11.836 4.73908 10.6455L4.70068 10.6455V10.6401H3.91732C3.2062 10.6401 2.54225 10.3118 2.06547 9.7587C1.5907 9.207"
+      },
+      {
+        "text": "添加地点",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-02e14e2e=\"\" data-v-2710ae6d-s=\"\" xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M2 7.22452C2 8.27585 2.28127 9.28954 2.80723 10.1808C3.12611 10.7193 3.693 11.3625 4.41755 12.0632C5.14389 12.7657 6.03608 13.5329 7.01165 14.3192C7.5901 14.7819 8.41134 14.7821 8.98702 14.3195C9.95976 13.5365 10.8521 12.7695 11.5796 12.066C12.3053 11.3643 12.874 10.7191 13.1928 10.1801C14.1357 8.58366 14.2724 6.64435 13.4979 4.78981C13.2458 4.1851 12.7768 3.55516 "
+      },
+      {
+        "text": "选择群聊",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-d6cac54a=\"\" data-v-2710ae6d-s=\"\" xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.66653 8.66667C8.50748 8.66667 9.99986 7.17428 9.99986 5.33333C9.99986 3.49238 8.50748 2 6.66653 2C4.82558 2 3.3332 3.49238 3.3332 5.33333C3.3332 7.17428 4.82558 8.66667 6.66653 8.66667ZM6.66653 7.46667C5.48832 7.46667 4.5332 6.51154 4.5332 5.33333C4.5332 4.15513 5.48832 3.2 6.66653 3.2C7.84474 3.2 8.79986 4.15513 8.79986 5.33333C8.79986 6.51154 7.84474 7.46667 6"
+      },
+      {
+        "text": "公开可见",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-1af124b1=\"\" data-v-2710ae6d-s=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M3.99998 4.66667C3.99998 6.69171 5.6416 8.33333 7.66665 8.33333C9.69169 8.33333 11.3333 6.69171 11.3333 4.66667C11.3333 2.64162 9.69169 1 7.66665 1C5.6416 1 3.99998 2.64162 3.99998 4.66667ZM10.1333 4.66667C10.1333 6.02897 9.02895 7.13333 7.66665 7.13333C6.30434 7.13333 5.19998 6.02897 5.19998 4.66667C5.19998 3.30436 6.30434 2.2 7.66665 2.2C9.02895 2.2 1"
+      }
+    ],
+    "entry_count": 1,
+    "menu": [
+      {
+        "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44 declaration-drop-down",
+        "text": "虚构演绎，仅供娱乐\n笔记含AI合成内容\n内容包含营销广告\n内容来源声明",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-handler --color-bg-fill-light",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-prefix-icon --space-p-top-small --space-p-right-small --space-p-bottom-small --space-p-left-small --color-text-description",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-grid d-option d-option-content --color-text-title",
+        "text": "虚构演绎，仅供娱乐",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-handler --color-bg-fill-light",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-prefix-icon --space-p-top-small --space-p-right-small --space-p-bottom-small --space-p-left-small --color-text-description",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-grid d-option d-option-content --color-text-title",
+        "text": "笔记含AI合成内容",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-handler --color-bg-fill-light",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-prefix-icon --space-p-top-small --space-p-right-small --space-p-bottom-small --space-p-left-small --color-text-description",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-grid d-option d-option-content --color-text-title",
+        "text": "内容包含营销广告",
+        "visible": true
+      },
+      {
+        "cls": "d-option d-option-handler --color-bg-fill-light",
+        "text": "",
+        "visible": true
+      },
+      {
+        "cls": "d-grid d-option d-option-content --color-text-title",
+        "text": "内容来源声明",
+        "visible": true
+      }
+    ],
+    "option_count": 1,
+    "declaration_after": [
+      {
+        "text": "虚构演绎，仅供娱乐",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-fa1a9f1a=\"\" data-v-2710ae6d-s=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><g><path d=\"M12.7007 11.0385C12.7007 12.0912 11.5329 12.7242 10.6509 12.1496C9.18844 11.197 7.48188 10.6555 5.74798 10.6457C5.88934 11.6186 6.27107 12.5215 6.82229 13.1865C6.9985 13.3992 6.96899 13.7144 6.75637 13.8906C6.54376 14.0668 6.22856 14.0373 6.05235 13.8247C5.34396 12.9699 4.88647 11.836 4.73908 10.6455L4.70068 10.6455V10.6401H3.91732C3.2062 10.6401 2.54225 10.3118 2.06547 9.7587C1.5907 9.20796 1.33398 8.47494 1.33398 7.72339C1.33398 6.97184 1.5907 6.23881 2.06547 5.68808C2.54225 5.13502 3.2062 4.80672 3.91732 4.80672H4.70068V4.79969L5.7006 4.79961C7.45127 4.79946 9.17553 4.25815 10.6508 "
+      },
+      {
+        "text": "添加地点",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-02e14e2e=\"\" data-v-2710ae6d-s=\"\" xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M2 7.22452C2 8.27585 2.28127 9.28954 2.80723 10.1808C3.12611 10.7193 3.693 11.3625 4.41755 12.0632C5.14389 12.7657 6.03608 13.5329 7.01165 14.3192C7.5901 14.7819 8.41134 14.7821 8.98702 14.3195C9.95976 13.5365 10.8521 12.7695 11.5796 12.066C12.3053 11.3643 12.874 10.7191 13.1928 10.1801C14.1357 8.58366 14.2724 6.64435 13.4979 4.78981C13.2458 4.1851 12.7768 3.55516 12.2229 3.01887C11.6689 2.48248 11.0208 2.0309 10.4029 1.79029C6.25828 0.174585 2 3.04215 2 7.22452ZM3.23912 7.22452C3.23912 3.89934 6.63775 1.65501 9.95371 2.94767C10.4081 3.12458 10.9166 3.48124 11."
+      },
+      {
+        "text": "选择群聊",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-d6cac54a=\"\" data-v-2710ae6d-s=\"\" xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.66653 8.66667C8.50748 8.66667 9.99986 7.17428 9.99986 5.33333C9.99986 3.49238 8.50748 2 6.66653 2C4.82558 2 3.3332 3.49238 3.3332 5.33333C3.3332 7.17428 4.82558 8.66667 6.66653 8.66667ZM6.66653 7.46667C5.48832 7.46667 4.5332 6.51154 4.5332 5.33333C4.5332 4.15513 5.48832 3.2 6.66653 3.2C7.84474 3.2 8.79986 4.15513 8.79986 5.33333C8.79986 6.51154 7.84474 7.46667 6.66653 7.46667Z\" fill=\"currentColor\"></path><path d=\"M1.0332 13C1.0332 11.0118 2.64498 9.4 4.6332 9.4H9.29987C11.2881 9.4 12.8999 11.0118 12.8999 13V13.5C12.8999 13.8314 12.6312 14.1 12.2999 14.1C11.9"
+      },
+      {
+        "text": "公开可见",
+        "cls": "d-select --color-text-title --color-bg-fill",
+        "html": "<div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-1af124b1=\"\" data-v-2710ae6d-s=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M3.99998 4.66667C3.99998 6.69171 5.6416 8.33333 7.66665 8.33333C9.69169 8.33333 11.3333 6.69171 11.3333 4.66667C11.3333 2.64162 9.69169 1 7.66665 1C5.6416 1 3.99998 2.64162 3.99998 4.66667ZM10.1333 4.66667C10.1333 6.02897 9.02895 7.13333 7.66665 7.13333C6.30434 7.13333 5.19998 6.02897 5.19998 4.66667C5.19998 3.30436 6.30434 2.2 7.66665 2.2C9.02895 2.2 10.1333 3.30436 10.1333 4.66667ZM5.1 9.56665C2.83563 9.56665 1 11.4023 1 13.6667V13.7292C1 14.0605 1.26863 14.3292 1.6 14.3292C1.93137 14.3292 2.2 14.0605 2.2 13.7292V13.6667C2.2 12.065 3.49837 10.7667"
+      }
+    ]
+  },
+  "d_cover": {
+    "error": "TimeoutError: Locator.scroll_into_view_if_needed: Timeout 29998ms exceeded.\nCall log:\n  - attempting scroll into view action\n    2 × waiting for element to be stable\n      - element is not visible\n    - retrying scroll into view action\n    - waiting 20ms\n    2 × waiting for element to be stable\n      - element is not visible\n    - retrying scroll into view action\n      - waiting 100ms\n    55 × waiting for element to be stable\n       - element is not visible\n     - retrying scroll into view action\n       - waiting 500ms\n    - waiting for element to be stable\n"
+  },
+  "finished": "2026-11-11T19:01:32"
+}

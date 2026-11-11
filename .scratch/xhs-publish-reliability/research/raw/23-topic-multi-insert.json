@@ -1,0 +1,1669 @@
+{
+  "account": "xiaohongshu_180.json",
+  "topics": [
+    "旅行",
+    "美食",
+    "穿搭"
+  ],
+  "steps": [
+    {
+      "index": 1,
+      "topic": "旅行",
+      "query": "#旅行",
+      "before": {
+        "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+        "editor_count": 1,
+        "editor_found": true,
+        "editor_role": "textbox",
+        "editor_class": "tiptap ProseMirror ProseMirror-focused",
+        "editor_text": "\n",
+        "editor_html_len": 117,
+        "anchor_count": 0,
+        "anchors": [],
+        "login_box_count": 0,
+        "dropdown": {
+          "container_count": 0,
+          "container_visible": 0
+        }
+      },
+      "typed_ms": 200,
+      "dropdown_wait_trace": [
+        {
+          "t_ms": 4,
+          "container_visible": 1,
+          "item_count": 0
+        },
+        {
+          "t_ms": 111,
+          "container_visible": 1,
+          "item_count": 0
+        },
+        {
+          "t_ms": 241,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 360,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 479,
+          "container_visible": 1,
+          "item_count": 50
+        }
+      ],
+      "candidates": {
+        "container_count": 1,
+        "container_visible": 1,
+        "item_count": 50,
+        "container_html": "<div data-v-3bde8448=\"\" id=\"creator-editor-topic-container\" class=\"items\"><div data-v-3bde8448=\"\" class=\"item is-selected\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;697b3a24000000002500dad4&quot;,&quot;tagLocation&quot;:&quot;relative&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&quot;PageInstance&quot;,&quot;value&quot;:&quot;creator_service_platform&quot;}}}}\"><span data-v-3bde8448=\"\" class=\"name\">#旅行pov</span><!----><span data-v-3bde8448=\"\" class=\"num\">10亿浏览</span></div><div data-v-3bde8448=\"\" class=\"item\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;68301c2c000000001302006b&quot;,&quot;tagLocation&quot;:&quot;relative&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&quot;PageInstance&quot;,&quot;value&quot;:&quot;creator_service_platform&quot;}}}}\"><span data-v-3bde8448=\"\" class=\"name\">#旅行中的非遗体验</span><!----><span data-v-3bde8448=\"\" class=\"num\">2.6亿浏览</span></div><div data-v-3bde8448=\"\" class=\"item\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;",
+        "items_top10": [
+          {
+            "name": "#旅行pov",
+            "text": "#旅行pov\n10亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行中的非遗体验",
+            "text": "#旅行中的非遗体验\n2.6亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行镜头里的爸妈",
+            "text": "#旅行镜头里的爸妈\n2.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行",
+            "text": "#旅行\n373亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行箱",
+            "text": "#旅行箱\n8.3亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行包",
+            "text": "#旅行包\n7.6亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行社",
+            "text": "#旅行社\n2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行车",
+            "text": "#旅行车\n3.7亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行必备",
+            "text": "#旅行必备\n12.6亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#旅行好物",
+            "text": "#旅行好物\n12.4亿浏览",
+            "visible": true
+          }
+        ]
+      },
+      "dropdown_appeared_without_action": true,
+      "clicked": {
+        "index": 3,
+        "name": "#旅行",
+        "exact_match": true
+      },
+      "dropdown_close_trace": [
+        {
+          "t_ms": 2,
+          "container_visible": 0,
+          "container_count": 0,
+          "item_count": 0
+        }
+      ],
+      "dropdown_close_ms": 2,
+      "after": {
+        "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+        "editor_count": 1,
+        "editor_found": true,
+        "editor_role": "textbox",
+        "editor_class": "tiptap ProseMirror ProseMirror-focused",
+        "editor_text": "#旅行[话题]# ",
+        "editor_html_len": 283,
+        "anchor_count": 2,
+        "anchors": [
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          }
+        ],
+        "login_box_count": 0,
+        "dropdown": {
+          "container_count": 0,
+          "container_visible": 0
+        }
+      },
+      "anchor_delta": 2,
+      "new_anchor_names": [
+        "旅行",
+        "旅行"
+      ],
+      "all_anchors_in_tiptap_textbox": false
+    },
+    {
+      "index": 2,
+      "topic": "美食",
+      "query": "#美食",
+      "before": {
+        "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+        "editor_count": 1,
+        "editor_found": true,
+        "editor_role": "textbox",
+        "editor_class": "tiptap ProseMirror ProseMirror-focused",
+        "editor_text": "#旅行[话题]# ",
+        "editor_html_len": 283,
+        "anchor_count": 2,
+        "anchors": [
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          }
+        ],
+        "login_box_count": 0,
+        "dropdown": {
+          "container_count": 0,
+          "container_visible": 0
+        }
+      },
+      "typed_ms": 122,
+      "dropdown_wait_trace": [
+        {
+          "t_ms": 1,
+          "container_visible": 1,
+          "item_count": 0
+        },
+        {
+          "t_ms": 106,
+          "container_visible": 1,
+          "item_count": 0
+        },
+        {
+          "t_ms": 222,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 325,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 432,
+          "container_visible": 1,
+          "item_count": 50
+        }
+      ],
+      "candidates": {
+        "container_count": 1,
+        "container_visible": 1,
+        "item_count": 50,
+        "container_html": "<div data-v-3bde8448=\"\" id=\"creator-editor-topic-container\" class=\"items\"><div data-v-3bde8448=\"\" class=\"item is-selected\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;646f2c7f000000002301f54f&quot;,&quot;tagLocation&quot;:&quot;relative&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&quot;PageInstance&quot;,&quot;value&quot;:&quot;creator_service_platform&quot;}}}}\"><span data-v-3bde8448=\"\" class=\"name\">#美食掌门人</span><!----><span data-v-3bde8448=\"\" class=\"num\">18.2亿浏览</span></div><div data-v-3bde8448=\"\" class=\"item\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;6442bc35000000002b01c6a3&quot;,&quot;tagLocation&quot;:&quot;relative&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&quot;PageInstance&quot;,&quot;value&quot;:&quot;creator_service_platform&quot;}}}}\"><span data-v-3bde8448=\"\" class=\"name\">#美食特种兵</span><!----><span data-v-3bde8448=\"\" class=\"num\">12.5亿浏览</span></div><div data-v-3bde8448=\"\" class=\"item\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;",
+        "items_top10": [
+          {
+            "name": "#美食掌门人",
+            "text": "#美食掌门人\n18.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食特种兵",
+            "text": "#美食特种兵\n12.5亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食兴趣班之有手就会",
+            "text": "#美食兴趣班之有手就会\n15.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食",
+            "text": "#美食\n1185.8亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食教程",
+            "text": "#美食教程\n254亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食日记",
+            "text": "#美食日记\n78.3亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食测评",
+            "text": "#美食测评\n128.4亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食的魅力",
+            "text": "#美食的魅力\n7900.7万浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食让人快乐",
+            "text": "#美食让人快乐\n6276.1万浏览",
+            "visible": true
+          },
+          {
+            "name": "#美食探店观察者",
+            "text": "#美食探店观察者\n3.7亿浏览",
+            "visible": true
+          }
+        ]
+      },
+      "dropdown_appeared_without_action": true,
+      "clicked": {
+        "index": 3,
+        "name": "#美食",
+        "exact_match": true
+      },
+      "dropdown_close_trace": [
+        {
+          "t_ms": 0,
+          "container_visible": 0,
+          "container_count": 0,
+          "item_count": 0
+        }
+      ],
+      "dropdown_close_ms": 0,
+      "after": {
+        "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+        "editor_count": 1,
+        "editor_found": true,
+        "editor_role": "textbox",
+        "editor_class": "tiptap ProseMirror ProseMirror-focused",
+        "editor_text": "#旅行[话题]# #美食[话题]# ",
+        "editor_html_len": 559,
+        "anchor_count": 4,
+        "anchors": [
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#美食[话题]#",
+            "data_topic_name": "美食",
+            "data_topic_raw": "{\"id\":\"571dbd6214de410a954e3552\",\"link\":\"xhsdiscover://topic/v2/5a438d9e8000860661720ae3\",\"name\":\"美食\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#美食[话题]#",
+            "data_topic_name": "美食",
+            "data_topic_raw": "{\"id\":\"571dbd6214de410a954e3552\",\"link\":\"xhsdiscover://topic/v2/5a438d9e8000860661720ae3\",\"name\":\"美食\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          }
+        ],
+        "login_box_count": 0,
+        "dropdown": {
+          "container_count": 0,
+          "container_visible": 0
+        }
+      },
+      "anchor_delta": 2,
+      "new_anchor_names": [
+        "旅行",
+        "美食",
+        "旅行",
+        "美食"
+      ],
+      "all_anchors_in_tiptap_textbox": false
+    },
+    {
+      "index": 3,
+      "topic": "穿搭",
+      "query": "#穿搭",
+      "before": {
+        "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+        "editor_count": 1,
+        "editor_found": true,
+        "editor_role": "textbox",
+        "editor_class": "tiptap ProseMirror ProseMirror-focused",
+        "editor_text": "#旅行[话题]# #美食[话题]# ",
+        "editor_html_len": 559,
+        "anchor_count": 4,
+        "anchors": [
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#美食[话题]#",
+            "data_topic_name": "美食",
+            "data_topic_raw": "{\"id\":\"571dbd6214de410a954e3552\",\"link\":\"xhsdiscover://topic/v2/5a438d9e8000860661720ae3\",\"name\":\"美食\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#美食[话题]#",
+            "data_topic_name": "美食",
+            "data_topic_raw": "{\"id\":\"571dbd6214de410a954e3552\",\"link\":\"xhsdiscover://topic/v2/5a438d9e8000860661720ae3\",\"name\":\"美食\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          }
+        ],
+        "login_box_count": 0,
+        "dropdown": {
+          "container_count": 0,
+          "container_visible": 0
+        }
+      },
+      "typed_ms": 105,
+      "dropdown_wait_trace": [
+        {
+          "t_ms": 1,
+          "container_visible": 1,
+          "item_count": 0
+        },
+        {
+          "t_ms": 103,
+          "container_visible": 1,
+          "item_count": 0
+        },
+        {
+          "t_ms": 216,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 322,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 463,
+          "container_visible": 0,
+          "item_count": 0
+        },
+        {
+          "t_ms": 567,
+          "container_visible": 1,
+          "item_count": 50
+        }
+      ],
+      "candidates": {
+        "container_count": 1,
+        "container_visible": 1,
+        "item_count": 50,
+        "container_html": "<div data-v-3bde8448=\"\" id=\"creator-editor-topic-container\" class=\"items\"><div data-v-3bde8448=\"\" class=\"item is-selected\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;68b860f3000000000501b0df&quot;,&quot;tagLocation&quot;:&quot;relative&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&quot;PageInstance&quot;,&quot;value&quot;:&quot;creator_service_platform&quot;}}}}\"><span data-v-3bde8448=\"\" class=\"name\">#穿搭bot</span><!----><span data-v-3bde8448=\"\" class=\"num\">26.6亿浏览</span></div><div data-v-3bde8448=\"\" class=\"item\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;6a55f4cf0000000001031b6f&quot;,&quot;tagLocation&quot;:&quot;relative&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impression&quot;},&quot;pointId&quot;:83688}},&quot;page&quot;:{&quot;type&quot;:&quot;Page&quot;,&quot;value&quot;:{&quot;pageInstance&quot;:{&quot;type&quot;:&quot;PageInstance&quot;,&quot;value&quot;:&quot;creator_service_platform&quot;}}}}\"><span data-v-3bde8448=\"\" class=\"name\">#穿搭暗号对一下</span><!----><span data-v-3bde8448=\"\" class=\"num\">8.2亿浏览</span></div><div data-v-3bde8448=\"\" class=\"item\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot",
+        "items_top10": [
+          {
+            "name": "#穿搭bot",
+            "text": "#穿搭bot\n26.6亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭暗号对一下",
+            "text": "#穿搭暗号对一下\n8.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭经验howto",
+            "text": "#穿搭经验howto\n4.8亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭",
+            "text": "#穿搭\n109.7亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭灵感",
+            "text": "#穿搭灵感\n63.5亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭技巧",
+            "text": "#穿搭技巧\n77.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭好物",
+            "text": "#穿搭好物\n19.3亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#穿搭夏季",
+            "text": "#穿搭夏季\n5.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#时尚穿搭",
+            "text": "#时尚穿搭\n142.2亿浏览",
+            "visible": true
+          },
+          {
+            "name": "#秋季穿搭",
+            "text": "#秋季穿搭\n活动话题·\n168.9亿浏览",
+            "visible": true
+          }
+        ]
+      },
+      "dropdown_appeared_without_action": true,
+      "clicked": {
+        "index": 3,
+        "name": "#穿搭",
+        "exact_match": true
+      },
+      "dropdown_close_trace": [
+        {
+          "t_ms": 1,
+          "container_visible": 0,
+          "container_count": 0,
+          "item_count": 0
+        }
+      ],
+      "dropdown_close_ms": 1,
+      "after": {
+        "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+        "editor_count": 1,
+        "editor_found": true,
+        "editor_role": "textbox",
+        "editor_class": "tiptap ProseMirror ProseMirror-focused",
+        "editor_text": "#旅行[话题]# #美食[话题]# #穿搭[话题]# ",
+        "editor_html_len": 835,
+        "anchor_count": 6,
+        "anchors": [
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#美食[话题]#",
+            "data_topic_name": "美食",
+            "data_topic_raw": "{\"id\":\"571dbd6214de410a954e3552\",\"link\":\"xhsdiscover://topic/v2/5a438d9e8000860661720ae3\",\"name\":\"美食\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#穿搭[话题]#",
+            "data_topic_name": "穿搭",
+            "data_topic_raw": "{\"id\":\"6262095f000000000101d36d\",\"link\":\"xhsdiscover://topic/v2/6262095f6399060001fc4a1c\",\"name\":\"穿搭\"}",
+            "in_tiptap_textbox": true,
+            "in_tiptap": true,
+            "inside_editor_root": true,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": "false"
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap ProseMirror ProseMirror-focused",
+                "role": "textbox",
+                "contenteditable": "true"
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "tiptap-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-content",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "editor-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "edit-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "publish-page-content-base",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#旅行[话题]#",
+            "data_topic_name": "旅行",
+            "data_topic_raw": "{\"id\":\"531d0427b4c4d657c9087aaf\",\"link\":\"xhsdiscover://topic/v2/5a438da08000860661720c4f\",\"name\":\"旅行\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#美食[话题]#",
+            "data_topic_name": "美食",
+            "data_topic_raw": "{\"id\":\"571dbd6214de410a954e3552\",\"link\":\"xhsdiscover://topic/v2/5a438d9e8000860661720ae3\",\"name\":\"美食\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          },
+          {
+            "text": "#穿搭[话题]#",
+            "data_topic_name": "穿搭",
+            "data_topic_raw": "{\"id\":\"6262095f000000000101d36d\",\"link\":\"xhsdiscover://topic/v2/6262095f6399060001fc4a1c\",\"name\":\"穿搭\"}",
+            "in_tiptap_textbox": false,
+            "in_tiptap": false,
+            "inside_editor_root": false,
+            "chain": [
+              {
+                "tag": "a",
+                "id": null,
+                "cls": "tiptap-topic",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "p",
+                "id": null,
+                "cls": "",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "info",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "scroll-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-area",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-container",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "image-preview",
+                "role": null,
+                "contenteditable": null
+              },
+              {
+                "tag": "div",
+                "id": null,
+                "cls": "preview-container",
+                "role": null,
+                "contenteditable": null
+              }
+            ]
+          }
+        ],
+        "login_box_count": 0,
+        "dropdown": {
+          "container_count": 0,
+          "container_visible": 0
+        }
+      },
+      "anchor_delta": 2,
+      "new_anchor_names": [
+        "旅行",
+        "美食",
+        "穿搭",
+        "旅行",
+        "美食",
+        "穿搭"
+      ],
+      "all_anchors_in_tiptap_textbox": false
+    }
+  ],
+  "error": null,
+  "landing_url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+  "login_box": {
+    "count": 0,
+    "visible": false
+  },
+  "before": {
+    "url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "editor_count": 1,
+    "editor_found": true,
+    "editor_role": "textbox",
+    "editor_class": "tiptap ProseMirror",
+    "editor_text": "\n",
+    "editor_html_len": 117,
+    "anchor_count": 0,
+    "anchors": [],
+    "login_box_count": 0,
+    "dropdown": {
+      "container_count": 0,
+      "container_visible": 0
+    }
+  },
+  "measured_at": "2026-11-11T17:31:11+0800"
+}

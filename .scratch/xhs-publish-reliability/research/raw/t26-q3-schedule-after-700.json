@@ -1,0 +1,736 @@
+{
+  "selectors": {
+    "title-container": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "title-max-suffix": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "max-suffix-any": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "suffix-any": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "suffix",
+          "text": "",
+          "attrs": {
+            "class": "suffix"
+          },
+          "visible": true,
+          "rect": [
+            794,
+            -664,
+            18,
+            32
+          ],
+          "html": "<div data-v-5b9fc8e0=\"\" class=\"suffix\"><!----></div>"
+        }
+      ]
+    },
+    "title-input": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "input",
+          "cls": "d-text",
+          "text": "",
+          "attrs": {
+            "class": "d-text",
+            "type": "text",
+            "placeholder": "填写标题会有更多赞哦",
+            "value": "",
+            "style": ""
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -660,
+            500,
+            24
+          ],
+          "html": "<input class=\"d-text\" type=\"text\" placeholder=\"填写标题会有更多赞哦\" value=\"\" style=\"\">"
+        }
+      ]
+    },
+    "edit-container": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "edit-container",
+          "text": "智能标题\n\n\n\n\n#vibecoding\n#视觉\n#花型设计\n#图形\n#会动的线条\n#灵感\n更多\n 话题\n 用户\n 表情\n0\n/1000",
+          "attrs": {
+            "class": "edit-container"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -664,
+            632,
+            286
+          ],
+          "html": "<div data-v-5c94c884=\"\" data-v-37fc793d=\"\" data-v-74e5df5a-s=\"\" data-v-7a28df78-s=\"\" class=\"edit-container\"><div data-v-5b9fc8e0=\"\" data-v-5c94c884=\"\" class=\"flex\"><div data-v-5b9fc8e0=\"\" class=\"input\"><div data-v-5b9fc8e0=\"\" class=\"d-input-wrapper d-inline-block c-input_inner\"><div class=\"d-input --color-text-title --color-bg-fill\"><!----><input class=\"d-text\" type=\"text\" placeholder=\"填写标题会有更多赞哦\" value=\"\" style=\"\"><!----><!----><!----></div><!----></div><div data-v-5b9fc8e0=\"\" class=\"suffix\"><!----></div></div><div data-v-5b9fc8e0=\"\" class=\"recommand-title-btn\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;n"
+        }
+      ]
+    },
+    "length-error": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "length-error-any": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "body-editor": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "tiptap ProseMirror",
+          "text": "",
+          "attrs": {
+            "role": "textbox",
+            "class": "tiptap ProseMirror",
+            "style": ""
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -616,
+            632,
+            140
+          ],
+          "html": "<div contenteditable=\"true\" role=\"textbox\" translate=\"no\" class=\"tiptap ProseMirror\" tabindex=\"0\" style=\"\"><p data-placeholder=\"输入正文描述，真诚有价值的分享予人温暖\" class=\"is-empty is-editor-empty\"><br class=\"ProseMirror-trailingBreak\"></p></div>"
+        }
+      ]
+    },
+    "post-time-wrapper": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "post-time-wrapper",
+          "text": "定时发布\n2026-11-11 19:55",
+          "attrs": {
+            "class": "post-time-wrapper"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            550,
+            632,
+            44
+          ],
+          "html": "<div data-v-2476ce24=\"\" data-v-37fc793d=\"\" data-v-74e5df5a-s=\"\" data-v-7a28df78-s=\"\" class=\"post-time-wrapper\"><div data-v-2476ce24=\"\" class=\"post-time-switch-container\"><div data-v-298c3e02=\"\" data-v-2476ce24=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\"><circle cx=\"7.99967\" cy=\"8.00065\" r=\"6.06667\" stroke=\"black\" stroke-opacity=\"0.7\" stroke-width=\"1.2\"></circle><path d=\"M7.33301 4.66602V7.99935C7.33301 8.36754 7.63148 8.66602 7.99967 8.66602H9.99967\" stroke=\"black\" stroke-opacity=\"0.7\" stro"
+        }
+      ]
+    },
+    "schedule-switch": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "d-switch d-clickable d-switch-default d-inline-block",
+          "text": "",
+          "attrs": {
+            "class": "d-switch d-clickable d-switch-default d-inline-block"
+          },
+          "visible": true,
+          "rect": [
+            564,
+            560,
+            40,
+            24
+          ],
+          "html": "<div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator hover checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" style=\"\" checked=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div>"
+        }
+      ]
+    },
+    "schedule-simulator": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "span",
+          "cls": "d-switch-simulator hover checked --color-bg-primary",
+          "text": "",
+          "attrs": {
+            "class": "d-switch-simulator hover checked --color-bg-primary"
+          },
+          "visible": true,
+          "rect": [
+            564,
+            560,
+            40,
+            24
+          ],
+          "html": "<span class=\"d-switch-simulator hover checked --color-bg-primary\"><input type=\"checkbox\" value=\"true\" style=\"\" checked=\"\"><span class=\"d-switch-indicator\"><!----></span></span>"
+        }
+      ]
+    },
+    "datepicker-filter": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "input",
+          "cls": "d-text",
+          "text": "",
+          "attrs": {
+            "class": "d-text",
+            "value": "2026-11-11 19:55"
+          },
+          "visible": true,
+          "rect": [
+            652,
+            562,
+            244,
+            20
+          ],
+          "html": "<input class=\"d-text\" value=\"2026-11-11 19:55\">"
+        }
+      ]
+    },
+    "datepicker-container": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "input",
+          "cls": "d-text",
+          "text": "",
+          "attrs": {
+            "class": "d-text",
+            "value": "2026-11-11 19:55"
+          },
+          "visible": true,
+          "rect": [
+            652,
+            562,
+            244,
+            20
+          ],
+          "html": "<input class=\"d-text\" value=\"2026-11-11 19:55\">"
+        }
+      ]
+    },
+    "publish-btn": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "xhs-publish-btn",
+          "cls": "",
+          "text": "",
+          "attrs": {},
+          "visible": true,
+          "rect": [
+            288,
+            630,
+            680,
+            90
+          ],
+          "html": "<xhs-publish-btn data-v-7a28df78=\"\" data-v-74e5df5a-s=\"\" is-publish=\"true\" is-save-draft=\"true\" submit-text=\"定时发布\" save-text=\"暂存离开\" submit-disabled=\"false\" submit-loading=\"false\" save-disabled=\"false\"></xhs-publish-btn>"
+        }
+      ]
+    },
+    "original-wrapper": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "original-wrapper",
+          "text": "原创声明",
+          "attrs": {
+            "class": "original-wrapper"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -194,
+            308,
+            44
+          ],
+          "html": "<div data-v-0cb8c711=\"\" class=\"original-wrapper\"><div data-v-298c3e02=\"\" data-v-0cb8c711=\"\" class=\"custom-switch-wrapper\"><div data-v-298c3e02=\"\" class=\"custom-switch-card\"><div data-v-298c3e02=\"\" class=\"custom-switch-icon\"><svg data-v-298c3e02=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M2.66699 8.5464V4.55449C2.66699 4.08567 2.95331 3.6644 3.38922 3.49185L7.5797 1.83312C7.84992 1.72616 8.15073 1.72616 8.42095 1.83312L12.6114 3.49185C13.0473 3.6644 13.3337 4.08567 13.3337 4.55449V8.5464C13.3337 9.89109 12.7457 11.1726 11.6873 12.0021C10.3499 13.0502 8.59188 14.3333 8.00033 14.3333C7.40877 14.33"
+        }
+      ]
+    },
+    "original-switch": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "d-switch d-clickable d-switch-default d-inline-block",
+          "text": "",
+          "attrs": {
+            "class": "d-switch d-clickable d-switch-default d-inline-block"
+          },
+          "visible": true,
+          "rect": [
+            564,
+            -184,
+            40,
+            24
+          ],
+          "html": "<div data-v-298c3e02=\"\" class=\"d-switch d-clickable d-switch-default d-inline-block\"><div class=\"d-switch-box\"><div class=\"d-switch-top\"><span class=\"d-switch-simulator unchecked --color-bg-fill\"><input type=\"checkbox\" value=\"true\" style=\"\"><span class=\"d-switch-indicator\"><!----></span></span><!----><!----><!----></div><!----></div></div>"
+        }
+      ]
+    },
+    "original-simulator": {
+      "count": 1,
+      "visible": 1,
+      "items": [
+        {
+          "tag": "span",
+          "cls": "d-switch-simulator unchecked --color-bg-fill",
+          "text": "",
+          "attrs": {
+            "class": "d-switch-simulator unchecked --color-bg-fill"
+          },
+          "visible": true,
+          "rect": [
+            564,
+            -184,
+            40,
+            24
+          ],
+          "html": "<span class=\"d-switch-simulator unchecked --color-bg-fill\"><input type=\"checkbox\" value=\"true\" style=\"\"><span class=\"d-switch-indicator\"><!----></span></span>"
+        }
+      ]
+    },
+    "declaration-select": {
+      "count": 4,
+      "visible": 4,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "d-select --color-text-title --color-bg-fill",
+          "text": "添加内容类型声明",
+          "attrs": {
+            "class": "d-select --color-text-title --color-bg-fill"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -134,
+            308,
+            44
+          ],
+          "html": "<div class=\"d-select --color-text-title --color-bg-fill\"><div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-fa1a9f1a=\"\" data-v-2710ae6d-s=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><g><path d=\"M12.7007 11.0385C12.7007 12.0912 11.5329 12.7242 10.6509 12.1496C9.18844 11.197 7.48188 10.6555 5.74798 10.6457C5.88934 11.6186 6.27107 12.5215 6.82229 13.1865C6.9985 13.3992 6.96899 13.7144 6.75637 13.8906C6.54376 14.0668 6.22856 14.0373 6.05235 13.8247C5.34396 12.9699 4.88647 11.836 4.73908 10.6455L4.70068 10.6455V10.6401H3.91732C3"
+        },
+        {
+          "tag": "div",
+          "cls": "d-select --color-text-title --color-bg-fill",
+          "text": "添加地点",
+          "attrs": {
+            "class": "d-select --color-text-title --color-bg-fill"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -26,
+            308,
+            44
+          ],
+          "html": "<div class=\"d-select --color-text-title --color-bg-fill\"><div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-02e14e2e=\"\" data-v-2710ae6d-s=\"\" xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M2 7.22452C2 8.27585 2.28127 9.28954 2.80723 10.1808C3.12611 10.7193 3.693 11.3625 4.41755 12.0632C5.14389 12.7657 6.03608 13.5329 7.01165 14.3192C7.5901 14.7819 8.41134 14.7821 8.98702 14.3195C9.95976 13.5365 10.8521 12.7695 11.5796 12.066C12.3053 11.3643 12.874 10.7191 13.1928 10.1801C14.1357 8.58366 14.272"
+        },
+        {
+          "tag": "div",
+          "cls": "d-select --color-text-title --color-bg-fill",
+          "text": "选择群聊",
+          "attrs": {
+            "class": "d-select --color-text-title --color-bg-fill"
+          },
+          "visible": true,
+          "rect": [
+            636,
+            -26,
+            308,
+            44
+          ],
+          "html": "<div class=\"d-select --color-text-title --color-bg-fill\"><div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-d6cac54a=\"\" data-v-2710ae6d-s=\"\" xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M6.66653 8.66667C8.50748 8.66667 9.99986 7.17428 9.99986 5.33333C9.99986 3.49238 8.50748 2 6.66653 2C4.82558 2 3.3332 3.49238 3.3332 5.33333C3.3332 7.17428 4.82558 8.66667 6.66653 8.66667ZM6.66653 7.46667C5.48832 7.46667 4.5332 6.51154 4.5332 5.33333C4.5332 4.15513 5.48832 3.2 6.66653 3.2C7.84474 3.2 8.79986 "
+        },
+        {
+          "tag": "div",
+          "cls": "d-select --color-text-title --color-bg-fill",
+          "text": "公开可见",
+          "attrs": {
+            "class": "d-select --color-text-title --color-bg-fill"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            490,
+            308,
+            44
+          ],
+          "html": "<div class=\"d-select --color-text-title --color-bg-fill\"><div class=\"d-grid d-select-main d-select-main-prefix-indicator --color-text-title\" style=\"display: grid;\"><div class=\"d-select-prefix --color-text-description\"><svg data-v-1af124b1=\"\" data-v-2710ae6d-s=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M3.99998 4.66667C3.99998 6.69171 5.6416 8.33333 7.66665 8.33333C9.69169 8.33333 11.3333 6.69171 11.3333 4.66667C11.3333 2.64162 9.69169 1 7.66665 1C5.6416 1 3.99998 2.64162 3.99998 4.66667ZM10.1333 4.66667C10.1333 6.02897 9.02895 7.13333 7.66665 7.13333C6.30434 7.13333 5.19998 6.02897 5.19998 4.66"
+        }
+      ]
+    },
+    "declaration-entry": {
+      "count": 4,
+      "visible": 3,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+          "text": "添加内容类型声明",
+          "attrs": {
+            "class": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+            "style": "width: 226px;"
+          },
+          "visible": true,
+          "rect": [
+            353,
+            -123,
+            226,
+            22
+          ],
+          "html": "<div class=\"d-text d-select-placeholder d-text-ellipsis d-text-nowrap\" style=\"width: 226px;\">添加内容类型声明</div>"
+        },
+        {
+          "tag": "div",
+          "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+          "text": "添加地点",
+          "attrs": {
+            "class": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+            "style": "width: 226px;"
+          },
+          "visible": true,
+          "rect": [
+            353,
+            -15,
+            226,
+            22
+          ],
+          "html": "<div class=\"d-text d-select-placeholder d-text-ellipsis d-text-nowrap\" style=\"width: 226px;\">添加地点</div>"
+        },
+        {
+          "tag": "div",
+          "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+          "text": "选择群聊",
+          "attrs": {
+            "class": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+            "style": "width: 226px;"
+          },
+          "visible": true,
+          "rect": [
+            677,
+            -15,
+            226,
+            22
+          ],
+          "html": "<div class=\"d-text d-select-placeholder d-text-ellipsis d-text-nowrap\" style=\"width: 226px;\">选择群聊</div>"
+        },
+        {
+          "tag": "div",
+          "cls": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+          "text": "",
+          "attrs": {
+            "class": "d-text d-select-placeholder d-text-ellipsis d-text-nowrap",
+            "style": "width: 226px;"
+          },
+          "visible": false,
+          "rect": [
+            353,
+            512,
+            226,
+            0
+          ],
+          "html": "<div class=\"d-text d-select-placeholder d-text-ellipsis d-text-nowrap\" style=\"width: 226px;\"></div>"
+        }
+      ]
+    },
+    "cover-stack": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "cover-entry": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "cover-img": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "modal": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    }
+  },
+  "scans": {
+    "edit-container": {
+      "root": "div.edit-container",
+      "total": 7,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "suffix",
+          "text": "",
+          "attrs": {
+            "class": "suffix"
+          },
+          "visible": true,
+          "rect": [
+            794,
+            -664,
+            18,
+            32
+          ],
+          "html": "<div data-v-5b9fc8e0=\"\" class=\"suffix\"><!----></div>"
+        },
+        {
+          "tag": "div",
+          "cls": "tiptap-container",
+          "text": "",
+          "attrs": {
+            "class": "tiptap-container"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -616,
+            632,
+            140
+          ],
+          "html": "<div data-v-00d687f8=\"\" class=\"tiptap-container\"><div contenteditable=\"true\" role=\"textbox\" translate=\"no\" class=\"tiptap ProseMirror\" tabindex=\"0\" style=\"\"><p data-placeholder=\"输入正文描述，真诚有价值的分享予人温暖\" class=\"is-empty is-editor-empty\"><br class=\"ProseMirror-trailingBreak\"></p></div></div>"
+        },
+        {
+          "tag": "div",
+          "cls": "tiptap ProseMirror",
+          "text": "",
+          "attrs": {
+            "role": "textbox",
+            "class": "tiptap ProseMirror",
+            "style": ""
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -616,
+            632,
+            140
+          ],
+          "html": "<div contenteditable=\"true\" role=\"textbox\" translate=\"no\" class=\"tiptap ProseMirror\" tabindex=\"0\" style=\"\"><p data-placeholder=\"输入正文描述，真诚有价值的分享予人温暖\" class=\"is-empty is-editor-empty\"><br class=\"ProseMirror-trailingBreak\"></p></div>"
+        },
+        {
+          "tag": "div",
+          "cls": "bottom",
+          "text": "#vibecoding\n#视觉\n#花型设计\n#图形\n#会动的线条\n#灵感\n更多",
+          "attrs": {
+            "class": "bottom"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -460,
+            626,
+            32
+          ],
+          "html": "<div data-v-00d687f8=\"\" class=\"bottom\"><div data-v-00d687f8=\"\" class=\"recommend-topic-wrapper\"><div data-v-461a49ca=\"\" data-v-00d687f8=\"\" class=\"tag-group\"><span data-v-461a49ca=\"\" class=\"tag\" data-impression=\"{&quot;noteTarget&quot;:{&quot;type&quot;:&quot;NoteTarget&quot;,&quot;value&quot;:{&quot;noteType&quot;:1,&quot;noteEditSource&quot;:1}},&quot;tagTarget&quot;:{&quot;type&quot;:&quot;TagTarget&quot;,&quot;value&quot;:{&quot;tagId&quot;:&quot;67c0e68e00000000040164b0&quot;,&quot;tagLocation&quot;:&quot;recommend&quot;}},&quot;event&quot;:{&quot;type&quot;:&quot;Event&quot;,&quot;value&quot;:{&quot;action&quot;:{&quot;type&quot;:&quot;NormalizedAction&quot;,&quot;value&quot;:&quot;impre"
+        },
+        {
+          "tag": "div",
+          "cls": "bottom-wrapper",
+          "text": "话题\n 用户\n 表情\n0\n/1000",
+          "attrs": {
+            "class": "bottom-wrapper"
+          },
+          "visible": true,
+          "rect": [
+            312,
+            -412,
+            632,
+            34
+          ],
+          "html": "<div data-v-5c94c884=\"\" class=\"bottom-wrapper\"><div data-v-5c94c884=\"\" class=\"btns\"><div data-v-5c94c884=\"\" class=\"topic-container\"><div data-v-5c94c884=\"\" class=\"topics\"><button data-v-5c94c884=\"\" id=\"topicBtn\" class=\"contentBtn topic-btn\"><svg data-v-5c94c884=\"\" width=\"16\" height=\"16\" viewBox=\"0 0 16 16\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M6.11819 2.49429C6.21349 2.13864 6.57905 1.92759 6.93469 2.02288C7.29033 2.11818 7.50139 2.48373 7.40609 2.83938L6.91675 4.66563H10.8696L11.451 2.49583C11.5463 2.14019 11.9119 1.92913 12.2675 2.02443C12.6231 2.11972 12.8342 2.48528 12.7389 2.84092L12.25 4.66563H13.4C13.7314 4.66563 14 4.93426 14 5.26563C14 5.597 13.7314 5.86563 13.4 5"
+        },
+        {
+          "tag": "div",
+          "cls": "editor-length-wrapper",
+          "text": "0\n/1000",
+          "attrs": {
+            "class": "editor-length-wrapper"
+          },
+          "visible": true,
+          "rect": [
+            893,
+            -412,
+            51,
+            34
+          ],
+          "html": "<div data-v-5c94c884=\"\" class=\"editor-length-wrapper\">0 <span data-v-5c94c884=\"\" class=\"max-length\">/1000</span></div>"
+        },
+        {
+          "tag": "span",
+          "cls": "max-length",
+          "text": "/1000",
+          "attrs": {
+            "class": "max-length"
+          },
+          "visible": true,
+          "rect": [
+            905,
+            -402,
+            35,
+            14
+          ],
+          "html": "<span data-v-5c94c884=\"\" class=\"max-length\">/1000</span>"
+        }
+      ]
+    },
+    "post-time-wrapper": {
+      "root": ".post-time-wrapper",
+      "total": 4,
+      "items": [
+        {
+          "tag": "span",
+          "cls": "has-tips",
+          "text": "定时发布",
+          "attrs": {
+            "class": "has-tips"
+          },
+          "visible": true,
+          "rect": [
+            352,
+            564,
+            56,
+            17
+          ],
+          "html": "<span data-v-298c3e02=\"\" class=\"has-tips\">定时发布</span>"
+        },
+        {
+          "tag": "div",
+          "cls": "d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title",
+          "text": "2026-11-11 19:55",
+          "attrs": {
+            "class": "d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title",
+            "style": "display: grid;"
+          },
+          "visible": true,
+          "rect": [
+            652,
+            560,
+            276,
+            24
+          ],
+          "html": "<div class=\"d-grid d-datepicker-main d-datepicker-main-suffix-indicator --color-text-title\" style=\"display: grid;\"><!----><div class=\"d-datepicker-content\"><!----><div class=\"d-datepicker-input-filter show\"><input class=\"d-text\" value=\"2026-11-11 19:55\"><div class=\"d-text d-text-nowrap d-datepicker-input-filter-shadow\">2026-11-11 19:55</div></div></div><div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div><div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg"
+        },
+        {
+          "tag": "div",
+          "cls": "d-datepicker-suffix --color-text-description",
+          "text": "",
+          "attrs": {
+            "class": "d-datepicker-suffix --color-text-description"
+          },
+          "visible": false,
+          "rect": [
+            904,
+            564,
+            0,
+            16
+          ],
+          "html": "<div class=\"d-datepicker-suffix --color-text-description\"><div class=\"d-text d-text-nowrap\"></div></div>"
+        },
+        {
+          "tag": "div",
+          "cls": "d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator",
+          "text": "",
+          "attrs": {
+            "class": "d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator"
+          },
+          "visible": true,
+          "rect": [
+            912,
+            564,
+            16,
+            16
+          ],
+          "html": "<div class=\"d-datepicker-suffix --color-text-description d-datepicker-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path fill-rule=\"evenodd\" clip-rule=\"evenodd\" d=\"M9 3C9 2.44772 8.55228 2 8 2C7.44772 2 7 2.44772 7 3H6C4.34315 3 3 4.34315 3 6V18C3 19.6569 4.34315 21 6 21H18C19.6569 21 21 19.6569 21 18V6C21 4.34315 19.6569 3 18 3H17C17 2.44772 16.5523 2 16 2C15.4477 2 15 2.44772 15 3H9ZM15 5H9V6C9 6.55228 8.55228 7 8 7C7.44772 7 7 6.55228 7 6V5H6C5.44772 5 5 5.44772 5 6V9H19V6C19 5.44772 18.5523 5 18 5H17V6C17 6.55228 16.5523 7 16 7C15.4477 7 15 6.55228 15 6V5ZM5 11H"
+        }
+      ]
+    },
+    "original-wrapper": {
+      "root": ".original-wrapper",
+      "total": 1,
+      "items": [
+        {
+          "tag": "span",
+          "cls": "has-tips",
+          "text": "原创声明",
+          "attrs": {
+            "class": "has-tips"
+          },
+          "visible": true,
+          "rect": [
+            352,
+            -180,
+            56,
+            17
+          ],
+          "html": "<span data-v-298c3e02=\"\" class=\"has-tips\">原创声明</span>"
+        }
+      ]
+    },
+    "cover-stack": {
+      "missing": true,
+      "root": ".cover-edit-stack"
+    },
+    "declaration-select": {
+      "root": ".publish-container .d-select",
+      "total": 1,
+      "items": [
+        {
+          "tag": "div",
+          "cls": "d-select-suffix --color-text-description d-select-suffix-indicator",
+          "text": "",
+          "attrs": {
+            "class": "d-select-suffix --color-text-description d-select-suffix-indicator"
+          },
+          "visible": true,
+          "rect": [
+            587,
+            -120,
+            16,
+            16
+          ],
+          "html": "<div class=\"d-select-suffix --color-text-description d-select-suffix-indicator\"><span class=\"d-icon --color-static --size-icon-default\"><svg width=\"100%\" height=\"100%\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M5.29289 8.29289C5.68342 7.90237 6.31658 7.90237 6.70711 8.29289L12 13.5858L17.2929 8.29289C17.6834 7.90237 18.3166 7.90237 18.7071 8.29289C19.0976 8.68342 19.0976 9.31658 18.7071 9.70711L12.7071 15.7071C12.3166 16.0976 11.6834 16.0976 11.2929 15.7071L5.29289 9.70711C4.90237 9.31658 4.90237 8.68342 5.29289 8.29289Z\" fill=\"currentColor\"></path></svg></span></div>"
+        }
+      ]
+    }
+  },
+  "_label": "q3-schedule-after-700",
+  "_url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+  "_len": {
+    "bodyText": "\n",
+    "bodyTextContent": "",
+    "bodyTextLen": 1,
+    "titleValue": "",
+    "titleLen": 0,
+    "titleMaxlength": null
+  }
+}

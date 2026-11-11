@@ -1,0 +1,156 @@
+{
+  "selectors": {
+    "title-container": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "title-max-suffix": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "max-suffix-any": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "suffix-any": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "title-input": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "edit-container": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "length-error": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "length-error-any": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "body-editor": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "post-time-wrapper": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "schedule-switch": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "schedule-simulator": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "datepicker-filter": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "datepicker-container": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "publish-btn": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "original-wrapper": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "original-switch": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "original-simulator": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "declaration-select": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "declaration-entry": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "cover-stack": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "cover-entry": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "cover-img": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    },
+    "modal": {
+      "count": 0,
+      "visible": 0,
+      "items": []
+    }
+  },
+  "scans": {
+    "edit-container": {
+      "missing": true,
+      "root": "div.edit-container"
+    },
+    "post-time-wrapper": {
+      "missing": true,
+      "root": ".post-time-wrapper"
+    },
+    "original-wrapper": {
+      "missing": true,
+      "root": ".original-wrapper"
+    },
+    "cover-stack": {
+      "missing": true,
+      "root": ".cover-edit-stack"
+    },
+    "declaration-select": {
+      "missing": true,
+      "root": ".publish-container .d-select"
+    }
+  },
+  "_label": "q5-original-before",
+  "_url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+  "_len": {
+    "bodyText": null,
+    "bodyTextContent": null,
+    "bodyTextLen": null,
+    "titleValue": null,
+    "titleLen": null,
+    "titleMaxlength": null
+  }
+}

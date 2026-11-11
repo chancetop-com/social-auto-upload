@@ -1,0 +1,990 @@
+{
+  "samples": [
+    {
+      "t": 0,
+      "pr": 2,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 5927,
+      "changedFrom": -1,
+      "snapshot": [
+        "<div data-v-1dbc6cff=\"\" class=\"pr\" data-draggable=\"true\"><div data-v-1dbc6cff=\"\" class=\"feature-guide-anchor\"><div data-v-1d1800ff=\"\" data-v-1dbc6cff=\"\" class=\"img-container\" aria-busy=\"false\"><div data-v-9d88f6a0=\"\" data-v-1d1800ff=\"\" class=\"format-img\"><img data-v-9d88f6a0=\"\" src=\"blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6\" alt=\"\" class=\"img preview\" style=\"object-fit: cover;\"></div><!----><div data-v-1d1800ff=\"\" class=\"img-idx\">1</div><!----><!----><div data-v-1d1800ff=\"\" class=\"mask hover-mask\"><div data-v-1d1800ff=\"\" class=\"close-btn hoverShow\"><svg data-v-1d1800ff=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\"><path data-v-1d1800ff=\"\" d=\"M2.91699 2.91699L11.083 11.083M11.083 2.91699L2.91699 11.083\" stroke=\"white\" stroke-width=\"1.16667\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path></svg></div><div data-v-1d1800ff=\"\" class=\"image-editor-control\"><div data-v-1d1800ff=\"\" class=\"image-editor-actions has-editor-info\"><button data-v-1d1800ff=\"\" type=\"button\" class=\"edit-btn\"> 编辑 </button><button data-v-1d1800ff=\"\" type=\"button\" class=\"image-editor-info-trigger\" aria-label=\"图片编辑器说明\"><svg data-v-1d1800ff=\"\" width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M5.13344 3.48612C5.13344 3.7546 4.9158 3.97224 4.64733 3.97224C4.37886 3.97224 4.16122 3.7546 4.16122 3.48612C4.16122 3.21765 4.37886 3.00001 4.64733 3.00001C4.9158 3.00001 5.13344 3.21765 5.13344 3.48612Z\" fill=\"currentColor\"></path><path d=\"M5.06999 4.44074C5.13871 4.50563 5.17172 4.59979 5.15857 4.69339L4.81218 6.99994L4.98793 6.95798C5.14461 6.92057 5.30195 7.01725 5.33936 7.17393C5.37677 7.33061 5.28008 7.48795 5.12341 7.52536L4.53156 7.66668C4.43775 7.68908 4.33893 7.66366 4.26758 7.59876C4.19622 7.53387 4.16157 7.43791 4.17499 7.3424L4.5237 5.01924L4.33495 5.05689C4.17698 5.0884 4.02337 4.98589 3.99186 4.82792C3.96034 4.66995 4.06286 4.51634 4.22083 4.48483L4.81268 4.36676",
+        "<div data-v-1dbc6cff=\"\" class=\"pr\" data-draggable=\"true\"><div data-v-1d1800ff=\"\" data-v-1dbc6cff=\"\" class=\"img-container\" aria-busy=\"false\"><div data-v-9d88f6a0=\"\" data-v-1d1800ff=\"\" class=\"format-img\"><img data-v-9d88f6a0=\"\" src=\"blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb\" alt=\"\" class=\"img preview\" style=\"object-fit: cover;\"></div><!----><div data-v-1d1800ff=\"\" class=\"img-idx\">2</div><!----><!----><div data-v-1d1800ff=\"\" class=\"mask hover-mask\"><div data-v-1d1800ff=\"\" class=\"close-btn hoverShow\"><svg data-v-1d1800ff=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\"><path data-v-1d1800ff=\"\" d=\"M2.91699 2.91699L11.083 11.083M11.083 2.91699L2.91699 11.083\" stroke=\"white\" stroke-width=\"1.16667\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path></svg></div><div data-v-1d1800ff=\"\" class=\"image-editor-control\"><div data-v-1d1800ff=\"\" class=\"image-editor-actions has-editor-info\"><button data-v-1d1800ff=\"\" type=\"button\" class=\"edit-btn\"> 编辑 </button><button data-v-1d1800ff=\"\" type=\"button\" class=\"image-editor-info-trigger\" aria-label=\"图片编辑器说明\"><svg data-v-1d1800ff=\"\" width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M5.13344 3.48612C5.13344 3.7546 4.9158 3.97224 4.64733 3.97224C4.37886 3.97224 4.16122 3.7546 4.16122 3.48612C4.16122 3.21765 4.37886 3.00001 4.64733 3.00001C4.9158 3.00001 5.13344 3.21765 5.13344 3.48612Z\" fill=\"currentColor\"></path><path d=\"M5.06999 4.44074C5.13871 4.50563 5.17172 4.59979 5.15857 4.69339L4.81218 6.99994L4.98793 6.95798C5.14461 6.92057 5.30195 7.01725 5.33936 7.17393C5.37677 7.33061 5.28008 7.48795 5.12341 7.52536L4.53156 7.66668C4.43775 7.68908 4.33893 7.66366 4.26758 7.59876C4.19622 7.53387 4.16157 7.43791 4.17499 7.3424L4.5237 5.01924L4.33495 5.05689C4.17698 5.0884 4.02337 4.98589 3.99186 4.82792C3.96034 4.66995 4.06286 4.51634 4.22083 4.48483L4.81268 4.36676C4.90537 4.34827 5.00127 4.37584 5.06999 4.44074Z\" fi"
+      ]
+    },
+    {
+      "t": 272,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629,
+      "changedFrom": 2,
+      "snapshot": [
+        "<div data-v-1dbc6cff=\"\" class=\"pr\" data-draggable=\"true\"><div data-v-1dbc6cff=\"\" class=\"feature-guide-anchor\"><div data-v-1d1800ff=\"\" data-v-1dbc6cff=\"\" class=\"img-container\" aria-busy=\"false\"><div data-v-9d88f6a0=\"\" data-v-1d1800ff=\"\" class=\"format-img\"><img data-v-9d88f6a0=\"\" src=\"blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6\" alt=\"\" class=\"img preview\" style=\"object-fit: cover;\"></div><!----><div data-v-1d1800ff=\"\" class=\"img-idx\">1</div><!----><!----><div data-v-1d1800ff=\"\" class=\"mask hover-mask\"><div data-v-1d1800ff=\"\" class=\"close-btn hoverShow\"><svg data-v-1d1800ff=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\"><path data-v-1d1800ff=\"\" d=\"M2.91699 2.91699L11.083 11.083M11.083 2.91699L2.91699 11.083\" stroke=\"white\" stroke-width=\"1.16667\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path></svg></div><div data-v-1d1800ff=\"\" class=\"image-editor-control\"><div data-v-1d1800ff=\"\" class=\"image-editor-actions has-editor-info\"><button data-v-1d1800ff=\"\" type=\"button\" class=\"edit-btn\"> 编辑 </button><button data-v-1d1800ff=\"\" type=\"button\" class=\"image-editor-info-trigger\" aria-label=\"图片编辑器说明\"><svg data-v-1d1800ff=\"\" width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M5.13344 3.48612C5.13344 3.7546 4.9158 3.97224 4.64733 3.97224C4.37886 3.97224 4.16122 3.7546 4.16122 3.48612C4.16122 3.21765 4.37886 3.00001 4.64733 3.00001C4.9158 3.00001 5.13344 3.21765 5.13344 3.48612Z\" fill=\"currentColor\"></path><path d=\"M5.06999 4.44074C5.13871 4.50563 5.17172 4.59979 5.15857 4.69339L4.81218 6.99994L4.98793 6.95798C5.14461 6.92057 5.30195 7.01725 5.33936 7.17393C5.37677 7.33061 5.28008 7.48795 5.12341 7.52536L4.53156 7.66668C4.43775 7.68908 4.33893 7.66366 4.26758 7.59876C4.19622 7.53387 4.16157 7.43791 4.17499 7.3424L4.5237 5.01924L4.33495 5.05689C4.17698 5.0884 4.02337 4.98589 3.99186 4.82792C3.96034 4.66995 4.06286 4.51634 4.22083 4.48483L4.81268 4.36676",
+        "<div data-v-1dbc6cff=\"\" class=\"pr\" data-draggable=\"true\"><div data-v-1d1800ff=\"\" data-v-1dbc6cff=\"\" class=\"img-container\" aria-busy=\"false\"><div data-v-9d88f6a0=\"\" data-v-1d1800ff=\"\" class=\"format-img\"><img data-v-9d88f6a0=\"\" src=\"blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb\" alt=\"\" class=\"img preview\" style=\"object-fit: cover;\"></div><!----><div data-v-1d1800ff=\"\" class=\"img-idx\">2</div><!----><!----><div data-v-1d1800ff=\"\" class=\"mask hover-mask\"><div data-v-1d1800ff=\"\" class=\"close-btn hoverShow\"><svg data-v-1d1800ff=\"\" width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\"><path data-v-1d1800ff=\"\" d=\"M2.91699 2.91699L11.083 11.083M11.083 2.91699L2.91699 11.083\" stroke=\"white\" stroke-width=\"1.16667\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path></svg></div><div data-v-1d1800ff=\"\" class=\"image-editor-control\"><div data-v-1d1800ff=\"\" class=\"image-editor-actions has-editor-info\"><button data-v-1d1800ff=\"\" type=\"button\" class=\"edit-btn\"> 编辑 </button><button data-v-1d1800ff=\"\" type=\"button\" class=\"image-editor-info-trigger\" aria-label=\"图片编辑器说明\"><svg data-v-1d1800ff=\"\" width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"transform: scaleX(1) scaleY(1);\"><path d=\"M5.13344 3.48612C5.13344 3.7546 4.9158 3.97224 4.64733 3.97224C4.37886 3.97224 4.16122 3.7546 4.16122 3.48612C4.16122 3.21765 4.37886 3.00001 4.64733 3.00001C4.9158 3.00001 5.13344 3.21765 5.13344 3.48612Z\" fill=\"currentColor\"></path><path d=\"M5.06999 4.44074C5.13871 4.50563 5.17172 4.59979 5.15857 4.69339L4.81218 6.99994L4.98793 6.95798C5.14461 6.92057 5.30195 7.01725 5.33936 7.17393C5.37677 7.33061 5.28008 7.48795 5.12341 7.52536L4.53156 7.66668C4.43775 7.68908 4.33893 7.66366 4.26758 7.59876C4.19622 7.53387 4.16157 7.43791 4.17499 7.3424L4.5237 5.01924L4.33495 5.05689C4.17698 5.0884 4.02337 4.98589 3.99186 4.82792C3.96034 4.66995 4.06286 4.51634 4.22083 4.48483L4.81268 4.36676C4.90537 4.34827 5.00127 4.37584 5.06999 4.44074Z\" fi",
+        "<div data-v-1dbc6cff=\"\" class=\"pr\" data-draggable=\"true\"><div data-v-1d1800ff=\"\" data-v-1dbc6cff=\"\" class=\"img-container\" aria-busy=\"false\"><div data-v-9d88f6a0=\"\" data-v-1d1800ff=\"\" class=\"format-img\"><img data-v-9d88f6a0=\"\" src=\"blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a\" alt=\"\" class=\"img preview\" style=\"object-fit: cover;\"></div><!----><div data-v-1d1800ff=\"\" class=\"img-idx\">3</div><div data-v-1d1800ff=\"\" class=\"mask uploading\"><div data-v-1d1800ff=\"\" class=\"progress-container\"><svg data-v-19062004=\"\" data-v-1d1800ff=\"\" width=\"20\" height=\"20\" viewBox=\"0 0 18 20\" fill=\"none\" class=\"spinner-red\"><path data-v-19062004=\"\" d=\"M10 18.75C10 19.4404 9.4382 20.0081 8.75323 19.922C7.47815 19.7618 6.24185 19.3567 5.11379 18.725C3.62095 17.8889 2.36759 16.6839 1.4736 15.225C0.579607 13.7661 0.0748843 12.1023 0.00771088 10.3926C-0.0594625 8.68292 0.31316 6.98461 1.08994 5.4601C1.86671 3.93559 3.02166 2.63589 4.4443 1.68531C5.86694 0.734728 7.50969 0.165073 9.21541 0.0308295C10.9211 -0.103414 12.6328 0.202246 14.1866 0.918571C15.3608 1.45986 16.4151 2.22197 17.2942 3.15935C17.7665 3.66291 17.6374 4.4511 17.0789 4.85688C16.5204 5.26266 15.745 5.12954 15.2522 4.64609C14.6393 4.04479 13.9253 3.551 13.1399 3.18893C11.9746 2.65168 10.6908 2.42244 9.41156 2.52312C8.13227 2.62381 6.90021 3.05105 5.83322 3.76398C4.76624 4.47691 3.90003 5.45169 3.31745 6.59507C2.73487 7.73846 2.4554 9.01219 2.50578 10.2945C2.55616 11.5767 2.93471 12.8246 3.6052 13.9187C4.27569 15.0129 5.21571 15.9167 6.33534 16.5437C7.0899 16.9663 7.90902 17.2536 8.75576 17.3961C9.43655 17.5106 10 18.0596 10 18.75Z\" fill=\"#FF2442\"></path></svg></div></div><!----><!----><!----></div><!----></div>"
+      ]
+    },
+    {
+      "t": 501,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 757,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 1001,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 1252,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 1501,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 1752,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 2002,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    },
+    {
+      "t": 2252,
+      "pr": 3,
+      "items": [
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "1\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/b6e42025-8efc-4ffe-ad7d-1f8381b2a5b6",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2543,
+          "desc": [
+            "div.feature-guide-anchor",
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask hover-mask",
+          "style": "",
+          "text": "2\n编辑",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/7f24bb0b-00a5-4ebe-870f-9f7e27b833fb",
+          "imgComplete": true,
+          "prog": [],
+          "htmlLen": 2484,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.hover-mask",
+            "div.close-btn.hoverShow",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]",
+            "div.image-editor-control",
+            "div.image-editor-actions.has-editor-info",
+            "button.edit-btn",
+            "button.image-editor-info-trigger"
+          ]
+        },
+        {
+          "cls": "pr",
+          "ariaBusy": null,
+          "imgContainerBusy": "false",
+          "maskCls": "mask uploading",
+          "style": "",
+          "text": "3",
+          "imgSrc": "blob:https://creator.xiaohongshu.com/db7ec845-9ed4-4818-a7e6-d489bc96231a",
+          "imgComplete": true,
+          "prog": [
+            {
+              "tag": "div",
+              "cls": "progress-container",
+              "now": null,
+              "text": ""
+            }
+          ],
+          "htmlLen": 1639,
+          "desc": [
+            "div.img-container",
+            "div.format-img",
+            "img.img.preview",
+            "div.img-idx",
+            "div.mask.uploading",
+            "div.progress-container",
+            "svg.[object.SVGAnimatedString]",
+            "path.[object.SVGAnimatedString]"
+          ]
+        }
+      ],
+      "entry": 1,
+      "inputs": 3,
+      "btn": {
+        "isPublish": "true",
+        "submitDisabled": "false"
+      },
+      "areaHtmlLen": 7629
+    }
+  ],
+  "mutations": [
+    {
+      "t": 162,
+      "type": "childList",
+      "target": "flex-list",
+      "added": [
+        "pr"
+      ],
+      "removed": 0,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 271,
+      "type": "childList",
+      "target": "img-container",
+      "added": [],
+      "removed": 1,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 271,
+      "type": "childList",
+      "target": "img-container",
+      "added": [
+        "mask uploading"
+      ],
+      "removed": 0,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 271,
+      "type": "childList",
+      "target": "img-container",
+      "added": [],
+      "removed": 1,
+      "attr": null,
+      "attrVal": null
+    },
+    {
+      "t": 271,
+      "type": "childList",
+      "target": "img-container",
+      "added": [
+        null
+      ],
+      "removed": 0,
+      "attr": null,
+      "attrVal": null
+    }
+  ],
+  "mutationsTotal": 5
+}

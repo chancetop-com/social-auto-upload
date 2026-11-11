@@ -1,0 +1,89 @@
+{
+  "ticket": 24,
+  "phase": "video-badfile-dom",
+  "failed_state": {
+    "submitDisabled": "true",
+    "isPublish": "true",
+    "uploadContent": false,
+    "titleInput": true,
+    "stageText": "上传失败\n检测到视频文件无视频流信息，请重新选择视频文件",
+    "uploadInputCount": 1
+  },
+  "failed_dom": {
+    "actionFound": true,
+    "actionOuter": "<span data-v-805d4d94=\"\" class=\"video-plugin-title-action\"><svg data-v-805d4d94=\"\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M5.00065 15.4155H4.37573C2.41968 15.4155 0.833984 13.8299 0.833984 11.8738C0.833984 9.91781 2.41958 8.33215 4.37557 8.33206L5.00065 8.33203C5.00065 5.83203 6.51229 3.33203 10.0007 3.33203C13.489 3.33203 15.0007 5.83203 15.0007 8.33222H15.6257C17.5817 8.33222 19.1673 9.91788 19.1673 11.8739C19.1673 13.8299 17.5817 15.4155 15.6257 15.4155H15.0007\" stroke=\"currentColor\" stroke-width=\"1.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path><path d=\"M9.55664 8.93359C9.80069 8.68954 10.1963 8.68959 10.4404 8.93359L",
+    "actionChain": [
+      {
+        "tag": "span",
+        "cls": "video-plugin-title-action",
+        "text": "重新上传"
+      },
+      {
+        "tag": "div",
+        "cls": "video-plugin-title",
+        "text": "视频文件\n重新上传"
+      },
+      {
+        "tag": "div",
+        "cls": "publish-page-content-media-content mt0",
+        "text": "视频文件\n重新上传\n视频文件.mp4\n上传失败\n检测到视频文件无视频流信息，请重新选择视频文件"
+      },
+      {
+        "tag": "div",
+        "cls": "publish-page-content-media",
+        "text": "视频文件\n重新上传\n视频文件.mp4\n上传失败\n检测到视频文件无视频流信息，请重新选择视频文件"
+      }
+    ],
+    "actionClickableClosest": null,
+    "errish": [
+      {
+        "tag": "div",
+        "cls": "style-override-container red-theme-override-container",
+        "text": "视频文件\n重新上传\n视频文件.mp4\n上传失败\n检测到视频文件无视频流信息，请重新选择视频文件\n设置封面\n默认截取第一帧作为封面。优质的封面会吸引更多人浏览笔记\n优质封面示例\n设置封面\n遇到问题?\n智能推荐封面\n\n基于视频内容与热门封面库，",
+        "outer": "<div data-v-74e5df5a=\"\" data-v-8d23ebcc=\"\" class=\"style-override-container red-theme-override-container\"><div data-v-8d23ebcc=\"\" data-v-74e5df5a-s=\"\" class=\"publish-page\"><div data-v-8d23ebcc=\"\" data-v-74e5df5a-s=\"\" class=\"publish-page-content\"><div data-v-8d23ebcc=\"\" data-v-74e5df5a-s=\"\" class=\"publish-page-content-media\"><div data-v-8d23ebcc=\"\" data-v-74e5df5a-s=\"\" class=\"publish-page-content-media-header\"><!----></div><div data-v-8d23ebcc=\"\" data-v-74e5df5a-s=\"\" class=\"publish-page-content-me"
+      },
+      {
+        "tag": "div",
+        "cls": "fail",
+        "text": "视频文件.mp4\n上传失败\n检测到视频文件无视频流信息，请重新选择视频文件",
+        "outer": "<div data-v-805d4d94=\"\" class=\"fail\"><div data-v-805d4d94=\"\" class=\"left\"><div data-v-805d4d94=\"\" class=\"name\">视频文件.mp4</div><div data-v-805d4d94=\"\" class=\"operator\"><div data-v-805d4d94=\"\" class=\"stage\"><img data-v-805d4d94=\"\" class=\"icon\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAsCAYAAAAehFoBAAACS0lEQVR4Xu1YQU7DMBDsUyrRSD0iPkBIisQJce6pRzjRD1TNT8pP+hQOReIYIR5gsnaMwnq9WTtxC6gjjVo13vXIGe/anUzOOCMd1DyfqtkiV1mxUhflg/l+e4nHnQxGYLFVs3LffNYNlZ96zFrN76Y4T3LolTMCCGESQuwix3lHB6zOMKGIWblL"
+      }
+    ],
+    "errorTextNodes": [
+      {
+        "text": "上传失败",
+        "parent": "div",
+        "parentCls": "stage"
+      },
+      {
+        "text": "检测到视频文件无视频流信息，请重新选择视频文件",
+        "parent": "div",
+        "parentCls": ""
+      },
+      {
+        "text": "视频上传失败，请重新上传",
+        "parent": "div",
+        "parentCls": "video-container-loading-text"
+      }
+    ],
+    "stageOuter": "<div data-v-805d4d94=\"\" class=\"stage\"><img data-v-805d4d94=\"\" class=\"icon\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAsCAYAAAAehFoBAAACS0lEQVR4Xu1YQU7DMBDsUyrRSD0iPkBIisQJce6pRzjRD1TNT8pP+hQOReIYIR5gsnaMwnq9WTtxC6gjjVo13vXIGe/anUzOOCMd1DyfqtkiV1mxUhflg/l+e4nHnQxGYLFVs3LffNYNlZ96zFrN76Y4T3LolTMCCGESQuwix3lHB6zOMKGIWblLtuJmVfteewSz4hX8jucbhGYlnp2JxucWzxsFSEQkT8U1nj8IpjQ5SRMzcjPqDQb+chImZx21EfUOdpMdieUe62HRVgQi0TEZYA1xrb26V+px4/5O0Y7Nl+4zksJVNs0BBxOEiT8+lcbbOy8EnsEYAMSAeDyGYtP6sT4HCvo9DqT4tDECLHyiu2ItpG9lVlRYn4MgOxyQECyaEgsxOJeXAlu4QQyvl37RPrEQg/P4WWN9PwBnVyKIp0/0cLGGnI+jyxkluotYsZpMeRvUin2iB4kt4DS3wjq/oa82OEBKyrMAvBFDyR09oy3hE2sxSDRnCXNHI4IYUmLBBtgesaKznL/EqpBbhU8seJbydIRorM+BuHEAfWLtc59oaWsWNo7KDSSIWzMWa0mJlrfm/huI2MewSvbw4xNr2RUNMdzYLrmm0YXYFjAxrLT0FYeMldjBIrq8jUqmnFEQr3IKZsUO6+lF62V5iRuLcPGVehfjJNbgWrEESnoDGYcVnj8KkIhIPjb7a24I9NEzzR8rdXBFkEJvxOzmhZg0kk0lit1gIfgzf2hjtKVvLRBft2Oqo6yoFHB21atv/L7S33+TwDP+I74AzsbuKy83z1sAAAAASUVORK5CYII=\"> 上传失败 <div data-v-805d4d94=\"\">检测到视频文件无视频流信息，请重新选择视频文件</div></div>"
+  },
+  "retry": {
+    "chooser": true,
+    "chooser_element": {
+      "tag": "input",
+      "accept": ".mp4,.mov,.flv,.f4v,.mkv,.rm,.rmvb,.m4v,.mpg,.mpeg,.ts",
+      "cls": "upload-input",
+      "multiple": false
+    },
+    "dispatched_valid": true,
+    "state_after_retry": {
+      "submitDisabled": "false",
+      "isPublish": "true",
+      "uploadContent": false,
+      "titleInput": true,
+      "stageText": "视频分辨率较低，建议上传1080P及以上分辨率的视频，有利于提升观看时长",
+      "uploadInputCount": 1
+    }
+  }
+}

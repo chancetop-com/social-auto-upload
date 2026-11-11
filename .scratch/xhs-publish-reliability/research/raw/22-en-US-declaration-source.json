@@ -1,0 +1,21 @@
+{
+  "navLang": "en-US",
+  "popovers": [
+    {
+      "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44 declaration-drop-down",
+      "text": "虚构演绎，仅供娱乐 笔记含AI合成内容 内容包含营销广告 内容来源声明"
+    },
+    {
+      "cls": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44",
+      "text": "自主拍摄 来源转载"
+    }
+  ],
+  "options": [
+    "虚构演绎，仅供娱乐",
+    "笔记含AI合成内容",
+    "内容包含营销广告",
+    "内容来源声明",
+    "自主拍摄",
+    "来源转载"
+  ]
+}
