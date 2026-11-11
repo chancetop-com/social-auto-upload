@@ -23,4 +23,4 @@
 - CLI 参数层仍不读取 `conf.LOCAL_CHROME_HEADLESS`；作用域已写入 `docs/install.md` 与 `docs/CLI.md`。
 - `docs/CLI.md` 的三列默认值与运行时参数说明回写为有头。
 - 16 平台 `check` 冒烟：**未验证（无真机环境）**（本地与托管均需要真实浏览器/账号）。
-- 离线回归：`python -m unittest discover -s tests -t .` → `Ran 1073 tests`；除 17 个改动前即存在的环境相关失败（`test_article_render` / `test_dayu_article` / `test_xueqiu_uploader`）外全绿。
+- 离线回归：`python -m unittest discover -s tests -t .` → `Ran 1073 tests`，`OK (skipped=2)`。
