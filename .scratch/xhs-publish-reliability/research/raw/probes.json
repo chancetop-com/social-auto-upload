@@ -1,0 +1,722 @@
+{
+  "account": "cookies/xiaohongshu_180.json",
+  "visits": {
+    "video": {
+      "requested": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video",
+      "status": 200,
+      "final_url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video",
+      "title": "小红书创作服务平台",
+      "probes": {
+        "xhs-publish-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "old-publish-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "any-发布-button": {
+          "error": "SyntaxError: Failed to execute 'querySelectorAll' on 'Document': 'button:has-text(\"发布\")' is not a valid selector."
+        },
+        "d-input-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "title-placeholder": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "textbox": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "tiptap": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "ql-editor": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "body-placeholder": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "topic-container-name": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "topic-anchor": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "upload-content": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "upload-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "img-preview": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "file-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "post-time-switch": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "custom-switch": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "switch-simulator": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "datepicker-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "d-datepicker-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "d-popover": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "feature-guide-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "login-box": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        }
+      }
+    },
+    "image": {
+      "requested": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+      "status": 200,
+      "final_url": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+      "title": "小红书创作服务平台",
+      "probes": {
+        "xhs-publish-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "old-publish-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "any-发布-button": {
+          "error": "SyntaxError: Failed to execute 'querySelectorAll' on 'Document': 'button:has-text(\"发布\")' is not a valid selector."
+        },
+        "d-input-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "title-placeholder": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "textbox": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "tiptap": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "ql-editor": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "body-placeholder": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "topic-container-name": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "topic-anchor": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "upload-content": {
+          "count": 1,
+          "visible": 1,
+          "tag": "div",
+          "attrs": {
+            "class": "upload-content"
+          },
+          "text": "上传图片，或写文字生成图片\n\n上传图片\n文字配图\n\n图片大小\n\n支持上传的图片大小，\n\n最大32MB的图片文件\n\n图片格式\n\n支持上传的图片格式，\n\n推荐使用p"
+        },
+        "upload-input": {
+          "count": 1,
+          "visible": 0,
+          "tag": "input",
+          "attrs": {
+            "class": "upload-input",
+            "type": "file",
+            "accept": ".jpg,.jpeg,.png,.webp"
+          },
+          "text": ""
+        },
+        "img-preview": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "file-input": {
+          "count": 1,
+          "visible": 0,
+          "tag": "input",
+          "attrs": {
+            "class": "upload-input",
+            "type": "file",
+            "accept": ".jpg,.jpeg,.png,.webp"
+          },
+          "text": ""
+        },
+        "post-time-switch": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "custom-switch": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "switch-simulator": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "datepicker-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "d-datepicker-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "d-popover": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "feature-guide-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "login-box": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        }
+      }
+    },
+    "official": {
+      "requested": "https://creator.xiaohongshu.com/publish/publish?source=official",
+      "status": 200,
+      "final_url": "https://creator.xiaohongshu.com/publish/publish?source=official",
+      "title": "小红书创作服务平台",
+      "probes": {
+        "xhs-publish-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "old-publish-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "any-发布-button": {
+          "error": "SyntaxError: Failed to execute 'querySelectorAll' on 'Document': 'button:has-text(\"发布\")' is not a valid selector."
+        },
+        "d-input-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "title-placeholder": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "textbox": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "tiptap": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "ql-editor": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "body-placeholder": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "topic-container-name": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "topic-anchor": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "upload-content": {
+          "count": 1,
+          "visible": 1,
+          "tag": "div",
+          "attrs": {
+            "class": "upload-content"
+          },
+          "text": "拖拽视频到此或点击上传\n\n上传视频\n\n视频大小\n\n支持时长4小时以内，\n\n最大20GB的视频文件\n\n视频格式\n\n支持常用视频格式，\n\n推荐使用mp4、mov\n\n"
+        },
+        "upload-input": {
+          "count": 1,
+          "visible": 0,
+          "tag": "input",
+          "attrs": {
+            "class": "upload-input",
+            "type": "file",
+            "accept": ".mp4,.mov,.flv,.f4v,.mkv,.rm,.rmvb,.m4v,.mpg,.mpeg,.ts"
+          },
+          "text": ""
+        },
+        "img-preview": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "file-input": {
+          "count": 1,
+          "visible": 0,
+          "tag": "input",
+          "attrs": {
+            "class": "upload-input",
+            "type": "file",
+            "accept": ".mp4,.mov,.flv,.f4v,.mkv,.rm,.rmvb,.m4v,.mpg,.mpeg,.ts"
+          },
+          "text": ""
+        },
+        "post-time-switch": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "custom-switch": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "switch-simulator": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "datepicker-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "d-datepicker-input": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "d-popover": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "feature-guide-btn": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        },
+        "login-box": {
+          "count": 0,
+          "visible": 0,
+          "tag": null,
+          "attrs": {},
+          "text": null
+        }
+      }
+    }
+  },
+  "editor": {
+    "url_before_upload": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "uploaded": true,
+    "url_after_upload": "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=image",
+    "probes": {
+      "xhs-publish-btn": {
+        "count": 1,
+        "visible": 1,
+        "tag": "xhs-publish-btn",
+        "attrs": {
+          "is-publish": "true",
+          "submit-disabled": "false"
+        },
+        "text": ""
+      },
+      "old-publish-btn": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "any-发布-button": {
+        "error": "SyntaxError: Failed to execute 'querySelectorAll' on 'Document': 'button:has-text(\"发布\")' is not a valid selector."
+      },
+      "d-input-input": {
+        "count": 1,
+        "visible": 1,
+        "tag": "input",
+        "attrs": {
+          "class": "d-text",
+          "type": "text",
+          "placeholder": "填写标题会有更多赞哦"
+        },
+        "text": ""
+      },
+      "title-placeholder": {
+        "count": 1,
+        "visible": 1,
+        "tag": "input",
+        "attrs": {
+          "class": "d-text",
+          "type": "text",
+          "placeholder": "填写标题会有更多赞哦"
+        },
+        "text": ""
+      },
+      "textbox": {
+        "count": 1,
+        "visible": 1,
+        "tag": "div",
+        "attrs": {
+          "contenteditable": "true",
+          "role": "textbox",
+          "class": "tiptap ProseMirror"
+        },
+        "text": ""
+      },
+      "tiptap": {
+        "count": 1,
+        "visible": 1,
+        "tag": "div",
+        "attrs": {
+          "contenteditable": "true",
+          "role": "textbox",
+          "class": "tiptap ProseMirror"
+        },
+        "text": ""
+      },
+      "ql-editor": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "body-placeholder": {
+        "count": 1,
+        "visible": 1,
+        "tag": "p",
+        "attrs": {
+          "data-placeholder": "输入正文描述，真诚有价值的分享予人温暖",
+          "class": "is-empty is-editor-empty"
+        },
+        "text": ""
+      },
+      "topic-container-name": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "topic-anchor": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "upload-content": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "upload-input": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "img-preview": {
+        "count": 1,
+        "visible": 1,
+        "tag": "div",
+        "attrs": {
+          "class": "pr"
+        },
+        "text": "1\n编辑"
+      },
+      "file-input": {
+        "count": 3,
+        "visible": 0,
+        "tag": "input",
+        "attrs": {
+          "type": "file",
+          "accept": ".jpg,.jpeg,.png,.webp"
+        },
+        "text": ""
+      },
+      "post-time-switch": {
+        "count": 1,
+        "visible": 1,
+        "tag": "div",
+        "attrs": {
+          "class": "d-switch d-clickable d-switch-default d-inline-block"
+        },
+        "text": ""
+      },
+      "custom-switch": {
+        "count": 3,
+        "visible": 3,
+        "tag": "div",
+        "attrs": {
+          "class": "custom-switch-card"
+        },
+        "text": "原创声明"
+      },
+      "switch-simulator": {
+        "count": 3,
+        "visible": 3,
+        "tag": "span",
+        "attrs": {
+          "class": "d-switch-simulator unchecked --color-bg-fill"
+        },
+        "text": ""
+      },
+      "datepicker-input": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "d-datepicker-input": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      },
+      "d-popover": {
+        "count": 6,
+        "visible": 1,
+        "tag": "div",
+        "attrs": {
+          "class": "d-popover d-popover-default d-dropdown --size-min-width-large custom-dropdown-44 declaration-drop-down"
+        },
+        "text": "虚构演绎，仅供娱乐笔记含AI合成内容内容包含营销广告内容来源声明"
+      },
+      "feature-guide-btn": {
+        "count": 1,
+        "visible": 1,
+        "tag": "button",
+        "attrs": {
+          "type": "button",
+          "class": "feature-guide__btn"
+        },
+        "text": "我知道了"
+      },
+      "login-box": {
+        "count": 0,
+        "visible": 0,
+        "tag": null,
+        "attrs": {},
+        "text": null
+      }
+    }
+  }
+}
