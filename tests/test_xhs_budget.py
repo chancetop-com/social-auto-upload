@@ -190,7 +190,7 @@ def _note_app(**overrides):
 # ---------------------------------------------------------------------------
 
 
-class StaticBudgetLiteralTests(unittest.TestCase):
+class Decision03BudgetLiteralTests(unittest.TestCase):
     """The acceptance gate from the ticket: ``rg "timeout=[0-9]"`` must be empty."""
 
     def _find(self, pattern: str) -> list[str]:
@@ -242,7 +242,7 @@ class StaticBudgetLiteralTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class WaitTimeoutShrinkTests(unittest.TestCase):
+class Decision03BudgetWaitShrinkTests(unittest.TestCase):
     def test_wait_timeout_shrinks_with_remaining_budget(self):
         app = _video_app()
         clock = FakeClock(start=1_000.0)
@@ -313,7 +313,7 @@ def _video_page(clock: FakeClock, *, advance_on_goto: float = 0.0, **overrides):
     return page, upload_input
 
 
-class VideoChainBudgetTests(unittest.TestCase):
+class Decision03BudgetVideoChainTests(unittest.TestCase):
     def setUp(self):
         patcher = _fast_humanize()
         patcher.start()
@@ -372,7 +372,7 @@ class VideoChainBudgetTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NoteChainBudgetTests(unittest.TestCase):
+class Decision03BudgetNoteChainTests(unittest.TestCase):
     def setUp(self):
         patcher = _fast_humanize()
         patcher.start()
@@ -434,7 +434,7 @@ class NoteChainBudgetTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class NotBeforeBudgetTests(unittest.TestCase):
+class Decision03BudgetNotBeforeTests(unittest.TestCase):
     def setUp(self):
         patcher = _fast_humanize()
         patcher.start()

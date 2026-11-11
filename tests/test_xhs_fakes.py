@@ -11,6 +11,9 @@ The fixtures are test infrastructure, so they need their own proof:
 * :class:`FakeClock` must replace the *module-level* ``time`` / ``asyncio``
   names without production code growing clock or sleep parameters.
 
+Fixtures only — they are shared by every ``Decision03``–``Decision13`` suite
+and deliberately carry no decision prefix of their own.
+
 All offline: no browser, no network.
 """
 

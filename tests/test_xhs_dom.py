@@ -151,7 +151,7 @@ class SpyBudget:
 # ---------------------------------------------------------------------------
 
 
-class AttachedRoleTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessAttachedTests(unittest.IsolatedAsyncioTestCase):
     async def test_single_connected_element_is_attached(self):
         loc = scripted(style=styles())
         self.assertEqual(await check(loc, "attached"), (True, None))
@@ -185,7 +185,7 @@ class AttachedRoleTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-class VisibleRoleTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessVisibleTests(unittest.IsolatedAsyncioTestCase):
     async def test_invisible_element_reports_zero_box(self):
         loc = scripted(visible=False, style=styles())
         self.assertEqual(await check(loc, "visible"), (False, "zero-box"))
@@ -232,7 +232,7 @@ class VisibleRoleTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-class InteractiveRoleTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessInteractiveTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_element_blocks(self):
         loc = scripted(enabled=False, style=styles(), hit={"self": True, "tag": "button"})
         self.assertEqual(await check(loc, "interactive"), (False, "disabled"))
@@ -319,7 +319,7 @@ class InteractiveRoleTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-class EditableRoleTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessEditableTests(unittest.IsolatedAsyncioTestCase):
     async def test_writable_input_is_editable(self):
         loc = scripted(style=styles(tag="input"))
         self.assertEqual(await check(loc, "editable"), (True, None))
@@ -356,7 +356,7 @@ class EditableRoleTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-class ResolveTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessResolveTests(unittest.IsolatedAsyncioTestCase):
     async def test_resolve_returns_first_candidate_with_kind(self):
         hit = scripted(name="#real")
         scope = FakeScope({"#first": scripted(count=0), "#real": hit})
@@ -447,7 +447,7 @@ class LateLocator(StrictLocator):
         return 1 if self._clock.now >= self._appear_at else 0
 
 
-class WaitResolvedTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessWaitTests(unittest.IsolatedAsyncioTestCase):
     async def test_polls_until_element_appears_on_virtual_clock(self):
         clock = FakeClock(start=100.0)
         scope = FakeScope({"#late": LateLocator(clock, appear_at=101.2)})
@@ -516,7 +516,7 @@ class QuietPage(RecordingPage):
         raise AssertionError(f"un-scripted page.evaluate({text!r})")
 
 
-class DomQuietTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessQuietTests(unittest.IsolatedAsyncioTestCase):
     async def test_returns_true_after_500ms_without_changes(self):
         clock = FakeClock()
         page = QuietPage([120, 520])
@@ -596,7 +596,7 @@ class DomQuietTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-class OverlayTests(unittest.IsolatedAsyncioTestCase):
+class Decision06ReadinessOverlayTests(unittest.IsolatedAsyncioTestCase):
     def _page(self, selectors):
         return RecordingPage(selectors=selectors)
 
@@ -704,7 +704,7 @@ class OverlayTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-class SharedLayerTests(unittest.TestCase):
+class Decision06ReadinessSharedLayerTests(unittest.TestCase):
     def test_no_platform_imports(self):
         forbidden = ("uploader", "sau_commands", "sau_cli", "conf")
         for module in (dom, controls):

@@ -9,6 +9,12 @@ from unittest.mock import AsyncMock, patch
 import uploader.xiaohongshu_uploader.main as xhs_main
 from utils.errors import PublishResultUnknownError
 
+# Decision map (spec U12 F): this legacy-file class mixes decisions, so it keeps
+# its name instead of a cosmetic rename. Methods anchor to:
+#   Decision03 (ARM/FIRE/OBSERVE deadlines), Decision10 (humanized typing),
+#   Decision11 (declarations / title defaults).
+
+
 
 class FakeLocator:
     def __init__(self, name, count=0, src=None, children=None):

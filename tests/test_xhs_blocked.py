@@ -125,7 +125,7 @@ def _note_app(**overrides):
 # ---------------------------------------------------------------------------
 
 
-class ClassifierPathTests(unittest.TestCase):
+class Decision07BlockedClassifierPathTests(unittest.TestCase):
     def test_xhs_rules_pin_the_paths_and_the_login_box(self):
         rules = xhs_main.XHS_BLOCKED_RULES
         self.assertEqual(rules.verification_paths, ("/website-login/captcha",))
@@ -280,7 +280,7 @@ class ClassifierPathTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class BlockedMessageTests(unittest.TestCase):
+class Decision07BlockedMessageTests(unittest.TestCase):
     def test_local_messages(self):
         self.assertEqual(
             xhs_main._blocked_message("login", "local", publish_attempted=False),
@@ -342,7 +342,7 @@ class BlockedMessageTests(unittest.TestCase):
                     self.assertNotIn(PUBLISH_ATTEMPTED_SUFFIX, base)
 
 
-class LoginRequiredErrorFieldTests(unittest.TestCase):
+class Decision07BlockedErrorFieldTests(unittest.TestCase):
     def test_legacy_positional_message_still_works(self):
         exc = LoginRequiredError("旧文案")
         self.assertEqual(str(exc), "旧文案")
@@ -372,7 +372,7 @@ class _LoginRedirectPage(RecordingPage):
         self.main_frame.url = LOGIN_URL
 
 
-class CheckpointTests(unittest.TestCase):
+class Decision07BlockedCheckpointTests(unittest.TestCase):
     def setUp(self):
         patcher = _fast_humanize()
         patcher.start()
@@ -449,7 +449,7 @@ class CheckpointTests(unittest.TestCase):
         self.assertIs(ctx.exception.publish_attempted, False)
 
 
-class LocalModeExitTests(unittest.TestCase):
+class Decision07BlockedLocalModeExitTests(unittest.TestCase):
     def setUp(self):
         patcher = _fast_humanize()
         patcher.start()
@@ -485,7 +485,7 @@ class LocalModeExitTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class DeletedCodeTests(unittest.TestCase):
+class Decision07BlockedDeletedCodeTests(unittest.TestCase):
     def setUp(self):
         self.source = Path(xhs_main.__file__).read_text(encoding="utf-8")
 

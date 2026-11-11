@@ -1021,17 +1021,19 @@ length   = ceil(weighted / 2)          # ≤ 20
 
 前置：`--no-publish` 已升级到 ARM 就绪（S5）；显式 `--debug`（默认关）；本地 cookie 有效。
 
-| # | 步骤 | 期望 |
-| --- | --- | --- |
-| 1 | 视频正路：`sau xiaohongshu upload-video --account <a> --file <mp4> --title T --no-publish` | 0；日志含 ARM 就绪行；命中日志 `xhs-publish-btn` |
-| 2 | 图文正路：2 张图 `upload-note … --no-publish` | 0；第 2 张经"+"瓦片/file chooser；逐瓦片完成态 + 静默复检通过 |
-| 3 | 定时正路：`--schedule <2h–14d>` | 到 ARM 就绪 0；**不验证**定时是否生效（§8.3 #3） |
-| 4 | 注入①：移走账号文件 | 10；**无** `browser session ready` 日志（证明未启浏览器） |
-| 5 | 注入②：改坏 `galaxy_creator_session_id` 一个字符（字段在、未过期） | 启浏览器 → C1 判 login → 10；stderr **不含** `publish_attempted=true` |
-| 6 | 注入③：假 mp4 | `div.fail` → 点击前 1；stderr 不含该行 |
-| 7 | 注入④（可选）：20MB PNG | 逐瓦片完成态正常；60s 不误杀 |
-| 8 | 真实发布（最小验收）：1 篇图文，不带 `--no-publish` | 0；URL 离开 `/publish/publish`；人工删除该笔记 |
-| 9 | 托管（可选）：有账号时重复 1/2 | 同本地；断言一条 `browser session ready` |
+| # | 步骤 | 期望 | 实际结果 |
+| --- | --- | --- | --- |
+| 1 | 视频正路：`sau xiaohongshu upload-video --account <a> --file <mp4> --title T --no-publish` | 0；日志含 ARM 就绪行；命中日志 `xhs-publish-btn` | 未验证（无真机环境） |
+| 2 | 图文正路：2 张图 `upload-note … --no-publish` | 0；第 2 张经"+"瓦片/file chooser；逐瓦片完成态 + 静默复检通过 | 未验证（无真机环境） |
+| 3 | 定时正路：`--schedule <2h–14d>` | 到 ARM 就绪 0；**不验证**定时是否生效（§8.3 #3） | 未验证（无真机环境） |
+| 4 | 注入①：移走账号文件 | 10；**无** `browser session ready` 日志（证明未启浏览器） | 未验证（无真机环境） |
+| 5 | 注入②：改坏 `galaxy_creator_session_id` 一个字符（字段在、未过期） | 启浏览器 → C1 判 login → 10；stderr **不含** `publish_attempted=true` | 未验证（无真机环境） |
+| 6 | 注入③：假 mp4 | `div.fail` → 点击前 1；stderr 不含该行 | 未验证（无真机环境） |
+| 7 | 注入④（可选）：20MB PNG | 逐瓦片完成态正常；60s 不误杀 | 未验证（无真机环境） |
+| 8 | 真实发布（最小验收）：1 篇图文，不带 `--no-publish` | 0；URL 离开 `/publish/publish`；人工删除该笔记 | 未验证（无真机环境） |
+| 9 | 托管（可选）：有账号时重复 1/2 | 同本地；断言一条 `browser session ready` | 未验证（无真机环境） |
+
+> 本次收尾环境没有账号、cookie 与桌面浏览器，**§9.3 全部行未执行**；以上「未验证」不是通过结论，不能当成真机证据。离线证据见 §9.4 的测试尾部日志。
 
 **明确不做**的注入：断网/恢复、改 URL/改选择器、真实发布后杀浏览器、真实验证码页面。
 
@@ -1044,6 +1046,18 @@ python -m unittest discover -s tests -t .
 ```
 
 验收证据：命令行尾部日志 + `--debug` 截图，结论回写本文件 §9.3 的"实际结果"列（实施时追加，不新建目录）。
+
+**2026-11-12 离线结果**（本机无真机环境，§9.3 全部未执行）：
+
+```text
+Ran 76 tests in 3.441s
+OK
+
+Ran 1447 tests in 111.967s
+OK (skipped=2)
+```
+
+（集成分支基线 1451 条；删除 5 条机制消失用例 + 新增 1 条 `PENDING` 守卫，净减 4。）
 
 ---
 

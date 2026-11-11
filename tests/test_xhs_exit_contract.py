@@ -6,10 +6,9 @@ One row = one failure type:
     scenario → exception / fields → expected exit code → stderr assertion
 
 The mirror only exercises scenarios that already work through
-``sau_cli.main()``.  Scenarios whose fields or stderr signal are not implemented
-yet live in :data:`PENDING`; the meta-tests below fail if a row is neither
-covered nor pending, so the ``PENDING`` registry can only shrink as tickets
-31–41 land.
+``sau_cli.main()``.  As of ticket 41 every spec §4 failure type has a row and
+:data:`PENDING` is empty; the meta-tests below fail if a row is neither covered
+nor pending.
 
 This file deliberately does **not** parse ``docs/CLI.md``: that file is a
 derived projection and must not define the contract (spec §4).
@@ -30,6 +29,7 @@ from unittest.mock import patch
 import sau_cli
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.dom import ElementUnusableError
 from utils.errors import (
     LoginRequiredError,
     PublishResultUnknownError,
@@ -193,6 +193,32 @@ ROWS: tuple[ExitRow, ...] = (
         stderr_contains=("上传失败",),
     ),
     ExitRow(
+        scenario="topic-mismatch",
+        expected_code=1,
+        outcome=_raises(
+            ElementUnusableError(
+                what="话题『旅行』",
+                role="interactive",
+                selector="#topic-item",
+                reason="topic-mismatch",
+                tried=[("#topic-item", None)],
+                elapsed_ms=520,
+                publish_clicked=False,
+            )
+        ),
+        stderr_contains=("topic-mismatch",),
+        stderr_excludes=("publish_attempted=true",),
+        note="topic readback mismatch before any click: definite non-publish",
+    ),
+    ExitRow(
+        scenario="metadata-failure",
+        expected_code=1,
+        outcome=_raises(ValueError("标题过长：当前 41 / 上限 40")),
+        stderr_contains=("标题过长",),
+        stderr_excludes=("publish_attempted=true",),
+        note="title/body/declaration/schedule readback failure before FIRE",
+    ),
+    ExitRow(
         scenario="fire-dispatch-exception",
         expected_code=9,
         outcome=_raises(
@@ -239,17 +265,10 @@ ROWS: tuple[ExitRow, ...] = (
     ),
 )
 
-#: Scenarios whose mechanism is not implemented yet.  Each entry names the
-#: ticket that will move the row into :data:`ROWS`; the meta-test keeps this
-#: list honest and it must be empty at ticket 41.
-PENDING: dict[str, str] = {
-    "topic-mismatch": (
-        "ticket 39: RuntimeError with reason=topic-mismatch / topic-multi-insert"
-    ),
-    "metadata-failure": (
-        "ticket 40: ValueError / ElementUnusableError metadata failure paths"
-    ),
-}
+#: Scenarios whose mechanism is not implemented yet.  Empty as of ticket 41:
+#: every spec §4 failure type now has a runnable row in :data:`ROWS`.
+PENDING: dict[str, str] = {}
+
 
 
 @dataclass(frozen=True)
@@ -296,7 +315,7 @@ def run_row(row: ExitRow) -> RunResult:
     )
 
 
-class ExitContractMirrorTests(unittest.TestCase):
+class Decision13ParityExitMirrorTests(unittest.TestCase):
     """One table-driven test over every covered row."""
 
     def test_every_covered_row_matches_the_contract(self):
@@ -333,7 +352,7 @@ class ExitContractMirrorTests(unittest.TestCase):
                     self.assertIsNone(result.propagated, row.scenario)
 
 
-class ExitContractRegistryTests(unittest.TestCase):
+class Decision13ParityExitRegistryTests(unittest.TestCase):
     """Meta-tests that keep the table honest as later tickets land."""
 
     def test_every_exit_code_in_the_contract_has_a_covered_row(self):
@@ -358,6 +377,12 @@ class ExitContractRegistryTests(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 self.assertTrue(reason.strip())
                 self.assertIn("ticket", reason.lower())
+
+    def test_pending_is_empty(self):
+        """Ticket 41 closure: no spec §4 row may remain unexecuted."""
+
+        self.assertEqual(PENDING, {}, "move the row into ROWS and delete its PENDING entry")
+
 
     def test_scenario_names_are_unique(self):
         names = [row.scenario for row in ROWS]

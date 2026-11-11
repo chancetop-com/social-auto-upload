@@ -81,7 +81,7 @@ sau xiaohongshu upload-note --account <name> \
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
-- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 两种模式下 `--account` 都被忽略：不参与身份、日志标签或 cookie 文件，身份由 `profile_id` 决定；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ```bash

@@ -85,14 +85,15 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 - `--schedule`：把发布时间交给平台，由平台在目标时间自动发布；
 - `--not-before`：在本地点发布前等待，发布动作仍由当前进程完成，适合需要人工保持登录态、平台不支持原生定时或希望统一控制提交时刻的场景。
 
-两者同时使用时，应让 `--not-before` 早于 `--schedule`；否则等待结束时平台侧定时时间可能已经过去，导致平台拒绝或立即发布。
+两者同时使用时，应让 `--not-before` 早于 `--schedule`；CLI 在 FIRE（点击发布）前复核平台侧的定时开关与时间值，若等待结束时平台侧定时时间已过、或回读不一致，直接退出 `1`（确定未发布），**不会**改成立即发布。
 
 注意事项：
 
 - 等待时间使用**本地时区**的墙钟时间，格式固定为 `YYYY-MM-DD HH:MM`；
 - 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
 - 主动等待不计入上传/发布超时预算；所有支持客户端发布闸门的平台都会把等待时长从 deadline 中顺延；
-- 使用 `--no-publish` / `--prepare-only` / `--draft` 时不会等待，也不会点击发布；
+- **禁止用 `--not-before` 做发布间隔或节流**：等待发生在填表之后、点击发布之前，浏览器与托管 Profile 全程被占用；节流、冷却与排程属于调用方 App（见[调度侧责任](#调度侧责任)）；
+- 使用 `--no-publish` / `--prepare-only` / `--draft` 时不会等待，也不会点击发布；小红书的 `--no-publish` 会跑到 ARM 就绪（见[小红书 CLI 子命令](#小红书-cli-子命令)）；
 - Bilibili 由 `biliup` 一次性完成上传和提交，无法在「填好表」和「点发布」之间插入等待，因此 `--not-before` 在启动 `biliup` 前生效。
 
 ## 发布超时预算（全平台）
@@ -104,7 +105,7 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 - 预算覆盖打开发布页、上传素材、填写标题/正文/标签、封面、声明、合集、定时设置、点击发布，以及等待平台确认；
 - **尚未点击发布**时超时：普通失败，CLI 退出 `1`，确定没有发布任何内容；
 - **已经点击发布**后超时：结果未知，CLI 退出 `9`，禁止自动重发；先到平台后台按标题与发布时间核对；
-- `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；
+- `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；**禁止用 `--not-before` 做发布间隔/节流**（等待期间浏览器与托管 Profile 被占用，节流属于调用方 App）；
 - 平台原有的素材上传/转码等长等待会收紧到剩余预算；点击后的短轮询可能有秒级收尾开销；
 - 各平台若还保留自己的短等待（如上传完成 600s、封面 120s），取“平台短等待”和“剩余总预算”的较小值；
 - Bilibili 是 `biliup` 单命令上传并提交，没有可区分的“点击发布”时刻；`--not-before` 在启动 `biliup` 前等待。命令本身同样受 15 分钟预算约束：命令启动后超时按结果未知退出 `9`，不会自动重发。
@@ -137,7 +138,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 
 | 参数 / 行为 | 本地 | MLX | AdsPower |
 | --- | --- | --- | --- |
-| `--account` | `login` / `check` / `upload-*` 必填；`verify` / `delete` 必填 | 可选；仅日志/结果标签，无身份或 cookie 语义 | 可选；纯兼容占位，仅日志/结果标签 |
+| `--account` | `login` / `check` / `upload-*` 必填；`verify` / `delete` 必填 | 忽略；身份由 `--profile-id` 决定（仅兼容占位） | 忽略；身份由 `--profile-id` 决定（仅兼容占位） |
 | `--folder-id` | 静默忽略 | 必填 | 注册但静默忽略；传值不报错、不告警 |
 | `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
 | 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
@@ -152,24 +153,29 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `article` | 本地工具 | 本地工具 | 本地工具 |
 
 - `--profile-id` 只校验 strip 后非空，不猜格式；Profile 不存在、被占用或内核未就绪交给服务端，按运行失败退出 `1`。
-- 托管模式下 `--account` 缺省取 `profile_id`，不会变成 cookie 文件名；它不参与登录或身份校验。
+- 托管模式下 `--account` **被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `profile_id` 决定。传了非空 `--account` 只会出现在启动日志的 `ignored=` 列表里。
+- 例外不变：`login`、`verify`、`delete` 仍必须 `--account`（`verify` / `delete` 始终本地执行）。
 - 注册范围：除 `bilibili` 外，所有平台的 `check` 与 `upload-*` 都接受 `--profile-id` / `--folder-id`；`login`、`verify`、`delete`、`article` 不注册这组参数。
 - 托管模式下 `sau <platform> login` 不带 flag 进入 `run()` 后拒绝并退出 `1`；显式带 `--profile-id` 时因 `login` 解析器未注册该 flag，argparse 退出 `2`。
 - 不打印模式 banner；`check` 成功只输出 `valid`，保持 stdout 可解析。
 
 ### 退出码
 
-| 码 | 含义 | 典型场景 |
-| --- | --- | --- |
-| `0` | 成功 | 上传已提交；check 已登录；Stop 失败但主操作成功（仅 warning） |
-| `1` | 运行失败 | Local API / Launcher 不可达、key 或 token 无效、Profile 不存在/被占用、CDP 连不上、上传失败、网络错误、双模式冲突、login/平台拒绝 |
-| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` 非法、本地缺 `--account`、未知子命令 |
-| `9` | 发布结果未知 | 发布点击已发出但未观察到成功页；**禁止自动重发**，需先人工核验 |
-| `10` | 需要登录 | 登录页、登录表单、验证码、2FA |
-| `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429；调度层退避重试 |
-| `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 |
+> **母本在规格**：完整契约表（按失败类型切分，含异常类型、`reason`、`publish_attempted` 字段与重跑规则）见 `.scratch/xhs-publish-reliability/spec.md` §4。本节只是派生投影，不能反向定义规格。
 
-- `11` 是 MLX 与 AdsPower 共用契约。**MLX 的 429 已由 `1` 改为 `11`**，这是本次改动中唯一改变 MLX 可观察行为的地方；调度层需要同步改为退避重试。
+| 码 | 含义 | 典型场景 | 调用方动作 |
+| --- | --- | --- | --- |
+| `0` | 成功 | 发布已提交；`--no-publish` / `--prepare-only` / `--draft` 已准备完成；`check` 已登录；Stop 失败但主操作成功（仅 warning） | 计数 +1、记录时刻 |
+| `1` | 运行失败（**确定未发布**） | Local API / Launcher 不可达、key/token 无效、Profile 不存在/被占用、CDP 连不上；双凭证冲突 / 不支持平台；登录探针结构异常或网络 5xx；ARM 就绪窗/预算耗尽；素材上传失败；话题插错/多插；元数据或定时回读失败；`login` 与平台拒绝 | 修正后可无条件重跑（冷却另议） |
+| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` 非法、本地缺 `--account`、静态参数冲突、未知子命令 | 修正参数 |
+| `9` | 发布结果未知 | 发布点击已发出（FIRE 后）但未在观察窗内确认离开发布页，或派发后异常；**帖子可能已存在** | **禁止自动重发**；先到平台后台按标题/素材/时间核对 |
+| `10` | 需要登录 / 人机验证 | 登录页、登录表单、验证码、2FA；本地运行前预检失败（账号文件缺失/失效）；`check` 确定未登录 | 点击前：排人工登录，登录后可直接重跑。点击后（stderr 另有 `publish_attempted=true`）：**先核对笔记是否存在** |
+| `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
+| `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
+
+**stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
+
+- `11` 是 MLX 与 AdsPower 共用契约。**MLX 的 429 已由 `1` 改为 `11`**；调度层需要同步改为退避重试。
 - CLI 不 sleep、不自动重试；429 由调度层处理。已成功的操作仅在 stop 阶段遇到 429 时只 warning，保持原退出码（通常 `0`）。
 - HTTP 200 + 业务 `code` 表示限流的情况官方未定义，暂按 `1`；待真实 AdsPower 冒烟（ticket 09）确认后再扩展。
 
@@ -194,10 +200,14 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 
 - 保证同一 Profile **不并发**；CLI 不加锁，也不做 active 预检。同一 Profile 的串行由调度 App 负责。
 - Profile 即身份；传错 `profile_id` 会直接操作另一个账号。CLI 只校验“已登录”，不校验账号是否匹配，调度侧承担该风险。
-- 收到退出码 `10` 时安排人工登录；托管模式不提供 CLI 登录。
-- 收到退出码 `9`（发布结果未知）时**禁止自动重发**；先到平台后台按标题、素材与发布时间核对原作品，已存在不要重发，不存在才可人工重试。
-- 收到退出码 `11`（429）时退避重试；CLI 自身不等待。
-- 收到退出码 `1` 时按运行失败处理，不要与登录失效或 429 混淆。
+- 收到 `0`：已发布，或 `--no-publish` / `--prepare-only` / `--draft` 已准备完成；计数 +1 并记录时刻。
+- 收到 `1`：确定未发布，可无条件重跑（冷却另议）；不要与登录失效或 429 混淆。
+- 收到 `9`：已派发但未确认成功，**帖子可能已存在**；**禁止自动重发**，先到平台后台核对，已存在不要重发，不存在才可人工重试。
+- 收到 `10`：
+  - stderr **有** `publish_attempted=true`：点击后才落登录/验证页，帖子可能已存在；**先核对**，再排人工登录。
+  - stderr **无**该行：点击前登录失效或运行前预检失败，**没有发布**；排人工登录，完成后可直接重跑。
+- 收到 `11`（429）：退避重试；CLI 自身不等待。
+- 托管模式不提供 CLI 登录。`--not-before` 不是节流手段：禁止用它制造发布间隔，节流/冷却/排程由调度 App 负责。
 - Stop 失败只 warning；主操作成功仍返回 `0`，调度侧负责清理可能残留的 Profile。
 - 跨机调度应在“桌面应用所在的那台机器”上远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
 
@@ -242,7 +252,7 @@ export MLX_API_TOKEN="<token>"
 # check：0=已登录，10=需要人工登录
 sau douyin check --folder-id <folder_id> --profile-id <profile_id>
 
-# 上传：--account 可省略，缺省用 profile_id 作为日志标签
+# 上传：--account 被忽略；身份由 --profile-id 决定
 sau douyin upload-video \
   --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
@@ -254,7 +264,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 ### MLX 专属参数与行为
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
-- `--account` 在 MLX 下可选，只是日志/结果标签；缺省值为 `profile_id`。它不参与登录或身份校验，也不决定 cookie 文件。
+- `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
 - `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；都不传即默认有头；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
@@ -289,7 +299,7 @@ export ADSPOWER_API_KEY="$KEY"
 # check：0=已登录，10=需要人工登录
 sau douyin check --profile-id <profile_id>
 
-# 上传：--account 可省略，缺省用 profile_id 作为日志标签
+# 上传：--account 被忽略；身份由 --profile-id 决定
 sau douyin upload-video \
   --profile-id <profile_id> \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
@@ -321,7 +331,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
-- `--account` 可选，仅日志/结果标签，缺省为 `profile_id`；它不会决定 cookie 文件。
+- `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
 - `--headless` 显式无头，V2 编码 `"1"`；`--headed`（默认）为 False，V2 编码 `"0"`；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
@@ -462,7 +472,7 @@ SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --acc
 | `--repost-source <媒体名称>` | 来源转载的媒体名称，仅与 `repost` 搭配 |
 | `--shoot-location <地点>` | 自主拍摄的拍摄地点，仅与 `self-shot` 搭配 |
 | `--shoot-date <YYYY-MM-DD>` | 自主拍摄的拍摄日期，仅与 `self-shot` 搭配 |
-| `--no-publish` | 填完内容并设置声明后停止，不点击发布，用于回归测试 |
+| `--no-publish` | 跑到 **ARM 就绪**（发布按钮存在、可点击且未被禁用/遮挡）后停止，不点击发布；用于回归测试与真机验收 |
 
 ```bash
 # 开启原创声明
@@ -494,21 +504,29 @@ sau xiaohongshu upload-video --account <account_name> \
 - `--repost-source` 只能与 `--content-type repost` 一起使用，且不能为空；
 - `--shoot-location` / `--shoot-date` 只能与 `--content-type self-shot` 一起使用，两者都必填，日期格式为 `YYYY-MM-DD`；
 - 以上组合错误会在启动浏览器前退出 `2`；
-- 声明设置失败只记 warning 并继续发布，不阻断上传；
-- 加 `--no-publish` 时，内容与声明设置完成后直接结束，不点击「发布」，适合有头回归验证。
+- **原创 `--original` 是硬闸**：点前读状态，未开则点击并确认须知；任一步失败退出 `1`（确定未发布）；
+- `--no-original` 与内容类型声明失败只记 warning 并继续，不阻断发布；封面设置失败同样 warning 并回退到视频首帧；
+- 加 `--no-publish` 时，内容、声明与定时设置完成后继续跑到 ARM 就绪（含 C1/C2/C3 与定时回读），不点击「发布」，也不等待 `--not-before`。
+
+### 小红书元数据与定时校验
+
+- 标题按小红书口径预检（UTF-16 加权：码元 >127 记 2，否则记 1，加总后除 2 向上取整），上限 **20**；显式超限在启动浏览器前退出 `1`，**绝不静默截断**；自动推导标题才会截到 ≤20 并记 warning。
+- 正文上限 **1000**，话题锚点按 `#name` 计入；正文 + 话题输入完成后若出现长度错误节点，退出 `1`。
+- `--schedule` 使用平台原生定时，时间格式 `YYYY-MM-DD HH:MM`；窗口为**本机墙上时间**的 `now + 2h < t <= now + 14d`（aware 输入的 offset 被忽略），越界在启动浏览器前退出 `1`。
+- 定时设置分三处回读：C1 点开关后查开关状态与时间输入存在；C2 写入并 `blur()` 后按分钟比对输入值；C3 在 ARM 就绪后、FIRE 前再证开关、值与「请求时间仍晚于本机现在」。任何不一致退出 `1`（确定未发布），不重试、不改成立即发布。
+- 回读只证明客户端接受了设置，**不证明服务端受理**；2h/14d 平台边界与定时是否真正生效仍需真机验证。
 
 ### 小红书发布超时
 
 小红书的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
 
-- 预算覆盖打开发布页、上传素材、填写标题/正文/标签、设置声明和封面、定时设置以及点击发布；
-- **尚未点击发布**时超时：退出 `1`，确定没有发布任何内容；
+- 预算覆盖打开发布页、上传素材、填写标题/正文/标签、设置声明和封面、定时设置、ARM 就绪等待以及点击发布；
+- **尚未点击发布**时超时（含 ARM 就绪窗/预算耗尽）：退出 `1`，确定没有发布任何内容；
 - **已经点击发布**后超时：退出 `9`，发布结果未知，禁止自动重发；先到创作服务平台 → 笔记管理按标题和发布时间核对；
 - 视频/图文的素材上传等待循环也使用同一个 deadline，不会无限挂起；
-- 发布点击后若出现「因违反社区规范禁止发笔记」「账号异常」「发布失败」等明确拒绝提示，会**立即退出 `1`**，不等待 15 分钟、不重试，并在错误信息中带上平台原文；
-- 「操作频繁」「请稍后再试」属于可恢复的限流提示，不立即失败，仍按原有逻辑重试，直到成功或 15 分钟预算耗尽；
-- 明确拒绝属于“确定未发布”，不是结果未知，不会返回 `9`；
-- `--no-publish` 在发布循环之前返回，不受该超时影响。
+- FIRE 之后只按 **URL path** 判定是否离开发布页，并先做登录/人机验证页分类；**不扫描页面文案**、不区分「明确拒绝」与「限流提示」、不做重试；
+- 15 秒观察窗内仍未离开 `/publish/publish`（且未命中登录/验证页）：退出 `9`；登录/验证页命中则退出 `10`，派发后带 stderr 行 `publish_attempted=true`；
+- `--no-publish` 跑到 ARM 就绪即返回，不进入 FIRE / OBSERVE，不受发布观察窗影响（仍受总预算约束）。
 
 ## Bilibili CLI 子命令
 

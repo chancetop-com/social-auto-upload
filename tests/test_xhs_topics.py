@@ -211,7 +211,7 @@ class TopicTestBase(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class TopicCandidateMatchTests(TopicTestBase):
+class Decision08TopicCandidateMatchTests(TopicTestBase):
     def _click_matching_position(self, position: int, total: int):
         env = TopicEnv()
         labels = [f"#热门{i}" for i in range(total)]
@@ -272,7 +272,7 @@ class TopicCandidateMatchTests(TopicTestBase):
         self.assertEqual(items[0].click_count, 1)
 
 
-class TopicReadinessTests(TopicTestBase):
+class Decision08TopicReadinessTests(TopicTestBase):
     def test_zero_item_shell_is_not_treated_as_ready(self):
         env = TopicEnv()
         items = env.set_labels(["#旅行"])
@@ -292,7 +292,7 @@ class TopicReadinessTests(TopicTestBase):
 # ---------------------------------------------------------------------------
 
 
-class TopicDegradeTests(TopicTestBase):
+class Decision08TopicDegradeTests(TopicTestBase):
     def test_no_candidate_keeps_plain_text_plus_one_space(self):
         env = TopicEnv()
         items = env.set_labels(["#旅行pov", "#旅行日常"])
@@ -324,7 +324,7 @@ class TopicDegradeTests(TopicTestBase):
         self.assertAlmostEqual(sum(clock.sleep_calls), 5.0, places=6)
 
 
-class TopicOutcomeTests(TopicTestBase):
+class Decision08TopicOutcomeTests(TopicTestBase):
     def _click_that_inserts(self, env: TopicEnv, *names: str):
         env.set_labels(["#旅行"])
 
@@ -460,7 +460,7 @@ class TagKeyboard(RecordingKeyboard):
             self.menu.set_items([TopicItem(label) for label in labels])
 
 
-class TopicBodyFormTests(TopicTestBase):
+class Decision08TopicBodyFormTests(TopicTestBase):
     def test_spec_example_body_keeps_text_then_adds_topic_chip(self):
         env = TopicEnv()
         env.page.keyboard = TagKeyboard(
@@ -505,7 +505,7 @@ class TopicBodyFormTests(TopicTestBase):
         self.assertEqual(rendered, "海边的日落\n#旅行 #治愈[话题]#")
 
 
-class TopicAmbiguityTests(TopicTestBase):
+class Decision08TopicAmbiguityTests(TopicTestBase):
     def test_multiple_full_equal_candidates_choose_first_and_log_info(self):
         env = TopicEnv()
         items = env.set_labels(["#旅行", "#旅行"])
@@ -521,7 +521,7 @@ class TopicAmbiguityTests(TopicTestBase):
         )
 
 
-class TopicBudgetTests(TopicTestBase):
+class Decision08TopicBudgetTests(TopicTestBase):
     def test_ready_window_is_clamped_to_remaining_budget(self):
         env = TopicEnv()
         env.menu.clear()
@@ -554,7 +554,7 @@ class TopicBudgetTests(TopicTestBase):
         self.assertAlmostEqual(clock.sleep_calls[-1], 0.05, delta=0.002)
 
 
-class TagCapTests(TopicTestBase):
+class Decision08TopicTagCapTests(TopicTestBase):
     def test_validation_caps_tags_and_names_dropped_items(self):
         tags = [f"tag{i}" for i in range(12)]
         app = self.app(tags)
@@ -585,7 +585,7 @@ class TagCapTests(TopicTestBase):
         self.assertEqual(typed, [f"#{tag}" for tag in tags])
 
 
-class TagCapCliTests(unittest.TestCase):
+class Decision08TopicTagCapCliTests(unittest.TestCase):
     def _args(self, count: int = 12):
         return SimpleNamespace(
             action="upload-video",
