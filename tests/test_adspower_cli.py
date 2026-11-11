@@ -316,7 +316,7 @@ class ParameterMatrixTests(unittest.TestCase):
         self.assertEqual(fake.probe_calls, 0)
         self.assertEqual(err.getvalue(), "")
 
-    def test_account_is_optional_and_label_defaults_to_profile(self):
+    def test_account_is_optional_and_ignored_in_favour_of_profile(self):
         factory = MagicMock(
             return_value=_AsyncCM(SimpleNamespace(context=object()))
         )
@@ -348,8 +348,47 @@ class ParameterMatrixTests(unittest.TestCase):
                 browser_command.resolve_account_label(
                     Namespace(profile_id=PROFILE, account="creator")
                 ),
-                "creator",
+                PROFILE,
             )
+
+    def test_managed_account_is_reported_as_an_ignored_key(self):
+        with _env(ADSPOWER_API_KEY=KEY):
+            self.assertEqual(
+                browser_command.managed_ignored_keys(
+                    Namespace(profile_id=PROFILE, account="creator")
+                ),
+                ("account",),
+            )
+            self.assertEqual(
+                browser_command.managed_ignored_keys(
+                    Namespace(profile_id=PROFILE, account=None)
+                ),
+                (),
+            )
+            self.assertEqual(
+                browser_command.managed_ignored_keys(
+                    Namespace(profile_id=PROFILE, account="  ")
+                ),
+                (),
+            )
+        # Local mode keeps --account, so nothing is ignored there.
+        self.assertEqual(
+            browser_command.managed_ignored_keys(Namespace(account="creator")),
+            (),
+        )
+
+    def test_local_only_actions_keep_requiring_account(self):
+        # login/verify/delete never gain the "ignore --account" behaviour.
+        with _env(ADSPOWER_API_KEY=KEY):
+            for action in ("verify", "delete"):
+                with self.subTest(action=action):
+                    with self.assertRaises(UsageError):
+                        browser_command.require_account(
+                            Namespace(action=action, account=None)
+                        )
+                    browser_command.require_account(
+                        Namespace(action=action, account="creator")
+                    )
 
     def test_headed_maps_to_headless_false_and_default_is_false(self):
         parser = sau_cli.build_parser()

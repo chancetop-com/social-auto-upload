@@ -19,6 +19,7 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Iterable,
     Literal,
     Mapping,
 )
@@ -53,13 +54,73 @@ _CONNECTION_HINTS = {
     ),
 }
 
+#: Managed mode cannot apply the local launch/context options: the Profile owns
+#: the fingerprint, UI language and timezone.  The message lists key names only.
+MANAGED_IGNORED_WARNING = (
+    "托管模式忽略本地浏览器参数：{keys}"
+    "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置"
+)
 
-def _provider_label(mode: str) -> str:
+#: Options accepted by ``browser_session`` that a managed run silently drops.
+_IGNORED_OPTION_NAMES = (
+    "launch_kwargs",
+    "context_kwargs",
+    "init_script",
+    "context_setup",
+)
+
+
+def provider_label(mode: str) -> str:
+    """Return the product name shown to users for a session mode."""
     return _PROVIDER_LABELS.get(mode, mode)
+
+
+def _ignored_option_names(
+    *,
+    launch_kwargs: Mapping[str, Any] | None,
+    context_kwargs: Mapping[str, Any] | None,
+    init_script: bool,
+    context_setup: Callable[..., Any] | None,
+    extra: Iterable[str] = (),
+) -> tuple[str, ...]:
+    """Return the non-empty local-only options a managed run would drop.
+
+    Empty values (``False`` / ``{}`` / ``None``) are not dropped content, so
+    they never appear in the warning or the startup log.  ``extra`` carries
+    caller-known drops such as the CLI ``--account`` flag.
+    """
+    values = {
+        "launch_kwargs": launch_kwargs,
+        "context_kwargs": context_kwargs,
+        "init_script": init_script,
+        "context_setup": context_setup,
+    }
+    names = [name for name in _IGNORED_OPTION_NAMES if bool(values[name])]
+    names.extend(name for name in extra if name)
+    return tuple(names)
 
 
 def _connection_hint(mode: str) -> str:
     return _CONNECTION_HINTS.get(mode, "")
+
+
+def _startup_line(
+    *,
+    mode: str,
+    headless: bool,
+    identity: str,
+    ignored: tuple[str, ...],
+    extras: tuple[str, ...] = (),
+) -> str:
+    """Build the single "session is ready" line both modes log once per run."""
+    fields = (
+        f"mode={mode}",
+        f"headless={'headless' if headless else 'headed'}",
+        f"identity={identity}",
+        f"ignored={', '.join(ignored) if ignored else '-'}",
+        *extras,
+    )
+    return "browser session ready: " + ", ".join(fields)
 
 
 def _endpoint_display(url: str) -> str:
@@ -80,14 +141,26 @@ def _port_display(url: str) -> str:
 
 
 def _mlx_folder_id(provider: ManagedBrowserProvider) -> str:
-    """Read the MLX folder id back for its legacy lifecycle log line.
+    """Read the MLX folder id shown in the managed startup line.
 
     The generic protocol only guarantees ``profile_id``; MLX's provider also
-    exposes its target, and its pre-refactor log line included ``folder_id``.
+    exposes its target, and the startup line keeps reporting ``folder_id``.
     """
     target = getattr(provider, "target", None)
     value = getattr(target, "folder_id", "")
     return str(value) if value is not None else ""
+
+
+def _managed_extras(
+    provider: ManagedBrowserProvider, connect_url: str
+) -> tuple[str, ...]:
+    """Provider-specific startup fields: MLX keeps folder/port, others endpoint."""
+    if provider.mode == "multilogin":
+        return (
+            f"folder_id={_mlx_folder_id(provider)}",
+            f"port={_port_display(connect_url)}",
+        )
+    return (f"endpoint={_endpoint_display(connect_url)}",)
 
 
 @dataclass(slots=True)
@@ -115,12 +188,18 @@ async def browser_session(
         ["BrowserContext"], Awaitable["BrowserContext | None"]
     ]
     | None = None,
+    extra_ignored: Iterable[str] = (),
 ) -> AsyncIterator[BrowserSession]:
     """Acquire a browser context for either local or managed browser mode.
 
     ``managed is None`` → existing local ``launch`` / ``new_context`` /
     ``storage_state`` behaviour.  Otherwise the provider starts its profile,
     the session attaches over CDP, and the profile is stopped on exit.
+
+    Managed mode cannot apply ``launch_kwargs`` / ``context_kwargs`` /
+    ``init_script`` / ``context_setup``; each non-empty one is reported once in
+    a warning and in the startup line.  ``extra_ignored`` lets a caller report
+    further keys it dropped itself (the CLI passes ``"account"``).
     """
 
     if managed is None:
@@ -136,10 +215,21 @@ async def browser_session(
             yield session
         return
 
+    ignored = _ignored_option_names(
+        launch_kwargs=launch_kwargs,
+        context_kwargs=context_kwargs,
+        init_script=init_script,
+        context_setup=context_setup,
+        extra=extra_ignored,
+    )
+    if ignored:
+        logger.warning(MANAGED_IGNORED_WARNING.format(keys=", ".join(ignored)))
+
     async with _managed_session(
         playwright,
         headless=headless,
         provider=managed,
+        ignored=ignored,
     ) as session:
         yield session
 
@@ -186,6 +276,13 @@ async def _local_session(
         if prepared is not None:
             context = prepared
 
+    identity = (
+        f"account_file:{account_file}" if account_file is not None else "account_file:-"
+    )
+    logger.info(
+        _startup_line(mode="local", headless=headless, identity=identity, ignored=())
+    )
+
     completed = False
     try:
         yield BrowserSession(browser=browser, context=context, mode="local")
@@ -206,6 +303,7 @@ async def _managed_session(
     *,
     headless: bool,
     provider: ManagedBrowserProvider,
+    ignored: tuple[str, ...] = (),
 ) -> AsyncIterator[BrowserSession]:
     # Probe and Start happen before the try block on purpose: if Start fails the
     # profile may belong to somebody else, so we must never Stop it.  The one
@@ -218,20 +316,6 @@ async def _managed_session(
     except StartIncompleteError:
         await _stop_profile(provider)
         raise
-    if provider.mode == "multilogin":
-        logger.info(
-            "Multilogin Profile 已启动：profile_id={} folder_id={} port={}",
-            provider.profile_id,
-            _mlx_folder_id(provider),
-            _port_display(connect_url),
-        )
-    else:
-        logger.info(
-            "{} Profile 已启动：profile_id={} endpoint={}",
-            _provider_label(provider.mode),
-            provider.profile_id,
-            _endpoint_display(connect_url),
-        )
 
     browser: "Browser | None" = None
     try:
@@ -249,6 +333,15 @@ async def _managed_session(
                 f"（期望 1，实际 {len(contexts)}）："
                 f"mode={provider.mode}，profile_id={provider.profile_id}"
             )
+        logger.info(
+            _startup_line(
+                mode=provider.mode,
+                headless=headless,
+                identity=f"profile:{provider.profile_id}",
+                ignored=ignored,
+                extras=_managed_extras(provider, connect_url),
+            )
+        )
         yield BrowserSession(
             browser=browser,
             context=contexts[0],
@@ -301,7 +394,7 @@ async def _connect_over_cdp(
             f"Profile 状态：{status_text}。{_connection_hint(provider.mode)}"
         )
 
-    label = _provider_label(provider.mode)
+    label = provider_label(provider.mode)
     raise RuntimeError(
         f"无法通过 CDP 连接 {label} Profile"
         f"（mode={provider.mode}，profile_id={provider.profile_id}，"
@@ -325,7 +418,7 @@ async def _disconnect(browser: "Browser", mode: str) -> None:
         else:
             logger.warning(
                 "断开 {} 浏览器连接失败：{}；已上传结果不受影响。",
-                _provider_label(mode),
+                provider_label(mode),
                 exc,
             )
 
@@ -339,7 +432,7 @@ async def _stop_profile(provider: ManagedBrowserProvider) -> None:
     else:
         logger.info(
             "正在停止 {} Profile：profile_id={}",
-            _provider_label(provider.mode),
+            provider_label(provider.mode),
             provider.profile_id,
         )
     try:
@@ -360,10 +453,10 @@ async def _stop_profile(provider: ManagedBrowserProvider) -> None:
             logger.warning(
                 "停止 {} Profile 失败（profile_id={}）：{}；"
                 "Profile 可能仍在运行，需调度侧清理。",
-                _provider_label(provider.mode),
+                provider_label(provider.mode),
                 provider.profile_id,
                 exc,
             )
 
 
-__all__ = ["BrowserSession", "browser_session"]
+__all__ = ["BrowserSession", "browser_session", "provider_label"]

@@ -1322,7 +1322,8 @@ class TiktokUploadCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         request = builder.call_args.args[0]
-        self.assertEqual(request.account_label, "creator")
+        # Managed runs label with profile_id; --account is ignored (ticket 30).
+        self.assertEqual(request.account_label, "profile")
         self.assertEqual(request.tags, ["one", "two"])
         self.assertEqual(request.publish_date, datetime(2026, 11, 5, 10, 30))
         self.assertEqual(request.thumbnail_file, thumbnail)

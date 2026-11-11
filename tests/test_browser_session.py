@@ -9,6 +9,7 @@ that touching a forbidden Playwright API fails loudly.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import unittest
 from pathlib import Path
@@ -22,7 +23,7 @@ from tests.fakes import (
     FakePlaywright,
     ForbiddenApiError,
 )
-from utils.browser_session import BrowserSession, browser_session
+from utils.browser_session import BrowserSession, browser_session, provider_label
 from utils.multilogin import MultiloginProvider, MultiloginTarget
 
 TOKEN = "ticket15-secret-token"
@@ -32,6 +33,20 @@ PROFILE_ID = "33333333-3333-4333-8333-333333333333"
 
 def run(coro):
     return asyncio.run(coro)
+
+
+class ProviderLabelTests(unittest.TestCase):
+    def test_each_mode_has_its_own_product_label(self):
+        # AdsPower must never be presented as Multilogin: the label is the only
+        # product name several error/warning lines show to the user.
+        self.assertEqual(provider_label("multilogin"), "Multilogin")
+        self.assertEqual(provider_label("adspower"), "AdsPower")
+        self.assertEqual(provider_label("local"), "local")
+
+    def test_provider_label_is_public_and_has_no_private_alias(self):
+        module = importlib.import_module("utils.browser_session")
+        self.assertIn("provider_label", module.__all__)
+        self.assertFalse(hasattr(module, "_provider_label"))
 
 
 class LocalBrowserSessionTests(unittest.TestCase):
@@ -463,7 +478,7 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         warning.assert_called_once()
         self.assertEqual(client.stop_calls, [PROFILE_ID])
 
-    def test_start_log_matches_legacy_mlx_wording(self):
+    def test_start_log_matches_single_startup_line(self):
         events: list[str] = []
         client = FakeMultiloginClient(events=events)
         playwright = FakePlaywright(events=events)
@@ -479,14 +494,17 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         with patch("utils.browser_session.logger.info") as info:
             run(scenario())
 
+        startup = [
+            call
+            for call in info.call_args_list
+            if str(call.args[0]).startswith("browser session ready: ")
+        ]
+        self.assertEqual(len(startup), 1)
         self.assertEqual(
-            info.call_args_list[0].args,
-            (
-                "Multilogin Profile 已启动：profile_id={} folder_id={} port={}",
-                PROFILE_ID,
-                FOLDER_ID,
-                "55513",
-            ),
+            startup[0].args[0],
+            "browser session ready: mode=multilogin, headless=headless, "
+            f"identity=profile:{PROFILE_ID}, ignored=-, "
+            f"folder_id={FOLDER_ID}, port=55513",
         )
 
     def test_contexts_error_matches_legacy_mlx_wording(self):
@@ -707,6 +725,255 @@ class ManagedSessionSeamTests(unittest.TestCase):
         )
         self.assertEqual(provider.start_calls, [True])
         self.assertEqual(provider.stop_calls, 1)
+
+
+class ManagedIgnoredKeysTests(unittest.TestCase):
+    """Managed mode drops local browser options; the user must be told once."""
+
+    FULL_WARNING = (
+        "托管模式忽略本地浏览器参数：launch_kwargs, context_kwargs, init_script"
+        "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置"
+    )
+
+    def _run_managed(self, **kwargs):
+        events: list[str] = []
+        provider = FakeManagedProvider(
+            mode="adspower", profile_id="profile-1", events=events
+        )
+        playwright = FakePlaywright(events=events)
+        playwright.chromium.queue_connect_browser(
+            FakeBrowser(
+                [FakeContext(events=events)],
+                allow_new_context=False,
+                events=events,
+            )
+        )
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=True, managed=provider, **kwargs
+            ):
+                pass
+
+        run(scenario())
+
+    def test_non_empty_managed_options_warn_once_with_key_names_only(self):
+        with patch("utils.browser_session.logger.warning") as warning:
+            self._run_managed(
+                launch_kwargs={"channel": "chromium"},
+                context_kwargs={"locale": "zh-CN"},
+                init_script=True,
+            )
+
+        warning.assert_called_once()
+        message = warning.call_args.args[0]
+        self.assertEqual(message, self.FULL_WARNING)
+        # Key names only: no option values ever reach the log.
+        self.assertNotIn("chromium", message)
+        self.assertNotIn("zh-CN", message)
+
+    def test_empty_values_do_not_count_as_ignored(self):
+        with patch("utils.browser_session.logger.warning") as warning:
+            self._run_managed(
+                launch_kwargs={},
+                context_kwargs=None,
+                init_script=False,
+                context_setup=None,
+            )
+
+        warning.assert_not_called()
+
+    def test_context_setup_counts_as_an_ignored_key(self):
+        async def context_setup(context):
+            return context
+
+        with patch("utils.browser_session.logger.warning") as warning:
+            self._run_managed(context_setup=context_setup)
+
+        warning.assert_called_once()
+        self.assertEqual(
+            warning.call_args.args[0],
+            "托管模式忽略本地浏览器参数：context_setup"
+            "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置",
+        )
+
+    def test_extra_ignored_keys_join_the_single_warning_and_startup_log(self):
+        with (
+            patch("utils.browser_session.logger.warning") as warning,
+            patch("utils.browser_session.logger.info") as info,
+        ):
+            self._run_managed(
+                launch_kwargs={"channel": "chromium"},
+                extra_ignored=("account",),
+            )
+
+        warning.assert_called_once()
+        self.assertEqual(
+            warning.call_args.args[0],
+            "托管模式忽略本地浏览器参数：launch_kwargs, account"
+            "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置",
+        )
+        startup = [
+            call
+            for call in info.call_args_list
+            if str(call.args[0]).startswith("browser session ready: ")
+        ]
+        self.assertEqual(len(startup), 1)
+        self.assertIn("ignored=launch_kwargs, account,", startup[0].args[0])
+
+    def test_local_mode_with_the_same_options_never_warns(self):
+        playwright = FakePlaywright()
+
+        async def scenario():
+            async with browser_session(
+                playwright,
+                headless=True,
+                account_file="/tmp/cookie.json",
+                launch_kwargs={"channel": "chromium"},
+                context_kwargs={"locale": "zh-CN"},
+                init_script=True,
+            ):
+                pass
+
+        with (
+            patch("utils.browser_session.logger.warning") as warning,
+            patch(
+                "utils.browser_session.set_init_script",
+                new=AsyncMock(side_effect=lambda ctx: ctx),
+            ),
+        ):
+            run(scenario())
+
+        warning.assert_not_called()
+
+
+class StartupLogTests(unittest.TestCase):
+    """Exactly one startup line per run, in both modes, with fixed fields."""
+
+    STARTUP_PREFIX = "browser session ready: "
+
+    def _startup_calls(self, info):
+        return [
+            call
+            for call in info.call_args_list
+            if str(call.args[0]).startswith(self.STARTUP_PREFIX)
+        ]
+
+    def _run_local(self, *, headless=True, account_file="/tmp/cookie.json"):
+        playwright = FakePlaywright()
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=headless, account_file=account_file
+            ):
+                pass
+
+        run(scenario())
+
+    def test_local_startup_log_has_mode_headless_identity_and_ignored(self):
+        with patch("utils.browser_session.logger.info") as info:
+            self._run_local(headless=False)
+
+        startup = self._startup_calls(info)
+        self.assertEqual(len(startup), 1)
+        self.assertEqual(
+            startup[0].args[0],
+            "browser session ready: mode=local, headless=headed, "
+            "identity=account_file:/tmp/cookie.json, ignored=-",
+        )
+
+    def test_local_headless_labelling(self):
+        with patch("utils.browser_session.logger.info") as info:
+            self._run_local(headless=True)
+
+        startup = self._startup_calls(info)
+        self.assertEqual(len(startup), 1)
+        self.assertIn("headless=headless,", startup[0].args[0])
+
+    def test_local_without_account_file_still_reports_identity(self):
+        with patch("utils.browser_session.logger.info") as info:
+            self._run_local(headless=True, account_file=None)
+
+        startup = self._startup_calls(info)
+        self.assertEqual(len(startup), 1)
+        self.assertIn("identity=account_file:-", startup[0].args[0])
+
+    def test_mlx_startup_log_folds_the_legacy_profile_line(self):
+        events: list[str] = []
+        provider = MultiloginProvider(
+            MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID),
+            FakeMultiloginClient(events=events),
+        )
+        playwright = FakePlaywright(events=events)
+        playwright.chromium.queue_connect_browser(
+            FakeBrowser(
+                [FakeContext(events=events)],
+                allow_new_context=False,
+                events=events,
+            )
+        )
+
+        async def scenario():
+            async with browser_session(
+                playwright,
+                headless=False,
+                managed=provider,
+                launch_kwargs={"channel": "chromium"},
+                context_kwargs={"locale": "zh-CN"},
+                init_script=True,
+            ):
+                pass
+
+        with patch("utils.browser_session.logger.info") as info:
+            run(scenario())
+
+        startup = self._startup_calls(info)
+        self.assertEqual(len(startup), 1)
+        self.assertEqual(
+            startup[0].args[0],
+            "browser session ready: mode=multilogin, headless=headed, "
+            f"identity=profile:{PROFILE_ID}, "
+            "ignored=launch_kwargs, context_kwargs, init_script, "
+            f"folder_id={FOLDER_ID}, port=55513",
+        )
+        self.assertFalse(
+            any("Profile 已启动" in str(call) for call in info.call_args_list)
+        )
+
+    def test_adspower_startup_log_reports_endpoint_and_ignored_dash(self):
+        ws_url = "ws://127.0.0.1:9222/devtools/browser/abc"
+        events: list[str] = []
+        provider = FakeManagedProvider(
+            mode="adspower",
+            profile_id="profile-1",
+            connect_url=ws_url,
+            events=events,
+        )
+        playwright = FakePlaywright(events=events)
+        playwright.chromium.queue_connect_browser(
+            FakeBrowser(
+                [FakeContext(events=events)],
+                allow_new_context=False,
+                events=events,
+            )
+        )
+
+        async def scenario():
+            async with browser_session(
+                playwright, headless=False, managed=provider
+            ):
+                pass
+
+        with patch("utils.browser_session.logger.info") as info:
+            run(scenario())
+
+        startup = self._startup_calls(info)
+        self.assertEqual(len(startup), 1)
+        self.assertEqual(
+            startup[0].args[0],
+            "browser session ready: mode=adspower, headless=headed, "
+            "identity=profile:profile-1, ignored=-, endpoint=127.0.0.1:9222",
+        )
 
 
 if __name__ == "__main__":
