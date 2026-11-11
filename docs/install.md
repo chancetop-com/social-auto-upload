@@ -77,8 +77,7 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`
-- `LOCAL_CHROME_HEADLESS`
-- `DEBUG_MODE`
+- `LOCAL_CHROME_HEADLESS`：只影响**直接调用 uploader / examples** 时的默认无头行为；CLI 参数层不读取该配置，CLI 默认有头，需要无头请显式传 `--headless`。
 
 `XHS_SERVER` 目前只和小红书旧流程相关。
 
