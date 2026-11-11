@@ -937,7 +937,7 @@ class FacebookCliTests(_CliBase):
             tags=[],
             account_file=None,
             proxy=None,
-            headless=True,
+            headless=False,
         )
         fake_app.main.assert_awaited_once_with(session=session_cm.value)
         resolve_account.assert_not_called()

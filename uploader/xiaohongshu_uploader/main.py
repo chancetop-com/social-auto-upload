@@ -14,7 +14,7 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
@@ -477,7 +477,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         publish_date: datetime | int,
         account_file,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
         original_declaration: bool | None = None,
         content_type: str | None = None,
@@ -993,7 +993,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         thumbnail_path=None,
         desc: str | None = None,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
         original_declaration: bool | None = None,
         content_type: str | None = None,
@@ -1258,7 +1258,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         title: str | None = None,
         desc: str | None = None,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
         original_declaration: bool | None = None,
         content_type: str | None = None,

@@ -13,7 +13,7 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import DEBUG_MODE, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
@@ -480,7 +480,7 @@ class KSBaseUploader(BaseVideoUploader):
         publish_date: datetime | int,
         account_file,
         publish_strategy: str | None = None,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
     ):
         self.publish_date = publish_date
@@ -621,7 +621,7 @@ class KSVideo(KSBaseUploader):
         publish_date: datetime | int,
         account_file,
         publish_strategy: str | None = None,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
         thumbnail_path=None,
         desc: str | None = None,
@@ -908,7 +908,7 @@ class KSNote(KSBaseUploader):
         account_file,
         title: str | None = None,
         publish_strategy: str | None = None,
-        debug: bool = DEBUG_MODE,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
     ):
         super().__init__(

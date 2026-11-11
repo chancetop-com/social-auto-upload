@@ -390,7 +390,7 @@ class WeiBoVideo(BaseVideoUploader):
         desc: str | None = None,
         thumbnail_path: str | None = None,
         collection_name: str | None = None,
-        debug: bool = True,
+        debug: bool = False,
         headless: bool = LOCAL_CHROME_HEADLESS,
     ):
         self.title = title

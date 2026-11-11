@@ -351,7 +351,7 @@ class ParameterMatrixTests(unittest.TestCase):
                 "creator",
             )
 
-    def test_headed_maps_to_headless_false_and_default_is_true(self):
+    def test_headed_maps_to_headless_false_and_default_is_false(self):
         parser = sau_cli.build_parser()
         default_args = parser.parse_args(
             ["douyin", "check", "--profile-id", PROFILE]
@@ -359,8 +359,12 @@ class ParameterMatrixTests(unittest.TestCase):
         headed_args = parser.parse_args(
             ["douyin", "check", "--profile-id", PROFILE, "--headed"]
         )
-        self.assertTrue(default_args.headless)
+        headless_args = parser.parse_args(
+            ["douyin", "check", "--profile-id", PROFILE, "--headless"]
+        )
+        self.assertFalse(default_args.headless)
         self.assertFalse(headed_args.headless)
+        self.assertTrue(headless_args.headless)
 
     def test_headed_is_forwarded_to_provider_start(self):
         fake = FakeAdspowerClient()

@@ -464,7 +464,7 @@ class UploadNoteParserTests(unittest.TestCase):
         self.assertEqual(args.images, [first, second])
         self.assertEqual(args.folder_id, "folder")
         self.assertEqual(args.profile_id, "profile")
-        self.assertTrue(args.headless)
+        self.assertFalse(args.headless)
         self.assertIsNone(args.account)
         self.assertIsNone(args.schedule)
 
@@ -1050,7 +1050,7 @@ class UploadNoteCliTests(unittest.TestCase):
             f"TikTok note upload submitted: {len(images)} images", out
         )
         setup.assert_awaited_once_with(
-            str(account_file), handle=False, headless=True
+            str(account_file), handle=False, headless=False
         )
         self.assertEqual(builder.call_args.args[0].account_file, account_file)
         app.upload.assert_awaited_once_with(playwright)
