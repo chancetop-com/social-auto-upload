@@ -81,8 +81,10 @@ class RecordingPage:
     def __init__(self):
         self.keyboard = RecordingKeyboard()
         self.locators = {
-            'input[placeholder*="填写标题"]': RecordingLocator("title"),
-            'p[data-placeholder*="输入正文描述"]': RecordingLocator("desc"),
+            "div.d-input input": RecordingLocator("title"),
+            'div.tiptap[role="textbox"][contenteditable="true"]': RecordingLocator(
+                "desc"
+            ),
             '#creator-editor-topic-container': RecordingLocator("topic-container"),
             '#creator-editor-topic-container .item': RecordingLocator("topic-item"),
         }
@@ -269,11 +271,11 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         asyncio.run(app.fill_meta(page))
 
         self.assertEqual(
-            page.locators['input[placeholder*="填写标题"]'].actions,
+            page.locators["div.d-input input"].actions,
             [("fill", "标题内容")],
         )
         self.assertEqual(
-            page.locators['p[data-placeholder*="输入正文描述"]'].actions,
+            page.locators['div.tiptap[role="textbox"][contenteditable="true"]'].actions,
             [("click",)],
         )
         self.assertIn(("type", "描述内容", None), page.keyboard.actions)
@@ -296,7 +298,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         asyncio.run(app.fill_meta(page))
 
         self.assertEqual(
-            page.locators['p[data-placeholder*="输入正文描述"]'].actions,
+            page.locators['div.tiptap[role="textbox"][contenteditable="true"]'].actions,
             [("click",)],
         )
         self.assertNotIn(("type", "", None), page.keyboard.actions)
@@ -504,6 +506,18 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             async def count(self):
                 return 1
 
+            async def is_visible(self):
+                return True
+
+            async def is_enabled(self):
+                return True
+
+            async def bounding_box(self):
+                return {"x": 0.0, "y": 0.0, "width": 80.0, "height": 20.0}
+
+            async def evaluate(self, expression, arg=None):
+                return {"self": True}
+
             async def get_attribute(self, name):
                 if name == "aria-checked":
                     return "true" if self.checked else "false"
@@ -530,12 +544,22 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             def locator(self, selector):
                 return self.switch
 
+        class AbsentLocator:
+            async def count(self):
+                return 0
+
         class FakePage:
             def __init__(self, switch):
                 self.card = FakeCard(switch)
+                self.switch = switch
 
             def locator(self, selector):
-                return self.card
+                if selector == xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector:
+                    return self.switch
+                if selector == ".custom-switch-card":
+                    return self.card
+                # 取消原创不弹窗：弹窗锚点保持 0 命中。
+                return AbsentLocator()
 
             async def wait_for_timeout(self, timeout):
                 return None
@@ -568,6 +592,18 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             async def count(self):
                 return 1
 
+            async def is_visible(self):
+                return True
+
+            async def is_enabled(self):
+                return True
+
+            async def bounding_box(self):
+                return {"x": 0.0, "y": 0.0, "width": 80.0, "height": 20.0}
+
+            async def evaluate(self, expression, arg=None):
+                return {"self": True}
+
             async def get_attribute(self, name):
                 if name == "aria-checked":
                     return "false"
@@ -593,12 +629,21 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             def locator(self, selector):
                 return self.switch
 
+        class AbsentLocator:
+            async def count(self):
+                return 0
+
         class FakePage:
             def __init__(self, switch):
                 self.card = FakeCard(switch)
+                self.switch = switch
 
             def locator(self, selector):
-                return self.card
+                if selector == xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector:
+                    return self.switch
+                if selector == ".custom-switch-card":
+                    return self.card
+                return AbsentLocator()
 
             async def wait_for_timeout(self, timeout):
                 return None
@@ -666,6 +711,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             def __init__(self):
                 self.trigger = FakeTrigger()
                 self.options = {}
+                self.locator_calls = []
                 self.source_input = FakeInput()
                 self.confirm = FakeTrigger()
 
@@ -673,10 +719,10 @@ class XiaohongshuUploaderTests(unittest.TestCase):
                 return self.trigger
 
             def locator(self, selector):
-                # 每个声明选项用独立 locator，按点击顺序记录到 options。
-                key = len(self.options)
-                option = FakeOption(key)
-                self.options[key] = option
+                # 每个声明选项用独立 locator，按选择器 + 点击顺序记录。
+                option = FakeOption(len(self.options))
+                self.options[len(self.options)] = option
+                self.locator_calls.append((selector, option))
                 return option
 
             def get_by_placeholder(self, placeholder):
@@ -703,8 +749,22 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
         self.assertEqual(page.source_input.filled, "某媒体")
         self.assertEqual(page.confirm.clicks, 1)
-        # 打开一级菜单 + 点「内容来源声明」+ 点「来源转载」
-        self.assertEqual(len(page.options), 2)
+        # 打开一级菜单 + 点「内容来源声明」+ 点「来源转载」：
+        # 触发器与两个选项都走候选层；选项限定 .declaration-drop-down .d-option。
+        option_calls = [
+            option
+            for selector, option in page.locator_calls
+            if selector == xhs_main.XHS_DECLARATION_OPTION_SELECTOR
+        ]
+        self.assertEqual(len(option_calls), 2)
+        self.assertTrue(all(option.clicks == 1 for option in option_calls))
+        trigger_calls = [
+            option
+            for selector, option in page.locator_calls
+            if selector == '.publish-container [tabindex="1"]'
+        ]
+        self.assertEqual(len(trigger_calls), 1)
+        self.assertEqual(trigger_calls[0].clicks, 1)
 
     def test_note_title_defaults_do_not_override_explicit_title(self):
         app = xhs_main.XiaoHongShuNote(

@@ -30,6 +30,8 @@ import uploader.publish_timeout as publish_timeout
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_clock import FakeClock
 from tests.fakes_xhs_dom import FakeLocator, RecordingLocator, RecordingPage
+from utils import dom
+from utils.dom import ElementMissingError
 from utils.errors import PublishResultUnknownError
 
 #: The exact wording required by ticket 31 (§3 U1).  The platform prefix
@@ -39,10 +41,28 @@ REQUIRED_PRE_CLICK_WORDING = "发布超时（15 分钟）：尚未点击发布�
 UPLOADER_DIR = Path(xhs_main.__file__).parent
 
 VIDEO_UPLOAD_SELECTOR = "input.upload-input"
-VIDEO_FILE_INPUT_SELECTOR = "div[class^='upload-content'] input[class='upload-input']"
+VIDEO_FILE_INPUT_SELECTOR = "div.upload-content input.upload-input"
 TITLE_SELECTOR = 'input[placeholder*="填写标题"]'
-NOTE_IMAGE_INPUT_SELECTOR = 'input[type="file"][accept*="image"]'
-PUBLISH_BUTTON_SELECTOR = 'button:has-text("发布")'
+#: 新结构主候选（ticket 33）：标题填入与上传入口不再依赖中文 placeholder。
+TITLE_STRUCTURE_SELECTOR = "div.d-input input"
+NOTE_IMAGE_INPUT_SELECTOR = "div.upload-content input.upload-input"
+NOTE_IMAGE_INPUT_FALLBACK = '.img-list .top input[type="file"][multiple]'
+PUBLISH_BUTTON_SELECTOR = "xhs-publish-btn"
+
+INPUT_FACTS = {
+    "tag": "input",
+    "display": "block",
+    "visibility": "visible",
+    "opacity": 1.0,
+    "ariaHidden": None,
+    "ancestorAriaHidden": False,
+    "disabled": False,
+    "disabledClass": False,
+    "pointerEvents": "auto",
+    "contentEditable": None,
+    "readOnly": False,
+    "isConnected": True,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -87,27 +107,41 @@ class _AdvancingPage(RecordingPage):
 
 
 class _AdvancingClickLocator(RecordingLocator):
-    """Publish button double: the dispatch itself burns virtual time."""
+    """发布按钮替身：满足 INTERACTIVE（ticket 32 四档），点击本身烧虚拟时间。"""
 
     def __init__(self, name: str, clock: FakeClock, *, advance: float = 0.0):
         super().__init__(name)
         self.clock = clock
         self.advance = advance
 
+    async def is_visible(self) -> bool:
+        return True
+
+    async def is_enabled(self) -> bool:
+        return True
+
+    async def bounding_box(self):
+        return {"x": 0.0, "y": 0.0, "width": 200.0, "height": 40.0}
+
+    async def evaluate(self, expression, arg=None):
+        self.evaluate_calls.append((expression, arg))
+        # 事实探测（合并进默认值）与落点命中都返回 self。
+        return {"self": True}
+
     async def click(self, **kwargs):
         await super().click(**kwargs)
         self.clock.advance(self.advance)
 
 
-class _SuccessClickLocator(RecordingLocator):
-    """Publish button double: the dispatch navigates to the success URL."""
+class _SuccessClickLocator(_AdvancingClickLocator):
+    """发布按钮替身：派发后跳到成功页。"""
 
     def __init__(self, name: str, page: RecordingPage):
-        super().__init__(name)
+        super().__init__(name, FakeClock(), advance=0.0)
         self._page = page
 
     async def click(self, **kwargs):
-        await super().click(**kwargs)
+        await FakeLocator.click(self, **kwargs)
         self._page.url = "https://creator.xiaohongshu.com/publish/success?target=video"
 
 
@@ -248,6 +282,9 @@ def _video_page(clock: FakeClock, *, advance_on_goto: float = 0.0, **overrides):
         VIDEO_UPLOAD_SELECTOR: upload_input,
         VIDEO_FILE_INPUT_SELECTOR: _FileInput("video-file"),
         TITLE_SELECTOR: RecordingLocator("title"),
+        TITLE_STRUCTURE_SELECTOR: FakeLocator(
+            "title-structure", computed_style=INPUT_FACTS
+        ),
     }
     selectors.update(overrides.pop("selectors", {}))
     page = _AdvancingPage(
@@ -328,15 +365,42 @@ class NoteChainBudgetTests(unittest.TestCase):
                 selectors={
                     NOTE_IMAGE_INPUT_SELECTOR: image_input,
                     TITLE_SELECTOR: title,
+                    TITLE_STRUCTURE_SELECTOR: FakeLocator(
+                        "title-structure", computed_style=INPUT_FACTS
+                    ),
                 },
             )
             asyncio.run(_note_app().upload_note_content(page, multilogin=False))
 
-        # goto 剩余 10 秒：附件 input 的 30 秒上限收缩到 10 秒。
-        self.assertEqual(image_input.wait_calls[0].timeout, 10_000)
+        # 上传入口改由 wait_resolved 解析（不再 locator.wait_for），
+        # 就绪判定仍然走预算：goto 花掉 890 秒后只剩 10 秒。
+        self.assertEqual(image_input.wait_calls, [])
+        self.assertEqual(image_input.files, [["a.png"]])
         self.assertEqual(title.wait_calls[0].timeout, 3_000)
         _url, goto_kwargs = page.goto_calls[0]
         self.assertEqual(goto_kwargs["wait_until"], "domcontentloaded")
+
+    def test_note_upload_input_resolution_timeout_is_clamped(self):
+        clock = FakeClock(start=0.0)
+        with clock.patch(xhs_main, publish_timeout, dom):
+            page = _AdvancingPage(
+                clock,
+                advance_on_goto=890.0,
+                url="about:blank",
+                selectors={
+                    NOTE_IMAGE_INPUT_SELECTOR: FakeLocator("absent", count=0),
+                    NOTE_IMAGE_INPUT_FALLBACK: FakeLocator(
+                        "absent-fallback", count=0
+                    ),
+                },
+            )
+            with self.assertRaises(ElementMissingError):
+                asyncio.run(
+                    _note_app().upload_note_content(page, multilogin=False)
+                )
+
+        # 附件 input 的 30 秒上限收缩到剩余的 10 秒：虚拟时间里正好等 10 秒。
+        self.assertAlmostEqual(sum(clock.sleep_calls), 10.0, places=3)
 
 
 # ---------------------------------------------------------------------------
