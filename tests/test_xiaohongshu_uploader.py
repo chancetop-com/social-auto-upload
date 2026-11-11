@@ -241,8 +241,8 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             )
 
             with patch(
-                "uploader.xiaohongshu_uploader.main.cookie_auth",
-                new=AsyncMock(return_value=True),
+                "uploader.xiaohongshu_uploader.main.local_session_preflight",
+                new=AsyncMock(return_value=None),
             ):
                 asyncio.run(app.validate_upload_args())
 

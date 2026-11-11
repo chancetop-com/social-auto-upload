@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import re
+import tempfile
 import time
 from collections import Counter
 from datetime import datetime
@@ -83,8 +84,13 @@ XHS_CONTENT_TYPES = tuple(XHS_CONTENT_TYPE_LABELS) + tuple(
     XHS_SOURCE_DECLARATION_LABELS
 )
 
-XHS_LOGIN_CHECK_TIMEOUT_MS = 20_000
 XHS_LOGIN_CHECK_SETTLE_MS = 3_000
+
+# 本地模式唯一的零网络前置：会话 cookie 名称（spec §3 U9 A）。
+XHS_SESSION_COOKIE_NAME = "galaxy_creator_session_id"
+# 检查发布页的观测窗口：导航 30s + 静置 3s（探测失败是退出 1，不是失效）。
+XHS_PROBE_NAVIGATION_TIMEOUT_MS = 30_000
+XHS_PROBE_SETTLE_MS = XHS_LOGIN_CHECK_SETTLE_MS
 
 # ---------------------------------------------------------------------------
 # 发布链路的等待上限（毫秒）。这些常量只是「上限」：真正传给 Playwright 的
@@ -145,7 +151,6 @@ XHS_COVER_OPEN_SETTLE_MS = 2_000
 XHS_COVER_MODAL_SETTLE_MS = 3_000
 XHS_COVER_RENDER_SETTLE_MS = 4_000
 XHS_ESCAPE_SETTLE_MS = 500
-XHS_LOGIN_SETTLE_MS = 3_000
 
 # 轮询/重试间隔（秒）：全部经 PublishTimeoutBudget.clamp_seconds() 收缩。
 XHS_VIDEO_UPLOAD_POLL_SECONDS = 2.0
@@ -845,114 +850,123 @@ async def _save_xhs_qrcode(
     return qrcode_info
 
 
-async def _is_xhs_login_completed(page: Page) -> bool:
-    if page.url.startswith(_build_xhs_creator_url("/login")):
-        return False
+def _local_login_required() -> LoginRequiredError:
+    """本地会话前置失败的唯一错误形状（退出 10，未启动浏览器）。"""
+    return LoginRequiredError(
+        _blocked_message("login", "local", publish_attempted=False),
+        reason="login",
+        publish_attempted=False,
+    )
 
-    login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
-    if not await login_box.count():
-        return True
+
+async def local_session_preflight(account_file) -> None:
+    """零网络本地前置：账号文件存在 + 会话 cookie 存在 + 未过期。
+
+    ``expires <= 0`` 表示会话 cookie / 过期时间未知，按规格放行。任何读取
+    失败都视为「无法证明会话存在」→ ``LoginRequiredError``，绝不启动浏览器。
+    """
+    path = Path(str(account_file))
+    if not path.is_file():
+        raise _local_login_required()
 
     try:
-        return not await login_box.is_visible()
-    except Exception:
-        return True
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise _local_login_required() from None
+
+    cookies = state.get("cookies") if isinstance(state, dict) else None
+    if not isinstance(cookies, list):
+        raise _local_login_required()
+
+    session_cookie = None
+    for cookie in cookies:
+        if isinstance(cookie, dict) and cookie.get("name") == XHS_SESSION_COOKIE_NAME:
+            session_cookie = cookie
+            break
+    if session_cookie is None:
+        raise _local_login_required()
+
+    expires = session_cookie.get("expires")
+    try:
+        expiry = float(expires) if expires is not None else 0.0
+    except (TypeError, ValueError):
+        expiry = 0.0
+    if expiry > 0 and expiry <= time.time():
+        raise _local_login_required()
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to Xiaohongshu.
+async def save_storage_state_atomic(context: BrowserContext, account_file) -> None:
+    """把当前 context 的 storage_state 原子写回账号文件（temp + replace）。"""
+    state = await context.storage_state()
+    target = Path(str(account_file))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_path = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False)
+        os.replace(temp_path, target)
+    except BaseException:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
 
-    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A clear login
-    page or visible login form returns ``False``; a missing login form alone is
-    not positive proof, so the publish-page upload anchor must also exist.
-    Network failures, 5xx responses, timeouts, unexpected redirects and an
-    ambiguous page structure raise so the CLI can exit 1 instead of silently
-    treating an outage as "logged out".
 
-    Worst-case budget: 20s navigation + 3s settle, inside the 15-30s spec.
+async def probe_session(context: BrowserContext) -> tuple[str, str]:
+    """发布页唯一观测（check 与登录后复核共用）。
+
+    一次 ``new_page`` → 导航发布页 → 静置 → 分类器 → 上传入口 ``attached``
+    （count ≥ 1）。返回 ``("valid" | kind, 当前 URL)``；导航 5xx / 超时 /
+    离开创作域 / 页面结构异常一律抛 ``RuntimeError``（探测失败 = 退出 1）。
     """
     page = await context.new_page()
     try:
-        response = await page.goto(
-            XHS_LOGIN_CHECK_URL,
-            wait_until="domcontentloaded",
-            timeout=XHS_LOGIN_CHECK_TIMEOUT_MS,
-        )
+        try:
+            response = await page.goto(
+                XHS_LOGIN_CHECK_URL,
+                wait_until="domcontentloaded",
+                timeout=XHS_PROBE_NAVIGATION_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"小红书发布页检查失败：导航未完成（{exc}）"
+            ) from exc
+
         status = getattr(response, "status", None)
         if isinstance(status, int) and status >= 500:
-            raise RuntimeError(f"小红书登录状态检查失败：HTTP {status}")
+            raise RuntimeError(f"小红书发布页检查失败：HTTP {status}")
 
         wait_for_timeout = getattr(page, "wait_for_timeout", None)
         if wait_for_timeout is not None:
-            await wait_for_timeout(XHS_LOGIN_CHECK_SETTLE_MS)
+            await wait_for_timeout(XHS_PROBE_SETTLE_MS)
 
         current_url = str(getattr(page, "url", "") or "")
-        creator_base = _build_xhs_creator_url("/")
-        if not current_url.startswith(creator_base):
+        if not current_url.startswith(_build_xhs_creator_url("/")):
             raise RuntimeError(
-                "小红书登录状态检查失败：页面未停留在小红书创作者中心"
+                "小红书发布页检查失败：页面未停留在小红书创作者中心"
                 f"（url={current_url or '<empty>'}）"
             )
 
-        if not await _is_xhs_login_completed(page):
-            return False
+        kind = await classify_blocked(page)
+        if kind is not None:
+            return kind, current_url
 
         for selector in XHS_LOGIN_POSITIVE_SELECTORS:
-            if await page.locator(selector).count():
-                return True
+            try:
+                count = await page.locator(selector).count()
+            except Exception:
+                count = 0
+            if count >= 1:
+                return "valid", current_url
 
         raise RuntimeError(
-            "小红书登录状态检查失败：未找到发布页上传入口（页面结构异常）"
+            "小红书发布页检查失败：未找到上传入口（页面结构异常）"
         )
     finally:
         await page.close()
-
-
-async def cookie_auth(account_file):
-    if not os.path.exists(account_file):
-        return False
-
-    async with async_playwright() as playwright:
-        if LOCAL_CHROME_PATH:
-            browser = await playwright.chromium.launch(headless=True, executable_path=LOCAL_CHROME_PATH)
-        else:
-            browser = await playwright.chromium.launch(headless=True, channel="chromium")
-        try:
-            context = await browser.new_context(
-                storage_state=account_file,
-                user_agent=await _xhs_user_agent(browser),
-                **XHS_CONTEXT_KWARGS,
-            )
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(
-                _build_xhs_creator_url(
-                    "/publish/publish?from=homepage&target=video"
-                )
-            )
-            await Humanizer(page).after_navigate()
-            await page.wait_for_timeout(XHS_LOGIN_SETTLE_MS)
-
-            if page.url.startswith(_build_xhs_creator_url("/login")):
-                xiaohongshu_logger.info(_msg("🥹", "cookie 已失效，得重新登录一下"))
-                return False
-
-            login_box = page.locator(XHS_LOGIN_BOX_SELECTOR).first
-            if await login_box.count():
-                try:
-                    if await login_box.is_visible():
-                        xiaohongshu_logger.info(_msg("🥹", "页面仍然停留在登录二维码页，按 cookie 失效处理"))
-                        return False
-                except Exception:
-                    return False
-
-            xiaohongshu_logger.success(_msg("🥳", "cookie 有效"))
-            return True
-        except Exception as exc:
-            xiaohongshu_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await browser.close()
 
 
 async def xiaohongshu_setup(
@@ -962,17 +976,23 @@ async def xiaohongshu_setup(
     qrcode_callback=None,
     headless: bool = LOCAL_CHROME_HEADLESS,
 ):
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
-            return result if return_detail else False
-        xiaohongshu_logger.info(_msg("🥹", "cookie 失效了，准备打开浏览器重新登录"))
+    # 登录命令总是允许重新扫码；不再用网络探测决定是否跳过。
+    if handle:
+        xiaohongshu_logger.info(_msg("🖼️", "准备打开浏览器扫码登录小红书"))
         result = await xiaohongshu_cookie_gen(
             account_file,
             qrcode_callback=qrcode_callback,
             headless=headless,
         )
         return result if return_detail else result["success"]
+
+    try:
+        await local_session_preflight(account_file)
+    except LoginRequiredError:
+        result = _build_login_result(
+            False, "cookie_invalid", "cookie文件不存在或已失效", account_file
+        )
+        return result if return_detail else False
 
     result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
     return result if return_detail else True
@@ -1010,20 +1030,29 @@ async def xiaohongshu_cookie_gen(
             xiaohongshu_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
 
             for _ in range(max_checks):
-                if await _is_xhs_login_completed(page):
+                # 扫码完成判据只有分类器：返回 None 即离开登录/验证页。
+                if await classify_blocked(page) is None:
                     await asyncio.sleep(XHS_LOGIN_SUCCESS_SETTLE_SECONDS)
-                    await context.storage_state(path=account_file)
-                    if await cookie_auth(account_file):
+                    kind, evidence = await probe_session(context)
+                    if kind == "valid":
+                        await save_storage_state_atomic(context, account_file)
                         xiaohongshu_logger.success(_msg("🥳", "小红书扫码登录成功，小人开心收工"))
-                        result = _build_login_result(True, "success", "小红书扫码登录成功", account_file, qrcode_info, page.url)
+                        result = _build_login_result(
+                            True,
+                            "success",
+                            "小红书扫码登录成功",
+                            account_file,
+                            qrcode_info,
+                            evidence or page.url,
+                        )
                     else:
                         result = _build_login_result(
                             False,
                             "cookie_invalid",
-                            "小红书扫码流程结束，但 cookie 校验失败",
+                            "小红书扫码流程结束，但发布页复核未通过",
                             account_file,
                             qrcode_info,
-                            page.url,
+                            evidence or page.url,
                         )
                     return result
 
@@ -1081,10 +1110,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
     async def validate_base_args(self, *, check_cookie: bool = True):
         if check_cookie:
-            if not os.path.exists(self.account_file):
-                raise RuntimeError(f"cookie文件不存在，请先完成小红书登录: {self.account_file}")
-            if not await cookie_auth(self.account_file):
-                raise RuntimeError(f"cookie文件已失效，请先完成小红书登录: {self.account_file}")
+            # 唯一的本地前置：零网络，失败 = 退出 10 且不启动浏览器。
+            await local_session_preflight(self.account_file)
 
         if self.publish_strategy not in {
             XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
@@ -2126,7 +2153,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await context.storage_state(path=self.account_file)
+            await save_storage_state_atomic(context, self.account_file)
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()
@@ -2322,7 +2349,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await context.storage_state(path=self.account_file)
+            await save_storage_state_atomic(context, self.account_file)
             xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
             await context.close()

@@ -355,7 +355,9 @@ class LocalGoldenTests(unittest.TestCase):
         browser = playwright.chromium.launch_browser
         probe_context, context = browser.contexts
         self.assertTrue(probe_context.closed)
-        self.assertEqual(context.storage_state_calls, ["/tmp/xhs-cookie.json"])
+        # Atomic write-back calls storage_state() without a path, then replaces
+        # the file itself; the path is no longer passed to Playwright.
+        self.assertEqual(context.storage_state_calls, [None])
         self.assertTrue(context.closed)
         self.assertTrue(browser.closed)
 
@@ -477,11 +479,12 @@ class MultiloginSeamTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             app = _make_xhs_video(tmp_dir, account_file=None)
             app.upload_in = AsyncMock()
-            cookie_auth = AsyncMock()
+            preflight = MagicMock()
+            save = AsyncMock()
 
             with (
-                patch.object(xhs_main, "cookie_auth", cookie_auth),
-                patch.object(xhs_main.os.path, "exists", MagicMock()) as exists,
+                patch.object(xhs_main, "local_session_preflight", preflight),
+                patch.object(xhs_main, "save_storage_state_atomic", save),
             ):
                 asyncio.run(
                     app.upload(
@@ -492,8 +495,8 @@ class MultiloginSeamTests(unittest.TestCase):
                     )
                 )
 
-        cookie_auth.assert_not_awaited()
-        exists.assert_not_called()
+        preflight.assert_not_called()
+        save.assert_not_awaited()
         self.assertIsNone(app.account_file)
 
     def test_ks_video_consumes_injected_session_without_forbidden_api(self):
@@ -667,10 +670,10 @@ class MultiloginSeamTests(unittest.TestCase):
 
 
 class LoginProbeTests(unittest.TestCase):
-    def _xhs_probe(self, page: _UploadPage) -> bool:
+    def _xhs_probe(self, page: _UploadPage) -> tuple[str, str]:
         context = _UploadContext(page)
         try:
-            result = asyncio.run(xhs_main.is_logged_in(context))
+            result = asyncio.run(xhs_main.probe_session(context))
         finally:
             self.assertEqual(context.new_page_calls, 1)
             self.assertEqual(page.close_calls, 1)
@@ -685,15 +688,17 @@ class LoginProbeTests(unittest.TestCase):
             self.assertEqual(page.close_calls, 1)
         return result
 
-    def test_xhs_logged_in_returns_true_with_positive_upload_anchor(self):
+    def test_xhs_probe_returns_valid_with_positive_upload_anchor(self):
         page = _UploadPage(final_url=XHS_VIDEO_URL, xhs_upload_anchor=True)
-        self.assertTrue(self._xhs_probe(page))
+        kind, evidence = self._xhs_probe(page)
+        self.assertEqual(kind, "valid")
+        self.assertEqual(evidence, XHS_VIDEO_URL)
         self.assertEqual(page.goto_calls[0][0], XHS_LOGIN_CHECK_URL)
         timeout = page.goto_calls[0][1]["timeout"]
         self.assertGreaterEqual(timeout, 15_000)
         self.assertLessEqual(timeout, 30_000)
 
-    def test_xhs_login_page_and_form_return_false(self):
+    def test_xhs_probe_login_page_and_form_return_login(self):
         cases = {
             "login path": _UploadPage(final_url=XHS_LOGIN_REDIRECT),
             "visible login form": _UploadPage(
@@ -702,17 +707,17 @@ class LoginProbeTests(unittest.TestCase):
         }
         for label, page in cases.items():
             with self.subTest(label):
-                self.assertFalse(self._xhs_probe(page))
+                self.assertEqual(self._xhs_probe(page)[0], "login")
 
-    def test_xhs_missing_positive_anchor_raises(self):
+    def test_xhs_probe_missing_positive_anchor_raises(self):
         page = _UploadPage(final_url=XHS_VIDEO_URL)
         context = _UploadContext(page)
         with self.assertRaisesRegex(RuntimeError, "页面结构异常"):
-            asyncio.run(xhs_main.is_logged_in(context))
+            asyncio.run(xhs_main.probe_session(context))
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(page.close_calls, 1)
 
-    def test_xhs_network_error_server_error_and_unexpected_domain_raise(self):
+    def test_xhs_probe_network_error_server_error_and_unexpected_domain_raise(self):
         cases = {
             "network error": _UploadPage(
                 final_url=XHS_VIDEO_URL, goto_error=RuntimeError("net::ERR_RESET")
@@ -724,7 +729,7 @@ class LoginProbeTests(unittest.TestCase):
             with self.subTest(label):
                 context = _UploadContext(page)
                 with self.assertRaises(RuntimeError):
-                    asyncio.run(xhs_main.is_logged_in(context))
+                    asyncio.run(xhs_main.probe_session(context))
                 self.assertEqual(context.new_page_calls, 1)
                 self.assertEqual(page.close_calls, 1)
 
@@ -813,12 +818,12 @@ class XhsCliTests(_CliCase):
     def test_check_logged_in_returns_0_and_enters_session_once(self):
         playwright_cm = _AsyncCM(object())
         session, session_cm, factory, session_patch = self._session_patch(xhs_command)
-        probe = AsyncMock(return_value=True)
+        probe = AsyncMock(return_value=("valid", XHS_VIDEO_URL))
 
         with (
             patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
             session_patch,
-            patch.object(xhs_command, "is_logged_in", new=probe),
+            patch.object(xhs_command, "probe_session", new=probe),
         ):
             code, out, _ = self._run(
                 ["xiaohongshu", "check", "--folder-id", "folder", "--profile-id", "profile"]
@@ -839,7 +844,9 @@ class XhsCliTests(_CliCase):
             patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
             session_patch,
             patch.object(
-                xhs_command, "is_logged_in", new=AsyncMock(return_value=False)
+                xhs_command,
+                "probe_session",
+                new=AsyncMock(return_value=("login", XHS_LOGIN_REDIRECT)),
             ),
         ):
             code, out, _ = self._run(
@@ -847,7 +854,7 @@ class XhsCliTests(_CliCase):
             )
 
         self.assertEqual(code, 10)
-        self.assertNotIn("valid", out)
+        self.assertEqual(out.strip(), "invalid")
         self.assertEqual(session_cm.exit_calls, 1)
 
     def test_check_probe_error_returns_1(self):
@@ -859,7 +866,7 @@ class XhsCliTests(_CliCase):
             session_patch,
             patch.object(
                 xhs_command,
-                "is_logged_in",
+                "probe_session",
                 new=AsyncMock(side_effect=RuntimeError("page failed")),
             ),
         ):
@@ -885,7 +892,6 @@ class XhsCliTests(_CliCase):
 
             playwright_cm = _AsyncCM(object())
             session, session_cm, factory, session_patch = self._session_patch(xhs_command)
-            probe = AsyncMock(return_value=True)
             fake_app = MagicMock()
             fake_app.xiaohongshu_upload_video = AsyncMock()
             builder = MagicMock(return_value=fake_app)
@@ -893,7 +899,6 @@ class XhsCliTests(_CliCase):
             with (
                 patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
                 session_patch,
-                patch.object(xhs_command, "is_logged_in", new=probe),
                 patch.object(xhs_command, "_build_video_uploader", new=builder),
             ):
                 code, out, _ = self._run(
@@ -920,7 +925,6 @@ class XhsCliTests(_CliCase):
         self.assertEqual(kwargs["launch_kwargs"], XHS_LAUNCH_KWARGS)
         self.assertEqual(kwargs["context_kwargs"], XHS_CONTEXT_KWARGS)
         self.assertTrue(kwargs["init_script"])
-        probe.assert_awaited_once_with(session.context)
         fake_app.xiaohongshu_upload_video.assert_awaited_once_with(session=session)
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
@@ -934,7 +938,9 @@ class XhsCliTests(_CliCase):
             patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
             session_patch,
             patch.object(
-                xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
+                xhs_command,
+                "probe_session",
+                new=AsyncMock(return_value=("valid", XHS_VIDEO_URL)),
             ),
         ):
             code, _, _ = self._run(
@@ -959,7 +965,9 @@ class XhsCliTests(_CliCase):
             patch.object(xhs_command, "async_playwright", lambda: playwright_cm),
             session_patch,
             patch.object(
-                xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
+                xhs_command,
+                "probe_session",
+                new=AsyncMock(return_value=("valid", XHS_VIDEO_URL)),
             ),
         ):
             code, _, _ = self._run(
@@ -992,9 +1000,6 @@ class XhsCliTests(_CliCase):
                     xhs_command, "async_playwright", lambda: _AsyncCM(object())
                 ),
                 session_patch,
-                patch.object(
-                    xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
-                ),
                 patch.object(
                     xhs_command,
                     "_build_video_uploader",
@@ -1038,9 +1043,6 @@ class XhsCliTests(_CliCase):
             with (
                 patch.object(xhs_command, "async_playwright", lambda: _AsyncCM(object())),
                 session_patch,
-                patch.object(
-                    xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
-                ),
                 patch.object(xhs_command, "_build_note_uploader", new=builder),
             ):
                 code, out, _ = self._run(
@@ -1063,20 +1065,20 @@ class XhsCliTests(_CliCase):
         self.assertIsNone(builder.call_args.args[1])
         fake_app.xiaohongshu_upload_note.assert_awaited_once_with(session=session)
 
-    def test_upload_mlx_logged_out_returns_10_and_skips_upload(self):
+    def test_upload_mlx_does_not_preflight_login(self):
+        # 发布链路的登录探测已删除：托管上传直接进入发布页，由 C1 判定。
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
             video_path.write_bytes(b"video")
 
             _, session_cm, _, session_patch = self._session_patch(xhs_command)
             upload = AsyncMock()
+            probe = AsyncMock()
 
             with (
                 patch.object(xhs_command, "async_playwright", lambda: _AsyncCM(object())),
                 session_patch,
-                patch.object(
-                    xhs_command, "is_logged_in", new=AsyncMock(return_value=False)
-                ),
+                patch.object(xhs_command, "probe_session", new=probe),
                 patch.object(XiaoHongShuVideo, "xiaohongshu_upload_video", new=upload),
             ):
                 code, out, _ = self._run(
@@ -1094,9 +1096,10 @@ class XhsCliTests(_CliCase):
                     ]
                 )
 
-        self.assertEqual(code, 10)
-        self.assertNotIn("submitted", out)
-        upload.assert_not_awaited()
+        self.assertEqual(code, 0)
+        self.assertIn("submitted", out)
+        upload.assert_awaited_once()
+        probe.assert_not_awaited()
         self.assertEqual(session_cm.exit_calls, 1)
 
     def test_upload_mlx_failure_still_exits_session_once(self):
@@ -1110,9 +1113,6 @@ class XhsCliTests(_CliCase):
             with (
                 patch.object(xhs_command, "async_playwright", lambda: _AsyncCM(object())),
                 session_patch,
-                patch.object(
-                    xhs_command, "is_logged_in", new=AsyncMock(return_value=True)
-                ),
                 patch.object(XiaoHongShuVideo, "xiaohongshu_upload_video", new=upload),
             ):
                 code, _, err = self._run(
