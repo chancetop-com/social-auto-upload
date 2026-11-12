@@ -1033,7 +1033,7 @@ length   = ceil(weighted / 2)          # ≤ 20
 | 5 | 注入②：改坏会话 cookie | 启浏览器 → C1 判 login → 10；stderr **不含** `publish_attempted=true` | ✅ 10；`invalid` + 本地登录句；无 `publish_attempted=true`。注意：只改 `galaxy_creator_session_id` **不会**失效（服务端仍认会话），需改 `customer-sso-sid` / `access-token-creator.xiaohongshu.com` / `galaxy.creator.beaker.session.id` 这组 |
 | 6 | 注入③：假 mp4（文本改名 .mp4） | `div.fail` → 点击前 1；stderr 不含该行 | ✅ 1；`div.fail — 视频上传失败（div.fail）`，点击前中止 |
 | 7 | 注入④（可选）：20MB PNG | 逐瓦片完成态正常；60s 不误杀 | 未执行（可选） |
-| 8 | 真实发布（最小验收）：1 篇图文，不带 `--no-publish` | 0；URL 离开 `/publish/publish`；人工删除该笔记 | 未执行（会产生真实笔记，待人工确认） |
+| 8 | 真实发布（最小验收）：1 篇图文，不带 `--no-publish` | 0；URL 离开 `/publish/publish`；人工删除该笔记 | ✅ 0；`图文发布成功`，OBSERVE 确认离开 `/publish/publish`；测试笔记标题「SAU真实发布验收」（2026-11-12 11:09），**待人工删除** |
 | 9 | 托管（可选）：有账号时重复 1/2 | 同本地；断言一条 `browser session ready` | 未执行（本机无 MLX/AdsPower 凭证） |
 
 **2026-11-12 真机复测发现并已修复**
