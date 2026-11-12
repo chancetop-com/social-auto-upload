@@ -97,14 +97,14 @@ async def trash_facebook_post(page: Page, article, *, post_url: str, owner_id: s
     # 菜单按钮位于已核实的原作品卡片内，aria-label 包含“这篇帖子”，排除点赞/分享等操作。
     menu_button = article.get_by_role("button", name=re.compile(r"^可对.+的这篇帖子执行的操作$"))
     await expect(menu_button).to_have_count(1)
-    await menu_button.click()
+    await menu_button.click()  # native-click: manage；删除/管理路径保持原生，作品正文不在此层
     menu = page.get_by_role("menu")
     await expect(menu).to_have_count(1)
-    await menu.get_by_role("menuitem").filter(has_text="移至垃圾箱").click()
+    await menu.get_by_role("menuitem").filter(has_text="移至垃圾箱").click()  # native-click: manage；删除菜单项保持原生
     # 同一确认弹窗中的“转移”才是最终提交动作，不点击全页同名按钮。
     dialog = page.get_by_role("dialog").filter(has_text="移至垃圾箱？")
     await expect(dialog).to_have_count(1)
-    await dialog.get_by_role("button", name="转移", exact=True).click()
+    await dialog.get_by_role("button", name="转移", exact=True).click()  # native-click: manage；删除确认按钮保持原生
     # 实测没有成功 toast。等待确认窗及原卡片消失，再到垃圾箱查原 ID，不能猜成功文案。
     await expect(dialog).to_have_count(0, timeout=30000)
     await expect(article).to_have_count(0, timeout=30000)
@@ -172,11 +172,11 @@ async def facebook_post_action(account_file: Path, *, post_url: str, owner_id: s
                 if permanent:
                     row = await find_trashed_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
                     # 垃圾箱单条记录的菜单与批量删除相隔离，禁止操作“全部”复选框。
-                    await row.get_by_role("button", name=re.compile(r"^针对.+的更多选项$")).click()
-                    await page.get_by_role("menu").get_by_role("menuitem", name="删除", exact=True).click()
+                    await row.get_by_role("button", name=re.compile(r"^针对.+的更多选项$")).click()  # native-click: manage；垃圾箱行内管理保持原生
+                    await page.get_by_role("menu").get_by_role("menuitem", name="删除", exact=True).click()  # native-click: manage；永久删除菜单项保持原生
                     dialog = page.get_by_role("dialog").filter(has_text="确定删除？")
                     await expect(dialog).to_contain_text("你删除的内容将无法恢复。")
-                    await dialog.get_by_role("button", name="删除", exact=True).click()
+                    await dialog.get_by_role("button", name="删除", exact=True).click()  # native-click: manage；永久删除确认按钮保持原生
                     await expect(dialog).to_have_count(0, timeout=30000)
                     await expect(row).to_have_count(0, timeout=30000)
                     await verify_facebook_deletion(page, owner_id=owner_id, post_url=post_url)

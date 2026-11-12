@@ -40,7 +40,7 @@ async def open_meta_post(page, *, list_url: str, page_name: str, expected_text: 
     # 已定时列表仍为旧布局，标题是唯一可选中的详情按钮。
     title = row.locator('[role="gridcell"][data-surface$=":TITLE"]') if '/published_posts' in list_url else row.locator('[role="button"][aria-pressed]')
     await expect(title).to_have_count(1)
-    await title.click()
+    await title.click()  # native-click: manage；作品列表进入详情，属管理路径
     if schedule:
         schedule = await page_wall_clock(page, schedule)
         await expect(row).to_contain_text(f'{schedule.month}月{schedule.day}日 {schedule:%H:%M}')
@@ -104,20 +104,20 @@ async def meta_post_action(account_file: Path, *, page_id: str, page_name: str,
                     await expect(detail).to_have_count(1)
                     menu_button = detail.locator('[role="button"][aria-haspopup="menu"]:not([aria-label])')
                     await expect(menu_button).to_have_count(1)
-                    await menu_button.click()
+                    await menu_button.click()  # native-click: manage；删除路径的更多选项菜单
                     items = page.get_by_role('menu').get_by_role('menuitem')
                     count = await items.count()
                     if count not in (4, 5):
                         raise RuntimeError(f'定时详情操作菜单结构未识别：{count} 项，未删除')
                     # 删除始终是该菜单最后一项；菜单本地化或权限不同会少一个“移到草稿”。
-                    await items.nth(count - 1).click()
+                    await items.nth(count - 1).click()  # native-click: manage；删除菜单末项，破坏性操作保持原生
                 else:
                     dropdown = page.locator('[data-surface$="BizWebObjectinsightsHeaderActionDropdown"] [aria-haspopup="menu"]')
                     await expect(dropdown).to_have_count(1)
-                    await dropdown.click()
+                    await dropdown.click()  # native-click: manage；删除路径的成效页动作下拉
                     action = page.locator('[data-surface$="match_container:TofuObjectInsightsDeleteAction"] [role="menuitem"]')
                     await expect(action).to_have_count(1)
-                    await action.click()
+                    await action.click()  # native-click: manage；删除动作，破坏性操作保持原生
                 # 真实确认框有 dialog/aria-labelledby/tabindex=-1；旧实现误判为无 dialog。
                 # 详情面板不具备这组属性。确认框三项业务顺序为关闭、取消、主动作，
                 # 数量/范围任一变化都停止，不靠中文文案或任意全页最后按钮执行破坏性操作。
@@ -125,7 +125,7 @@ async def meta_post_action(account_file: Path, *, page_id: str, page_name: str,
                 await expect(dialog).to_have_count(1)
                 actions = dialog.get_by_role('button')
                 await expect(actions).to_have_count(2)
-                await actions.nth(1).click()
+                await actions.nth(1).click()  # native-click: manage；删除确认框主动作，破坏性操作保持原生
                 await expect(dialog).to_have_count(0, timeout=30000)
                 await expect(row).to_have_count(0, timeout=45000)
                 if not scheduled:

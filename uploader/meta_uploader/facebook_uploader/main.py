@@ -16,6 +16,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
+from utils.humanize import Humanizer
 from utils.log import facebook_logger
 
 
@@ -25,6 +26,13 @@ FACEBOOK_PROXY = os.environ.get("SAU_FACEBOOK_PROXY")
 FACEBOOK_LOGIN_INPUT = 'input[name="email"]'
 # 首页发帖附件同时接受图片与视频，头像/封面控件不具备这组 MIME 类型。
 FACEBOOK_MEDIA_INPUT = 'input[type="file"][accept*="image/"][accept*="video/"]'
+# 选择素材后 composer 异步挂载；这里先等到可见的正文编辑器出现。
+FACEBOOK_COMPOSER_READY = '[role="dialog"] [contenteditable="true"][role="textbox"]:visible'
+# 外层 aria-modal dialog 属于本次发帖表单，排除首页评论框及隐藏模板。
+FACEBOOK_COMPOSER_EDITOR = (
+    '[role="dialog"][aria-modal="true"] [contenteditable="true"][role="textbox"]'
+)
+FACEBOOK_PUBLISH_FORM = '[role="dialog"][aria-modal="true"] form'
 
 FACEBOOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
 FACEBOOK_LOGIN_CHECK_SETTLE_MS = 2_500
@@ -224,6 +232,15 @@ async def facebook_setup(
             await browser.close()
 
 
+def _composer_text(caption: str) -> str:
+    """正文只允许 LF：``\r\n`` 与孤立 ``\r`` 一律归一为 ``\n``。
+
+    ``\r`` 不是可打印字符，``type_text`` 会把它交给 ``insert_text``，浏览器
+    可能直接丢弃；先统一换行，逐字输入才会与读回值一致。
+    """
+    return caption.replace("\r\n", "\n").replace("\r", "\n")
+
+
 class FacebookPost:
     """通过个人主页 composer 发布一个视频或一组图片。"""
 
@@ -259,16 +276,36 @@ class FacebookPost:
             budget = self._publish_budget = PublishTimeoutBudget("Facebook")
         return budget
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针与随机流在同一个 page 上保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """停顿只吃剩余预算：耗尽时收缩到 0，超时判据仍只在发布点击处。"""
+        remaining = max(0.0, self._ensure_publish_budget().remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            facebook_logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     async def _find_caption_editor(self, page: Page):
         # 外层 aria-modal dialog 属于本次发帖表单，排除首页评论框及隐藏模板。
-        editor = page.locator('[role="dialog"][aria-modal="true"] [contenteditable="true"][role="textbox"]')
+        editor = page.locator(FACEBOOK_COMPOSER_EDITOR)
         await expect(editor).to_have_count(1)
         return editor
 
     async def _find_publish_button(self, page: Page):
         # 发帖 form 的最后一个业务动作是提交，前面的按钮分别为编辑器关闭、隐私及附件编辑。
         # 图文/视频实际 DOM 均已检查；嵌套 dialog 实际是编辑器标题栏，不能把它当提交区域。
-        form = page.locator('[role="dialog"][aria-modal="true"] form')
+        form = page.locator(FACEBOOK_PUBLISH_FORM)
         await expect(form).to_have_count(1)
         button = form.get_by_role('button').last
         await expect(button).to_be_visible()
@@ -309,7 +346,12 @@ class FacebookPost:
             label="Facebook 发布",
         )
         budget.check_pre_click()
-        await publish_button.click()
+        humanizer = self._humanizer(page)
+        # 发布是提交动作：先付一次 before_submit，再走坐标点击（人类化唯一路径）。
+        await humanizer.before_submit()
+        # 停顿可能吃掉最后的预算：派发前再确认一次（未发布，退出 1）。
+        budget.check_pre_click()
+        await humanizer.click(publish_button)
         while budget.remaining_seconds() > 0:
             # 只接受状态提示或成功文案；弹窗消失本身不足以证明服务端已受理。
             success_text = page.get_by_text(success_pattern)
@@ -338,13 +380,19 @@ class FacebookPost:
 
         budget = self._ensure_publish_budget()
         # 选择素材后 composer 异步挂载；不能在同一轮立即检查 count 就判输入框不存在。
-        await page.locator('[role="dialog"] [contenteditable="true"][role="textbox"]:visible').wait_for(
+        await page.locator(FACEBOOK_COMPOSER_READY).wait_for(
             timeout=budget.clamp_ms(30000)
         )
         editor = await self._find_caption_editor(page)
-        caption = self._caption()
-        await editor.click()
-        await editor.fill(caption)
+        # 正文 = 标题 + 正文 + 标签（``\n\n`` 连接）；多行字段只允许 LF。
+        caption = _composer_text(self._caption())
+        humanizer = self._humanizer(page)
+        # sel 形态：坐标点击聚焦 → 全选 → 删除 → 逐字（>1000 码点由
+        # ``type_text`` 整段 insert_text），``type_text`` 自带恰一次 after_type。
+        await humanizer.click(editor)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(caption)
         if (await editor.inner_text()).strip() != caption:
             raise RuntimeError("Facebook 正文输入框未读回预期内容")
 
