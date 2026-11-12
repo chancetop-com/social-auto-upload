@@ -128,6 +128,11 @@ def _add_publish_option_flags(parser, *, include_reuse: bool) -> None:
             "with --privacy only-me"
         ),
     )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="跑到发布就绪点即停止，不点击发布（回归测试用）",
+    )
 
 
 def register(platform_parsers):
@@ -238,6 +243,7 @@ class TiktokVideoUploadRequest:
     options: TiktokPublishOptions | None = None
     account_file: Path | None = None
     publish_not_before: datetime | None = None
+    no_publish: bool = False
 
 
 def _build_publish_options(args) -> TiktokPublishOptions | None:
@@ -305,6 +311,7 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
         ),
         options=request.options,
         headless=request.headless,
+        no_publish=request.no_publish,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -323,6 +330,7 @@ class TiktokNoteUploadRequest:
     options: TiktokPublishOptions | None = None
     account_file: Path | None = None
     publish_not_before: datetime | None = None
+    no_publish: bool = False
 
 
 def _note_text(args) -> str | None:
@@ -430,6 +438,7 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
         options=request.options,
         debug=request.debug,
         headless=request.headless,
+        no_publish=request.no_publish,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -566,6 +575,7 @@ async def run(args):
             options=_build_publish_options(args),
             account_file=account_file,
             publish_not_before=args.not_before,
+            no_publish=getattr(args, "no_publish", False),
         )
         await _upload_note(request, target)
         print(
@@ -589,6 +599,7 @@ async def run(args):
             options=_build_publish_options(args),
             account_file=account_file,
             publish_not_before=args.not_before,
+            no_publish=getattr(args, "no_publish", False),
         )
         await _upload_video(request, target)
         print(f"TikTok video upload submitted: {request.video_file}")
