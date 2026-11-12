@@ -77,9 +77,7 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`
-- `LOCAL_CHROME_HEADLESS`：只影响**直接调用 uploader / examples** 时的默认无头行为；CLI 参数层不读取该配置，CLI 默认有头，需要无头请显式传 `--headless`。
-
-`XHS_SERVER` 目前只和小红书旧流程相关。
+- `LOCAL_CHROME_HEADLESS`：只影响**直接调用 uploader** 时的默认无头行为；CLI 参数层不读取该配置，CLI 默认有头，需要无头请显式传 `--headless`。
 
 ### 6. 验证 CLI 是否可用
 
@@ -171,7 +169,7 @@ sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --titl
 如果你是一个可执行命令的 agent，请优先按下面顺序处理：
 
 1. 先假设仓库根目录就是当前工作目录
-2. 优先使用 `uv` 管理环境，不要默认回退到旧的 `requirements.txt`
+2. 优先使用 `uv` 管理环境（`uv pip install -e .`）
 3. 安装命令优先使用：
 
 ```bash
@@ -243,8 +241,6 @@ sau bilibili upload-video
 - 如果环境支持查看本地图片，优先用查看图片能力把二维码展示出来；路径只作为补充信息
 - Bilibili 登录当前不建议 agent 在非交互环境里直接代跑
 - 正确做法是让用户自己在本地终端执行 `sau bilibili login --account <name>`；如果二维码显示不完整，再提示用户打开 `qrcode.png`
-- `requirements.txt` 目前是历史兼容文件，不是主安装入口
 - `uploader/` 是核心实现目录
 - `sau_cli.py` 是当前 CLI 主入口
-- `docs/legacy-web.md` 是历史 Web 版本说明，不保证当前可用
 - Bilibili 首次运行时可能自动下载 `biliup`

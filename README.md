@@ -136,7 +136,6 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 - [Agent Bootstrap Prompt](./docs/agent-bootstrap.md)
 - 跨平台总入口：[social-auto-upload](./skills/social-auto-upload/SKILL.md)
 - 各平台 Skill：[抖音](./skills/douyin-upload/SKILL.md)、[Bilibili](./skills/bilibili-upload/SKILL.md)、[小红书](./skills/xiaohongshu-upload/SKILL.md)、[快手](./skills/kuaishou-upload/SKILL.md)、[视频号](./skills/tencent-upload/SKILL.md)、[百家号](./skills/baijiahao-upload/SKILL.md)、[大鱼号](./skills/dayu-upload/SKILL.md)、[支付宝生活号](./skills/alipay-upload/SKILL.md)、[微博](./skills/weibo-upload/SKILL.md)、[虎扑](./skills/hupu-upload/SKILL.md)、[TikTok](./skills/tiktok-upload/SKILL.md)、[雪球](./skills/xueqiu-upload/SKILL.md)、[YouTube](./skills/youtube-upload/SKILL.md)、[知乎](./skills/zhihu-upload/SKILL.md)、[Facebook](./skills/facebook-upload/SKILL.md)、[Facebook Page](./skills/meta-upload/SKILL.md)、[Instagram](./skills/instagram-upload/SKILL.md)
-- [历史 Web 版本说明](./docs/legacy-web.md)
 
 #### Skill 分发与市场
 
@@ -153,7 +152,7 @@ npx skills add dreammis/social-auto-upload --skill douyin-upload
 
 ## 🏁快速开始
 
-### 方式 1：使用 CLI
+### 使用 CLI
 
 先按上方平台能力表确认支持范围，再选择下面的内容类型。视频、文章和图文分别使用独立发布命令；文章中的配图仍属于文章正文。
 
@@ -329,26 +328,6 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 - 首次运行相关命令时，程序会自动下载 `biliup`
 - 后续运行会自动检查上游 release 并更新
 - Bilibili 登录建议由用户自己在本地真实终端里执行；如果终端二维码显示不完整，可以直接打开当前目录下的 `qrcode.png` 扫码
-
-### 方式 2：使用 examples
-
-`examples/` 目录里同时存在两类脚本：
-
-- 当前主线 CLI 包装示例
-- 历史直连 uploader 示例
-
-对抖音、快手、小红书、Bilibili 来说，当前主线优先使用上面的 `sau ...` CLI。
-下面这些脚本主要是历史直连 uploader 示例或调试入口：
-
-- `examples/upload_to_douyin.py`
-- `examples/upload_video_to_bilibili.py`
-- `examples/upload_to_kuaishou.py`
-- `examples/upload_video_to_tencent.py`
-- `examples/upload_video_to_baijiahao.py`
-- `examples/get_alipay_cookie.py`
-- `examples/test_alipay_upload.py`
-- `examples/upload_video_to_tiktok.py`
-- `examples/upload_video_to_xiaohongshu.py`
 
 ## 📃详细文档
 

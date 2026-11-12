@@ -1,6 +1,6 @@
 # 大鱼号视频发布使用说明
 
-当前支持登录、检查账号、立即或定时发布视频和查询发布结果；尚未接入 Web 界面。文章和富文本正文文件发布见 [大鱼号图文发布](./dayu-article.md)，Agent 使用见 [大鱼号 Skill](../skills/dayu-upload/SKILL.md)。
+当前支持登录、检查账号、立即或定时发布视频和查询发布结果。文章和富文本正文文件发布见 [大鱼号图文发布](./dayu-article.md)，Agent 使用见 [大鱼号 Skill](../skills/dayu-upload/SKILL.md)。
 
 ## 首次使用
 

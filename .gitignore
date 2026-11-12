@@ -183,9 +183,6 @@ node_modules/
 package-lock.json
 !utils/article_renderer/package-lock.json
 
-# database
-db/database.db
-
 # 临时文件夹
 cookiesFile
 uploadFile

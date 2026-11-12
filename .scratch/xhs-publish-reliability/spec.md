@@ -713,7 +713,7 @@ length   = ceil(weighted / 2)          # ≤ 20
 
 - **每步只改一个平台**（灰度粒度 = 提交/发布）；只有全局 `HUMANIZE=0` 开关，**不设平台级开关**。
 - **已取证的登录/风控规则不得被空规则替换**：无真机证据前保留现有登录判定并映射到 `LoginRequiredError`，不允许 `classify` 恒返回 `None` 把失效降级成 1。
-- 不迁也不删：`bilibili`（biliup 子进程）、`uploader/xhs_uploader/`（CLI 不可达）、`uploader/tk_uploader/main.py`（若 CLI 走 `main_chrome`）。
+- 不迁也不删：`bilibili`（biliup 子进程）、`uploader/xhs_uploader/`（CLI 不可达）、`uploader/tk_uploader/main.py`（若 CLI 走 `main_chrome`）。2026-11-12 更新：`uploader/xhs_uploader/` 已作为独立清理议题删除，见 `.scratch/legacy-web-removal/spec.md`。
 
 **D. 静态断言豁免** `fill(` = 0 **豁免** YouTube `_fill_editable`（逐字输入 `#` 会触发话题补全并卡死流程）；豁免形式 = 唯一 helper + 注释写明原因。文章正文的剪贴板粘贴不与长配文 `insert_text` 合并。
 

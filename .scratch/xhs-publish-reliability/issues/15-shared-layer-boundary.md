@@ -141,3 +141,7 @@ async def classify(page, rules: BlockedRules) -> BlockedKind | None
 - **上述 `## Answer` 第 7 条与迁移路线步 10 的「阻塞于 25 / 必须先算文本上界」以此处为准。**
 - **静态断言 `fill(` = 0 必须豁免 YouTube `_fill_editable`**（标题与描述都走它，理由见 `youtube_uploader/main.py:238-252`：逐字输入 `#` 会触发话题补全并卡死流程）。豁免形式：唯一 helper + 注释写明原因，16 的断言按白名单核对。
 - **文章正文粘贴保持独立**：不与长配文的 `insert_text` 合并成一个 helper（前者为保留富文本结构所必需，后者是行为降级）。
+
+## Comments
+
+- 2026-11-12：`uploader/xhs_uploader/` 已作为独立清理议题删除，同批删除历史 Web（`sau_backend.py`、`sau_frontend/`、`myUtils/` 等）与旧 `examples/` 脚本；记录见 `CHANGELOG.md` 的「移除历史 Web 与旧示例脚本」。`bilibili` 与 `tk_uploader/main.py` 仍按原约定保留。

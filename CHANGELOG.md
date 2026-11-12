@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 移除历史 Web 与旧示例脚本
+
+- 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。
+- 删除 CLI 不可达的旧小红书签名实现 `uploader/xhs_uploader/`，并移除 `conf.XHS_SERVER`。
+- 删除 `examples/` 下的历史直连上传/登录脚本，仅保留文章渲染与发布示例素材（`article.md`、`dayu_article.html`、`xueqiu_article.*`、`images/`）。
+- 同步清理 README、`docs/install.md`、`docs/update.md`、`docs/agent-bootstrap.md` 中对上述内容的引用。
+
 ### 客户端发布闸门
 
 - 所有发布命令（`upload-video` / `upload-note` / `upload-article`）新增 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区的绝对时刻）：先完成上传、填表、封面、声明、合集等全部准备，解析后换算到运行机器本地时区，到达目标时刻才点击发布；不传时立即发布，目标时间已过也立即发布。

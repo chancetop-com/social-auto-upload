@@ -50,7 +50,7 @@
 请遵守以下规则：
 
 1. 默认把仓库根目录视为当前工作目录。
-2. 优先使用 `uv` 管理 Python 环境，不要默认回退到旧的 `requirements.txt`。
+2. 优先使用 `uv` 管理 Python 环境（`uv pip install -e .`）。
 3. 优先使用当前主线 CLI：`sau`。
 4. 优先参考这些文档：
    - `docs/install.md`
@@ -62,7 +62,7 @@
    - `skills/xiaohongshu-upload/`
    - `skills/bilibili-upload/`
    - `skills/dayu-upload/`
-6. 不要默认走历史 `examples/` 和旧 Web 路径，除非当前 CLI 主线不可用。
+6. `examples/` 仅保留文章示例素材，不包含可执行脚本；统一使用当前 CLI 主线。
 7. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
 8. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端执行。
 9. 安装完成后，请优先验证以下命令：
