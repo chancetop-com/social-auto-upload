@@ -3,6 +3,7 @@ import asyncio
 from patchright.async_api import async_playwright
 
 from uploader.ks_uploader.main import _click_visible_publish_confirm
+from utils.humanize import Humanizer
 
 
 def test_click_visible_publish_confirm_uses_modal_primary_button():
@@ -22,7 +23,7 @@ def test_click_visible_publish_confirm_uses_modal_primary_button():
                 "button => button.addEventListener('click', () => window.publishConfirmed = true)"
             )
 
-            assert await _click_visible_publish_confirm(page) is True
+            assert await _click_visible_publish_confirm(page, Humanizer(page)) is True
             assert await page.evaluate("window.publishConfirmed") is True
             await browser.close()
 
@@ -36,7 +37,7 @@ def test_click_visible_publish_confirm_is_noop_without_modal():
             page = await browser.new_page()
             await page.set_content("<button>发布</button>")
 
-            assert await _click_visible_publish_confirm(page) is False
+            assert await _click_visible_publish_confirm(page, Humanizer(page)) is False
             await browser.close()
 
     asyncio.run(scenario())

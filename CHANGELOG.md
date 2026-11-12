@@ -4,16 +4,26 @@
 
 ## [Unreleased]
 
+### 人类化交互层（W3 国内冲突）
+
+- 抖音：53 个交互点接入人类化（视频/图文发布，删除 `_native_click` 及其合成事件重放；`uploader/douyin_uploader/`）。
+
 ### 人类化交互层（W2 国外）
 
 - Facebook 个人主页：3 个交互点接入人类化（正文输入 + 正文聚焦 / 发布点击），删除/管理点击与文件选择保持原生并逐条标记（`uploader/meta_uploader/facebook_uploader/`）。
 - YouTube：标题/简介逐字输入（含 `#` 逐段等待候选并按文本全等点选、失败降级纯文本继续）、播放列表名与标签改为全选覆盖后逐字、12 处可见点击（含 `_click_if_present`）统一走人类化指针（uploader/youtube_uploader）。
 - Facebook Page：14 个交互点接入人类化（`uploader/meta_uploader/facebook_page_uploader/`）。
 
+### 人类化交互层（W3 国内冲突）
+
+- 微博：23 个交互点接入人类化（首页入口与 popup 发布页各一实例、跨页不复用；发布按钮比例落点 `(0.65,0.5)` → 失败且未派发时 `(0.35,0.5)` 再试一次；封面「完成」只点一次；`uploader/weibo_uploader/`）。
+
 ### 人类化交互层（W4 国内主体）
 
 - 大鱼号：36 个交互点接入人类化（`uploader/dayu_uploader/`）。
 - 知乎：30 个交互点接入人类化（视频表单标题/介绍、领域与标记下拉、原创勾选、文章标题与正文聚焦、定时表单 17 处、两个发布点），失焦点击与发布后详情跳转保持原生并逐条标记（`uploader/zhihu_uploader/`）。
+- 视频号：34 个交互点接入人类化（`uploader/tencent_uploader/`）。
+- 快手：13 个交互点接入人类化（描述/正文清空序列与话题逐字、描述聚焦、发布确认弹窗、定时开关与日期 picker、合集下拉与选项、封面入口/上传 tab/确认、视频与图文发布），登录二维码、文件入口、「我知道了」提示条和 Joyride 引导层保持原生并逐条标记（`uploader/ks_uploader/`）。
 
 ### 移除历史 Web 与旧示例脚本
 
