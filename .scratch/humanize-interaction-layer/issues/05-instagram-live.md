@@ -47,3 +47,43 @@ Status: ready-for-human
 
 `Status:` 未改（真机复跑仍需按上面清单执行）。
 
+### 第三次干跑：配文页开关的点击目标（同日，integration tip `c037298`）
+
+配文回读修好后流程 ~62s 到达 `options` 阶段，`--no-comments` 与 `--ai-generated` 同时以
+`ElementUnusableError(reason="opacity-zero")`（role `interactive`）失败，结果
+`comments=mismatch; ai_generated=mismatch`、退出 1、未发布任何内容。证据：IG 的开关是
+`<input type="checkbox" role="switch" aria-checked="...">`，Instagram 把 **input 自身**
+样式成 `opacity: 0`，用户看到的轨道/滑块在它的直接父容器里。`utils.dom.check` 按 spec
+把 `opacity < 0.1` 判为不可点，而 `SwitchControl.set` 之前把 input 直接交给
+`Humanizer.click`，于是死在坐标点击自己的 `interactive` 复核。
+
+`uploader/meta_uploader/insgraph_uploader/controls/toggles.py`（共享层与 `_rows.py` 零改动）：
+- `_locate` 不变，仍返回 `input[role=switch]`：回读继续读真实开关的 `aria-checked` /
+  `is_checked()`，语义值不受影响。
+- 新增模块内 `_click_target(switch)` / `_visible_target(node)`：**只解析点击目标**。
+  开关自身通过共享 `utils.dom.check(..., "visible")` 时就是目标（普通开关坐标不变）；
+  否则逐层 `xpath=..` 向上最多 4 层（`_CLICK_ANCESTOR_LEVELS`），返回第一个通过同一
+  可见性检查的祖先；一个都没有则原样返回开关，让点击以原来的 `opacity-zero` 硬错失败。
+  没有 `force`、没有 JS 点击、没有键盘或重试兜底。
+- `set()` 只把 `click_control(...)` 的 locator 换成 `await _click_target(switch)`，
+  `_rows.activate` / `click_control` 语义与其他控件零变化。
+
+覆盖（`tests/test_instagram_humanize.py`，34 passed = 原 29 + 5）：
+- `test_opacity_zero_switch_clicks_the_visible_parent`：`opacity:0` 的 input + 可见直接父容器 →
+  命中测试发生在父容器、恰好一次 `mouse.down`/`up`、零原生点击，回读仍读 input 的
+  `aria-checked`（点击父容器翻转它）。
+- `test_no_visible_ancestor_keeps_the_opacity_zero_hard_error`：4 层祖先全不可见 →
+  目标退回开关本身，抛出的就是原来的 `opacity-zero`（role `interactive`、
+  `publish_clicked=False`），且零点击。
+- `test_comments_and_ai_label_controls_both_click_the_visible_parent`：经真实
+  `resolve_instagram_option_controls` 注册表跑 `comments`（invert）与 `ai_generated`
+  两条路径，各自命中父容器、各自回读 input；两次 `down`、零原生点击。
+- `test_a_visible_switch_is_clicked_directly`：不是 opacity:0 的普通开关仍点开关本身，
+  命中测试在开关上、祖先零点击——保证这次只改“不可见开关”的目标。
+- `test_fast_path_still_clicks_once_on_the_visible_parent`：`HUMANIZE=0` 下同一条解析
+  路径，恰好一次 `locator.click`（落在可见父容器）且零 pause；文档写明了期望目标。
+
+全库：1712 passed / 2 skipped（781 subtests）。`utils/humanize.py`、`utils/dom.py`、
+`_rows.py`、其他平台、真实 C 层 fixture 均零改动。
+
+`Status:` 未改（真机复跑仍需按上面清单执行）。

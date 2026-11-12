@@ -38,12 +38,16 @@ from uploader.meta_uploader.insgraph_uploader.controls._rows import (
     activate,
     click_control,
 )
+from uploader.meta_uploader.insgraph_uploader.controls import (
+    resolve_instagram_option_controls,
+)
 from uploader.meta_uploader.insgraph_uploader.controls.alt_text import AltTextControl
 from uploader.meta_uploader.insgraph_uploader.controls.location import (
     ENTRY_SELECTORS,
     TYPE_DELAY_MS,
     LocationControl,
 )
+from uploader.meta_uploader.insgraph_uploader.controls.toggles import SwitchControl
 from uploader.meta_uploader.insgraph_uploader.main import (
     InstagramUploader,
     _dismiss_optional_prompt,
@@ -877,7 +881,326 @@ class InstagramHumanizeFieldReadbackTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. Package gates A–E
+# 3. Switch click target: Instagram paints the switch in the input's parent
+# ---------------------------------------------------------------------------
+
+#: Instagram's real switch is an ``input[role=switch]`` styled ``opacity: 0``;
+#: the visible track/thumb is its immediate parent.  Spec §2.6: click the
+#: visible parent, never JS, never ``force``, never a keyboard fallback.
+_SWITCH_SELECTOR = '[role="switch"], [role="checkbox"]'
+_SWITCH_HOLDER_XPATH = (
+    'xpath=ancestor-or-self::*'
+    '[descendant-or-self::*[@role="switch"] or '
+    'descendant-or-self::*[@role="checkbox"]][1]'
+)
+_PARENT_XPATH = "xpath=.."
+
+_COMMENTS_LABELS = ("Turn off commenting", "关闭评论")
+_AI_LABELS = ("Add AI label", "AI label", "AI 标签", "添加 AI 标签")
+
+
+class _HiddenSwitch(Field):
+    """The native switch: ``opacity: 0`` but still "visible" to Playwright.
+
+    ``is_visible()`` ignores opacity, so the find step accepts the input — the
+    live run then failed inside ``Humanizer.click`` at the ``interactive``
+    probe with ``reason="opacity-zero"``.  ``utils.dom`` facts are overridden
+    here so the double reproduces exactly that state.
+    """
+
+    def __init__(self, name: str, **kwargs) -> None:
+        super().__init__(name, **kwargs)
+        self.attributes_read: list[str] = []
+
+    async def evaluate(self, expression, arg=None):
+        if isinstance(expression, str) and "ancestorAriaHidden" in expression:
+            self.evaluate_calls.append((expression, arg))
+            return {**FACTS, "tag": "input", "opacity": 0.0}
+        return await super().evaluate(expression, arg)
+
+    async def get_attribute(self, name: str):
+        self.attributes_read.append(name)
+        return await super().get_attribute(name)
+
+
+def _switch_chain(
+    page: HumanizePage,
+    name: str,
+    *,
+    checked: str = "false",
+    ancestor_visible: bool = True,
+    opacity_zero: bool = True,
+) -> tuple[Field, Field, list[Field]]:
+    """Wire ``input`` plus four ancestors; returns ``(switch, parent, chain)``.
+
+    ``parent`` is the immediate wrapper (the visible track).  ``chain`` runs
+    parent → great-great-grandparent so the four-level walk can be scripted
+    invisible end to end.  Clicking the parent flips the input's
+    ``aria-checked`` — readback must observe that on the input, not the wrapper.
+    ``opacity_zero=False`` models a plain switch that is itself clickable (the
+    pre-2026-11-13 fixtures and every non-IG toggle shape).
+    """
+    ancestors: list[Field] = []
+    deeper: Field | None = None
+    for level in range(4, 0, -1):
+        parent = Field(
+            f"{name}-ancestor-{level}",
+            page=page,
+            visible=ancestor_visible and level == 1,
+            children={_PARENT_XPATH: deeper} if deeper is not None else None,
+        )
+        ancestors.insert(0, parent)
+        deeper = parent
+    attributes = {"role": "switch", "aria-checked": checked}
+    switch: Field = (
+        _HiddenSwitch(
+            f"{name}-switch",
+            page=page,
+            attributes=attributes,
+            children={_PARENT_XPATH: ancestors[0]},
+        )
+        if opacity_zero
+        else Field(
+            f"{name}-switch",
+            page=page,
+            attributes=attributes,
+            children={_PARENT_XPATH: ancestors[0]},
+        )
+    )
+
+    def flip() -> None:
+        current = switch._attributes.get("aria-checked")
+        switch._attributes["aria-checked"] = (
+            "false" if current == "true" else "true"
+        )
+
+    ancestors[0].on_real_click = flip
+    switch.on_real_click = flip
+    return switch, ancestors[0], ancestors
+
+
+def _dialog_with(
+    page: HumanizePage,
+    rows: dict[str, tuple[Field, Field, list[Field]]],
+    *,
+    labels: tuple[str, ...],
+) -> Field:
+    """Dialog double: every declared label resolves to its row, others empty."""
+    children: dict[str, Field] = {}
+    for label in labels:
+        if label in rows:
+            switch = rows[label][0]
+            holder = Field(
+                f"{label}-holder",
+                page=page,
+                children={
+                    _SWITCH_SELECTOR: Field(
+                        f"{label}-switches",
+                        page=page,
+                        items=[switch],
+                        count=1,
+                    )
+                },
+            )
+            children[f"text:{label}:exact"] = Field(
+                f"{label}-nodes",
+                page=page,
+                items=[
+                    Field(
+                        f"{label}-text",
+                        page=page,
+                        children={_SWITCH_HOLDER_XPATH: holder},
+                    )
+                ],
+                count=1,
+            )
+        else:
+            children[f"text:{label}:exact"] = Field(
+                f"{label}-absent", page=page, count=0
+            )
+    # Structural fallback: no extra switches live directly under the dialog.
+    children[_SWITCH_SELECTOR] = Field("dialog-switches", page=page, count=0)
+    return Field("dialog", page=page, children=children)
+
+
+def _comments_toggle(page: HumanizePage, humanizer: Humanizer) -> SwitchControl:
+    return SwitchControl(
+        page,
+        labels=_COMMENTS_LABELS,
+        panel_labels=("Advanced settings", "高级设置"),
+        invert=True,
+        humanizer=humanizer,
+    )
+
+
+class InstagramSwitchClickTargetTests(unittest.IsolatedAsyncioTestCase):
+    """Spec §2.6: an opacity-zero switch is clicked through its visible parent.
+
+    Readback must keep reading the real input (``aria-checked`` /
+    ``is_checked``); only the click target moves.  No JS click, no ``force``,
+    no retry — an unreachable switch keeps the original hard error.
+    """
+
+    async def test_opacity_zero_switch_clicks_the_visible_parent(self):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        switch, parent, _chain = _switch_chain(page, "comments")
+        page.add(
+            "role:dialog",
+            _dialog_with(
+                page, {"Turn off commenting": (switch, parent, _chain)},
+                labels=_COMMENTS_LABELS,
+            ),
+        )
+        control = _comments_toggle(page, humanizer)
+
+        # invert=True: aria-checked=false means commenting is still enabled, so
+        # requesting comments off (set(False)) must click exactly once.
+        await control.set(False)
+
+        self.assertEqual(parent.click_count, 0)
+        self.assertEqual(switch.click_count, 0)
+        # The click was dispatched on the wrapper: its hit-test ran and its
+        # real click flipped the input's aria-checked.
+        self.assertIn(("hit-test", parent.name), page.timeline.events)
+        self.assertNotIn(("hit-test", switch.name), page.timeline.events)
+        self.assertEqual(page.timeline.kinds().count("down"), 1)
+        self.assertEqual(page.timeline.kinds().count("up"), 1)
+        self.assertNotIn("locator.click", page.timeline.kinds())
+        # Readback (before and after the click) stayed on the real switch.
+        self.assertIn("aria-checked", switch.attributes_read)
+        self.assertIs(await control.read(), False)
+
+    async def test_no_visible_ancestor_keeps_the_opacity_zero_hard_error(self):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        switch, parent, chain = _switch_chain(
+            page, "comments", ancestor_visible=False
+        )
+        page.add(
+            "role:dialog",
+            _dialog_with(
+                page, {"Turn off commenting": (switch, parent, chain)},
+                labels=_COMMENTS_LABELS,
+            ),
+        )
+        control = _comments_toggle(page, humanizer)
+
+        with self.assertRaises(ElementUnusableError) as ctx:
+            await control.set(False)
+
+        self.assertEqual(ctx.exception.reason, "opacity-zero")
+        self.assertEqual(ctx.exception.role, "interactive")
+        self.assertIs(ctx.exception.publish_clicked, False)
+        # Fallback target is the switch itself: the error is the original one,
+        # and nothing was clicked (no native click, no mouse.down).
+        self.assertEqual(switch.click_count, 0)
+        for ancestor in chain:
+            self.assertEqual(ancestor.click_count, 0)
+        self.assertNotIn("down", page.timeline.kinds())
+
+    async def test_comments_and_ai_label_controls_both_click_the_visible_parent(self):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        comments = _switch_chain(page, "comments")
+        ai = _switch_chain(page, "ai")
+        page.add(
+            "role:dialog",
+            _dialog_with(
+                page,
+                {
+                    "Turn off commenting": comments,
+                    "Add AI label": ai,
+                },
+                labels=_COMMENTS_LABELS + _AI_LABELS,
+            ),
+        )
+        controls = resolve_instagram_option_controls(
+            page, image_count=1, humanizer=humanizer
+        )
+
+        await controls["comments"].set(False)
+        await controls["ai_generated"].set(True)
+
+        for name, (switch, parent, _chain) in (
+            ("comments", comments),
+            ("ai_generated", ai),
+        ):
+            with self.subTest(control=name):
+                self.assertEqual(parent.click_count, 0)
+                self.assertEqual(switch.click_count, 0)
+                self.assertIn(("hit-test", parent.name), page.timeline.events)
+                self.assertIn("aria-checked", switch.attributes_read)
+        self.assertEqual(page.timeline.kinds().count("down"), 2)
+        self.assertEqual(page.timeline.kinds().count("up"), 2)
+        self.assertNotIn("locator.click", page.timeline.kinds())
+        self.assertIs(await controls["comments"].read(), False)
+        self.assertIs(await controls["ai_generated"].read(), True)
+
+    async def test_a_visible_switch_is_clicked_directly(self):
+        """Only an unusable switch moves the target; every other click is unchanged.
+
+        The shared visibility check accepts a normal switch (opacity 1), so the
+        click stays on the switch itself — the same target and coordinates as
+        before this ticket.
+        """
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        switch, parent, chain = _switch_chain(
+            page, "comments", opacity_zero=False
+        )
+        page.add(
+            "role:dialog",
+            _dialog_with(
+                page, {"Turn off commenting": (switch, parent, chain)},
+                labels=_COMMENTS_LABELS,
+            ),
+        )
+        control = _comments_toggle(page, humanizer)
+
+        await control.set(False)
+
+        self.assertEqual(switch.click_count, 0)  # humanized: no native click
+        self.assertEqual(parent.click_count, 0)
+        self.assertIn(("hit-test", switch.name), page.timeline.events)
+        self.assertNotIn(("hit-test", parent.name), page.timeline.events)
+        self.assertEqual(page.timeline.kinds().count("down"), 1)
+        self.assertIs(await control.read(), False)
+
+    async def test_fast_path_still_clicks_once_on_the_visible_parent(self):
+        """``HUMANIZE=0``: one native click, zero pauses — same target.
+
+        The fast path deliberately resolves the same click target as the
+        humanized path, so a mode switch cannot change what gets clicked.  One
+        ``locator.click`` lands on the visible parent; there is no
+        ``mouse.down`` and no pause at all.
+        """
+        page = _page()
+        switch, parent, chain = _switch_chain(page, "comments")
+        page.add(
+            "role:dialog",
+            _dialog_with(
+                page, {"Turn off commenting": (switch, parent, chain)},
+                labels=_COMMENTS_LABELS,
+            ),
+        )
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            humanizer = Humanizer(page, sleep=page.timeline.sleep)
+        self.assertFalse(humanizer.enabled)
+        control = _comments_toggle(page, humanizer)
+
+        await control.set(False)
+
+        self.assertEqual(parent.click_count, 1)
+        self.assertEqual(switch.click_count, 0)
+        self.assertEqual(page.timeline.kinds().count("locator.click"), 1)
+        self.assertNotIn("down", page.timeline.kinds())
+        self.assertEqual(page.timeline.payloads("pause"), [])
+        self.assertIs(await control.read(), False)
+
+
+# ---------------------------------------------------------------------------
+# 4. Package gates A–E
 # ---------------------------------------------------------------------------
 
 
@@ -997,7 +1320,7 @@ class InstagramHumanizeGateTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 4. HUMANIZE=0 fast path
+# 5. HUMANIZE=0 fast path
 # ---------------------------------------------------------------------------
 
 
