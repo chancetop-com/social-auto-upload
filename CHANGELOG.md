@@ -6,6 +6,7 @@
 
 ### 人类化交互层（W2 国外）
 
+- Facebook 个人主页：3 个交互点接入人类化（正文输入 + 正文聚焦 / 发布点击），删除/管理点击与文件选择保持原生并逐条标记（`uploader/meta_uploader/facebook_uploader/`）。
 - Facebook Page：14 个交互点接入人类化（`uploader/meta_uploader/facebook_page_uploader/`）。
 
 ### 移除历史 Web 与旧示例脚本
