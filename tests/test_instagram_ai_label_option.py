@@ -394,11 +394,22 @@ class _FakePage:
         self.keyboard = _FakeKeyboard()
 
 
+class _FakeHumanizer:
+    """行为层替身：语义测试只关心“点了一次开关”，点击机制另由平台人类化用例覆盖。"""
+
+    enabled = True
+
+    async def click(self, locator):
+        await locator.click()
+
+
 class _StubAiLabelControl(SwitchControl):
     """替换页面定位：直接返回一个内存开关，验证语义与幂等。"""
 
     def __init__(self, switch):
-        super().__init__(_FakePage(), labels=("Add AI label",))
+        super().__init__(
+            _FakePage(), labels=("Add AI label",), humanizer=_FakeHumanizer()
+        )
         self.switch = switch
 
     async def _locate(self):

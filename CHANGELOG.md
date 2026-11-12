@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 人类化交互层（W1 真机探针）
+
+- Instagram：§3.9 的 16 个交互点全部处置——文本与可见点击接入人类化，2 处 `set_input_files` 与作品管理路径按规格保留原生（`uploader/meta_uploader/insgraph_uploader/`）。
+
 ### 移除历史 Web 与旧示例脚本
 
 - 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。
