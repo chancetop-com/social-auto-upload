@@ -46,16 +46,17 @@
 - [01 — 15 个平台的交互调用点清单与分类](./issues/01-interaction-inventory.md) — 386 个唯一行、371 个真实交互；处置 改 Humanizer 246 / 保持原生 54 / 待定 45。两个全局事实：`check(...,"interactive")` 要求 locator `count()==1`（裸 `get_by_role` 必须先收窄）；hit-test 在元素所在 frame 内计算，跨 iframe 的 `stillOn` 成立。
 - [02 — Humanizer 的可移植性边界](./issues/02-portability.md) — iframe **能**（坐标与 hit-test 同为视口 CSS px）；内层 shadow DOM **不能**（`elementFromPoint` 重定向到 host，`contains` 判否）；新 tab 必须重建实例；托管模式 `connect_over_cdp` 强制 `noDefaultViewport`，`page.viewport_size` 为 `None`，`ensure_in_viewport` 静默退回 1280×720，**15 个平台同时受影响**。
 - [03 — `force=True` 白名单准入规则](./issues/03-force-whitelist.md) — 判据：**走不通人类化才用 force**，判断顺序「先改点 → 再判是否原生路径 → 最后才是真不可能」。三条硬事实推翻了大半白名单理由：force 只跳过遮挡**检查**、仍在坐标上派发真实鼠标事件（被浮层盖住时点到浮层）；`interactive` 的命中判定接受后代（`hit === el || el.contains(hit)`），所以「被组件装饰层盖住」改点容器即解；零尺寸禁止 force（会点到别的元素）。18 条判完**真残余 0 条**，剩 4 条全是「不走」的原生路径（2FA ×2、引导层、hidden file input）。因此不建白名单表——产出是判据顺序 + **AST 标记门**（每个残留 `force` 必须同行带 `# humanize-impossible: <失败模式>；<依据等级>；已排除替代`）。失败语义照 XHS：`Humanizer.click` 不传 `what`；`ElementMissing`=选择器问题、`ElementUnusable`=页面问题。过渡一次到位，回滚靠 `HUMANIZE=0`，force 不得当回滚网。
+- [04 — 长文本阈值与时间预算](./issues/04-timing-and-horizon.md) — 阈值保持 1000 全局唯一、不分档（沿用既有「唯一定义」静态门）；>1000 接受单次 `insert_text`，逐字段登记 + 每平台 bulk 断言 + 三平台真机读回。预算 15 分钟不变：人类化停顿只吃剩余预算（`min(sample, remaining)`，耗尽收缩到 0 不抛，clamp 时 WARNING 一次/流程），超时判据仍只在锚点 / 发布点击。固定 sleep **0 删 1 增**（对齐 XHS `f429242`），338 处裸 wait 接预算归 Out of scope。基线只在 TikTok / IG / XHS 记 `HUMANIZE=1` 与 `=0` 实测，其余 12 个标「未验证」。两条限制进规格：码点口径（emoji 提前越线）；per-call 累积成本（IG alt text 最坏可吃光预算 → 点击前 exit 1）。
+- [05 — 波次、回滚与文档同步](./issues/05-waves-and-rollback.md) — 五波：W1 三真机（IG / TikTok / 小红书作参照+回归）→ W2 其余国外（YouTube / FB / FB Page）→ W3 国内冲突（抖音 / 微博）→ W4 国内主体（知乎 / 大鱼 / 视频号 / 快手）→ W5 长尾（支付宝 / 百家号 / 虎扑 / 雪球）。回滚只有全局 `HUMANIZE=0` + revert 平台提交，不做运行时自动降级、`force` 不当回滚网。平台完成 = 事件序列 + 字段值读回 + 平台静态门三条全过。真机记录落 `.scratch/humanize-rollout/acceptance.md`，只验本地模式（无托管账号，托管行为归未验证）。文档改四处：`docs/CLI.md` / `GLOSSARY.md` / `CHANGELOG.md` / umbrella skill，均随 W1；README 与 17 个平台 SKILL.md 不改。
 
 ## Not yet specified
 
-以下是能看出存在、但现在还表述不成一个问题的雾。01 / 02 / 03 已落地，逐项重估后只剩四条（清空策略那条已被 06 吸收，不再算雾）：
+以下是能看出存在、但现在还表述不成一个问题的雾。01 / 02 / 03 / 04 / 05 已落地，逐项重估后只剩三条（清空策略那条已被 06 吸收；固定 sleep 那条已由 04 定案「不清理」，不再算雾）：
 
 - ~~每个平台具体字段该用哪种清空策略~~ → **已并入 06**：01 已交付每个文本输入点的「默认值」列，06 要求 #3 已强制「逐条给出改法 / 清空策略 / 保留原生」。唯一要留意的特例是**大鱼 `#author` 预填（清空会抹掉作者）**，01 风险 Top 5 已记。
 - **YouTube Studio 的 `ytcp-*` 控件是否在 shadow root 内。** 02 判定内层 shadow DOM 无法坐标点击，而 YouTube 是唯一可能大面积踩中的平台。需要一次真机 `evaluate` 才能定，本机无浏览器。
 - 15 个平台里哪些目标**hover 后尺寸会变**。08 决定策略，具体分布只能真机看。
 - 真机验收时人类化是否引入**新的卡死模式**（例如 `stillOn` 在动画按钮上反复失败）。只能等实施后跑真机才知道。
-- 15 个平台里哪些的**既有固定 `sleep`** 会与人类化重复计时、需要清理。属于实施期观测。
 
 ## Out of scope
 
@@ -64,6 +65,8 @@
 - `utils/dom.py` 的其余能力：唯一锚点解析、浮层注册表、Esc 清理、禁止删除节点。本次只带 `Humanizer.click` 必需的 `check` 与 `ensure_in_viewport`。
 - 文件选择器（`expect_file_chooser`）、下拉选择（`select_option`）、日期键入回读、话题点击重试回读。
 - 限流 / 冷却 / 每日上限 / 熔断。
+- 各平台 338 处裸 wait（105 `asyncio.sleep` + 233 `wait_for_timeout`）接预算——即 XHS `53c723f` 那类「单一时间源」重构；不属于交互层。本次只要求人类化停顿自身受预算 clamp（04）。
 - B 站 `biliup` CLI、`myUtils/login.py` 遗留登录、Flask 后端、Vue 前端。
+- 托管模式（Multilogin X / AdsPower）下的人类化行为验证：本轮无托管账号，只验本地模式（05）；08 的托管视口缺陷因此不阻断，最终处置仍由 08 定。
 - 新增 `type_into` 之类封装（已决议：各平台手写）。
 - 把人类化效果与封禁率挂钩的任何断言。
