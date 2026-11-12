@@ -18,8 +18,10 @@ from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
+from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError
 from utils.files_times import get_absolute_path
+from utils.humanize import Humanizer
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
@@ -66,6 +68,11 @@ def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 
 
+def _normalise_text(text: str) -> str:
+    """多行正文先 ``\\r\\n`` → ``\\n``；共享层的 ``\\r`` 会被 ``insert_text`` 丢弃。"""
+    return str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+
 async def _dump_page_debug(page, tag: str) -> str:
     """出错时保存整页截图 + 当前 HTML，返回保存目录，便于对照新 DOM 修选择器。"""
     import time
@@ -83,7 +90,7 @@ async def _dump_page_debug(page, tag: str) -> str:
     return str(base.resolve())
 
 
-async def _focus_desc_editor(page) -> None:
+async def _focus_desc_editor(page, humanizer: Humanizer) -> None:
     """定位并聚焦快手发布页的『描述』编辑区。
 
     快手创作者中心 DOM 时有改版，旧的
@@ -91,6 +98,10 @@ async def _focus_desc_editor(page) -> None:
     一旦结构变化就会干等 30s 超时。这里按多种策略依次尝试（都锚定在「描述」
     标签附近，避免误点到标题框），每种短超时快速失败；全部失败则保存截图/HTML
     供排查后抛出明确错误，而不是无脑超时。
+
+    每次聚焦都是 ``Humanizer.click``：策略 #0 是正常路径，回退分支也不再带
+    ``force``——零尺寸 / 被遮挡的目标直接以 ``zero-box`` / ``covered-by:*``
+    硬失败，不再伪造「已聚焦」的成功。
     """
     label = page.get_by_text("描述")  # 默认子串匹配，"作品描述" 等也能命中
     strategies = [
@@ -108,11 +119,14 @@ async def _focus_desc_editor(page) -> None:
         try:
             loc = make().first
             await loc.wait_for(state="visible", timeout=8000)
-            await loc.click(force=True)
+            await humanizer.click(loc)
             if i > 0:
                 kuaishou_logger.warning(_msg(
                     "⚠️", f"描述区改用回退策略#{i}定位成功（快手可能已改版，建议核对选择器）"))
             return
+        except ElementUnusableError:
+            # 元素存在但不可用：选择器问题，直接失败，不再换策略掩盖。
+            raise
         except Exception as e:  # noqa: BLE001
             last_err = e
     dbg = await _dump_page_debug(page, "desc_not_found")
@@ -121,7 +135,7 @@ async def _focus_desc_editor(page) -> None:
         f"请据此更新选择器。最后错误: {last_err}")
 
 
-async def _click_visible_publish_confirm(page: Page) -> bool:
+async def _click_visible_publish_confirm(page: Page, humanizer: Humanizer) -> bool:
     """Confirm an already-open Ant Design publish dialog before touching the page behind it."""
     modal = page.locator("div.ant-modal-confirm-centered:visible").first
     if not await modal.count():
@@ -131,7 +145,7 @@ async def _click_visible_publish_confirm(page: Page) -> bool:
     if not await primary_button.count():
         raise RuntimeError("快手发布确认弹窗已显示，但未找到可点击的主按钮")
 
-    await primary_button.click(timeout=8000)
+    await humanizer.click(primary_button)
     return True
 
 
@@ -265,12 +279,12 @@ async def _extract_ks_qrcode_src(page: Page) -> str:
         if not await qrcode_img.count() or not await qrcode_img.is_visible():
             platform_switch = login_form.locator("div.platform-switch").first
             await platform_switch.wait_for(state="visible", timeout=10000)
-            await platform_switch.click()
+            await platform_switch.click()  # native-click: login；扫码登录页切换二维码方式
             await asyncio.sleep(1)
     except Exception:
         platform_switch = login_form.locator("div.platform-switch").first
         await platform_switch.wait_for(state="visible", timeout=10000)
-        await platform_switch.click()
+        await platform_switch.click()  # native-click: login；扫码登录页切换二维码方式
         await asyncio.sleep(1)
 
     await qrcode_img.wait_for(state="visible", timeout=15000)
@@ -441,7 +455,7 @@ async def get_ks_cookie(
                     kuaishou_logger.warning(_msg("😵", "二维码失效了，小人马上去刷新"))
                     refresh_button = page.locator("p.qrcode-refresh").first
                     if await refresh_button.count():
-                        await refresh_button.click()
+                        await refresh_button.click()  # native-click: login；二维码过期刷新
                         await asyncio.sleep(1)
                     qrcode_info = await _save_ks_qrcode(
                         page,
@@ -516,17 +530,38 @@ class KSBaseUploader(BaseVideoUploader):
         else:
             self.publish_date = 0
 
-    async def set_schedule_time(self, page: Page, publish_date: datetime):
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """行为层时延只吃预算上限，从不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            kuaishou_logger.warning(_msg(
+                "⚠️", f"人类化停顿被预算裁剪: {round(seconds, 2)}s > {round(remaining, 2)}s"))
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
+    async def set_schedule_time(
+        self, page: Page, publish_date: datetime, humanizer: Humanizer
+    ):
         publish_date = await page_wall_clock(page, publish_date)
         kuaishou_logger.info(_msg("🕒", "小人准备设置定时发布时间"))
         publish_date_str = publish_date.strftime("%Y-%m-%d %H:%M:%S")
 
         # 1. 切换到"定时发布"radio (用文本匹配更稳)
-        await page.locator('label.ant-radio-wrapper').filter(has_text="定时发布").click()
+        schedule_radio = page.locator('label.ant-radio-wrapper').filter(has_text="定时发布")
+        await humanizer.click(schedule_radio)
         await asyncio.sleep(2)
 
         # 2. 点击 picker 打开下拉面板
-        await page.locator('input[placeholder="选择日期时间"]').click()
+        date_input = page.locator('input[placeholder="选择日期时间"]')
+        await humanizer.click(date_input)
         await asyncio.sleep(1)
 
         # 3. 用 React 兼容的方式直接设置 input 的 value
@@ -551,7 +586,7 @@ class KSBaseUploader(BaseVideoUploader):
 
         await asyncio.sleep(1)
         # 4. 按 Enter 确认
-        await page.keyboard.press("Enter")
+        await humanizer.press("Enter")
         await asyncio.sleep(2)
         kuaishou_logger.info(f"✅ 定时发布时间已设置为 {publish_date_str}")
 
@@ -580,7 +615,9 @@ class KSBaseUploader(BaseVideoUploader):
             for sel in close_selectors:
                 btn = page.locator('div[role="alertdialog"]').locator(sel)
                 if await btn.count() > 0:
-                    await btn.first.click(force=True)
+                    await btn.first.click(  # native-click: chrome；Joyride 引导层是非正常路径的遮罩清理
+                        force=True,  # humanize-impossible: 遮罩拦截指针；needs-live；已排除坐标点击与 hover 显形
+                    )
                     await asyncio.sleep(0.5)
                     break
             closed = True
@@ -642,7 +679,7 @@ class KSVideo(KSBaseUploader):
         self.desc = desc or ""
         self.collection_name = collection_name
 
-    async def apply_collection(self, page: Page) -> None:
+    async def apply_collection(self, page: Page, humanizer: Humanizer) -> None:
         """在发布表单页选择"加入合集"下拉框（Ant Design Select，label 属性=合集名）。
 
         锚点用 label 文字"加入合集"精确定位紧邻的 ant-select 容器，避免误选页面上
@@ -659,7 +696,7 @@ class KSVideo(KSBaseUploader):
             if await trigger.count() == 0:
                 kuaishou_logger.warning(_msg("😵", "未找到\"加入合集\"下拉框，跳过归集"))
                 return
-            await trigger.locator(".ant-select-selector").click(timeout=8000)
+            await humanizer.click(trigger.locator(".ant-select-selector"))
             await page.wait_for_timeout(800)
 
             option = page.locator(f'div.ant-select-item-option[label="{self.collection_name}"]')
@@ -667,17 +704,17 @@ class KSVideo(KSBaseUploader):
                 kuaishou_logger.warning(
                     _msg("😵", f"合集下拉框未找到「{self.collection_name}」，跳过归集，保持未选状态")
                 )
-                await page.keyboard.press("Escape")
+                await humanizer.press("Escape")
                 await page.wait_for_timeout(300)
                 return
 
-            await option.first.click(timeout=8000)
+            await humanizer.click(option.first)
             await page.wait_for_timeout(500)
             kuaishou_logger.success(_msg("🥳", f"已选择合集：{self.collection_name}"))
         except Exception as exc:
             kuaishou_logger.warning(_msg("😵", f"选择合集失败，跳过归集继续发布: {exc}"))
             try:
-                await page.keyboard.press("Escape")
+                await humanizer.press("Escape")
             except Exception:
                 pass
 
@@ -693,7 +730,7 @@ class KSVideo(KSBaseUploader):
         kuaishou_logger.warning(_msg("😵", "视频上传摔了一跤，小人马上重新上传"))
         await page.locator('div.progress-div [class^="upload-btn-input"]').set_input_files(self.file_path)
 
-    async def set_thumbnail(self, page: Page):
+    async def set_thumbnail(self, page: Page, humanizer: Humanizer):
         if not self.thumbnail_path:
             return
 
@@ -701,14 +738,21 @@ class KSVideo(KSBaseUploader):
 
         cover_label = page.locator("span").filter(has_text="封面设置")
         await cover_label.wait_for(state="visible", timeout=30000)
-        await cover_label.locator("xpath=../following-sibling::div[1]").locator('div').nth(0).click()
+        # 「封面设置」右侧是无文本 div：先收窄到该容器内第一个可见 div（具体可点
+        # 元素），不再按 nth(0) 猜坐标。真机命中区仍待 acceptance 确认（§9 残留）。
+        cover_entry = (
+            cover_label.locator("xpath=../following-sibling::div[1]")
+            .locator("div:visible")
+            .first
+        )
+        await humanizer.click(cover_entry)
 
         modal = page.locator('div[role="document"].ant-modal')
         await modal.wait_for(state="visible", timeout=30000)
 
         upload_cover_tab = modal.get_by_text("上传封面", exact=True)
         await upload_cover_tab.wait_for(state="visible", timeout=10000)
-        await upload_cover_tab.click()
+        await humanizer.click(upload_cover_tab)
 
         file_input = modal.locator('input[type="file"]')
         await file_input.wait_for(state="attached", timeout=30000)
@@ -717,7 +761,7 @@ class KSVideo(KSBaseUploader):
 
         confirm_button = modal.get_by_role("button", name="确认", exact=True)
         await confirm_button.wait_for(state="visible", timeout=10000)
-        await confirm_button.click()
+        await humanizer.click(confirm_button)
 
         await modal.wait_for(state="hidden", timeout=30000)
         kuaishou_logger.success(_msg("🥳", "封面已经设置完成"))
@@ -759,6 +803,8 @@ class KSVideo(KSBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
         page = await session.context.new_page()
+        # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
+        self._humanizer(page)
         await page.goto(KUAISHOU_UPLOAD_URL)
         if session.managed:
             _raise_if_login_required(page)
@@ -770,11 +816,12 @@ class KSVideo(KSBaseUploader):
         )
 
     async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
+        humanizer = self._humanizer(page)
         upload_button = page.locator("button[class^='_upload-btn']")
         await upload_button.wait_for(state="visible", timeout=10000)
 
         async with page.expect_file_chooser() as fc_info:
-            await upload_button.click()
+            await upload_button.click()  # native-click: file；文件选择器必须由原生点击派发
         file_chooser = await fc_info.value
         await file_chooser.set_files(self.file_path)
 
@@ -783,7 +830,7 @@ class KSVideo(KSBaseUploader):
         know_button = page.locator('button[type="button"] span:text("我知道了")').first
         try:
             if await know_button.count() and await know_button.is_visible():
-                await know_button.click()
+                await know_button.click()  # native-click: chrome；平台一次性「我知道了」提示条
         except Exception:
             pass
 
@@ -792,16 +839,16 @@ class KSVideo(KSBaseUploader):
         kuaishou_logger.info(_msg("✍️", "小人开始填描述和话题"))
         # 再次检查并关闭 Joyride（可能在文件上传后才弹出）
         await self.close_guide_overlay(page)
-        await _focus_desc_editor(page)
-        await page.keyboard.press("Backspace")
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.press("Delete")
-        await page.keyboard.type(self.desc or self.title)
-        await page.keyboard.press("Enter")
+        await _focus_desc_editor(page, humanizer)
+        await humanizer.press("Backspace")
+        await humanizer.press("Control+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(_normalise_text(self.desc or self.title))
+        await humanizer.press("Enter")
 
         for index, tag in enumerate(self.tags[:3], start=1):
             kuaishou_logger.info(_msg("🏷️", f"小人正在添加第 {index} 个话题: #{tag}"))
-            await page.keyboard.type(f"#{tag} ")
+            await humanizer.type_text(f"#{tag} ")
             await asyncio.sleep(2)
 
         budget = self.publish_budget
@@ -837,12 +884,12 @@ class KSVideo(KSBaseUploader):
                 f"等待快手视频上传完成超时（>{KUAISHOU_UPLOAD_TIMEOUT_SECONDS}秒），已停止发布"
             )
 
-        await self.set_thumbnail(page)
+        await self.set_thumbnail(page, humanizer)
 
-        await self.apply_collection(page)
+        await self.apply_collection(page, humanizer)
 
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-            await self.set_schedule_time(page, self.publish_date)
+            await self.set_schedule_time(page, self.publish_date, humanizer)
 
         await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
@@ -859,14 +906,15 @@ class KSVideo(KSBaseUploader):
                 raise budget.timeout_error(publish_clicked)
             try:
                 if not publish_clicked:
-                    confirmed = await _click_visible_publish_confirm(page)
+                    await humanizer.before_submit()
+                    confirmed = await _click_visible_publish_confirm(page, humanizer)
                     if not confirmed:
                         publish_button = page.get_by_text("发布", exact=True)
                         if await publish_button.count() == 0:
                             raise RuntimeError("未找到快手发布按钮")
-                        await publish_button.click()
+                        await humanizer.click(publish_button)
                         await asyncio.sleep(1)
-                        await _click_visible_publish_confirm(page)
+                        await _click_visible_publish_confirm(page, humanizer)
                     publish_clicked = True
 
                 await page.wait_for_url(KUAISHOU_MANAGE_URL_PATTERN, timeout=5000)
@@ -940,10 +988,13 @@ class KSNote(KSBaseUploader):
         self.image_paths = normalized_image_paths
 
     async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
+        humanizer = self._humanizer(page)
         budget = self.publish_budget
         kuaishou_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
         kuaishou_logger.info(_msg("🔀", "小人正在切换到图文发布"))
-        await page.locator('div[role="tablist"] div[role="tab"]:has-text("图文")').click()
+        image_tab = page.locator('div[role="tablist"] div[role="tab"]:has-text("图文")')
+        await humanizer.click(image_tab)
+        await humanizer.after_navigate()
         await page.wait_for_timeout(1000)
 
         kuaishou_logger.info(_msg("📤", "小人正在上传图片"))
@@ -951,30 +1002,30 @@ class KSNote(KSBaseUploader):
         await upload_button.wait_for(state="visible", timeout=10000)
 
         async with page.expect_file_chooser() as fc_info:
-            await upload_button.click()
+            await upload_button.click()  # native-click: file；文件选择器必须由原生点击派发
         file_chooser = await fc_info.value
         await file_chooser.set_files(self.image_paths)
 
         know_button = page.locator('button[type="button"] span:text("我知道了")').first
         try:
             if await know_button.count() and await know_button.is_visible():
-                await know_button.click()
+                await know_button.click()  # native-click: chrome；平台一次性「我知道了」提示条
         except Exception:
             pass
 
         await self.close_guide_overlay(page)
 
         kuaishou_logger.info(_msg("✍️", "小人开始填写图文内容和话题"))
-        await _focus_desc_editor(page)
-        await page.keyboard.press("Backspace")
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.press("Delete")
-        await page.keyboard.type(self.note)
-        await page.keyboard.press("Enter")
+        await _focus_desc_editor(page, humanizer)
+        await humanizer.press("Backspace")
+        await humanizer.press("Control+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(_normalise_text(self.note))
+        await humanizer.press("Enter")
 
         for index, tag in enumerate(self.tags[:3], start=1):
             kuaishou_logger.info(_msg("🏷️", f"小人正在添加第 {index} 个话题: #{tag}"))
-            await page.keyboard.type(f"#{tag} ")
+            await humanizer.type_text(f"#{tag} ")
             await asyncio.sleep(2)
 
         max_retries = 60
@@ -1006,7 +1057,7 @@ class KSNote(KSBaseUploader):
             kuaishou_logger.warning(_msg("😵", "超过最大重试次数，图文上传可能未完成"))
 
         if self.publish_strategy == KUAISHOU_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-            await self.set_schedule_time(page, self.publish_date)
+            await self.set_schedule_time(page, self.publish_date, humanizer)
 
         await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
@@ -1022,14 +1073,15 @@ class KSNote(KSBaseUploader):
                 raise budget.timeout_error(publish_clicked)
             try:
                 if not publish_clicked:
+                    await humanizer.before_submit()
                     publish_button = page.get_by_text("发布", exact=True)
                     if await publish_button.count() > 0:
-                        await publish_button.click()
+                        await humanizer.click(publish_button)
 
                     await asyncio.sleep(1)
                     confirm_button = page.get_by_text("确认发布")
                     if await confirm_button.count() > 0:
-                        await confirm_button.click()
+                        await humanizer.click(confirm_button)
                     publish_clicked = True
 
                 await page.wait_for_url(KUAISHOU_MANAGE_URL_PATTERN, timeout=5000)
@@ -1080,6 +1132,8 @@ class KSNote(KSBaseUploader):
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
         page = await session.context.new_page()
+        # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
+        self._humanizer(page)
         await page.goto(KUAISHOU_UPLOAD_URL)
         if session.managed:
             _raise_if_login_required(page)
