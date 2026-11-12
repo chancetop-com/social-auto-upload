@@ -27,6 +27,7 @@ import asyncio
 import os
 import random
 import re
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -38,6 +39,7 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     preview_tiles,
 )
+from tests.humanize_gates import assert_clean, gate_violations
 from utils import humanize
 from utils.dom import ElementUnusableError
 
@@ -689,7 +691,124 @@ class SharedLayerBoundaryTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+class HumanizeGateTests(unittest.TestCase):
+    """The executable form of spec §4 gates A–E, on synthetic packages."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "utils").mkdir()
+        (self.root / "utils" / "humanize.py").write_text(
+            "type_horizon_chars = 1000\n", encoding="utf-8"
+        )
+        self.package = self.root / "uploader" / "demo"
+        self.package.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write(self, source: str) -> None:
+        (self.package / "main.py").write_text(source, encoding="utf-8")
+
+    def _violations(self) -> list[str]:
+        return gate_violations(self.package)
+
+    def _assert_gate(self, gate: str) -> None:
+        violations = self._violations()
+        self.assertTrue(
+            any(gate in violation for violation in violations),
+            f"expected {gate} violation, got {violations}",
+        )
+
+    def test_gate_a_rejects_js_click(self):
+        self._write(
+            "async def go(el):\n"
+            "    await el.evaluate('el => el.click()')\n"
+        )
+        self._assert_gate("gate A")
+
+    def test_gate_a_allows_read_only_evaluate(self):
+        self._write(
+            "async def go(el):\n"
+            "    return await el.evaluate('el => el.getBoundingClientRect()')\n"
+        )
+        self.assertEqual(self._violations(), [])
+
+    def test_gate_b_requires_a_native_click_marker(self):
+        self._write(
+            "async def go(page):\n"
+            "    await page.locator('#shell').click()\n"
+        )
+        self._assert_gate("gate B")
+
+    def test_gate_b_accepts_a_marked_native_click(self):
+        self._write(
+            "async def go(page):\n"
+            "    await page.locator('#shell').click()  "
+            "# native-click: chrome；native browser UI\n"
+        )
+        self.assertEqual(self._violations(), [])
+
+    def test_gate_b_rejects_an_unknown_native_click_class(self):
+        self._write(
+            "async def go(page):\n"
+            "    await page.locator('#shell').click()  "
+            "# native-click: magic；unknown class\n"
+        )
+        self._assert_gate("gate B")
+
+    def test_gate_b_exempts_the_humanizer(self):
+        self._write(
+            "async def go(humanizer, locator):\n"
+            "    await humanizer.click(locator)\n"
+        )
+        self.assertEqual(self._violations(), [])
+
+    def test_gate_c_requires_the_impossible_marker(self):
+        self._write(
+            "async def go(locator):\n"
+            "    await locator.click(force=True)  "
+            "# native-click: chrome；native UI\n"
+        )
+        self._assert_gate("gate C")
+
+    def test_gate_c_accepts_a_complete_impossible_marker(self):
+        self._write(
+            "async def go(locator):\n"
+            "    await locator.click(force=True)  "
+            "# native-click: chrome；native UI "
+            "# humanize-impossible: overlay；needs-live；hover-then-retry\n"
+        )
+        self.assertEqual(self._violations(), [])
+
+    def test_gate_d_requires_the_native_fill_marker(self):
+        self._write(
+            "async def go(locator):\n"
+            "    await locator.fill('123456')\n"
+        )
+        self._assert_gate("gate D")
+
+    def test_gate_d_accepts_the_two_factor_exception(self):
+        self._write(
+            "async def go(locator):\n"
+            "    await locator.fill('123456')  "
+            "# native-fill: 2FA 验证码\n"
+        )
+        self.assertEqual(self._violations(), [])
+
+    def test_gate_e_rejects_a_second_horizon_definition(self):
+        self._write("THRESHOLD = 1000  # type_horizon_chars\n")
+        self._assert_gate("gate E")
+
+    def test_gate_e_accepts_a_package_without_the_constant(self):
+        self._write("THRESHOLD = 1000\n")
+        self.assertEqual(self._violations(), [])
+
+
 class XhsStaticGateTests(unittest.TestCase):
+    def test_xhs_package_passes_humanize_gates_a_to_e(self):
+        assert_clean(UPLOADER_DIR)
+
     def test_no_fill_el_click_or_forced_clicks_remain(self):
         offenders: list[str] = []
         for name, source in _uploader_sources().items():
