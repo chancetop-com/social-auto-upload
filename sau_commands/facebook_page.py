@@ -17,7 +17,7 @@ from uploader.meta_uploader.facebook_page_uploader.main import (
 )
 from uploader.meta_uploader.facebook_page_uploader.posts import meta_post_action
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP_ZH,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -40,7 +40,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     for meta_platform, meta_help in (
         ("facebook-page", "Facebook Page Business Suite operations"),
     ):
@@ -77,7 +76,7 @@ def register(platform_parsers):
         upload_video_parser.add_argument("--desc", default="")
         upload_video_parser.add_argument("--tags", default="")
         upload_video_parser.add_argument("--page", default=None, help="Business Suite 发布主体名称；不传使用当前主体")
-        upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"定时发布时间，格式 {schedule_help}")
+        upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP_ZH)
         upload_video_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_video_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_not_before_flag(upload_video_parser)
@@ -92,7 +91,7 @@ def register(platform_parsers):
         upload_note_parser.add_argument("--note", default="")
         upload_note_parser.add_argument("--tags", default="")
         upload_note_parser.add_argument("--page", default=None, help="Business Suite 发布主体名称；不传使用当前主体")
-        upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"定时发布时间，格式 {schedule_help}")
+        upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP_ZH)
         upload_note_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_note_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_not_before_flag(upload_note_parser)

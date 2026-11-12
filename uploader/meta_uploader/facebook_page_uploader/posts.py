@@ -10,6 +10,7 @@ from uuid import uuid4
 from patchright.async_api import async_playwright, expect, TimeoutError as BrowserTimeoutError
 
 from uploader.meta_uploader.facebook_page_uploader.main import _open_business_page
+from utils.browser_time import page_wall_clock
 
 
 async def open_meta_post(page, *, list_url: str, page_name: str, expected_text: str,
@@ -41,6 +42,7 @@ async def open_meta_post(page, *, list_url: str, page_name: str, expected_text: 
     await expect(title).to_have_count(1)
     await title.click()
     if schedule:
+        schedule = await page_wall_clock(page, schedule)
         await expect(row).to_contain_text(f'{schedule.month}月{schedule.day}日 {schedule:%H:%M}')
     if '/published_posts' in list_url:
         # 新版已发布列表进入成效详情，URL 的 content_id 为“复制帖子编号”对应原作品编号。

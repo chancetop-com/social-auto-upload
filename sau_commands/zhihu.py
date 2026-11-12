@@ -7,7 +7,6 @@ from patchright.async_api import async_playwright
 
 from uploader.zhihu_uploader.article import ZhihuArticle
 from uploader.zhihu_uploader.constants import (
-    ZHIHU_CONTEXT_KWARGS,
     ZHIHU_LAUNCH_KWARGS,
     ZHIHU_SCHEDULE_MAX_HOURS,
     ZHIHU_SCHEDULE_MINUTES,
@@ -21,7 +20,7 @@ from uploader.zhihu_uploader.session import (
 from uploader.zhihu_uploader.verification import verify_zhihu_result
 from uploader.zhihu_uploader.video import ZhihuVideo
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP_ZH,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -54,7 +53,6 @@ def _raise_login_required(target) -> None:
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     zhihu_parser = platform_parsers.add_parser("zhihu", help="知乎创作中心文章与视频发布")
     zhihu_actions = zhihu_parser.add_subparsers(dest="action", required=True)
     zhihu_login = zhihu_actions.add_parser("login", help="在可见 Chrome 中登录并保存本地会话")
@@ -75,7 +73,7 @@ def register(platform_parsers):
     zhihu_article.add_argument("--title", required=True, help="文章标题，最多 100 字")
     zhihu_article.add_argument("--content-file", required=True, type=existing_file_path, help="UTF-8 HTML/Markdown/TXT，图片路径写在原稿对应段落中")
     zhihu_article.add_argument("--schedule", type=schedule_value,
-                               help=f"实验性定时发布，格式 {schedule_help}，北京时间 {ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
+                               help=f"实验性定时发布，{SCHEDULE_HELP_ZH}，{ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
     zhihu_article.add_argument("--prepare-only", action="store_true", help="填写并检查编辑器后结束，不点击发布")
     zhihu_article.add_argument("--upload-timeout", type=int, default=600, help="每张正文图片上传等待秒数")
     add_not_before_flag(zhihu_article)
@@ -95,7 +93,7 @@ def register(platform_parsers):
     zhihu_video.add_argument("--originality", choices=ZHIHU_ORIGINALITY, required=True,
                              help="内容为原创或转载")
     zhihu_video.add_argument("--schedule", type=schedule_value,
-                             help=f"实验性定时发布，格式 {schedule_help}，北京时间 {ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
+                             help=f"实验性定时发布，{SCHEDULE_HELP_ZH}，{ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
     zhihu_video.add_argument("--prepare-only", action="store_true", help="上传并填写后结束，不点击发布")
     zhihu_video.add_argument("--upload-timeout", type=int, default=1200, help="视频上传等待秒数")
     add_not_before_flag(zhihu_video)
@@ -148,7 +146,6 @@ async def _run_multilogin(args, target):
             account_file=None,
             managed=target,
             launch_kwargs=ZHIHU_LAUNCH_KWARGS,
-            context_kwargs=ZHIHU_CONTEXT_KWARGS,
         ) as session:
             _log_identity_unverified(target)
             if not await is_logged_in(session.context):

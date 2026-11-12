@@ -1,5 +1,7 @@
 # 27 — 定时设置后的单次回读（决策）
 
+> **时区契约更新（2026-11）：** `--schedule` 现在传 UTC 绝对时刻，填写前读取浏览器时区；本文中的“墙上时间 / 忽略 offset”描述已由 [`../../timezone-contract/spec.md`](../../timezone-contract/spec.md) 取代。
+
 Status: resolved
 Type: grilling
 Blocked by: 11, 26

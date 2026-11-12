@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
@@ -177,7 +177,7 @@ class TiktokParserTests(unittest.TestCase):
                     "--tags",
                     "a,b",
                     "--schedule",
-                    "2026-11-05 10:30",
+                    "2026-11-05T02:30:00Z",
                     "--thumbnail",
                     str(thumb),
                 ]
@@ -187,7 +187,10 @@ class TiktokParserTests(unittest.TestCase):
         self.assertEqual(args.file, video)
         self.assertEqual(args.title, "标题")
         self.assertEqual(args.tags, "a,b")
-        self.assertEqual(args.schedule, datetime(2026, 11, 5, 10, 30))
+        self.assertEqual(
+            args.schedule,
+            datetime(2026, 11, 5, 2, 30, tzinfo=timezone.utc),
+        )
         self.assertEqual(args.thumbnail, thumb)
         self.assertEqual(args.folder_id, "folder")
         self.assertEqual(args.profile_id, "profile")
@@ -1314,7 +1317,7 @@ class TiktokUploadCliTests(unittest.TestCase):
                         "--tags",
                         "#one, two",
                         "--schedule",
-                        "2026-11-05 10:30",
+                        "2026-11-05T02:30:00Z",
                         "--thumbnail",
                         str(thumbnail),
                     ]
@@ -1325,7 +1328,10 @@ class TiktokUploadCliTests(unittest.TestCase):
         # Managed runs label with profile_id; --account is ignored (ticket 30).
         self.assertEqual(request.account_label, "profile")
         self.assertEqual(request.tags, ["one", "two"])
-        self.assertEqual(request.publish_date, datetime(2026, 11, 5, 10, 30))
+        self.assertEqual(
+            request.publish_date,
+            datetime(2026, 11, 5, 2, 30, tzinfo=timezone.utc),
+        )
         self.assertEqual(request.thumbnail_file, thumbnail)
 
     def test_logged_out_returns_10_and_skips_upload(self):

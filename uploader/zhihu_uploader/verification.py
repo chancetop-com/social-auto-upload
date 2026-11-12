@@ -36,7 +36,7 @@ async def verify_zhihu_result(account_file, result_file, headless=False) -> dict
             executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=headless,
         )
         try:
-            context = await browser.new_context(storage_state=str(account_file), timezone_id="Asia/Shanghai")
+            context = await browser.new_context(storage_state=str(account_file))
             page = await context.new_page()
             response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:

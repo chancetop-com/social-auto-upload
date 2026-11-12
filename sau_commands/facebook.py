@@ -19,7 +19,6 @@ from uploader.meta_uploader.facebook_uploader.main import (
 )
 from uploader.meta_uploader.facebook_uploader.posts import facebook_post_action
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -40,7 +39,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     facebook_parser = platform_parsers.add_parser("facebook", help="Facebook personal post operations")
     facebook_actions = facebook_parser.add_subparsers(dest="action", required=True)
 

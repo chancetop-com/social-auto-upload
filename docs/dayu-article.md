@@ -33,10 +33,10 @@ sau dayu upload-article --account creator --title "如何阅读作品数据面�
 
 ## 定时发表
 
-在上述命令中增加 `--schedule "YYYY-MM-DD HH:MM"`，按**北京时间（Asia/Shanghai，UTC+8）**解释。时间须在当前时间 2 小时后至 7 天内，分钟为 5 的倍数；例如 `10:30`、`10:35`。请预留图片上传和正文处理的时间，填表时也会重新检查范围；无效时间不会自动取整或改成立即发表。
+在上述命令中增加 `--schedule "YYYY-MM-DDTHH:MM:00Z"`（UTC 绝对时刻），CLI 填写前换算到浏览器时区。时间须在当前时刻 2 小时后至 7 天内，分钟为 5 的倍数；例如 `10:30`、`10:35`。请预留图片上传和正文处理的时间，填表时也会重新检查范围；无效时间不会自动取整或改成立即发表。
 
 ```powershell
-sau dayu upload-article --account creator --title "如何阅读作品数据面板" --content-file examples/article.md --theme modern --source "无需标注" --cover-indices 1 --schedule "2027-01-01 10:30"
+sau dayu upload-article --account creator --title "如何阅读作品数据面板" --content-file examples/article.md --theme modern --source "无需标注" --cover-indices 1 --schedule "2027-01-01T02:30:00Z"
 ```
 
 请将示例日期换成实际范围内的时间。省略该参数默认立即发表。平台确认原作品及预定时间后，命令即返回定时安排成功，不等待到点或审核；审核延长时平台可能晚于预定时间公开。
@@ -120,7 +120,7 @@ sau dayu upload-article --account creator --title "如何阅读作品数据面�
 | 单封面、三封面 | 支持从正文图片选择，使用 `--cover-indices` |
 | 竖版封面 | 尚未支持 |
 | 个人素材库选图 | 尚未支持，当前使用正文文件引用的本地图片 |
-| 定时发布 | 支持 `--schedule`；北京时间 2 小时后至 7 天内，5 分钟一档 |
+| 定时发布 | 支持 `--schedule`（UTC ISO）；2 小时后至 7 天内，5 分钟一档 |
 | 导入文档 | 网页支持 doc/docx/pdf/txt，最大 5 MB；尚未接入，当前命令使用 HTML/Markdown/TXT 文件 |
 | 正文插入视频 | 尚未支持 |
 | 创作助手：标题、错别字、违规广告检测 | 沿用网站设置，尚未提供配置参数 |

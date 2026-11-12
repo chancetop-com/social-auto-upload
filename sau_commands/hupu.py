@@ -15,7 +15,6 @@ from uploader.hupu_uploader.main import (
     prepare_local_context,
 )
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -35,7 +34,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     hupu_parser = platform_parsers.add_parser("hupu", help="Hupu (虎扑) operations")
     hupu_actions = hupu_parser.add_subparsers(dest="action", required=True)
 

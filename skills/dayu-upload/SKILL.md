@@ -34,7 +34,7 @@ Markdown 首次使用需要 Node.js 22+ 并执行 `sau article setup`。在文�
 
 ## 定时
 
-只有用户要求定时才增加 `--schedule "YYYY-MM-DD HH:MM"`；不传默认立即发表。时间固定按**北京时间 Asia/Shanghai（UTC+8）**解释，须在当前时间 **2 小时后至 7 天内**，分钟为 **5 的倍数**。视频和文章用同一参数。向用户说明时区；缺少具体时间或存在歧义时先明确时间，不擅自取整或改成立即发表。预留上传和处理时间，填表时仍会校验范围。
+只有用户要求定时才增加 `--schedule "YYYY-MM-DDTHH:MM:00Z"`（UTC 绝对时刻）；不传默认立即发表。CLI 填写前会换算到浏览器时区，须在当前时刻 **2 小时后至 7 天内**，分钟为 **5 的倍数**。视频和文章用同一参数。缺少具体时间或存在歧义时先明确时间，不擅自取整或改成立即发表。预留上传和处理时间，填表时仍会校验范围。
 
 平台确认本次作品及保存的预定时间后即为定时安排成功，不等待到点、审核或公开访问，不把“定时安排成功”说成“已公开”。平台审核可能使实际公开时间延后。
 
@@ -54,7 +54,7 @@ sau dayu verify --account <本地账号名> --result "本次结果文件.json" -
 
 ## 托管浏览器模式（可选）
 
-设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下不写入时区，建议把 Profile 时区设为 `Asia/Shanghai`。
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式不写入时区，填写时读取浏览器/Profile 时区。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。

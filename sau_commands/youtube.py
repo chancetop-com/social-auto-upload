@@ -14,7 +14,6 @@ from uploader.youtube_uploader.main import (
     youtube_setup,
 )
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -31,11 +30,11 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.errors import UsageError
 
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     youtube_parser = platform_parsers.add_parser("youtube", help="YouTube operations")
     youtube_actions = youtube_parser.add_subparsers(dest="action", required=True)
 
@@ -56,7 +55,11 @@ def register(platform_parsers):
     youtube_upload_video_parser.add_argument("--playlist", help="Optional playlist name to add the video to (for series)")
     youtube_upload_video_parser.add_argument(
         "--visibility", default="public", choices=["public", "unlisted", "private"], help="Video visibility")
-    youtube_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    youtube_upload_video_parser.add_argument(
+        "--schedule",
+        type=schedule_value,
+        help="Not supported yet; omit to publish immediately",
+    )
     add_not_before_flag(youtube_upload_video_parser)
     add_runtime_flags(youtube_upload_video_parser)
     add_browser_flags(youtube_upload_video_parser)
@@ -153,6 +156,9 @@ async def run(args):
             raise RuntimeError(result["message"])
         print(f"YouTube login flow completed: {result['account_file']}")
         return 0
+
+    if args.action == "upload-video" and args.schedule:
+        raise UsageError("YouTube 定时发布尚未实现；请省略 --schedule 立即发布。")
 
     target = resolve_managed_provider(args)
     require_local_account(args)

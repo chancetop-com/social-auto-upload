@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -185,14 +186,20 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
                     timed = {"success": False, "schedule": "2027-01-01T10:30:00+08:00"}
                     read_schedule.side_effect = RuntimeError("定时时间不一致") if scenario == "wrong_time" else None
                     with patch("uploader.dayu_uploader.publication.wait_dayu_publication", new_callable=AsyncMock) as query:
-                        query.return_value = {"status": 5}
+                        query.return_value = (
+                            {"status": 5},
+                            datetime.fromisoformat(timed["schedule"]),
+                        )
                         if scenario == "query_timeout":
                             query.side_effect = TimeoutError("查询超时")
                         if scenario == "scheduled":
                             await submit_dayu_publication(page, timed, path)
                             self.assertEqual(timed["status"], "scheduled")
                             self.assertTrue(timed["schedule_verified"])
-                            self.assertEqual(query.call_args.kwargs["schedule"], timed["schedule"])
+                            self.assertEqual(
+                                query.call_args.kwargs["target"],
+                                datetime.fromisoformat(timed["schedule"]),
+                            )
                         else:
                             with self.assertRaisesRegex((RuntimeError, TimeoutError), "不一致|查询超时"):
                                 await submit_dayu_publication(page, timed, path)

@@ -45,7 +45,7 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 
 ## 指定发布时刻
 
-所有 `upload-video` / `upload-note` / `upload-article` 支持 `--not-before "YYYY-MM-DD HH:MM"`：先完成上传、填表、封面和声明，再等到本地时间不早于目标时间才点击发布。它和平台原生 `--schedule` 不同，可同时使用；同时使用时让 `--not-before` 早于 `--schedule`。`--no-publish` / `--prepare-only` / `--draft` 会跳过等待。Bilibili 因 `biliup` 一次性提交，等待发生在启动命令之前。
+所有 `upload-video` / `upload-note` / `upload-article` 支持 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区偏移的绝对时刻）：先完成上传、填表、封面和声明，再等到绝对时刻不早于目标时间才点击发布。它和平台原生 `--schedule` 不同，可同时使用；同时使用时让 `--not-before` 早于 `--schedule`。`--no-publish` / `--prepare-only` / `--draft` 会跳过等待。Bilibili 因 `biliup` 一次性提交，等待发生在启动命令之前。
 
 ## 工作流程
 

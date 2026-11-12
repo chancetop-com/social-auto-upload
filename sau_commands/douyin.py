@@ -18,7 +18,7 @@ from uploader.douyin_uploader.main import (
     is_logged_in,
 )
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -40,7 +40,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     douyin_parser = platform_parsers.add_parser("douyin", help="Douyin operations")
     douyin_actions = douyin_parser.add_subparsers(dest="action", required=True)
 
@@ -57,7 +56,7 @@ def register(platform_parsers):
     upload_video_parser.add_argument("--title", required=True, help="Video title")
     upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
-    upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(upload_video_parser)
     upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
     upload_video_parser.add_argument("--thumbnail-landscape", type=existing_file_path, help="Optional 4:3 landscape thumbnail path")
@@ -80,7 +79,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--notef", default="", help="Read note content from file (txt/md)")
     upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
-    upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(upload_note_parser)
     add_runtime_flags(upload_note_parser)
     add_browser_flags(upload_note_parser)

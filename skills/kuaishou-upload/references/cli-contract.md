@@ -40,7 +40,7 @@ sau kuaishou upload-video \
   --title "<title>" \
   [--desc "<description>"] \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"] \
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [--thumbnail <image-path>] \
   [--debug] \
   [--headless | --headed]
@@ -68,7 +68,7 @@ sau kuaishou upload-note \
   --title "<title>" \
   [--note "<content>"] \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"] \
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [--debug] \
   [--headless | --headed]
 ```
@@ -92,7 +92,7 @@ sau kuaishou upload-note \
 - 时间格式为:
 
 ```text
-YYYY-MM-DD HH:MM
+YYYY-MM-DDTHH:MM:00Z
 ```
 
 ## 额外说明

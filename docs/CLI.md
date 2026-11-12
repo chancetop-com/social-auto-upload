@@ -68,28 +68,28 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 客户端发布闸门（`--not-before`）
 
-所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DD HH:MM"`：
+所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区偏移的绝对时刻）：
 
 - 上传素材、填写标题/正文、封面、声明、合集等准备工作照常执行；
 - 全部准备完成后，如果本地当前时间早于目标时间，保持浏览器打开并等待；
-- 只有本地时间 **>= `--not-before`** 才执行最后一次「发布/发表」点击；
+- 只有绝对时刻 **>= `--not-before`** 才执行最后一次「发布/发表」点击；
 - 不传该参数时立即发布；目标时间已在过去时也立即发布。
 
 ```bash
 # 先完成所有准备，20:00 之后才点发布
-sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --not-before "2026-12-01 20:00"
+sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --not-before "2026-12-01T20:00:00+08:00"
 ```
 
 它与平台原生的 `--schedule` 是两套机制，可以同时使用：
 
 - `--schedule`：把发布时间交给平台，由平台在目标时间自动发布；
-- `--not-before`：在本地点发布前等待，发布动作仍由当前进程完成，适合需要人工保持登录态、平台不支持原生定时或希望统一控制提交时刻的场景。
+- `--not-before`：在本地等待到目标绝对时刻才点击发布，发布动作仍由当前进程完成，适合需要人工保持登录态、平台不支持原生定时或希望统一控制提交时刻的场景。
 
 两者同时使用时，应让 `--not-before` 早于 `--schedule`；CLI 在 FIRE（点击发布）前复核平台侧的定时开关与时间值，若等待结束时平台侧定时时间已过、或回读不一致，直接退出 `1`（确定未发布），**不会**改成立即发布。
 
 注意事项：
 
-- 等待时间使用**本地时区**的墙钟时间，格式固定为 `YYYY-MM-DD HH:MM`；
+- 等待时间使用**带时区偏移的绝对时刻**，例如 `2026-12-01T20:00:00+08:00` 或 `2026-12-01T12:00:00Z`；CLI 解析后换算到运行机器的本地时区再等待/打印，不再接受无时区的 `YYYY-MM-DD HH:MM`；
 - 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
 - 主动等待不计入上传/发布超时预算；所有支持客户端发布闸门的平台都会把等待时长从 deadline 中顺延；
 - **禁止用 `--not-before` 做发布间隔或节流**：等待发生在填表之后、点击发布之前，浏览器与托管 Profile 全程被占用；节流、冷却与排程属于调用方 App（见[调度侧责任](#调度侧责任)）；
@@ -386,7 +386,7 @@ sau dayu upload-article --account creator --title "如何阅读作品数据面�
 
 Markdown 默认主题为 `default`，可选 `default/grace/simple/modern/plain`；HTML/TXT 不使用 `--theme`。主题会自动转换为大鱼号兼容排版，保留文字颜色、背景和近似字号，圆角、字体和间距等效果可能与本地预览不同。确认发表前会检查服务端预览；平台确认最终发表后即返回成功，不等待审核。
 
-视频和文章均支持 `--schedule "YYYY-MM-DD HH:MM"`：北京时间 2 小时后至 7 天内，分钟为 5 的倍数。平台确认原作品和定时安排后即成功，不等待到点。使用结果文件执行 `sau dayu verify --account creator --result "本次结果文件.json"` 可只读核对原作品与时间，勿重新上传。Agent 可使用仓库的 [大鱼号 Skill](../skills/dayu-upload/SKILL.md)。
+视频和文章均支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，CLI 填写前按浏览器时区换算；当前时刻 2 小时后至 7 天内，分钟为 5 的倍数。平台确认原作品和定时安排后即成功，不等待到点。使用结果文件执行 `sau dayu verify --account creator --result "本次结果文件.json"` 可只读核对原作品与时间，勿重新上传。Agent 可使用仓库的 [大鱼号 Skill](../skills/dayu-upload/SKILL.md)。
 
 ## 知乎 CLI 子命令
 
@@ -411,7 +411,7 @@ sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎�
 
 文章和视频加 `--prepare-only` 可只填写检查，平台仍可能自动保存草稿。`published` 表示平台确认发表；结果为 `submission_unknown` 时先检查创作中心原作品，勿重复上传。已有链接时用 `sau zhihu verify --account creator --result "本次结果.json"` 核对，视频详情地址可为 `/pin/<作品ID>`。
 
-`--schedule "YYYY-MM-DD HH:MM"` 为实验性选项，按北京时间限制在 30 分钟后至 48 小时内，尚不保证完整排期流程可用。更多用法见 [知乎 Skill](../skills/zhihu-upload/SKILL.md)。
+`--schedule "YYYY-MM-DDTHH:MM:00Z"` 为实验性选项，UTC 绝对时刻，CLI 填写前按浏览器时区换算；限制在当前时刻 30 分钟后至 48 小时内，尚不保证完整排期流程可用。更多用法见 [知乎 Skill](../skills/zhihu-upload/SKILL.md)。
 
 ## 抖音 CLI 子命令
 
@@ -512,7 +512,7 @@ sau xiaohongshu upload-video --account <account_name> \
 
 - 标题按小红书口径预检（UTF-16 加权：码元 >127 记 2，否则记 1，加总后除 2 向上取整），上限 **20**；显式超限在启动浏览器前退出 `1`，**绝不静默截断**；自动推导标题才会截到 ≤20 并记 warning。
 - 正文上限 **1000**，话题锚点按 `#name` 计入；正文 + 话题输入完成后若出现长度错误节点，退出 `1`。
-- `--schedule` 使用平台原生定时，时间格式 `YYYY-MM-DD HH:MM`；窗口为**本机墙上时间**的 `now + 2h < t <= now + 14d`（aware 输入的 offset 被忽略），越界在启动浏览器前退出 `1`。
+- `--schedule` 使用平台原生定时，时间格式 `YYYY-MM-DDTHH:MM:00Z`（UTC 绝对时刻），填写前按浏览器时区换算；窗口为绝对时刻的 `now + 2h < t <= now + 14d`，越界在启动浏览器前退出 `1`。
 - 定时设置分三处回读：C1 点开关后查开关状态与时间输入存在；C2 写入并 `blur()` 后按分钟比对输入值；C3 在 ARM 就绪后、FIRE 前再证开关、值与「请求时间仍晚于本机现在」。任何不一致退出 `1`（确定未发布），不重试、不改成立即发布。
 - 回读只证明客户端接受了设置，**不证明服务端受理**；2h/14d 平台边界与定时是否真正生效仍需真机验证。
 
@@ -560,7 +560,7 @@ sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title
 视频号支持定时发布、草稿、合集和双比例封面：
 
 ```bash
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30" --thumbnail-landscape covers/landscape.png --thumbnail-portrait covers/portrait.png --collection "我的合集"
+sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z" --thumbnail-landscape covers/landscape.png --thumbnail-portrait covers/portrait.png --collection "我的合集"
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --draft
 ```
 
@@ -592,10 +592,10 @@ sau alipay upload-video --account <account_name> --file videos/demo.mp4 --title 
 sau youtube login --account <account_name>
 sau youtube check --account <account_name>
 sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "定时视频" --schedule "2026-10-21 10:30"
+sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "示例视频"
 ```
 
-YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维码。`--visibility` 可选 `public`、`unlisted` 或 `private`，`--playlist` 可选；传 `--schedule` 时使用 YouTube Studio 的 Schedule 状态并核对日期/时间控件，不传则立即按 `--visibility` 发布。
+YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维码。`--visibility` 可选 `public`、`unlisted` 或 `private`，`--playlist` 可选。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
 
 ## Facebook CLI 子命令
 
@@ -607,11 +607,11 @@ sau facebook check --account creator
 sau facebook upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文"
 sau facebook upload-note --account creator --images images/1.jpg --title "图文标题" --note "正文"
 sau facebook-page login --account creator
-sau facebook-page upload-note --account creator --page "我的 Page" --images images/1.jpg --title "图文标题" --note "正文" --schedule "2026-10-21 10:30" --result .local/page-result.json
-sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21 10:30" --result .local/reel-result.json
+sau facebook-page upload-note --account creator --page "我的 Page" --images images/1.jpg --title "图文标题" --note "正文" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
+sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
 
-个人主页支持视频、图片及正文立即发布，目前未接入个人主页定时。Page 视频和图文支持 `--schedule "YYYY-MM-DD HH:MM"`，使用北京时间，要求至少提前 2 小时；不传即立即提交。当前实现核对 `Asia/Shanghai` 浏览器时区、页面日期/时间及原作品列表安排。`--page` 应填写准确 Page 名称。
+个人主页支持视频、图片及正文立即发布，目前未接入个人主页定时。Page 视频和图文支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，填写前按浏览器时区换算，要求至少提前 2 小时；不传即立即提交。当前实现核对页面日期/时间及原作品列表安排。`--page` 应填写准确 Page 名称。
 
 Page 发布结果默认保存在 `.local/meta-results/`，也可用 `--result` 指定 JSON 文件。结果包含 `page_id`、`page_name`、`content_id`（视频处理中可能暂时没有）和状态。`scheduled` 表示平台已确认排期并核对原记录；`published` 表示图文已发布并核对原记录；立即发布视频在创建响应无错误且完成弹窗出现后返回 `processing`，表示平台已受理并正在处理，不能当成已经公开播放，后续作品编号由平台生成时再查询。`submission_unknown` 仅表示提交响应或完成证据没有确认，必须先查原记录，禁止直接重发。
 
@@ -758,7 +758,7 @@ sau tiktok upload-video \
   --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
-  --schedule "2026-10-21 10:30" --thumbnail covers/demo.png
+  --schedule "2026-10-21T02:30:00Z" --thumbnail covers/demo.png
 
 # 图文：1–35 张本地图片，按传入顺序展示，第 1 张即封面
 sau tiktok upload-note \
@@ -775,7 +775,7 @@ sau tiktok check --profile-id <profile_id>
 sau tiktok upload-video \
   --profile-id <profile_id> \
   --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
-  --privacy public --no-comments --schedule "2026-10-21 10:30"
+  --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
 ```
 
 - 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`，请先在对应桌面应用中登录 Profile。
@@ -812,7 +812,7 @@ sau tiktok upload-video \
 | `--note` | 否 | Description，≤4000 字符（含 tags 展开后的文本）；不传且无 tags 时不改动页面输入 |
 | `--notef` | 否 | 从本地 txt/md 读取 Description；与 `--note` 互斥 |
 | `--tags` | 否 | 逗号分隔，规范化后追加到 Description；最多 50 个 |
-| `--schedule` | 否 | 与视频相同的 `YYYY-MM-DD HH:MM` |
+| `--schedule` | 否 | 与视频相同的 `YYYY-MM-DDTHH:MM:00Z` |
 | `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义 |
 
 `upload-note` 没有 `--disable-reuse`、`--thumbnail` 或 `--cover-index`：图片帖没有内容复用设置，第 1 张即封面。
@@ -837,21 +837,21 @@ sau tiktok upload-video \
 
 ## 定时发布
 
-抖音、快手、小红书、视频号的图文或视频上传，TikTok（本地或托管浏览器模式）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。只要传了 `--schedule`，CLI 就会自动切换到对应平台的定时发布策略；不传则默认立即发布。大鱼号时间固定为北京时间，范围为 2 小时后至 7 天内、5 分钟一档。百家号、支付宝生活号、微博和虎扑当前不支持 `--schedule`。
+抖音、快手、小红书、视频号、知乎、Facebook Page 的图文或视频上传，TikTok（本地或托管浏览器模式）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。时间统一传 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`）。除 Bilibili 直接映射为 `--dtime` epoch 外，CLI 填写前从页面读取实际浏览器时区（`Intl.DateTimeFormat().resolvedOptions().timeZone`）再换算；读取失败直接退出 `1`，不回退到机器时区。不传则默认立即发布。大鱼号和 TikTok 的定时精确到 5 分钟，其它平台精确到分钟。百家号、支付宝生活号、微博、虎扑和 YouTube 当前不支持 `--schedule`。
 
 ```bash
-sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
-sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
-sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
-sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
-sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
-sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
-sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249 --schedule "2026-03-24 21:30"
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24 21:30"
-sau tiktok upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24 21:30"
-sau tiktok upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
-sau tiktok upload-video --folder-id <folder_id> --profile-id <profile_id> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24 21:30"
-sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24 21:30"
+sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
+sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
+sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
+sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249 --schedule "2026-03-24T13:30:00Z"
+sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-video --folder-id <folder_id> --profile-id <profile_id> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
 ```
 
 ## 运行时参数

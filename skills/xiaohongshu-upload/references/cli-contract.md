@@ -40,7 +40,7 @@ sau xiaohongshu upload-video \
   --title "<title>" \
   [--desc "<description>"] \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"] \
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [--thumbnail <image-path>] \
   [--original | --no-original] \
   [--content-type fiction|ai|marketing|self-shot|repost] \
@@ -77,7 +77,7 @@ sau xiaohongshu upload-note \
   --title "<title>" \
   [--note "<content>"] \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"] \
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [--original | --no-original] \
   [--content-type fiction|ai|marketing|self-shot|repost] \
   [--repost-source <media-name>] \
@@ -110,10 +110,10 @@ sau xiaohongshu upload-note \
 - 时间格式为:
 
 ```text
-YYYY-MM-DD HH:MM
+YYYY-MM-DDTHH:MM:00Z
 ```
 
-- 定时窗口为本机墙上时间的 `now + 2h < t <= now + 14d`；越界在启动浏览器前退出 `1`
+- 定时窗口为绝对时刻的 `now + 2h < t <= now + 14d`；填写前读取浏览器时区换算墙上时间，越界在启动浏览器前退出 `1`
 - CLI 在 FIRE（点击发布）前复核定时开关与时间值；回读不一致或时间已过期退出 `1`，不会改成立即发布
 - 回读只证明客户端接受设置，不证明服务端受理；定时是否真正生效需真机验证
 

@@ -7,7 +7,7 @@ Current mainline usage prefers:
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from conf import BASE_DIR
@@ -27,7 +27,7 @@ def upload_video_to_kuaishou():
     thumbnail_path = video_file_path.with_suffix(".png")
     video_meta_title = "快手视频上传示例"
     video_meta_hashtags = ["快手", "自动上传", "示例"]
-    video_meta_publish_time = datetime.strptime("2026-03-27 12:13", "%Y-%m-%d %H:%M")
+    video_meta_publish_time = datetime(2026, 3, 27, 4, 13, tzinfo=timezone.utc)
     publish_strategy = KUAISHOU_PUBLISH_STRATEGY_SCHEDULED
 
     app = KSVideo(
@@ -53,7 +53,7 @@ def upload_note_to_kuaishou():
     ]
     note = "快手图文内容示例"
     tags = ["快手图文", "自动上传", "示例"]
-    note_meta_publish_time = datetime.strptime("2026-03-27 12:13", "%Y-%m-%d %H:%M")
+    note_meta_publish_time = datetime(2026, 3, 27, 4, 13, tzinfo=timezone.utc)
     publish_strategy = KUAISHOU_PUBLISH_STRATEGY_SCHEDULED
 
     app = KSNote(

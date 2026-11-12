@@ -106,7 +106,7 @@ sau <platform> upload-video \
   --title "<title>" \
   [--desc "<description>"] \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"] \
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [平台特有参数...]
 ```
 
@@ -137,7 +137,7 @@ sau <platform> upload-note \
   --title "<title>" \
   [--note "<content>"] \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"]
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"]
 ```
 
 统一规则：

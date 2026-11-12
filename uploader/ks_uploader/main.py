@@ -17,6 +17,7 @@ from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
+from utils.browser_time import page_wall_clock
 from utils.errors import LoginRequiredError
 from utils.files_times import get_absolute_path
 from utils.login_qrcode import build_login_qrcode_path
@@ -489,7 +490,6 @@ class KSBaseUploader(BaseVideoUploader):
         self.debug = debug
         self.headless = headless
         self.local_executable_path = LOCAL_CHROME_PATH
-        self.date_format = "%Y-%m-%d %H:%M"
 
     async def validate_base_args(self, *, check_cookie: bool = True):
         if check_cookie:
@@ -517,6 +517,7 @@ class KSBaseUploader(BaseVideoUploader):
             self.publish_date = 0
 
     async def set_schedule_time(self, page: Page, publish_date: datetime):
+        publish_date = await page_wall_clock(page, publish_date)
         kuaishou_logger.info(_msg("🕒", "小人准备设置定时发布时间"))
         publish_date_str = publish_date.strftime("%Y-%m-%d %H:%M:%S")
 

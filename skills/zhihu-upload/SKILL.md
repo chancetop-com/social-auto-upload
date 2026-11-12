@@ -83,11 +83,11 @@ sau zhihu upload-video --account creator --file "视频.mp4" --title "视频标�
 sau zhihu verify --account creator --result "本次结果.json"
 ```
 
-`--schedule "YYYY-MM-DD HH:MM"` 为实验性选项，按北京时间限制在 30 分钟后至 48 小时内；尚不保证完整排期流程可用。
+`--schedule "YYYY-MM-DDTHH:MM:00Z"` 为实验性选项（UTC 绝对时刻，填写前换算到浏览器时区），限制在当前时刻 30 分钟后至 48 小时内；尚不保证完整排期流程可用。
 
 ## 托管浏览器模式（可选）
 
-设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下跳过剪贴板授权，建议把 Profile 时区设为 `Asia/Shanghai`。
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下跳过剪贴板授权，填写时读取浏览器/Profile 时区。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。

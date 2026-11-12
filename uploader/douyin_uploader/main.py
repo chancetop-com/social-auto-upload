@@ -16,6 +16,7 @@ from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
+from utils.browser_time import page_wall_clock
 from utils.errors import LoginRequiredError
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -424,7 +425,6 @@ class DouYinBaseUploader(BaseVideoUploader):
         self.account_file = account_file
         self.publish_strategy = publish_strategy
         self.debug = debug
-        self.date_format = "%Y年%m月%d日 %H:%M"
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
 
@@ -443,6 +443,7 @@ class DouYinBaseUploader(BaseVideoUploader):
             self.publish_date = 0
 
     async def set_schedule_time_douyin(self, page, publish_date):
+        publish_date = await page_wall_clock(page, publish_date)
         label_element = page.locator("[class^='radio']:has-text('定时发布')")
         await label_element.click()
         await asyncio.sleep(1)

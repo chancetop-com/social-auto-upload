@@ -20,7 +20,6 @@ from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.schedule import fill_dayu_schedule, validate_dayu_schedule
 from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.dayu_uploader.session import (
-    DAYU_CONTEXT_KWARGS,
     DAYU_INIT_SCRIPT,
     DAYU_LAUNCH_KWARGS,
     dayu_results_dir,
@@ -278,7 +277,6 @@ class DayuArticle:
                 headless=self.headless,
                 account_file=str(self.account_file),
                 launch_kwargs=DAYU_LAUNCH_KWARGS,
-                context_kwargs=DAYU_CONTEXT_KWARGS,
                 init_script=DAYU_INIT_SCRIPT,
             ) as local_session:
                 return await self.upload_in(local_session)

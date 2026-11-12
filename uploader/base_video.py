@@ -7,10 +7,11 @@ from uploader.publish_timeout import (
     PUBLISH_TIMEOUT_SECONDS,
     PublishTimeoutBudget,
 )
+from utils.time_utils import require_schedule_window
 
 
 class BaseVideoUploader:
-    #: 本地发布闸门：全部准备完成后，只有本地时间 >= 该值才点击发布。
+    #: 客户端发布闸门：全部准备完成后，只有绝对时刻 >= 该值才点击发布。
     #: 命令层在构造上传器后赋值；None 表示不做客户端等待。
     publish_not_before: datetime | None = None
     #: 发布超时预算使用的平台名；子类覆盖后错误文案会带上平台名。
@@ -85,12 +86,11 @@ class BaseVideoUploader:
         if not isinstance(publish_date, datetime):
             raise TypeError("publish_date 必须是 datetime 类型或 0")
 
-        now = datetime.now(tz=publish_date.tzinfo) if publish_date.tzinfo else datetime.now()
-        if publish_date <= now:
-            raise ValueError("定时发布时间必须晚于当前时间")
-
-        min_publish_time = now + cls.MIN_SCHEDULE_LEAD_TIME
-        if publish_date <= min_publish_time:
-            raise ValueError("定时发布时间必须大于当前时间 2 小时")
-
-        return publish_date
+        return require_schedule_window(
+            publish_date,
+            min_lead=cls.MIN_SCHEDULE_LEAD_TIME,
+            max_lead=None,
+            label="定时发布时间",
+            min_inclusive=False,
+            too_soon="定时发布时间必须大于当前时间 2 小时",
+        )

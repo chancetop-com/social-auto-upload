@@ -5,6 +5,7 @@ from datetime import datetime
 from playwright.async_api import Playwright, async_playwright
 import os
 import asyncio
+from uploader.tk_uploader.schedule import prepare_schedule
 from uploader.tk_uploader.tk_config import Tk_Locator
 from utils.base_social_media import set_init_script
 from utils.files_times import get_absolute_path
@@ -81,6 +82,7 @@ class TiktokVideo(object):
 
 
     async def set_schedule_time(self, page, publish_date):
+        publish_date = await prepare_schedule(page, publish_date)
         schedule_input_element = self.locator_base.get_by_label('Schedule')
         await schedule_input_element.wait_for(state='visible')  # 确保按钮可见
 

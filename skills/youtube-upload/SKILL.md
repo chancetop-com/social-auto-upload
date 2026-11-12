@@ -18,7 +18,7 @@ sau youtube check --account creator
 sau youtube upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "简介" --tags tag1,tag2 --visibility public
 ```
 
-标题最多 100 个字符。`--visibility` 可选 `public`、`unlisted`、`private`，默认 `public`；`--thumbnail` 指定封面，`--playlist` 指定已有播放列表。只有用户明确给出定时时间才传 `--schedule "YYYY-MM-DD HH:MM"`；该选项会使用 YouTube Studio 的 Schedule 状态，需核对页面显示的日期与时间。
+标题最多 100 个字符。`--visibility` 可选 `public`、`unlisted`、`private`，默认 `public`；`--thumbnail` 指定封面，`--playlist` 指定已有播放列表。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
 
 ## 托管浏览器模式（可选）
 

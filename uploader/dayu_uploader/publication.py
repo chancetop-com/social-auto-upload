@@ -4,8 +4,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, expect
-from uploader.dayu_uploader.verification import check_dayu_article_content, wait_dayu_publication
-from uploader.dayu_uploader.schedule import read_dayu_schedule
+from uploader.dayu_uploader.verification import (
+    check_dayu_article_content,
+    wait_dayu_publication,
+)
+from uploader.dayu_uploader.schedule import (
+    apply_schedule_result,
+    read_dayu_schedule,
+    target_from_result,
+)
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.log import dayu_logger
 
@@ -113,11 +120,13 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if result.get("schedule"):
         # content_id 确认已提交，再从作品列表复核原作品及安排；草稿不能算定时提交成功。
-        record = await wait_dayu_publication(page.context, content_id=result["content_id"],
-                                             origin_id=result["origin_id"], title=result.get("title"),
-                                             schedule=result["schedule"])
-        result.update(schedule_verified=True, platform_status=record["status"])
-        result.update(success=True, status="scheduled")
+        target = target_from_result(result["schedule"])
+        record, saved_actual = await wait_dayu_publication(
+            page.context, content_id=result["content_id"],
+            origin_id=result["origin_id"], title=result.get("title"),
+            target=target)
+        apply_schedule_result(result, record, target, saved_actual)
+        result.update(success=True, platform_status=record["status"])
     else:
         result.update(success=True, status="submitted")
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

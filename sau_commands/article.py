@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from utils.article_render import ARTICLE_THEMES, render_article_file, setup_article_renderer
-from sau_commands.arguments import SCHEDULE_FORMAT, existing_file_path
+from sau_commands.arguments import existing_file_path
 
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     article_parser = platform_parsers.add_parser("article", help="本地文章转换与主题预览，不登录或发表")
     article_actions = article_parser.add_subparsers(dest="action", required=True)
     article_actions.add_parser("themes", help="列出内置主题")

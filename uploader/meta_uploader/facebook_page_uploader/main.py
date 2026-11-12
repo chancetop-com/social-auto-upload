@@ -23,6 +23,7 @@ from patchright.async_api import (
 
 from uploader.base_video import BaseVideoUploader
 from utils.browser_session import BrowserSession
+from utils.browser_time import page_wall_clock
 from utils.errors import LoginRequiredError
 
 
@@ -369,10 +370,8 @@ class MetaBusinessUploader(BaseVideoUploader):
     async def _fill_schedule(self, page: Page) -> None:
         if not self.schedule:
             return
-        # 此表单按浏览器本地时区解释时间，当前真实验证为 Asia/Shanghai。
-        zone = await page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
-        if zone != "Asia/Shanghai" or self.schedule.tzinfo is not None:
-            raise ValueError("当前 Meta 定时要求 Asia/Shanghai 浏览器及不带时区的北京时间输入")
+        # 表单按浏览器时区解释时间；先读取页面时区再换算墙上时间。
+        schedule = await page_wall_clock(page, self.schedule)
         if self.video_file:
             region = page.locator('[data-surface$="bizweb_create_reel:left_panel"]')
             # 分享阶段的三种发布模式是立即、定时、草稿；其 aria-pressed 表示模式，非提交。
@@ -395,7 +394,7 @@ class MetaBusinessUploader(BaseVideoUploader):
         if not match:
             raise RuntimeError('无法读取日历的月份/年份，未提交')
         month, year = map(int, match.groups())
-        month_delta = (self.schedule.year - year) * 12 + self.schedule.month - month
+        month_delta = (schedule.year - year) * 12 + schedule.month - month
         if abs(month_delta) > 12:
             raise ValueError('定时日期超出已验证日历范围')
         # 日历非 grid 内的两个按钮分别为上一月/下一月；日按钮属于 gridcell，排除它们。
@@ -404,9 +403,9 @@ class MetaBusinessUploader(BaseVideoUploader):
         await expect(navigation).to_have_count(2)
         for _ in range(abs(month_delta)):
             await navigation.nth(1 if month_delta > 0 else 0).click()
-        await expect(grid).to_have_attribute('aria-labelledby', re.compile(fr'-{self.schedule.month}-{self.schedule.year}$'))
+        await expect(grid).to_have_attribute('aria-labelledby', re.compile(fr'-{schedule.month}-{schedule.year}$'))
         # 已核对日历年月后按日期数字选择，避免依赖 aria-label 的星期/月名翻译。
-        day = grid.get_by_role('button').filter(has_text=re.compile(fr'^{self.schedule.day}$'))
+        day = grid.get_by_role('button').filter(has_text=re.compile(fr'^{schedule.day}$'))
         await expect(day).to_have_count(1)
         if await day.get_attribute('aria-disabled') == 'true':
             raise ValueError('平台日历不允许选定日期，未提交')
@@ -414,8 +413,8 @@ class MetaBusinessUploader(BaseVideoUploader):
         hour = region.locator('[role="spinbutton"][aria-valuemax="23"], [role="spinbutton"][aria-valuemax="12"]')
         await expect(hour).to_have_count(1)
         twelve_hour = await hour.get_attribute('aria-valuemax') == '12'
-        value_hour = (self.schedule.hour % 12 or 12) if twelve_hour else self.schedule.hour
-        for control, value in ((hour, value_hour), (region.locator('[role="spinbutton"][aria-valuemax="59"]'), self.schedule.minute)):
+        value_hour = (schedule.hour % 12 or 12) if twelve_hour else schedule.hour
+        for control, value in ((hour, value_hour), (region.locator('[role="spinbutton"][aria-valuemax="59"]'), schedule.minute)):
             await control.click()
             for digit in f'{value:02d}':
                 await control.press(digit)
@@ -424,13 +423,13 @@ class MetaBusinessUploader(BaseVideoUploader):
         if twelve_hour:
             # AM/PM 的真实数值是 0/1；按键切换后读回，拒绝只填小时造成 12 小时偏差。
             period = region.locator('[role="spinbutton"][aria-valuemax="1"]')
-            target = str(int(self.schedule.hour >= 12))
+            target = str(int(schedule.hour >= 12))
             if await period.get_attribute('aria-valuenow') != target:
                 await period.press('ArrowUp')
             await expect(period).to_have_attribute('aria-valuenow', target)
         # 日期控件在中英日页面实测读回均包含年月日数字；允许分隔符本地化，不猜月份名称。
         parts = [int(part) for part in re.findall(r'\d+', await date_input.input_value())]
-        if parts != [self.schedule.year, self.schedule.month, self.schedule.day]:
+        if parts != [schedule.year, schedule.month, schedule.day]:
             raise RuntimeError(f'日期未读回请求值：{await date_input.input_value()}')
 
     async def _publish(self, page: Page) -> None:
@@ -503,7 +502,6 @@ class MetaBusinessUploader(BaseVideoUploader):
                 # 完成弹窗和无错误的创建响应已经是“提交成功、正在处理”的业务证据；编号只用于后续核验/删除，不能阻断发布结果。
                 self.result['status'] = 'processing'
                 self.result['schedule'] = None
-                self.result['timezone'] = 'Asia/Shanghai'
                 self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
                 return
         # 创建响应明确受理后按 Page 和原作品编号查询；不依赖任何语言的成功提示。
@@ -516,7 +514,6 @@ class MetaBusinessUploader(BaseVideoUploader):
         self.result['content_id'] = content_id
         self.result['status'] = 'scheduled' if self.schedule else ('processing' if self.video_file else 'published')
         self.result['schedule'] = self.schedule.isoformat() if self.schedule else None
-        self.result['timezone'] = 'Asia/Shanghai'
 
     def _validate_media(self) -> None:
         if self.video_file:

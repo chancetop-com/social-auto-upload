@@ -43,7 +43,7 @@ sau xueqiu upload-article --account <别名> --title "用户标题" --content-fi
 
 ## 托管浏览器模式（可选）
 
-设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下不写入时区，建议把 Profile 时区设为 `Asia/Shanghai`。
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式不写入时区。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。

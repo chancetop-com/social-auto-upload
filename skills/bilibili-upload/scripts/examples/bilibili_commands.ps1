@@ -18,4 +18,4 @@ sau bilibili upload-video `
   --desc "Bilibili CLI Demo" `
   --tid 249 `
   --tags 足球,测试 `
-  --schedule "2026-03-26 16:00"
+  --schedule "2026-03-26T08:00:00Z"

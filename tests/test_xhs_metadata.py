@@ -28,6 +28,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from unittest.mock import AsyncMock, Mock, patch
 
 import uploader.publish_timeout as publish_timeout
@@ -41,6 +42,7 @@ from tests.fakes_xhs_dom import (
     preview_tiles,
 )
 from utils import dom
+from utils.browser_time import to_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError
 
 NOTE_URL = (
@@ -77,11 +79,13 @@ VISIBLE_FACTS = dict(INPUT_FACTS, tag="div")
 
 
 def _requested(hours: int = 3) -> datetime:
-    return (datetime.now() + timedelta(hours=hours)).replace(microsecond=0)
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).replace(
+        microsecond=0
+    )
 
 
 def _text(value: datetime) -> str:
-    return value.strftime("%Y-%m-%d %H:%M")
+    return to_wall_clock(value, ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
 
 
 async def _noop_async_sleep(_seconds: float) -> None:
@@ -561,7 +565,7 @@ class Decision11ReadbackBodyLengthTests(unittest.TestCase):
 
 class Decision11ReadbackScheduleWindowTests(unittest.TestCase):
     def setUp(self):
-        self.now = datetime(2026, 11, 12, 10, 0, 0)
+        self.now = datetime(2026, 11, 12, 10, 0, 0, tzinfo=timezone.utc)
 
     def test_exactly_two_hours_ahead_is_rejected(self):
         with self.assertRaises(ValueError) as ctx:
@@ -589,28 +593,34 @@ class Decision11ReadbackScheduleWindowTests(unittest.TestCase):
             )
         self.assertIn("14 天", str(ctx.exception))
 
-    def test_aware_offset_is_ignored_for_validation(self):
+    def test_naive_input_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "必须包含时区偏移"):
+            xhs_main.xhs_validate_schedule_time(
+                (self.now + timedelta(hours=3)).replace(tzinfo=None), now=self.now
+            )
+
+    def test_aware_input_keeps_its_offset(self):
         aware = (self.now + timedelta(hours=3)).replace(
             tzinfo=timezone(timedelta(hours=-8))
         )
         result = xhs_main.xhs_validate_schedule_time(aware, now=self.now)
-        self.assertIsNone(result.tzinfo)
-        self.assertEqual(result, self.now + timedelta(hours=3))
+        self.assertEqual(result, aware)
+        self.assertIsNotNone(result.tzinfo)
 
-    def test_validate_base_args_normalizes_aware_input_to_wall_time(self):
+    def test_validate_base_args_keeps_aware_input(self):
         aware = (_requested(3)).replace(tzinfo=timezone(timedelta(hours=-8)))
         app = _note_app(
             publish_strategy=xhs_main.XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
             publish_date=aware,
         )
         asyncio.run(app.validate_base_args(check_cookie=False))
-        self.assertIsNone(app.publish_date.tzinfo)
-        self.assertEqual(app.publish_date, aware.replace(tzinfo=None))
+        self.assertIsNotNone(app.publish_date.tzinfo)
+        self.assertEqual(app.publish_date, aware)
 
     def test_validate_base_args_rejects_over_fourteen_days(self):
         app = _note_app(
             publish_strategy=xhs_main.XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
-            publish_date=datetime.now() + timedelta(days=15),
+            publish_date=datetime.now(timezone.utc) + timedelta(days=15),
         )
         with self.assertRaises(ValueError):
             asyncio.run(app.validate_base_args(check_cookie=False))
@@ -726,12 +736,11 @@ class Decision11ReadbackScheduleReadbackTests(unittest.TestCase):
         page = _schedule_page(values=[_text(requested)])
         app = self._app(requested)
 
-        class _FrozenDatetime(datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return requested + timedelta(minutes=1)
-
-        with patch.object(xhs_main, "datetime", _FrozenDatetime):
+        with patch.object(
+            xhs_main,
+            "require_aware_now",
+            return_value=requested + timedelta(minutes=1),
+        ):
             with self.assertRaises(ElementUnusableError):
                 asyncio.run(app._verify_schedule_before_fire(page))
 

@@ -16,7 +16,7 @@ from uploader.tencent_uploader.main import (
     tencent_setup,
 )
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -37,7 +37,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     tencent_parser = platform_parsers.add_parser("tencent", help="Tencent/WeChat Channels operations")
     tencent_actions = tencent_parser.add_subparsers(dest="action", required=True)
 
@@ -54,7 +53,7 @@ def register(platform_parsers):
     tencent_upload_video_parser.add_argument("--title", required=True, help="Video title")
     tencent_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     tencent_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
-    tencent_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    tencent_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(tencent_upload_video_parser)
     tencent_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
     tencent_upload_video_parser.add_argument("--thumbnail-landscape", type=existing_file_path, help="Optional 4:3 landscape thumbnail path")

@@ -161,7 +161,7 @@
 | `--note` | 否 | 页面 Description，≤4000 字符；不传则不动 |
 | `--notef` | 否 | 从 txt/md 读 Description；与 `--note` 互斥 |
 | `--tags` | 否 | 逗号分隔，规范化后追加到 Description |
-| `--schedule` | 否 | 与视频相同的 `YYYY-MM-DD HH:MM` |
+| `--schedule` | 否 | 与视频相同的 `YYYY-MM-DDTHH:MM:00Z` |
 | `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义 |
 | `--account` / `--debug` / `--headed` / `--headless` / `--folder-id` / `--profile-id` | 否 | 与现有平台一致 |
 

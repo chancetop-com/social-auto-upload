@@ -34,7 +34,6 @@ from uploader.dayu_uploader import session as dayu_session
 from uploader.dayu_uploader.article import DayuArticle
 from uploader.dayu_uploader.main import DayuVideo
 from uploader.dayu_uploader.session import (
-    DAYU_CONTEXT_KWARGS,
     DAYU_INIT_SCRIPT,
     DAYU_LAUNCH_KWARGS,
     is_logged_in as dayu_is_logged_in,
@@ -755,7 +754,6 @@ class DayuLocalGoldenTests(unittest.TestCase):
             DAYU_LAUNCH_KWARGS,
             {"executable_path": LOCAL_CHROME_PATH or None, "channel": "chrome"},
         )
-        self.assertEqual(DAYU_CONTEXT_KWARGS, {"timezone_id": "Asia/Shanghai"})
         self.assertFalse(DAYU_INIT_SCRIPT)
 
     def test_video_local_launch_context_timezone_and_teardown(self):
@@ -786,7 +784,7 @@ class DayuLocalGoldenTests(unittest.TestCase):
         browser = playwright.chromium.launch_browser
         self.assertEqual(
             browser.new_context_calls,
-            [{"storage_state": str(account.resolve()), **DAYU_CONTEXT_KWARGS}],
+            [{"storage_state": str(account.resolve())}],
         )
         context = browser.contexts[0]
         self.assertEqual(context.storage_state_calls, [str(account.resolve())])
@@ -823,7 +821,7 @@ class DayuLocalGoldenTests(unittest.TestCase):
         browser = playwright.chromium.launch_browser
         self.assertEqual(
             browser.new_context_calls,
-            [{"storage_state": str(account.resolve()), **DAYU_CONTEXT_KWARGS}],
+            [{"storage_state": str(account.resolve())}],
         )
         context = browser.contexts[0]
         self.assertEqual(context.storage_state_calls, [str(account.resolve())])
@@ -1229,7 +1227,7 @@ class DayuCliTests(unittest.TestCase):
             MultiloginTarget(folder_id=FOLDER, profile_id=PROFILE),
         )
         self.assertEqual(kwargs["launch_kwargs"], DAYU_LAUNCH_KWARGS)
-        self.assertEqual(kwargs["context_kwargs"], DAYU_CONTEXT_KWARGS)
+        self.assertNotIn("context_kwargs", kwargs)
         self.assertFalse(kwargs["init_script"])
         probe.assert_awaited_once_with(session.context)
         self.assertIsNone(builder.call_args.kwargs["account_file"])
@@ -1239,7 +1237,7 @@ class DayuCliTests(unittest.TestCase):
             PROFILE,
         )
         logger.info.assert_any_call(
-            "Multilogin 模式不写入时区；建议在 Profile 设置中将时区设为 Asia/Shanghai"
+            "Multilogin 模式不写入时区；定时填写时读取浏览器/Profile 时区"
         )
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)

@@ -16,7 +16,6 @@ from uploader.dayu_uploader.constants import (
 )
 from uploader.dayu_uploader.main import DayuVideo
 from uploader.dayu_uploader.session import (
-    DAYU_CONTEXT_KWARGS,
     DAYU_HOME_URL,
     DAYU_INIT_SCRIPT,
     DAYU_LAUNCH_KWARGS,
@@ -28,7 +27,7 @@ from uploader.dayu_uploader.session import (
 )
 from uploader.dayu_uploader.verification import verify_dayu_article, verify_dayu_video
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP_ZH,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -51,7 +50,6 @@ from sau_commands.browser import (
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     dayu_parser = platform_parsers.add_parser("dayu", help="Dayu (大鱼号) video publishing and verification")
     dayu_actions = dayu_parser.add_subparsers(dest="action", required=True)
     dayu_login = dayu_actions.add_parser("login", help="Log in manually with visible Chrome")
@@ -73,7 +71,7 @@ def register(platform_parsers):
     dayu_upload.add_argument("--source-url", default="", help="转载时必填的 http/https 原文链接")
     dayu_upload.add_argument("--thumbnail", required=True, type=existing_file_path)
     dayu_upload.add_argument("--schedule", type=schedule_value,
-                            help=f"{schedule_help}，北京时间，{DAYU_SCHEDULE_MIN_HOURS}小时后至{DAYU_SCHEDULE_MAX_DAYS}天内，分钟为{DAYU_SCHEDULE_STEP_MINUTES}的倍数")
+                            help=f"{SCHEDULE_HELP_ZH}；{DAYU_SCHEDULE_MIN_HOURS}小时后至{DAYU_SCHEDULE_MAX_DAYS}天内，分钟为{DAYU_SCHEDULE_STEP_MINUTES}的倍数")
     dayu_upload.add_argument("--prepare-only", action="store_true", help="Upload and fill only; do not click publish")
     add_not_before_flag(dayu_upload)
     dayu_upload.add_argument("--upload-timeout", type=int, default=600, help="Upload/processing timeout in seconds")
@@ -89,7 +87,7 @@ def register(platform_parsers):
     dayu_article.add_argument("--author", help="选填作者名称；省略时沿用网页已有值")
     dayu_article.add_argument("--cover-indices", nargs="+", type=int, help="选填1或3个正文图片序号（从1开始），对应单封面或三封面")
     dayu_article.add_argument("--schedule", type=schedule_value,
-                             help=f"{schedule_help}，北京时间，{DAYU_SCHEDULE_MIN_HOURS}小时后至{DAYU_SCHEDULE_MAX_DAYS}天内，分钟为{DAYU_SCHEDULE_STEP_MINUTES}的倍数")
+                             help=f"{SCHEDULE_HELP_ZH}；{DAYU_SCHEDULE_MIN_HOURS}小时后至{DAYU_SCHEDULE_MAX_DAYS}天内，分钟为{DAYU_SCHEDULE_STEP_MINUTES}的倍数")
     dayu_article.add_argument("--prepare-only", action="store_true", help="上传和填写后结束，不发表")
     add_not_before_flag(dayu_article)
     dayu_article.add_argument("--upload-timeout", type=int, default=600, help="每张图片上传等待秒数")
@@ -120,7 +118,7 @@ def _log_identity_unverified(target) -> None:
 
 def _log_profile_identity(target) -> None:
     _log_identity_unverified(target)
-    # 托管模式不写 timezone_id；发布时区由 Profile 决定。
+    # 托管模式不写 timezone_id；发布时区由浏览器/Profile 决定。
     dayu_logger.info(managed_timezone_hint(target.mode))
 
 
@@ -132,7 +130,6 @@ async def _run_mlx_upload(app, *, target, headless: bool):
             account_file=None,
             managed=target,
             launch_kwargs=DAYU_LAUNCH_KWARGS,
-            context_kwargs=DAYU_CONTEXT_KWARGS,
             init_script=DAYU_INIT_SCRIPT,
         ) as session:
             if not await is_logged_in(session.context):

@@ -16,6 +16,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +27,7 @@ from uploader.tk_uploader.main_chrome import (
     TiktokPublishOptions,
     TiktokVideo,
 )
+from utils.time_utils import require_minute_step
 
 TOKEN = "SENTINEL-MLX-TOKEN-ticket12"
 
@@ -1852,6 +1854,20 @@ class TiktokOptionCliFlowTests(unittest.TestCase):
         self.assertIs(request.options.aigc, False)
         self.assertIsNone(request.options.your_brand)
         self.assertIsNone(request.options.branded_content)
+
+
+class TiktokScheduleMinuteTests(unittest.TestCase):
+    def test_accepts_multiples_of_five(self):
+        value = datetime(2026, 11, 12, 10, 35, tzinfo=timezone.utc)
+        self.assertEqual(require_minute_step(value, 5, label="TikTok 定时"), value)
+
+    def test_rejects_silently_floored_minutes(self):
+        with self.assertRaisesRegex(ValueError, "5 分钟"):
+            require_minute_step(
+                datetime(2026, 11, 12, 10, 32, tzinfo=timezone.utc),
+                5,
+                label="TikTok 定时",
+            )
 
 
 class HashtagEntityTests(unittest.TestCase):

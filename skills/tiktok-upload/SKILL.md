@@ -56,7 +56,7 @@ sau tiktok upload-video \
   --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
-  --schedule "2026-10-21 10:30" --thumbnail covers/demo.png
+  --schedule "2026-10-21T02:30:00Z" --thumbnail covers/demo.png
 
 # 图文：1–35 张本地图片，按传入顺序展示，第 1 张即封面
 sau tiktok upload-note \
@@ -73,7 +73,7 @@ sau tiktok check --profile-id <profile_id>
 sau tiktok upload-video \
   --profile-id <profile_id> \
   --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
-  --privacy public --no-comments --schedule "2026-10-21 10:30"
+  --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
 ```
 
 - 本地模式必填 `--account`；托管模式 `--account` 可选，仅作日志标签，缺省为 `profile_id`。
@@ -103,7 +103,7 @@ sau tiktok upload-video \
 - `--title`：页面 Title，≤90 字符，可选；不传则不改动页面输入。
 - `--note` / `--notef`：Description，≤4000 字符（含 tags 展开后的文本）；`--notef` 从本地 txt/md 读取；两者互斥；都不传且无 tags 时不改动页面输入。
 - `--tags`：逗号分隔，最多 50 个。
-- `--schedule`：`YYYY-MM-DD HH:MM`。
+- `--schedule`：`YYYY-MM-DDTHH:MM:00Z`（UTC 绝对时刻，填写前换算到浏览器时区；精确到 5 分钟）。
 - 发布选项：`--privacy`、`--no-comments`、`--aigc`/`--no-aigc`、`--your-brand`、`--branded-content` 与视频相同。
 - `upload-note` 没有 `--disable-reuse`、`--thumbnail` 或 `--cover-index`。
 
@@ -115,6 +115,6 @@ sau tiktok upload-video \
 - 收到 `9` 时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关。
 
-定时发布使用 `--schedule "YYYY-MM-DD HH:MM"`；只有用户明确给出时间才传。托管模式只验证“已登录”，Profile 即身份，调度侧需确保 `profile_id` 与目标账号匹配；本地模式则由 `--account` 决定 cookie 文件。命令级登录检测已是 provider-aware 文案；部分平台上传过程中的登录/验证码/2FA 错误仍可能提到 Multilogin，属于已知遗留。
+定时发布使用 `--schedule "YYYY-MM-DDTHH:MM:00Z"`（UTC 绝对时刻，填写前换算到浏览器时区；精确到 5 分钟）；只有用户明确给出时间才传。托管模式只验证“已登录”，Profile 即身份，调度侧需确保 `profile_id` 与目标账号匹配；本地模式则由 `--account` 决定 cookie 文件。命令级登录检测已是 provider-aware 文案；部分平台上传过程中的登录/验证码/2FA 错误仍可能提到 Multilogin，属于已知遗留。
 
 每次发布前让用户确认账号、单条视频或一组图片、标题、正文/标签及立即/定时方式。页面布局或登录状态不符合预期时停止并报告；只有平台页面确认提交后才报告成功，未知结果先核查 TikTok Studio，不能直接重发。

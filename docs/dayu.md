@@ -62,10 +62,10 @@ sau dayu upload-video --account creator --file "D:\素材\视频.mp4" --title "�
 
 ## 定时发布
 
-在发布命令中增加 `--schedule "YYYY-MM-DD HH:MM"`。时间固定按**北京时间（Asia/Shanghai，UTC+8）**解释，不受运行电脑时区影响；须在当前时间 2 小时后至 7 天内，分钟为 5 的倍数，例如 `10:30` 或 `10:35`。程序不会自动取整或改成立即发布。请留足上传和处理时间，填表时仍须处于允许范围内。
+在发布命令中增加 `--schedule "YYYY-MM-DDTHH:MM:00Z"`（UTC 绝对时刻）。CLI 会在填写表单前换算到浏览器时区；须在当前时刻 2 小时后至 7 天内，分钟为 5 的倍数，例如 `10:30` 或 `10:35`。程序不会自动取整或改成立即发布。请留足上传和处理时间，填表时仍须处于允许范围内。
 
 ```powershell
-sau dayu upload-video --account creator --file "D:\素材\视频.mp4" --title "这是大鱼号视频标题" --category "科技" --source "无需标注" --thumbnail "D:\素材\封面.jpg" --schedule "2027-01-01 10:30"
+sau dayu upload-video --account creator --file "D:\素材\视频.mp4" --title "这是大鱼号视频标题" --category "科技" --source "无需标注" --thumbnail "D:\素材\封面.jpg" --schedule "2027-01-01T02:30:00Z"
 ```
 
 示例日期需替换成实际范围内的时间。省略 `--schedule` 默认立即发布。平台确认原作品及定时时间后返回成功，表示**定时安排已提交**，不等待到点或审核。平台审核若延长，实际公开时间可能晚于预定时间。
@@ -79,7 +79,7 @@ sau dayu upload-video --account creator --file "D:\素材\视频.mp4" --title "�
 | 视频简介 | 选填 | 支持，使用 `--desc` |
 | 视频标签 | 选填 | 支持，使用 `--tags` |
 | 竖版封面 | 选填 | 尚未支持 |
-| 定时发布 | 选填 | 支持，使用 `--schedule`；北京时间 2 小时后至 7 天内，5 分钟一档 |
+| 定时发布 | 选填 | 支持，使用 `--schedule`（UTC ISO）；2 小时后至 7 天内，5 分钟一档 |
 | 从素材库选择视频 | 可选素材来源 | 尚未支持；当前命令使用本机文件 |
 | 网页预览 | 可选操作 | 发布过程中会进入预览并确认；尚未提供独立预览命令 |
 | 保存草稿、清空编辑内容 | 可选操作 | 尚未提供对应命令 |

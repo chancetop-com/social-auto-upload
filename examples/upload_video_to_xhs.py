@@ -61,7 +61,7 @@ if __name__ == '__main__':
                                             desc=title + tags_str + hash_tags_str,
                                             topics=topics,
                                             is_private=False,
-                                            post_time=publish_datetimes[index].strftime("%Y-%m-%d %H:%M:%S"))
+                                            post_time=publish_datetimes[index].astimezone().strftime("%Y-%m-%d %H:%M:%S"))
 
         beauty_print(note)
         # 强制休眠30s，避免风控（必要）

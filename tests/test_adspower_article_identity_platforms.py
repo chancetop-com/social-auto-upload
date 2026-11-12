@@ -68,16 +68,12 @@ MLX_IDENTITY_FORMAT = "账号一致性未校验：以 Multilogin Profile 为身�
 MLX_IDENTITY_FORMAT_DETAILED = (
     MLX_IDENTITY_FORMAT + "，请调度侧确保 profile_id 与目标账号匹配。"
 )
-MLX_TIMEZONE_HINT = (
-    "Multilogin 模式不写入时区；建议在 Profile 设置中将时区设为 Asia/Shanghai"
-)
+MLX_TIMEZONE_HINT = "Multilogin 模式不写入时区；定时填写时读取浏览器/Profile 时区"
 ADSPOWER_IDENTITY_FORMAT = "账号一致性未校验：以 AdsPower Profile 为身份（profile_id={}）"
 ADSPOWER_IDENTITY_FORMAT_DETAILED = (
     ADSPOWER_IDENTITY_FORMAT + "，请调度侧确保 profile_id 与目标账号匹配。"
 )
-ADSPOWER_TIMEZONE_HINT = (
-    "AdsPower 模式不写入时区；建议在 Profile 设置中将时区设为 Asia/Shanghai"
-)
+ADSPOWER_TIMEZONE_HINT = "AdsPower 模式不写入时区；定时填写时读取浏览器/Profile 时区"
 
 
 class _AsyncCM:

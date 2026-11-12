@@ -7,7 +7,7 @@ Current mainline usage prefers:
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from conf import BASE_DIR
@@ -26,7 +26,7 @@ def upload_video_to_douyin():
     video_meta_hashtags = ["坚持不懈", "爱情执着", "奋斗使者", "短视频"]
     thumbnail_landscape_path = Path(BASE_DIR) / "videos/demo.png"
     thumbnail_portrait_path = Path(BASE_DIR) / "videos/demo.png"
-    video_meta_publish_time = datetime.strptime("2026-3-25 12:13", "%Y-%m-%d %H:%M")
+    video_meta_publish_time = datetime(2026, 3, 25, 4, 13, tzinfo=timezone.utc)
 
     app = DouYinVideo(
         title=video_meta_title,
@@ -46,7 +46,7 @@ def upload_note_to_douyin():
     image_paths = [Path(BASE_DIR) / "videos/demo.png", Path(BASE_DIR) / "videos/demo.png", Path(BASE_DIR) / "videos/demo.png"]
     note = "图文内容示例"
     tags = ["图文", "示例", "抖音图文"]
-    video_meta_publish_time = datetime.strptime("2026-3-25 12:13", "%Y-%m-%d %H:%M")
+    video_meta_publish_time = datetime(2026, 3, 25, 4, 13, tzinfo=timezone.utc)
 
     app = DouYinNote(
         image_paths=image_paths,

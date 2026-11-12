@@ -8,7 +8,7 @@
 
 ### Multilogin X 模式
 
-设置 `MLX_API_TOKEN` 后，`check`、`upload-article`、`upload-video` 通过 `--folder-id/--profile-id` 使用 Multilogin Profile。此时不读写 `cookies/*.json` 或 `.identity.json`，不比对用户 ID，也不注入本地 `channel="chrome"` / `executable_path` / `timezone_id="Asia/Shanghai"`；身份与浏览器指纹完全由 Profile 决定。请把 Profile 的时区设为 `Asia/Shanghai`，否则定时发布按 Profile 时区解释。`check` 只回答“是否已登录”，不校验账号一致性；调度侧需确保 `profile_id` 与目标账号匹配。验证码/二次验证或上传中被踢回登录页返回退出码 10。
+设置 `MLX_API_TOKEN` 后，`check`、`upload-article`、`upload-video` 通过 `--folder-id/--profile-id` 使用 Multilogin Profile。此时不读写 `cookies/*.json` 或 `.identity.json`，不比对用户 ID，也不注入本地 `channel="chrome"` / `executable_path` / `timezone_id`；身份与浏览器指纹完全由 Profile 决定；定时发布填写前读取浏览器/Profile 时区。`check` 只回答“是否已登录”，不校验账号一致性；调度侧需确保 `profile_id` 与目标账号匹配。验证码/二次验证或上传中被踢回登录页返回退出码 10。
 
 ## 文章
 

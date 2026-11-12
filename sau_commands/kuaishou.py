@@ -17,7 +17,7 @@ from uploader.ks_uploader.main import (
     ks_setup,
 )
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -39,7 +39,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     kuaishou_parser = platform_parsers.add_parser("kuaishou", help="Kuaishou operations")
     kuaishou_actions = kuaishou_parser.add_subparsers(dest="action", required=True)
 
@@ -56,7 +55,7 @@ def register(platform_parsers):
     kuaishou_upload_video_parser.add_argument("--title", required=True, help="Video title")
     kuaishou_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     kuaishou_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
-    kuaishou_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    kuaishou_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(kuaishou_upload_video_parser)
     kuaishou_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     kuaishou_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
@@ -69,7 +68,7 @@ def register(platform_parsers):
     kuaishou_upload_note_parser.add_argument("--title", required=True, help="Note title")
     kuaishou_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     kuaishou_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
-    kuaishou_upload_note_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    kuaishou_upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(kuaishou_upload_note_parser)
     add_runtime_flags(kuaishou_upload_note_parser)
     add_browser_flags(kuaishou_upload_note_parser)

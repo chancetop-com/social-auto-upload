@@ -316,7 +316,7 @@ def managed_timezone_hint(mode: ProviderMode | None = None) -> str:
     """Return the managed-mode timezone hint shown after identity logging."""
     return (
         f"{managed_app_label(mode)} 模式不写入时区；"
-        "建议在 Profile 设置中将时区设为 Asia/Shanghai"
+        "定时填写时读取浏览器/Profile 时区"
     )
 
 

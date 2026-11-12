@@ -18,7 +18,7 @@ sau tencent check --account creator
 sau tencent upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "简介" --tags 视频号,测试
 ```
 
-视频号仅支持视频发布。可选参数包括 `--schedule "YYYY-MM-DD HH:MM"`、`--draft`、`--collection`、`--short-title`、`--category`、`--thumbnail-landscape` 和 `--thumbnail-portrait`。`--thumbnail` 是竖版封面的兼容参数。合集必须已存在。
+视频号仅支持视频发布。可选参数包括 `--schedule "YYYY-MM-DDTHH:MM:00Z"`、`--draft`、`--collection`、`--short-title`、`--category`、`--thumbnail-landscape` 和 `--thumbnail-portrait`。`--thumbnail` 是竖版封面的兼容参数。合集必须已存在。
 
 登录和上传依赖浏览器会话。登录若生成二维码，直接展示二维码图片供用户扫码；需要人工操作页面时使用 `--headed`。定时仅在用户给出明确时间时使用。`--draft` 只保存草稿，不代表发布。
 

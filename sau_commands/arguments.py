@@ -2,12 +2,18 @@
 from __future__ import annotations
 import argparse
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 from conf import BASE_DIR
+from utils.time_utils import parse_aware_iso
 
-SCHEDULE_FORMAT = "%Y-%m-%d %H:%M"
+#: ``--schedule`` 约定为 UTC 绝对时刻，填写前换算到浏览器时区。
+SCHEDULE_EXAMPLE = "YYYY-MM-DDTHH:MM:00Z"
+SCHEDULE_HELP = f"Schedule time in {SCHEDULE_EXAMPLE} (UTC)"
+SCHEDULE_HELP_ZH = f"定时发布时间，格式 {SCHEDULE_EXAMPLE}（UTC）"
+#: ``--not-before`` 也接受任意偏移，示例使用东八区。
+NOT_BEFORE_EXAMPLE = "YYYY-MM-DDTHH:MM:SS+08:00"
 
 def has_interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
@@ -36,9 +42,14 @@ def parse_image_files(raw_files: Iterable[Path]) -> list[Path]:
 
 
 def parse_schedule(raw_schedule: str | None) -> datetime | int:
-    if not raw_schedule:
+    if raw_schedule is None:
         return 0
-    return datetime.strptime(raw_schedule, SCHEDULE_FORMAT)
+    parsed = parse_aware_iso(raw_schedule, label="--schedule")
+    if parsed.utcoffset() != timedelta(0):
+        raise ValueError("--schedule 必须是 UTC 绝对时刻（使用 Z 或 +00:00）")
+    if parsed.second or parsed.microsecond:
+        raise ValueError("--schedule 精确到分钟，不接受秒或微秒")
+    return parsed
 
 
 def existing_file_path(value: str) -> Path:
@@ -53,17 +64,19 @@ def schedule_value(value: str):
         return parse_schedule(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"Invalid schedule '{value}'. Expected format: {SCHEDULE_FORMAT}"
+            f"Invalid schedule '{value}'. Expected UTC ISO 8601: {SCHEDULE_EXAMPLE}"
         ) from exc
 
 
 def not_before_value(value: str) -> datetime:
-    """解析 ``--not-before``：只校验格式，允许指向过去（立即发布）。"""
+    """解析 ``--not-before``：接受带偏移的绝对时刻，并换算到本地时区。"""
     try:
-        return datetime.strptime(value, SCHEDULE_FORMAT)
+        return parse_aware_iso(
+            value, label="--not-before", require_t=False
+        ).astimezone()
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"Invalid --not-before '{value}'. Expected format: {SCHEDULE_FORMAT}"
+            f"Invalid --not-before '{value}'. Expected timezone-aware ISO 8601: {NOT_BEFORE_EXAMPLE}"
         ) from exc
 
 
@@ -75,8 +88,8 @@ def add_not_before_flag(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="TIME",
         help=(
-            "All content is prepared first; click publish only when local time "
-            f"is at or after TIME (format {SCHEDULE_FORMAT.replace('%', '%%')}). "
+            "All content is prepared first; click publish only at or after "
+            f"the absolute instant TIME (format {NOT_BEFORE_EXAMPLE}). "
             "Omit to publish immediately."
         ),
     )

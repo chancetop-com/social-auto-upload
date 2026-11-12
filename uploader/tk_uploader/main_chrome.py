@@ -37,6 +37,7 @@ from uploader.tk_uploader.tk_config import (
 )
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
+from uploader.tk_uploader.schedule import prepare_schedule
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.files_times import get_absolute_path
 from utils.log import tiktok_logger
@@ -1955,7 +1956,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         if self.publish_date == 0:
             return
 
-        publish_date = self.publish_date
+        publish_date = await prepare_schedule(page, self.publish_date)
         scope = self.locator_base if self.locator_base is not None else page
 
         # only-me can disable scheduling on private accounts; fail clearly

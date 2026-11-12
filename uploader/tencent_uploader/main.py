@@ -19,6 +19,7 @@ from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
+from utils.browser_time import page_wall_clock
 from utils.errors import LoginRequiredError
 from utils.log import tencent_logger
 
@@ -666,6 +667,7 @@ class TencentBaseUploader(BaseVideoUploader):
         return output_path
 
     async def set_schedule_time_tencent(self, page: Page, publish_date: datetime):
+        publish_date = await page_wall_clock(page, publish_date)
         label_element = page.locator("label").filter(has_text="定时").nth(1)
         await label_element.click()
         await page.click('input[placeholder="请选择发表时间"]')

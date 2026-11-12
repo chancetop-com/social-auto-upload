@@ -45,7 +45,7 @@ sau bilibili upload-video \
   --desc "<desc>" \
   --tid <category-id> \
   [--tags tag1,tag2] \
-  [--schedule "YYYY-MM-DD HH:MM"]
+  [--schedule "YYYY-MM-DDTHH:MM:00Z"]
 ```
 
 - 必填参数：

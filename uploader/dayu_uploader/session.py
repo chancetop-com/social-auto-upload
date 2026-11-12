@@ -16,9 +16,8 @@ DAYU_VIDEO_URL = "https://mp.dayu.com/dashboard/video/write"
 
 # Golden local-mode options.  ``sau_commands/dayu.py`` passes the same values to
 # ``browser_session`` in Multilogin mode, which ignores them (Profile decides).
-DAYU_TIMEZONE = "Asia/Shanghai"
+# Timezone/fingerprint are owned by the browser or Profile, not the CLI.
 DAYU_LAUNCH_KWARGS = {"executable_path": LOCAL_CHROME_PATH or None, "channel": "chrome"}
-DAYU_CONTEXT_KWARGS = {"timezone_id": DAYU_TIMEZONE}
 DAYU_INIT_SCRIPT = False
 
 # MLX 登录检测只打开一个页面；总预算 20s 导航 + 2.5s 稳定。

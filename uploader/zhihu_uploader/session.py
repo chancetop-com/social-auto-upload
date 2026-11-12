@@ -78,7 +78,7 @@ async def login_zhihu_account(account_file: str | Path, timeout: int = 600) -> d
             executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=False,
         )
         try:
-            context = await browser.new_context(timezone_id="Asia/Shanghai")
+            context = await browser.new_context()
             page = await context.new_page()
             await page.goto(ZHIHU_CREATOR_URL, wait_until="domcontentloaded", timeout=45000)
             print("请在打开的 Chrome 中完成知乎登录；账号密码和验证码直接在网页输入。", flush=True)
@@ -146,7 +146,7 @@ async def check_zhihu_account(account_file: str | Path, headless: bool = True) -
             executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=headless,
         )
         try:
-            context = await browser.new_context(storage_state=str(account_file), timezone_id="Asia/Shanghai")
+            context = await browser.new_context(storage_state=str(account_file))
             page = await context.new_page()
             response = await page.goto(ZHIHU_CREATOR_URL, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:

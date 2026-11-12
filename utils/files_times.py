@@ -64,7 +64,7 @@ def generate_schedule_time_next_day(total_videos, videos_per_day = 1, daily_time
 
     # Generate timestamps
     schedule = []
-    current_time = datetime.now()
+    current_time = datetime.now().astimezone()
 
     for video in range(total_videos):
         day = video // videos_per_day + start_days + 1  # +1 to start from the next day

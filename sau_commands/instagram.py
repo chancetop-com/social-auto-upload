@@ -23,7 +23,6 @@ from uploader.meta_uploader.insgraph_uploader.options import (
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -46,7 +45,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     instagram_parser = platform_parsers.add_parser("instagram", help="Instagram independent web operations")
     instagram_actions = instagram_parser.add_subparsers(dest="action", required=True)
     for action_name in ("login", "check"):

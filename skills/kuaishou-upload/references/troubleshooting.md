@@ -79,7 +79,7 @@ sau kuaishou login --account <account>
 时间格式使用：
 
 ```text
-YYYY-MM-DD HH:MM
+YYYY-MM-DDTHH:MM:00Z
 ```
 
 如果不需要定时发布，去掉 `--schedule` 即可改为立即发布。

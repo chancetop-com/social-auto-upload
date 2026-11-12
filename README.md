@@ -169,11 +169,11 @@ sau douyin check --account creator
 
 #### 指定发布时刻（可选）
 
-所有发布命令都支持 `--not-before "YYYY-MM-DD HH:MM"`：先完成素材上传、标题/正文、封面、声明等全部准备，再等待到本地时间不早于目标时间后才点击发布。它和平台原生 `--schedule` 是两套机制，可以同时使用。
+所有发布命令都支持 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区偏移的绝对时刻）：先完成素材上传、标题/正文、封面、声明等全部准备，再等待到绝对时刻不早于目标时间后才点击发布。它和平台原生 `--schedule` 是两套机制，可以同时使用。
 
 ```bash
 sau xiaohongshu upload-video --account creator --file demo.mp4 --title "新视频" \
-  --not-before "2026-12-01 20:00"
+  --not-before "2026-12-01T20:00:00+08:00"
 ```
 
 详见 [CLI 使用说明的客户端发布闸门](./docs/CLI.md#客户端发布闸门--not-before)。
@@ -290,7 +290,7 @@ sau tiktok login --account creator
 sau tiktok upload-note --account creator --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
 # TikTok 托管浏览器模式（MLX；AdsPower 只传 --profile-id）
 sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
-sau facebook-page upload-note --account <account_name> --images images/1.jpg --title "Page 图文" --note "正文" --page "我的 Page" --schedule "2026-10-21 10:30" --result .local/page-result.json
+sau facebook-page upload-note --account <account_name> --images images/1.jpg --title "Page 图文" --note "正文" --page "我的 Page" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
 sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图片帖" --note "正文"
 sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "图片轮播" --note "正文"
 ```

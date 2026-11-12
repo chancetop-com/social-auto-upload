@@ -31,7 +31,7 @@ def main() -> None:
         "--tags",
         "足球,测试",
         "--schedule",
-        "2026-03-26 16:00",
+        "2026-03-26T08:00:00Z",
     ]
     subprocess.run(command, check=True)
 

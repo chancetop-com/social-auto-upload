@@ -18,8 +18,8 @@ from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
 from uploader.zhihu_uploader.constants import (
-    ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL, ZHIHU_CONTEXT_KWARGS,
-    ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS, ZHIHU_TIMEZONE,
+    ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL,
+    ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS,
 )
 from uploader.zhihu_uploader.schedule import fill_zhihu_article_schedule, validate_zhihu_schedule
 from uploader.zhihu_uploader.session import (
@@ -233,7 +233,7 @@ class ZhihuArticle:
             )
             try:
                 context = await browser.new_context(
-                    storage_state=str(self.account_file), **ZHIHU_CONTEXT_KWARGS,
+                    storage_state=str(self.account_file),
                 )
                 return await self.upload_in(
                     BrowserSession(browser=browser, context=context, mode="local")
@@ -247,7 +247,7 @@ class ZhihuArticle:
         self._publish_budget = budget
         results_dir = self.results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
-        result_file = results_dir / f"{datetime.now(ZHIHU_TIMEZONE):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
+        result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {
             "success": False, "status": "preparing", "type": "article", "title": self.title,
             "content_file": str(self.content_file), "images": [str(image) for image in self.images],

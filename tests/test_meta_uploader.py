@@ -1,7 +1,7 @@
 import asyncio
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from patchright.async_api import async_playwright
@@ -35,7 +35,7 @@ class MetaBusinessValidationTests(unittest.TestCase):
                     Path(directory) / "account.json",
                     title="标题",
                     video_file=path,
-                    schedule=datetime.now() + timedelta(minutes=5),
+                    schedule=datetime.now(timezone.utc) + timedelta(minutes=5),
                 )
 
     def test_business_suite_nav_is_positive_login_evidence(self):
@@ -62,12 +62,13 @@ class MetaBusinessValidationTests(unittest.TestCase):
                 "--title",
                 "标题",
                 "--schedule",
-                "2026-10-21 10:30",
+                "2026-10-21T02:30:00Z",
             ]
         )
         self.assertEqual(args.platform, "facebook-page")
         self.assertEqual(args.images, [Path(__file__)])
         self.assertEqual(args.schedule.year, 2026)
+        self.assertIsNotNone(args.schedule.tzinfo)
 
 
 if __name__ == "__main__":

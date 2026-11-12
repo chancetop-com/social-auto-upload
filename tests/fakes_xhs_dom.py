@@ -450,6 +450,7 @@ class RecordingPage:
         hit_test_target: Any = _UNSET,
         screenshot_error: BaseException | None = None,
         file_chooser: FakeFileChooser | None = None,
+        timezone: str = "UTC",
     ) -> None:
         self.url = url
         self.main_frame = RecordingFrame(
@@ -462,6 +463,7 @@ class RecordingPage:
         self._evaluate_handler = evaluate_handler
         self._hit_test_target = hit_test_target
         self._screenshot_error = screenshot_error
+        self.timezone = timezone
         self.file_chooser = file_chooser or FakeFileChooser()
         self.fail_file_chooser: BaseException | None = None
         self.expect_file_chooser_calls = 0
@@ -516,6 +518,11 @@ class RecordingPage:
         if self._evaluate_handler is not None:
             result = self._evaluate_handler(expression, arg)
             return await result if inspect.isawaitable(result) else result
+        if (
+            isinstance(expression, str)
+            and "resolvedOptions().timeZone" in expression
+        ):
+            return self.timezone
         if (
             isinstance(expression, str)
             and "elementFromPoint" in expression

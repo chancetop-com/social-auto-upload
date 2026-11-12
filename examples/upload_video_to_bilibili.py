@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from datetime import timezone
 from pathlib import Path
 
 from conf import BASE_DIR
@@ -20,7 +21,9 @@ if __name__ == '__main__':
         print(f"标题：{title}")
         print(f"Hashtag：{tags}")
         desc = title
-        schedule_text = publish_datetimes[index].strftime("%Y-%m-%d %H:%M")
+        schedule_text = publish_datetimes[index].astimezone(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         command = [
             sys.executable,
             str(cli_path),

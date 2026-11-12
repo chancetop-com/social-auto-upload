@@ -1,8 +1,6 @@
 """大鱼号表单的固定选项；CLI、视频和图文共用同一份定义。"""
-from datetime import timedelta, timezone
 
-# 视频与图文实测使用同一定时控件：北京时间，最早两小时后、最晚七天内，五分钟一档。
-DAYU_TIMEZONE = timezone(timedelta(hours=8), "Asia/Shanghai")
+# 视频与图文实测使用同一定时控件：最早两小时后、最晚七天内，五分钟一档。
 DAYU_SCHEDULE_MIN_HOURS = 2
 DAYU_SCHEDULE_MAX_DAYS = 7
 DAYU_SCHEDULE_STEP_MINUTES = 5

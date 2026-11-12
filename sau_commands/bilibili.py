@@ -7,7 +7,7 @@ from subprocess import TimeoutExpired
 from uploader.bilibili_uploader.runtime import run_biliup_command
 from uploader.publish_timeout import PublishTimeoutBudget
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP,
     add_not_before_flag,
     existing_file_path,
     has_interactive_terminal,
@@ -26,7 +26,6 @@ from sau_commands.browser import (
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     bilibili_parser = platform_parsers.add_parser("bilibili", help="Bilibili operations")
     bilibili_actions = bilibili_parser.add_subparsers(dest="action", required=True)
 
@@ -42,7 +41,7 @@ def register(platform_parsers):
     bilibili_upload_video_parser.add_argument("--tid", required=True, type=int, help="Bilibili category id")
     bilibili_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     bilibili_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional Bilibili cover image path")
-    bilibili_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
+    bilibili_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(bilibili_upload_video_parser)
 
 

@@ -10,7 +10,13 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from uuid import uuid4
 
 from patchright.async_api import Browser, BrowserContext, Locator, expect
-from uploader.dayu_uploader.constants import DAYU_CONTENT_PUBLIC, DAYU_CONTENT_REVIEWING, DAYU_CONTENT_SCHEDULED, DAYU_TIMEZONE
+from uploader.dayu_uploader.constants import DAYU_CONTENT_PUBLIC, DAYU_CONTENT_REVIEWING, DAYU_CONTENT_SCHEDULED
+from uploader.dayu_uploader.schedule import (
+    apply_schedule_result,
+    initial_status,
+    target_from_result,
+    verify_saved_schedule,
+)
 from utils.log import dayu_logger
 
 
@@ -50,12 +56,13 @@ async def check_dayu_article_content(body: Locator, manifest: dict) -> None:
 async def wait_dayu_publication(context: BrowserContext, content_id: str | None = None,
                                 origin_id: str | None = None, title: str | None = None,
                                 timeout: int = 60, public: bool = False,
-                                schedule: str | None = None) -> dict:
+                                target: datetime | None = None) -> tuple[dict, datetime | None]:
     """默认确认原作品已提交；只有显式公开核验才等待公开，始终不重发。"""
     if not content_id and not origin_id:
         raise ValueError("核验必须提供 content_id 或 origin_id（预览时保存的草稿 ID）")
     deadline = time.monotonic() + timeout
     record = None
+    saved_actual = None
     last_status = None
     while time.monotonic() < deadline:
         page_number = 1
@@ -93,22 +100,22 @@ async def wait_dayu_publication(context: BrowserContext, content_id: str | None 
                 dayu_logger.info(f"大鱼号作品查询: content_id={record.get('content_id')}，{current_status}")
             last_status = current_status
             # 审核中的原作品已提交成功；公开核验是调用者额外选择的检查范围。
-            if schedule or record.get("status") == DAYU_CONTENT_SCHEDULED:
+            if target is not None or record.get("status") == DAYU_CONTENT_SCHEDULED:
                 epoch = record.get("_app_extra", {}).get("time_for_release")
-                if isinstance(epoch, bool) or not isinstance(epoch, (int, float)) or epoch <= 0:
-                    raise RuntimeError("原作品缺少已保存的定时安排，拒绝确认成功")
-                actual = datetime.fromtimestamp(epoch / 1000, DAYU_TIMEZONE)
-                if schedule and actual != datetime.fromisoformat(schedule):
-                    raise RuntimeError(f"原作品定时时间不一致: 预期={schedule}，实际={actual.isoformat()}")
+                saved_actual = verify_saved_schedule(
+                    epoch,
+                    target,
+                    missing_message="原作品缺少已保存的定时安排，拒绝确认成功",
+                )
             accepted = (DAYU_CONTENT_PUBLIC,) if public else (DAYU_CONTENT_PUBLIC, DAYU_CONTENT_REVIEWING, DAYU_CONTENT_SCHEDULED)
             if record.get("status") in accepted:
                 break
         await asyncio.sleep(min(5, max(0, deadline - time.monotonic())))
     else:
-        target = "公开访问" if public else "提交发表确认"
-        raise TimeoutError(f"等待大鱼号{target}超时；最后状态={last_status}，请核查原作品，勿重新上传")
+        target_label = "公开访问" if public else "提交发表确认"
+        raise TimeoutError(f"等待大鱼号{target_label}超时；最后状态={last_status}，请核查原作品，勿重新上传")
 
-    return record
+    return record, saved_actual
 
 
 async def verify_dayu_video(context: BrowserContext, browser: Browser, identity: dict,
@@ -116,15 +123,12 @@ async def verify_dayu_video(context: BrowserContext, browser: Browser, identity:
                             title: str | None = None, timeout: int = 60, public: bool = False,
                             schedule: str | None = None) -> dict:
     """确认原视频已提交；public=True 时额外验证匿名标题、作者及播放。"""
-    record = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, schedule)
-    result = {"success": True, "status": "published" if record["status"] == DAYU_CONTENT_PUBLIC else "submitted", "type": "video",
+    target = target_from_result(schedule)
+    record, saved_actual = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, target)
+    result = {"success": True, "status": initial_status(record), "type": "video",
               "content_id": str(record["content_id"]), "origin_id": record["origin_id"],
               "title": record["title"], "identity": identity, "platform_status": record["status"]}
-    if schedule or record["status"] == DAYU_CONTENT_SCHEDULED:
-        result.update(schedule=datetime.fromtimestamp(record["_app_extra"]["time_for_release"] / 1000, DAYU_TIMEZONE).isoformat(),
-                      schedule_verified=True)
-        if record["status"] != DAYU_CONTENT_PUBLIC:
-            result["status"] = "scheduled"
+    apply_schedule_result(result, record, target, saved_actual)
     if not public:
         return result
     public_url = record.get("ucUrl", "")
@@ -167,15 +171,12 @@ async def verify_dayu_article(context: BrowserContext, browser: Browser, identit
                               manifest: dict | None = None, public: bool = False,
                               schedule: str | None = None) -> dict:
     """确认原文章已提交；public=True 时再匿名核对正文、图片位置及格式。"""
-    record = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, schedule)
-    result = {"success": True, "status": "published" if record["status"] == DAYU_CONTENT_PUBLIC else "submitted", "type": "article",
+    target = target_from_result(schedule)
+    record, saved_actual = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, target)
+    result = {"success": True, "status": initial_status(record), "type": "article",
               "content_id": str(record["content_id"]), "origin_id": record["origin_id"],
               "title": record["title"], "identity": identity, "platform_status": record["status"]}
-    if schedule or record["status"] == DAYU_CONTENT_SCHEDULED:
-        result.update(schedule=datetime.fromtimestamp(record["_app_extra"]["time_for_release"] / 1000, DAYU_TIMEZONE).isoformat(),
-                      schedule_verified=True)
-        if record["status"] != DAYU_CONTENT_PUBLIC:
-            result["status"] = "scheduled"
+    apply_schedule_result(result, record, target, saved_actual)
     if not public:
         return result
     if not re.fullmatch(r"[a-f0-9]{32}", record.get("origin_id", "")):

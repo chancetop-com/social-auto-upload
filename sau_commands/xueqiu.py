@@ -17,7 +17,6 @@ from uploader.xueqiu_uploader.session import (
 )
 from uploader.xueqiu_uploader.verification import verify_xueqiu_result
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -92,7 +91,6 @@ async def _run_multilogin(args, target):
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     xueqiu_parser = platform_parsers.add_parser("xueqiu", help="雪球创作者中心图文长文")
     xueqiu_actions = xueqiu_parser.add_subparsers(dest="action", required=True)
     xueqiu_login = xueqiu_actions.add_parser("login", help="在可见 Chrome 中登录并保存本地会话")

@@ -7,24 +7,30 @@ from unittest.mock import AsyncMock, patch
 from patchright.async_api import async_playwright
 from conf import LOCAL_CHROME_PATH
 
-from uploader.dayu_uploader.constants import DAYU_TIMEZONE
 from uploader.dayu_uploader.schedule import validate_dayu_schedule, fill_dayu_schedule, read_dayu_schedule
 from uploader.dayu_uploader.article import DayuArticle
 from uploader.dayu_uploader.main import DayuVideo
 from uploader.dayu_uploader.verification import verify_dayu_article, verify_dayu_video
 
 
+TZ = timezone(timedelta(hours=8))
+
+
 class DayuScheduleTests(unittest.TestCase):
     def setUp(self):
-        self.now = datetime(2026, 12, 31, 20, 0, tzinfo=DAYU_TIMEZONE)
+        self.now = datetime(2026, 12, 31, 20, 0, tzinfo=TZ)
 
     def test_immediate_remains_default(self):
         self.assertIsNone(validate_dayu_schedule(None, self.now))
 
-    def test_naive_is_beijing_and_aware_is_converted(self):
-        expected = datetime(2027, 1, 1, 10, 30, tzinfo=DAYU_TIMEZONE)
-        self.assertEqual(validate_dayu_schedule(expected.replace(tzinfo=None), self.now), expected)
-        self.assertEqual(validate_dayu_schedule(expected.astimezone(timezone.utc), self.now), expected)
+    def test_naive_is_rejected_and_aware_is_kept(self):
+        expected = datetime(2027, 1, 1, 10, 30, tzinfo=TZ)
+        with self.assertRaisesRegex(ValueError, "必须包含时区偏移"):
+            validate_dayu_schedule(expected.replace(tzinfo=None), self.now)
+        self.assertEqual(
+            validate_dayu_schedule(expected.astimezone(timezone.utc), self.now),
+            expected,
+        )
 
     def test_exact_range_boundaries_are_inclusive(self):
         for delta in (timedelta(hours=2), timedelta(days=7)):
@@ -63,7 +69,7 @@ class DayuScheduleReadbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_original_draft_time_must_match_exactly(self):
         # 查询已过去的安排也合法；校验范围只在新提交前进行。
-        target = datetime(2026, 1, 1, 10, 30, tzinfo=DAYU_TIMEZONE)
+        target = datetime(2026, 1, 1, 10, 30, tzinfo=TZ)
         data = {"draft_id": "original", "is_timed_release": True, "time_for_release": target.timestamp() * 1000}
         result = await read_dayu_schedule(self.context(data), "original", target.isoformat())
         self.assertTrue(result["schedule_verified"])
@@ -77,6 +83,7 @@ class DayuScheduleReadbackTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_original_scheduled_work_is_success_without_waiting_for_audit(self):
         expected = "2026-01-01T10:30:00+08:00"
+        expected_utc = "2026-01-01T02:30:00+00:00"
         epoch = datetime.fromisoformat(expected).timestamp() * 1000
         record = {"content_id": "123", "origin_id": "original", "title": "测试定时作品", "status": 5,
                   "audit_status": 0, "_app_extra": {"time_for_release": epoch}}
@@ -87,7 +94,10 @@ class DayuScheduleReadbackTests(unittest.IsolatedAsyncioTestCase):
                     browser = SimpleNamespace(new_context=AsyncMock(side_effect=AssertionError("不应等待公开")))
                     result = await verify(context, browser, {}, content_id="123", schedule=schedule)
                     self.assertEqual(result["status"], "scheduled")
-                    self.assertEqual(result["schedule"], expected)
+                    self.assertEqual(
+                        result["schedule"],
+                        expected if schedule else expected_utc,
+                    )
                     self.assertTrue(result["success"])
                     self.assertEqual(context.request.get.await_count, 1)
                     browser.new_context.assert_not_awaited()
@@ -135,19 +145,12 @@ class DayuScheduleBrowserTests(unittest.IsolatedAsyncioTestCase):
             hours.querySelector('.hour').onclick=()=>{hours.style.display='none';minutes.style.display=''};
             minutes.querySelector('.minute').onclick=()=>{widget.querySelector('input').value='2027年01月01日 01:05';picker.style.display='none'};
             </script>''')
-        target = datetime(2027, 1, 1, 1, 5, tzinfo=DAYU_TIMEZONE)
+        target = datetime(2026, 12, 31, 17, 5, tzinfo=timezone.utc)
         with patch("uploader.dayu_uploader.schedule.validate_dayu_schedule", return_value=target):
             await fill_dayu_schedule(self.page, target)
         self.assertEqual(await self.page.locator('.widgets-datepicker-m input').input_value(), "2027年01月01日 01:05")
         await fill_dayu_schedule(self.page, None)
         self.assertNotIn("w-radio_checked", await self.page.locator('#toggle').get_attribute('class'))
-
-    async def test_wrong_browser_timezone_is_rejected(self):
-        page = await self.browser.new_page(timezone_id="UTC")
-        await page.set_content('<div class="article-write_radio"><div class="w-radio"></div>定时发布</div>')
-        target = (datetime.now(DAYU_TIMEZONE) + timedelta(days=1)).replace(hour=10, minute=30, second=0, microsecond=0)
-        with self.assertRaisesRegex(RuntimeError, "Asia/Shanghai"):
-            await fill_dayu_schedule(page, target)
 
 
 if __name__ == "__main__":

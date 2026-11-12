@@ -41,7 +41,7 @@ def upload_video_to_xiaohongshu():
 def upload_video_to_xiaohongshu_scheduled():
     video_file = Path(BASE_DIR) / "videos" / "demo.mp4"
     thumbnail_path = video_file.with_suffix(".png")
-    publish_time = (datetime.now() + timedelta(hours=3)).replace(second=0, microsecond=0)
+    publish_time = (datetime.now().astimezone() + timedelta(hours=3)).replace(second=0, microsecond=0)
     app = XiaoHongShuVideo(
         title="小红书视频定时发布示例",
         file_path=str(video_file),
@@ -80,7 +80,7 @@ def upload_note_to_xiaohongshu_scheduled():
         Path(BASE_DIR) / "videos" / "demo2.png",
     ]
     image_paths = [str(path) for path in image_candidates if path.exists()]
-    publish_time = (datetime.now() + timedelta(hours=3)).replace(second=0, microsecond=0)
+    publish_time = (datetime.now().astimezone() + timedelta(hours=3)).replace(second=0, microsecond=0)
     app = XiaoHongShuNote(
         image_paths=image_paths,
         note="小红书图文内容示例 #图文调试",

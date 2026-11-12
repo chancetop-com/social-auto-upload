@@ -29,6 +29,7 @@ from utils.blocked import classify as classify_block
 from utils.browser_session import BrowserSession
 from utils.browser_session import log_local_session_ready
 from utils.browser_session import provider_label
+from utils.browser_time import page_wall_clock
 from utils.controls import read_switch_state
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
@@ -51,6 +52,7 @@ from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import xiaohongshu_logger
+from utils.time_utils import require_aware_now, require_schedule_window
 
 XHS_DEFAULT_CREATOR_BASE_URL = "https://creator.xiaohongshu.com"
 XHS_CREATOR_BASE_URL_ENV = "SAU_XHS_CREATOR_BASE_URL"
@@ -315,7 +317,7 @@ XHS_BODY_LENGTH_ERROR_SELECTOR = "div.edit-container div.length-error"
 XHS_TITLE_WARN_MIN_MS = 350
 XHS_TITLE_WARN_WINDOW_MS = 500
 XHS_TITLE_WARN_POLL_MS = 50
-# 定时边界（spec §3 U8 D）：now + 2h < t <= now + 14d；墙上时间语义。
+# 定时边界（spec §3 U8 D）：now + 2h < t <= now + 14d；按绝对时刻比较。
 XHS_MAX_SCHEDULE_LEAD_TIME = timedelta(days=14)
 # 失焦后到单次回读之间的渲染静置（C2）。
 XHS_SCHEDULE_READBACK_SETTLE_MS = 300
@@ -1150,30 +1152,28 @@ def xhs_body_length(desc: str, tags=None) -> int:
     return total
 
 
-def _wall_clock(value: datetime) -> datetime:
-    """墙上时间：aware 输入的 offset 一律忽略（只取它自带的年月日时分）。"""
-    return value.replace(tzinfo=None)
-
-
 def xhs_validate_schedule_time(
     publish_date: datetime, *, now: datetime | None = None
 ) -> datetime:
-    """窗口 ``now + 2h < t <= now + 14d``，墙上时间语义。"""
+    """窗口 ``now + 2h < t <= now + 14d``，按绝对时刻比较。"""
     if not isinstance(publish_date, datetime):
         raise TypeError("publish_date 必须是 datetime 类型或 0")
-    wall = _wall_clock(publish_date)
-    current = _wall_clock(now) if now is not None else datetime.now()
-    if wall <= current:
-        raise ValueError("定时发布时间必须晚于当前时间")
-    if wall <= current + BaseVideoUploader.MIN_SCHEDULE_LEAD_TIME:
-        raise ValueError("定时发布时间必须大于当前时间 2 小时")
-    if wall > current + XHS_MAX_SCHEDULE_LEAD_TIME:
-        raise ValueError("定时发布时间不能晚于当前时间 14 天")
-    return wall
+    return require_schedule_window(
+        publish_date,
+        min_lead=BaseVideoUploader.MIN_SCHEDULE_LEAD_TIME,
+        max_lead=XHS_MAX_SCHEDULE_LEAD_TIME,
+        label="定时发布时间",
+        now=now,
+        min_inclusive=False,
+        too_soon="定时发布时间必须大于当前时间 2 小时",
+        too_far="定时发布时间不能晚于当前时间 14 天",
+    )
 
 
 def _format_schedule_value(publish_date: datetime) -> str:
-    return _wall_clock(publish_date).strftime("%Y-%m-%d %H:%M")
+    if publish_date.tzinfo is not None:
+        raise ValueError("定时时间必须先换算为浏览器墙上时间")
+    return publish_date.strftime("%Y-%m-%d %H:%M")
 
 
 def _parse_schedule_value(raw) -> datetime | None:
@@ -1718,7 +1718,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         self.account_file = None if account_file is None else str(account_file)
         self.publish_strategy = publish_strategy
         self.debug = debug
-        self.date_format = "%Y年%m月%d日 %H:%M"
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
         # 两项声明默认都不操作页面：None / "" 表示保持平台默认。
@@ -1742,7 +1741,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
 
         if self.publish_strategy == XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED:
             if isinstance(self.publish_date, datetime):
-                # 墙上时间语义：aware 输入的 offset 不参与校验，也不参与格式化。
+                # 绝对时刻校验；填写时读取浏览器时区再换算墙上时间。
                 self.publish_date = xhs_validate_schedule_time(self.publish_date)
             else:
                 self.publish_date = self.validate_publish_date(self.publish_date)
@@ -1760,7 +1759,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         humanizer: Humanizer | None = None,
     ):
         humanizer = humanizer or self._humanizer(page)
-        xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {_format_schedule_value(publish_date)}"))
+        wall_clock = await page_wall_clock(page, publish_date)
+        xiaohongshu_logger.info(_msg("🕒", f"小人准备设置定时发布时间: {_format_schedule_value(wall_clock)}"))
         switch = await _resolve_anchor(
             page,
             "定时开关",
@@ -1793,7 +1793,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         # 直接键入会**追加**成两段日期。必须先全选，再逐字替换。
         await time_input.locator.focus()
         await humanizer.press("ControlOrMeta+A")
-        await humanizer.type_text(_format_schedule_value(publish_date))
+        await humanizer.type_text(_format_schedule_value(wall_clock))
         # 失焦只允许 blur()：Tab 会把焦点交给发布按钮，Enter 会触发暂存离开。
         await time_input.locator.blur()
         await self._settle(page, XHS_SCHEDULE_READBACK_SETTLE_MS)
@@ -1802,7 +1802,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             page, switch.locator, stage="C2"
         )
         await self._assert_schedule_value(
-            page, time_input.locator, publish_date, stage="C2"
+            time_input.locator, wall_clock, stage="C2"
         )
 
     async def _assert_schedule_switch_on(self, page: Page, switch, *, stage: str):
@@ -1817,7 +1817,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         )
 
     async def _assert_schedule_value(
-        self, page: Page, input_locator, publish_date: datetime, *, stage: str
+        self, input_locator, wall_clock: datetime, *, stage: str
     ):
         try:
             raw = await input_locator.input_value()
@@ -1828,7 +1828,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             read_error = None
 
         parsed = _parse_schedule_value(raw)
-        expected = _wall_clock(publish_date)
+        expected = wall_clock
         if parsed is None or not _same_schedule_minute(parsed, expected):
             detail = (
                 f"读取失败: {read_error}"
@@ -1875,11 +1875,12 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="attached",
             budget=self.publish_budget,
         )
+        wall_clock = await page_wall_clock(page, self.publish_date)
         await self._assert_schedule_value(
-            page, time_input.locator, self.publish_date, stage="C3"
+            time_input.locator, wall_clock, stage="C3"
         )
 
-        if _wall_clock(self.publish_date) <= datetime.now():
+        if self.publish_date <= require_aware_now():
             raise ElementUnusableError(
                 "定时发布时间",
                 role="attached",

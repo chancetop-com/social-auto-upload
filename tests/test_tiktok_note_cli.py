@@ -604,7 +604,7 @@ class UploadNoteValidationTests(unittest.TestCase):
                 self._argv(
                     images,
                     "--schedule",
-                    "2026-11-06 18:15",
+                    "2026-11-06T10:15:00Z",
                 )
             )
 
@@ -617,7 +617,7 @@ class UploadNoteValidationTests(unittest.TestCase):
                     "--tags",
                     "fyp",
                     "--schedule",
-                    "2026-11-06 18:15",
+                    "2026-11-06T10:15:00Z",
                 )
             )
 

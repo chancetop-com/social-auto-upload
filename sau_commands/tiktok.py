@@ -14,7 +14,7 @@ from pathlib import Path
 from patchright.async_api import async_playwright
 
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
+    SCHEDULE_HELP,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -137,7 +137,6 @@ def _add_publish_option_flags(parser, *, include_reuse: bool) -> None:
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     tiktok_parser = platform_parsers.add_parser(
         "tiktok", help="TikTok operations (local or Multilogin mode)"
     )
@@ -174,7 +173,7 @@ def register(platform_parsers):
         "--tags", default="", help="Comma-separated tags, such as tag1,tag2"
     )
     upload_video_parser.add_argument(
-        "--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}"
+        "--schedule", type=schedule_value, help=SCHEDULE_HELP
     )
     add_not_before_flag(upload_video_parser)
     upload_video_parser.add_argument(
@@ -220,7 +219,7 @@ def register(platform_parsers):
         "--tags", default="", help="Comma-separated tags, such as tag1,tag2"
     )
     upload_note_parser.add_argument(
-        "--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}"
+        "--schedule", type=schedule_value, help=SCHEDULE_HELP
     )
     add_not_before_flag(upload_note_parser)
     # Photo posts have no content-reuse control, so ``--disable-reuse`` is not

@@ -41,7 +41,6 @@ from uploader.zhihu_uploader import video as zhihu_video
 from uploader.zhihu_uploader.article import ZhihuArticle
 from uploader.zhihu_uploader.constants import (
     ZHIHU_ARTICLE_URL,
-    ZHIHU_CONTEXT_KWARGS,
     ZHIHU_CREATOR_URL,
     ZHIHU_LAUNCH_KWARGS,
     ZHIHU_VIDEO_URL,
@@ -330,7 +329,7 @@ class ZhihuLocalGoldenTests(unittest.TestCase):
         browser = playwright.chromium.launch_browser
         self.assertEqual(
             browser.new_context_calls,
-            [{"storage_state": str(account_file.resolve()), **ZHIHU_CONTEXT_KWARGS}],
+            [{"storage_state": str(account_file.resolve())}],
         )
         self.assertTrue(browser.closed)
 
@@ -352,7 +351,6 @@ class ZhihuLocalGoldenTests(unittest.TestCase):
         self._assert_common(playwright, account_file)
         session = upload_in.await_args.args[0]
         self.assertEqual(session.mode, "local")
-        self.assertEqual(ZHIHU_CONTEXT_KWARGS, {"timezone_id": "Asia/Shanghai"})
         self.assertEqual(ZHIHU_LAUNCH_KWARGS["channel"], "chrome")
 
     def test_video_local_launch_context_and_timezone_are_golden(self):
@@ -725,7 +723,7 @@ class ZhihuMlxCliUploadTests(_CliMixin, unittest.TestCase):
         self.assertIn('"success": true', out)
         self.assertIsNone(builder.call_args.kwargs["account_file"])
         self.assertEqual(factory.call_args.kwargs["launch_kwargs"], ZHIHU_LAUNCH_KWARGS)
-        self.assertEqual(factory.call_args.kwargs["context_kwargs"], ZHIHU_CONTEXT_KWARGS)
+        self.assertNotIn("context_kwargs", factory.call_args.kwargs)
         self.assertIsNone(factory.call_args.kwargs["account_file"])
         probe.assert_awaited_once_with(session.context)
         app.main.assert_awaited_once_with(session=session)

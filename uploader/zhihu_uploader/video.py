@@ -19,7 +19,7 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
 from uploader.zhihu_uploader.constants import (
-    ZHIHU_CONTEXT_KWARGS, ZHIHU_LAUNCH_KWARGS, ZHIHU_ORIGINALITY, ZHIHU_TIMEZONE,
+    ZHIHU_LAUNCH_KWARGS, ZHIHU_ORIGINALITY,
     ZHIHU_VIDEO_DESCRIPTION_MAX, ZHIHU_VIDEO_EXTENSIONS, ZHIHU_VIDEO_MAX_BYTES,
     ZHIHU_VIDEO_MIN_BYTES, ZHIHU_VIDEO_MAX_SECONDS, ZHIHU_VIDEO_TITLE_MAX,
     ZHIHU_VIDEO_TITLE_MIN, ZHIHU_VIDEO_URL, ZHIHU_VIDEO_TOPICS_MAX,
@@ -223,7 +223,7 @@ class ZhihuVideo:
             )
             try:
                 context = await browser.new_context(
-                    storage_state=str(self.account_file), **ZHIHU_CONTEXT_KWARGS,
+                    storage_state=str(self.account_file),
                 )
                 return await self.upload_in(
                     BrowserSession(browser=browser, context=context, mode="local")
@@ -236,7 +236,7 @@ class ZhihuVideo:
         budget = PublishTimeoutBudget("知乎视频")
         results_dir = self.results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
-        result_file = results_dir / f"{datetime.now(ZHIHU_TIMEZONE):%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
+        result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {
             "success": False, "status": "preparing", "type": "video", "title": self.title,
             "video_file": str(self.file_path), "identity": self.identity, "topics": self.topics,

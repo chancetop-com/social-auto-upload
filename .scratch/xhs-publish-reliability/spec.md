@@ -1,5 +1,7 @@
 # 小红书发布链路可靠性 — 实施规格
 
+> **时区契约更新（2026-11）：** `--schedule` 现在传 UTC 绝对时刻，填写前读取浏览器时区；本文中“墙上时间 / 忽略 offset”的描述已由 [`../timezone-contract/spec.md`](../timezone-contract/spec.md) 取代。
+
 - 状态：**规格定稿，未实施**。本 effort 只产出本文件，不改生产代码、不改选择器、不执行测试。
 - 范围：`sau xiaohongshu upload-video` / `upload-note` / `check` / `login`，**本地模式与托管模式同步改**。
 - 来源：决议 ticket [03](./issues/03-publish-submit-semantics.md)–[27](./issues/27-schedule-readback.md)；取证见 [research/](./research/)。

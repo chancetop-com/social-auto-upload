@@ -15,7 +15,6 @@ from uploader.alipay_uploader.main import (
     is_logged_in,
 )
 from sau_commands.arguments import (
-    SCHEDULE_FORMAT,
     add_not_before_flag,
     add_runtime_flags,
     existing_file_path,
@@ -35,7 +34,6 @@ from utils.browser_session import browser_session
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
-    schedule_help = SCHEDULE_FORMAT.replace("%", "%%")
     alipay_parser = platform_parsers.add_parser("alipay", help="Alipay life account operations")
     alipay_actions = alipay_parser.add_subparsers(dest="action", required=True)
 
