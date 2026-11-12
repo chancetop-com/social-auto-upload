@@ -12,6 +12,7 @@ Login is interactive (Google account, no QR code): the browser opens, the user s
 the storage_state is saved. Reuse it afterwards for fully unattended uploads.
 """
 import asyncio
+import re
 from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright
@@ -21,6 +22,7 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 from utils.log import youtube_logger
 
 try:
@@ -37,6 +39,17 @@ VISIBILITY = {"public": "PUBLIC", "unlisted": "UNLISTED", "private": "PRIVATE"}
 YOUTUBE_LOGIN_CHECK_URL = STUDIO_URL
 YOUTUBE_LOGIN_CHECK_TIMEOUT_MS = 20_000
 YOUTUBE_LOGIN_CHECK_SETTLE_MS = 3_000
+
+#: `# 话题` 补全容器（YouTube Studio 的 hashtag 建议列表）。
+HASHTAG_AUTOCOMPLETE = "ytcp-hashtag-autocomplete"
+#: 可能处于打开状态的浮层；只用于「确认有浮层」时才按 Escape。
+AUTOCOMPLETE_VISIBLE = (
+    "tp-yt-iron-dropdown:visible, ytcp-hashtag-autocomplete:visible"
+)
+#: 候选项等待上限：补全靠网络，等不到就按纯文本继续，不拖住整条发布链。
+HASHTAG_CANDIDATE_TIMEOUT_MS = 1500
+#: 一段 `#` 话题：`#` 后到空白 / 下一个 `#` 之前。
+_HASHTAG_RE = re.compile(r"#[^\s#]+")
 
 # Golden local-mode browser options.  ``sau_commands/youtube.py`` passes the
 # same values to ``browser_session`` in Multilogin mode, where they are ignored:
@@ -216,50 +229,144 @@ async def youtube_setup(account_file, handle: bool = False, return_detail: bool 
     return result if return_detail else True
 
 
-async def _dismiss_autocomplete(page: Page):
+async def _dismiss_autocomplete(
+    page: Page,
+    humanizer: Humanizer,
+    *,
+    blur: bool = True,
+):
     """关掉 # 话题 / @ 提及 自动补全下拉浮层（会挡住后续“继续/发布”按钮）。
 
     先 blur 失焦；若浮层仍可见再补一次 Escape——仅在检测到浮层时才按，
-    避免在没有浮层时误关掉整个上传对话框。"""
+    避免在没有浮层时误关掉整个上传对话框。
+
+    ``blur=False`` 只按 Escape 收起浮层、保留输入焦点：逐字填充中途遇到
+    「候选项全等匹配失败」时用它降级为纯文本，然后继续输入剩余内容。
+    """
+    if blur:
+        try:
+            await page.evaluate("() => { const a = document.activeElement; if (a && a.blur) a.blur(); }")
+        except Exception:
+            pass
     try:
-        await page.evaluate("() => { const a = document.activeElement; if (a && a.blur) a.blur(); }")
-    except Exception:
-        pass
-    try:
-        dropdown = page.locator("tp-yt-iron-dropdown:visible")
+        dropdown = page.locator(AUTOCOMPLETE_VISIBLE)
         if await dropdown.count() > 0:
-            await page.keyboard.press("Escape")
+            await humanizer.press("Escape")
             await page.wait_for_timeout(200)
     except Exception:
         pass
 
 
-async def _fill_editable(page: Page, selector: str, text: str):
-    """填 YouTube Studio 的 contenteditable 富文本框（标题/简介），先清空再输入。
+def _normalise_text(text: str, *, multiline: bool) -> str:
+    """多行先 ``\\r\\n``→``\\n``；单行字段不得含换行/制表符（会变成 Enter/Tab）。"""
+    value = str(text).replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
+    if multiline:
+        return value
+    return value.replace("\n", " ")
 
-    用 fill() 一次性灌入而非逐字 type()：标题/简介里的 # 字符（如 #Shorts）会触发
-    YouTube 的话题自动补全下拉浮层；逐字输入会让浮层持续跟随光标弹出、盖住输入框与
-    后续“继续/发布”按钮，导致上传流程卡死。fill() 一次性写入不会逐字触发补全。"""
+
+async def _select_hashtag_candidate(
+    page: Page,
+    humanizer: Humanizer,
+    tag: str,
+    timeout: int = HASHTAG_CANDIDATE_TIMEOUT_MS,
+) -> bool:
+    """在 `#` 话题补全里按文本**全等**点选 ``tag``（含 `#`）。
+
+    返回是否点中。等不到浮层、没有全等项、或点选本身失败都返回 ``False``：
+    候选点选是增强，由调用方保留纯文本并收起浮层后继续，不能中止发布。
+    点选失败可能是 ``click_dispatched="maybe"``，这里只降级、不重试。
+    """
+    autocomplete = page.locator(HASHTAG_AUTOCOMPLETE)
+    try:
+        await autocomplete.first.wait_for(state="visible", timeout=timeout)
+    except Exception:
+        return False
+    try:
+        candidate = autocomplete.get_by_text(tag, exact=True)
+        if await candidate.count() == 0:
+            return False
+        await humanizer.click(candidate.first)
+    except Exception:
+        return False
+    return True
+
+
+async def _type_with_hashtags(page: Page, humanizer: Humanizer, text: str) -> None:
+    """逐段逐字输入；每段 `#tag` 后点选全等候选，匹配失败降级为纯文本。"""
+    cursor = 0
+    for match in _HASHTAG_RE.finditer(text):
+        if match.start() > cursor:
+            await humanizer.type_text(text[cursor:match.start()])
+        tag = match.group(0)
+        await humanizer.type_text(tag)
+        if not await _select_hashtag_candidate(page, humanizer, tag):
+            await _dismiss_autocomplete(page, humanizer, blur=False)
+        cursor = match.end()
+    if cursor == 0:
+        # 没有 `#`：一次 type_text，>1000 码点由共享层整段 bulk。
+        await humanizer.type_text(text)
+    elif cursor < len(text):
+        await humanizer.type_text(text[cursor:])
+
+
+async def _fill_editable(
+    page: Page,
+    selector: str,
+    text: str,
+    humanizer: Humanizer,
+    *,
+    multiline: bool = False,
+):
+    """逐字填 YouTube Studio 的 contenteditable 富文本框（标题/简介）。
+
+    路径（人类化交互层，替代旧的 ``fill()`` / ``type(delay=)`` 结论）：
+
+    1. ``humanizer.click`` 聚焦 → ``ControlOrMeta+A`` → ``Delete`` 清空；
+    2. 逐字 ``type_text``：ASCII（含 ``#``）走真实按键，中文/emoji 走
+       ``insert_text``；
+    3. 每段 ``#tag`` 后等 ``ytcp-hashtag-autocomplete`` 候选项，按文本**全等**
+       点选；等不到 / 没有全等项 / 点选失败 → 保留纯文本、Escape 收起浮层，
+       继续输入剩余内容；
+    4. 收尾 ``_dismiss_autocomplete``，避免浮层盖住“继续/发布”。
+
+    旧 docstring 的「``#`` 会让浮层卡死，所以只能一次性 fill」结论**作废**：
+    浮层已由候选点选 + 收尾关闭处理。>1000 码点仍由 ``type_text`` 整段
+    ``insert_text``，平台不设第二个阈值、也不自己切段。
+    """
+    value = _normalise_text(text, multiline=multiline)
     box = page.locator(selector).first
     await box.wait_for(state="visible", timeout=30000)
-    await box.click()
-    await page.keyboard.press("Control+A")
-    await page.keyboard.press("Delete")
-    try:
-        await box.fill(text)            # 一次性灌入，不逐字触发 # 话题自动补全
-    except Exception:
-        await box.type(text, delay=6)   # 个别 contenteditable 不支持 fill 时退回逐字输入
+    await humanizer.click(box)
+    await humanizer.press("ControlOrMeta+A")
+    await humanizer.press("Delete")
+    if value:
+        await _type_with_hashtags(page, humanizer, value)
     await page.wait_for_timeout(400)
-    await _dismiss_autocomplete(page)   # 收尾关掉可能弹出的补全浮层
+    await _dismiss_autocomplete(page, humanizer)
 
 
-async def _click_if_present(page: Page, selector: str, timeout: int = 4000) -> bool:
+async def _click_if_present(
+    page: Page,
+    selector: str,
+    timeout: int = 4000,
+    *,
+    humanizer: Humanizer,
+) -> bool:
+    """目标存在则用人类化指针点它；保留「可缺席」语义：不存在返回 ``False``，不抛。
+
+    ``humanizer`` 必传——每个可见点击都走同一实例。唯一例外是
+    ``mouse.down`` 之后才失败的 ``click_dispatched="maybe"``：那时可能已经点到
+    页面上，继续返回 ``False`` 会让调用方再点兜底选择器，所以原样上抛。
+    """
     try:
         el = page.locator(selector).first
         await el.wait_for(state="visible", timeout=timeout)
-        await el.click()
+        await humanizer.click(el)
         return True
-    except Exception:
+    except Exception as exc:
+        if getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE:
+            raise
         return False
 
 
@@ -362,6 +469,8 @@ class YouTubeVideo(BaseVideoUploader):
         self.start_publish_budget()
         page = await session.context.new_page()
         page.set_default_timeout(60000)
+        # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
+        self._humanizer(page)
 
         youtube_logger.info(_msg("🎬", f"开始上传: {Path(self.file_path).name}"))
         await page.goto(UPLOAD_URL, wait_until="domcontentloaded")
@@ -375,9 +484,48 @@ class YouTubeVideo(BaseVideoUploader):
         await self._upload_video_on_page(page, multilogin=multilogin)
         return page
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """行为层时延只吃预算上限，从不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        await asyncio.sleep(min(seconds, remaining))
+
+    async def _fill_playlist_name(self, page: Page, humanizer: Humanizer) -> None:
+        """新建播放列表名：全选覆盖后逐字输入（单行）。"""
+        title_box = page.locator(
+            "ytcp-playlist-metadata-editor #textbox, #create-playlist-form #textbox"
+        ).first
+        if not await title_box.count():
+            return
+        await humanizer.click(title_box)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(
+            _normalise_text(self.playlist or "", multiline=False)
+        )
+
+    async def _fill_tags(self, page: Page, humanizer: Humanizer) -> None:
+        """标签输入：全选覆盖后把逗号分隔的标签逐字打完（单行，保留尾逗号）。"""
+        tag_input = page.locator(
+            "#tags-container #text-input, ytcp-form-input-container#tags-container input"
+        ).first
+        await humanizer.click(tag_input)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        payload = ",".join(str(tag) for tag in self.tags)[:500] + ","
+        await humanizer.type_text(_normalise_text(payload, multiline=False))
+
     async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
         if multilogin:
             _raise_if_login_required(page)
+        humanizer = self._humanizer(page)
 
         # 1) 选择视频文件
         file_input = page.locator('input[type="file"]').first
@@ -393,12 +541,18 @@ class YouTubeVideo(BaseVideoUploader):
 
         # 3) 标题
         youtube_logger.info(_msg("✍️", "填写标题"))
-        await _fill_editable(page, "#title-textarea #textbox", self.title[:100])
+        await _fill_editable(page, "#title-textarea #textbox", self.title[:100], humanizer)
 
         # 4) 简介
         if self.description.strip():
             youtube_logger.info(_msg("✍️", "填写简介"))
-            await _fill_editable(page, "#description-textarea #textbox", self.description)
+            await _fill_editable(
+                page,
+                "#description-textarea #textbox",
+                self.description,
+                humanizer,
+                multiline=True,
+            )
 
         # 5) 封面（处理到一定进度才允许传，失败不致命）
         if self.thumbnail_path and Path(self.thumbnail_path).exists():
@@ -417,41 +571,43 @@ class YouTubeVideo(BaseVideoUploader):
         if self.playlist:
             try:
                 await _click_if_present(
-                    page, "#basics ytcp-text-dropdown-trigger, ytcp-video-metadata-playlists ytcp-dropdown-trigger", 8000)
+                    page, "#basics ytcp-text-dropdown-trigger, ytcp-video-metadata-playlists ytcp-dropdown-trigger", 8000,
+                    humanizer=humanizer)
                 await page.wait_for_timeout(1200)
                 existing = page.locator(
                     f"tp-yt-paper-checkbox:has-text('{self.playlist}'), "
                     f"ytcp-checkbox-group:has-text('{self.playlist}')").first
                 if await existing.count():
-                    await existing.click()
+                    await humanizer.click(existing)
                 else:
-                    if await _click_if_present(page, "ytcp-button:has-text('New playlist'), ytcp-button:has-text('创建播放列表')", 4000):
+                    if await _click_if_present(page, "ytcp-button:has-text('New playlist'), ytcp-button:has-text('创建播放列表')", 4000,
+                                               humanizer=humanizer):
                         await page.wait_for_timeout(800)
-                        await _click_if_present(page, "tp-yt-paper-item:has-text('New playlist'), tp-yt-paper-item:has-text('新建播放列表')", 3000)
-                        title_box = page.locator("ytcp-playlist-metadata-editor #textbox, #create-playlist-form #textbox").first
-                        if await title_box.count():
-                            await title_box.click()
-                            await title_box.type(self.playlist, delay=6)
-                            await _click_if_present(page, "ytcp-button#create-button, tp-yt-paper-dialog ytcp-button:has-text('Create'), tp-yt-paper-dialog ytcp-button:has-text('创建')", 4000)
+                        await _click_if_present(page, "tp-yt-paper-item:has-text('New playlist'), tp-yt-paper-item:has-text('新建播放列表')", 3000,
+                                                humanizer=humanizer)
+                        await self._fill_playlist_name(page, humanizer)
+                        await _click_if_present(page, "ytcp-button#create-button, tp-yt-paper-dialog ytcp-button:has-text('Create'), tp-yt-paper-dialog ytcp-button:has-text('创建')", 4000,
+                                                humanizer=humanizer)
             except Exception as exc:
                 youtube_logger.warning(_msg("⚠️", f"播放列表处理跳过（不影响发布）: {exc}"))
             finally:
-                await _click_if_present(page, "ytcp-playlist-dialog #save-button, ytcp-button:has-text('Done'), ytcp-button:has-text('完成')", 3000)
-                await page.keyboard.press("Escape")
+                await _click_if_present(page, "ytcp-playlist-dialog #save-button, ytcp-button:has-text('Done'), ytcp-button:has-text('完成')", 3000,
+                                        humanizer=humanizer)
+                await humanizer.press("Escape")
                 await page.wait_for_timeout(600)
 
         # 7) 受众：非儿童向（必填）
-        if not await _click_if_present(page, "tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_NOT_MFK']", 10000):
-            await _click_if_present(page, "tp-yt-paper-radio-button:has-text('not made for kids'), tp-yt-paper-radio-button:has-text('不是面向儿童')", 6000)
+        if not await _click_if_present(page, "tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_NOT_MFK']", 10000,
+                                       humanizer=humanizer):
+            await _click_if_present(page, "tp-yt-paper-radio-button:has-text('not made for kids'), tp-yt-paper-radio-button:has-text('不是面向儿童')", 6000,
+                                    humanizer=humanizer)
 
         # 8) 标签（“显示更多”里）
         if self.tags:
             try:
-                await _click_if_present(page, "#toggle-button", 6000)
+                await _click_if_present(page, "#toggle-button", 6000, humanizer=humanizer)
                 await page.wait_for_timeout(800)
-                tag_input = page.locator("#tags-container #text-input, ytcp-form-input-container#tags-container input").first
-                await tag_input.click()
-                await tag_input.type(",".join(self.tags)[:500] + ",", delay=4)
+                await self._fill_tags(page, humanizer)
             except Exception as exc:
                 youtube_logger.warning(_msg("⚠️", f"标签填写跳过（不影响发布）: {exc}"))
 
@@ -460,13 +616,14 @@ class YouTubeVideo(BaseVideoUploader):
             vis = page.locator("tp-yt-paper-radio-button[name='PUBLIC']")
             if await vis.count() and await vis.first.is_visible():
                 break
-            if not await _click_if_present(page, "#next-button", 6000):
+            if not await _click_if_present(page, "#next-button", 6000, humanizer=humanizer):
                 await page.wait_for_timeout(1200)
             await page.wait_for_timeout(1000)
 
         # 10) 可见性
         youtube_logger.info(_msg("🌐", f"设置可见性 = {self.visibility}"))
-        await _click_if_present(page, f"tp-yt-paper-radio-button[name='{VISIBILITY[self.visibility]}']", 10000)
+        await _click_if_present(page, f"tp-yt-paper-radio-button[name='{VISIBILITY[self.visibility]}']", 10000,
+                                humanizer=humanizer)
 
         # 10.5) 关键：等上传真正传完再发布。浏览器上传靠窗口开着传，
         #       传到一半就点发布+关浏览器 = 上传被掐断卡在中途（如 76%）。
@@ -484,7 +641,8 @@ class YouTubeVideo(BaseVideoUploader):
         )
         budget.check_pre_click()
         await page.wait_for_timeout(1200)
-        if not await _click_if_present(page, "#done-button", budget.clamp_ms(15000)):
+        await humanizer.before_submit()
+        if not await _click_if_present(page, "#done-button", budget.clamp_ms(15000), humanizer=humanizer):
             raise RuntimeError("未找到 YouTube 发布按钮，未提交发布")
         else:
             await page.wait_for_timeout(4000)
@@ -495,7 +653,8 @@ class YouTubeVideo(BaseVideoUploader):
                     video_url = await link.get_attribute("href") or ""
             except Exception:
                 pass
-            await _click_if_present(page, "ytcp-button:has-text('Close'), ytcp-button:has-text('关闭'), #close-button", 8000)
+            await _click_if_present(page, "ytcp-button:has-text('Close'), ytcp-button:has-text('关闭'), #close-button", 8000,
+                                    humanizer=humanizer)
             youtube_logger.success(_msg("🥳", f"发布完成（{self.visibility}）{(' ' + video_url) if video_url else ''}"))
 
     async def main(self, *, session: BrowserSession | None = None):
