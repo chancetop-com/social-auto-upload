@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 人类化交互层（W2 国外）
+
+- YouTube：标题/简介逐字输入（含 `#` 逐段等待候选并按文本全等点选、失败降级纯文本继续）、播放列表名与标签改为全选覆盖后逐字、12 处可见点击（含 `_click_if_present`）统一走人类化指针（uploader/youtube_uploader）。
+
 ### 移除历史 Web 与旧示例脚本
 
 - 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。
