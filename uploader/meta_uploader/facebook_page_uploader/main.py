@@ -95,7 +95,6 @@ async def _unique(locator, what: str, *, timeout_ms: int = _UNIQUE_TIMEOUT_MS):
         await asyncio.sleep(_UNIQUE_POLL_SECONDS)
 
 
-
 def facebook_page_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
     """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
     return {**FACEBOOK_PAGE_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
