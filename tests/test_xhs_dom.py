@@ -739,56 +739,196 @@ class Decision06ReadinessSharedLayerTests(unittest.TestCase):
         self.assertEqual(resolved.role, "visible")
 
 
-class _ViewportLocator:
-    def __init__(self, box):
-        self.box = box
+def _geometry(
+    *,
+    width: float = 60.0,
+    height: float = 30.0,
+    inside: bool = True,
+    clipped: bool = False,
+    child_frame: bool = False,
+) -> dict:
+    return {
+        "width": width,
+        "height": height,
+        "inside": inside,
+        "clipped": clipped,
+        "childFrame": child_frame,
+    }
+
+
+class _PredicateLocator:
+    """Locator double: the geometry predicate runs in this element's frame."""
+
+    def __init__(
+        self,
+        box=None,
+        *,
+        geometry: dict | None = None,
+        geometry_error: BaseException | None = None,
+        scroll_api: bool = True,
+    ):
+        self.box = None if box is None else dict(box)
+        self.geometry = geometry
+        self.geometry_error = geometry_error
         self.scrolled = 0
+        self.evaluate_calls: list[tuple] = []
+        if not scroll_api:
+            self.scroll_into_view_if_needed = None
 
     async def bounding_box(self):
         return None if self.box is None else dict(self.box)
 
-    async def scroll_into_view_if_needed(self, **kwargs):
+    async def scroll_into_view_if_needed(self, timeout=None, **kwargs):
         self.scrolled += 1
         self.box = {"x": 100.0, "y": 100.0, "width": 60.0, "height": 30.0}
 
+    async def evaluate(self, expression, arg=None):
+        self.evaluate_calls.append((expression, arg))
+        if self.geometry_error is not None:
+            raise self.geometry_error
+        if self.geometry is not None:
+            return dict(self.geometry)
+        raise AssertionError("geometry predicate was not scripted")
 
-class _ViewportPage:
-    viewport_size = {"width": 800, "height": 600}
+
+class _PredicatePage:
+    """Page double that fails loudly if the old viewport arithmetic returns."""
+
+    def __init__(
+        self,
+        *,
+        element_from_point: bool = True,
+        projection_error: BaseException | None = None,
+    ):
+        self.element_from_point = element_from_point
+        self.projection_error = projection_error
+        self.evaluate_calls: list[tuple] = []
+
+    @property
+    def viewport_size(self):
+        raise AssertionError("ensure_in_viewport must not read viewport_size")
+
+    async def evaluate(self, expression, arg=None):
+        self.evaluate_calls.append((expression, arg))
+        if self.projection_error is not None:
+            raise self.projection_error
+        return self.element_from_point
 
 
 class EnsureInViewportTests(unittest.IsolatedAsyncioTestCase):
-    async def test_offscreen_target_is_scrolled_before_hit_test(self):
-        locator = _ViewportLocator(
-            {"x": 10.0, "y": 900.0, "width": 60.0, "height": 30.0}
-        )
-        scrolled = await dom.ensure_in_viewport(_ViewportPage(), locator)
-        self.assertTrue(scrolled)
-        self.assertEqual(locator.scrolled, 1)
-        self.assertEqual(locator.box["y"], 100.0)
+    async def test_point_inside_frame_does_not_scroll(self):
+        locator = _PredicateLocator(DEFAULT_BOX, geometry=_geometry())
+        page = _PredicatePage()
 
-    async def test_visible_target_does_not_scroll(self):
-        locator = _ViewportLocator(
-            {"x": 10.0, "y": 100.0, "width": 60.0, "height": 30.0}
-        )
-        scrolled = await dom.ensure_in_viewport(_ViewportPage(), locator)
+        scrolled = await dom.ensure_in_viewport(page, locator, point=(0.65, 0.5))
+
         self.assertFalse(scrolled)
         self.assertEqual(locator.scrolled, 0)
+        # The predicate runs in the element's own frame, with the fractional point.
+        self.assertEqual(len(locator.evaluate_calls), 1)
+        self.assertIn("overflowX", locator.evaluate_calls[0][0])
+        self.assertEqual(locator.evaluate_calls[0][1], (0.65, 0.5))
+        # Same-frame targets never need the main-frame projection round-trip.
+        self.assertEqual(page.evaluate_calls, [])
 
-    async def test_point_below_fold_scrolls_even_when_box_starts_above(self):
-        # A 1200px-tall element starting at 100 has its center (700) off-screen.
-        locator = _ViewportLocator(
-            {"x": 10.0, "y": 100.0, "width": 60.0, "height": 1200.0}
-        )
-        scrolled = await dom.ensure_in_viewport(_ViewportPage(), locator)
+    async def test_point_outside_frame_scrolls(self):
+        locator = _PredicateLocator(DEFAULT_BOX, geometry=_geometry(inside=False))
+
+        scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
+
         self.assertTrue(scrolled)
+        self.assertEqual(locator.scrolled, 1)
 
-    async def test_missing_box_attempts_scroll_and_survives_no_api(self):
-        locator = _ViewportLocator(None)
-        self.assertTrue(await dom.ensure_in_viewport(_ViewportPage(), locator))
-        no_api = FakeLocator("no-scroll-api", box=None)
-        self.assertFalse(
-            await dom.ensure_in_viewport(_ViewportPage(), no_api)
+    async def test_ancestor_overflow_clip_scrolls(self):
+        locator = _PredicateLocator(
+            DEFAULT_BOX, geometry=_geometry(inside=True, clipped=True)
         )
+
+        scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
+
+        self.assertTrue(scrolled)
+        self.assertEqual(locator.scrolled, 1)
+
+    async def test_missing_viewport_size_is_irrelevant(self):
+        visible = _PredicateLocator(DEFAULT_BOX, geometry=_geometry())
+        self.assertFalse(
+            await dom.ensure_in_viewport(_PredicatePage(), visible)
+        )
+        self.assertEqual(visible.scrolled, 0)
+
+        # A page without any ``viewport_size`` attribute at all is fine too.
+        offscreen = _PredicateLocator(DEFAULT_BOX, geometry=_geometry(inside=False))
+        self.assertTrue(await dom.ensure_in_viewport(object(), offscreen))
+
+    async def test_child_frame_point_projects_to_main_frame(self):
+        locator = _PredicateLocator(
+            {"x": 100.0, "y": 100.0, "width": 60.0, "height": 30.0},
+            geometry=_geometry(child_frame=True),
+        )
+        page = _PredicatePage(element_from_point=True)
+
+        scrolled = await dom.ensure_in_viewport(page, locator)
+
+        self.assertFalse(scrolled)
+        self.assertEqual(locator.scrolled, 0)
+        self.assertEqual(len(page.evaluate_calls), 1)
+        expression, arg = page.evaluate_calls[0]
+        self.assertIn("elementFromPoint", expression)
+        # Main-frame coordinates come from locator.bounding_box() (Playwright
+        # already converts child-frame boxes into main-frame coordinates).
+        self.assertEqual(arg, [130.0, 115.0])
+
+    async def test_child_frame_null_element_from_point_scrolls(self):
+        locator = _PredicateLocator(DEFAULT_BOX, geometry=_geometry(child_frame=True))
+        page = _PredicatePage(element_from_point=False)
+
+        scrolled = await dom.ensure_in_viewport(page, locator)
+
+        self.assertTrue(scrolled)
+        self.assertEqual(locator.scrolled, 1)
+        self.assertEqual(len(page.evaluate_calls), 1)
+
+    async def test_child_frame_projection_error_is_conservative(self):
+        locator = _PredicateLocator(DEFAULT_BOX, geometry=_geometry(child_frame=True))
+        page = _PredicatePage(projection_error=RuntimeError("frame detached"))
+
+        scrolled = await dom.ensure_in_viewport(page, locator)
+
+        self.assertTrue(scrolled)
+        self.assertEqual(locator.scrolled, 1)
+
+    async def test_geometry_exception_is_conservative(self):
+        locator = _PredicateLocator(
+            DEFAULT_BOX, geometry_error=RuntimeError("execution context destroyed")
+        )
+
+        scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
+
+        self.assertTrue(scrolled)
+        self.assertEqual(locator.scrolled, 1)
+
+    async def test_zero_size_box_never_scrolls(self):
+        locator = _PredicateLocator(
+            {"x": 10.0, "y": 10.0, "width": 0.0, "height": 30.0},
+            geometry=_geometry(width=0.0, inside=False),
+        )
+
+        scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
+
+        self.assertFalse(scrolled)
+        self.assertEqual(locator.scrolled, 0)
+        self.assertEqual(locator.evaluate_calls, [])
+
+    async def test_missing_box_and_no_scroll_api_returns_false(self):
+        locator = _PredicateLocator(
+            None,
+            geometry_error=RuntimeError("cannot evaluate"),
+            scroll_api=False,
+        )
+
+        scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
+
+        self.assertFalse(scrolled)
 
 
 if __name__ == "__main__":

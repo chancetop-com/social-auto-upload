@@ -30,6 +30,7 @@ t≈12s 才可点 → 「元素出现」不能作为阶段就绪判据，必须�
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Sequence
@@ -245,10 +246,102 @@ def normalise_point(point: Any) -> tuple[float, float]:
     return x, y
 
 
-#: 落点判定前允许的视口边缘空隙；中心落点必须真的在视口内。
-DEFAULT_VIEWPORT_WIDTH = 1280
-DEFAULT_VIEWPORT_HEIGHT = 720
+#: 滚动超时；可见性结果**不缓存**（窗口尺寸与滚动位置随时变）。
 SCROLL_INTO_VIEW_TIMEOUT_MS = 2000
+
+#: 几何可见性谓词：在**元素自己的 frame** 内判断落点是否可见。
+#:
+#: 不读 ``page.viewport_size``：托管模式（``connect_over_cdp`` +
+#: ``noDefaultViewport``）下它是 ``None``，而真实窗口尺寸只体现在
+#: ``innerWidth/innerHeight`` 上。同一段 JS 回答三件事：落点是否在 frame
+#: 视口内、是否被逐层 ``overflow != visible`` 祖先裁剪、目标是否在子 frame 内。
+_GEOMETRY_JS = """
+(el, point) => {
+  const rect = el.getBoundingClientRect();
+  const width = rect.width;
+  const height = rect.height;
+  const x = rect.left + width * point[0];
+  const y = rect.top + height * point[1];
+  let childFrame = false;
+  try {
+    const win = el.ownerDocument && el.ownerDocument.defaultView;
+    childFrame = !!win && win !== win.top;
+  } catch (e) {
+    childFrame = true;
+  }
+  let inside = x >= 0 && y >= 0 && x < innerWidth && y < innerHeight;
+  let clipped = false;
+  if (inside) {
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        const a = n.getBoundingClientRect();
+        if (x < a.left || y < a.top || x > a.right || y > a.bottom) {
+          clipped = true;
+          break;
+        }
+      }
+    }
+  }
+  return { width: width, height: height, inside: inside, clipped: clipped,
+           childFrame: childFrame };
+}
+"""
+
+#: 子 frame 目标的第二级判断：把落点投影回主 frame，只看 ``elementFromPoint``
+#: 是否非空（即落点确实落在某个真实布局内容上，而不是窗口外）。
+_TOP_FRAME_POINT_JS = """
+(point) => {
+  const x = point[0];
+  const y = point[1];
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) { return false; }
+  return document.elementFromPoint(x, y) !== null;
+}
+"""
+
+_dom_log = logging.getLogger(__name__)
+
+
+async def _geometry(
+    locator: Any, ratio: tuple[float, float]
+) -> dict[str, Any] | None:
+    """元素所在 frame 内的几何事实；读不到返回 ``None``（保守判需滚动）。"""
+    try:
+        raw = await locator.evaluate(_GEOMETRY_JS, ratio)
+    except Exception as exc:
+        _dom_log.debug("geometry probe failed: %s", exc)
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return raw
+
+
+async def _projected_off_screen(
+    page: Any, locator: Any, ratio: tuple[float, float], box: Any
+) -> bool:
+    """子 frame 目标：落点投影回主 frame 后是否不可见。"""
+    if box is None:
+        try:
+            box = await locator.bounding_box()
+        except Exception as exc:
+            _dom_log.debug("child-frame box probe failed: %s", exc)
+            return True
+    if not box:
+        return True
+    try:
+        left = float(box["x"])
+        top = float(box["y"])
+        width = float(box["width"])
+        height = float(box["height"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    target = [left + width * ratio[0], top + height * ratio[1]]
+    try:
+        visible = await page.evaluate(_TOP_FRAME_POINT_JS, target)
+    except Exception as exc:
+        _dom_log.debug("child-frame projection failed: %s", exc)
+        return True
+    return not bool(visible)
 
 
 async def ensure_in_viewport(
@@ -260,11 +353,15 @@ async def ensure_in_viewport(
 ) -> bool:
     """把目标滚入视口，使坐标落点真的能在 ``elementFromPoint`` 命中。
 
-    真机：发布页正文编辑区/发布按钮常在首屏下方；不滚动时
-    ``elementFromPoint(x, y)`` 返回 ``null``，会被误判成
-    ``covered-by:unknown``。``box`` 可由调用方预先测量，避免多一次
-    ``bounding_box``（调用方的 stillOn 复核依赖测量次数稳定）。返回是否
-    发生了滚动；任何读取失败都当作“无需滚动”，由后续 ``check`` 按未知档处理。
+    可见性是**几何问题**：在目标自己的 frame 内判断落点是否被视口或
+    ``overflow`` 祖先裁剪，子 frame 目标再投影回主 frame 问一次
+    ``elementFromPoint``。不可见、或求值异常，都保守地滚一次
+    ``scroll_into_view_if_needed``（Playwright 负责滚祖先容器与 frame 链）。
+    可点性不在这里修：遮挡仍由 ``check`` 报 ``covered-by:*``。
+
+    从不读取 ``page.viewport_size``，也不猜任何默认视口尺寸。``box`` 可由
+    调用方预先测量，避免多一次 ``bounding_box``（调用方的 stillOn 复核依赖
+    测量次数稳定）。返回是否发生了滚动；没有滚动 API 时返回 ``False``。
     """
     ratio = normalise_point(point)
     try:
@@ -272,35 +369,47 @@ async def ensure_in_viewport(
             box = await locator.bounding_box()
     except Exception:
         box = None
-    if box is None:
+
+    if box is not None:
+        try:
+            box_width = float(box["width"])
+            box_height = float(box["height"])
+        except (KeyError, TypeError, ValueError):
+            pass
+        else:
+            # 零尺寸是「元素本身不可交互」，不是几何不可见：不滚。
+            if box_width <= 0 or box_height <= 0:
+                return False
+
+    geometry = await _geometry(locator, ratio)
+    if geometry is None:
         needs_scroll = True
     else:
         try:
-            left = float(box["x"])
-            top = float(box["y"])
-            width = float(box["width"])
-            height = float(box["height"])
+            width = float(geometry["width"])
+            height = float(geometry["height"])
         except (KeyError, TypeError, ValueError):
             needs_scroll = True
         else:
             if width <= 0 or height <= 0:
                 needs_scroll = False
+            elif not bool(geometry.get("inside")) or bool(
+                geometry.get("clipped")
+            ):
+                needs_scroll = True
+            elif bool(geometry.get("childFrame")):
+                needs_scroll = await _projected_off_screen(
+                    page, locator, ratio, box
+                )
             else:
-                try:
-                    viewport = getattr(page, "viewport_size", None)
-                except Exception:
-                    viewport = None
-                if isinstance(viewport, dict):
-                    vw = int(viewport.get("width") or DEFAULT_VIEWPORT_WIDTH)
-                    vh = int(viewport.get("height") or DEFAULT_VIEWPORT_HEIGHT)
-                else:
-                    vw, vh = DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT
-                target_x = left + width * ratio[0]
-                target_y = top + height * ratio[1]
-                needs_scroll = not (0 <= target_x <= vw and 0 <= target_y <= vh)
+                needs_scroll = False
 
     if not needs_scroll:
         return False
+    _dom_log.debug(
+        "ensure_in_viewport: scrolling %s into view",
+        getattr(locator, "name", locator),
+    )
     scroll = getattr(locator, "scroll_into_view_if_needed", None)
     if scroll is None:
         return False
