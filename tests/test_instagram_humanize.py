@@ -12,7 +12,8 @@ The three required blocks are:
     every changed interaction point uses the humanizer primitive
     (``press`` vs ``insert_text``), pays exactly one ``after_type``, runs
     ``stillOn`` (hit-test) before ``mouse.down``, never dispatches ``force``
-    and never calls native ``locator.click``.
+    and never calls native ``locator.click``.  The shared nav helper hovers
+    before it clicks (Instagram's rail expands on hover — spec §2.5.1).
 ``InstagramHumanizeFieldReadbackTests``
     the fake fields keep a typing buffer, so a correct key sequence that ends
     with the wrong value (dirty clear, appended text, dropped newline) fails.
@@ -234,6 +235,7 @@ class Field:
         self._evaluate_result = evaluate_result
 
         self.blurs = 0
+        self.hovers = 0
         self.click_count = 0
         self.native_clicks: list[dict] = []
         self.presses: list[str] = []
@@ -330,6 +332,11 @@ class Field:
         self.fills.append(value)
         self.value = value
         self.page.timeline.add("fill", self.name, value)
+
+    async def hover(self, **kwargs) -> None:
+        # ``HUMANIZE=0`` 的 ``Humanizer.hover`` 直通 ``locator.hover``。
+        self.hovers += 1
+        self.page.timeline.add("locator.hover", self.name)
 
     async def click(self, **kwargs) -> None:
         self.click_count += 1
@@ -574,6 +581,35 @@ class InstagramHumanizeEventSequenceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(entry.click_count, 0)
 
+    async def test_nav_helper_hovers_before_its_own_move_and_mouse_down(self):
+        """真机 Instagram 左栏 hover 展开使包围盒漂移：先 ``hover`` 再 ``click``。
+
+        spec §2.5.1 只在调用点加一次前置 hover，``Humanizer.click`` 内部零改动。
+        两次 ``pointer_settle`` 把事件切成两段：hover 的移动爆发在前，click 自己
+        的移动爆发与 ``down`` 在后。
+        """
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        entry = page.add("entry", Field("entry", page=page))
+
+        await _click_nav(entry, humanizer)
+
+        events = page.timeline.events
+        moves = [index for index, event in enumerate(events) if event[0] == "move"]
+        settles = [
+            index
+            for index, event in enumerate(events)
+            if event == ("pause", "pointer_settle")
+        ]
+        down = page.timeline.kinds().index("down")
+        # hover 一次 + click 一次；少于两次说明调用点没有前置 hover。
+        self.assertEqual(len(settles), 2)
+        self.assertTrue([index for index in moves if index < settles[0]])
+        self.assertTrue([index for index in moves if settles[0] < index < settles[1]])
+        self.assertLess(settles[1], down)
+        self.assertEqual(page.timeline.kinds().count("down"), 1)
+        self.assertEqual(entry.click_count, 0)
+
     async def test_share_waits_before_submit_before_dispatching(self):
         page = _page()
         humanizer = RecordingHumanizer(page, page.timeline)
@@ -801,6 +837,63 @@ class InstagramHumanizeGateTests(unittest.TestCase):
                     hits.append(f"{path.name}:{node.lineno}: force=True")
         self.assertEqual(hits, [])
 
+    def test_both_nav_call_sites_go_through_the_hovering_helper(self):
+        """创建入口与向导 Next 都走 ``_click_nav``，helper 内 hover 先于 click。
+
+        静态哨兵：任何新增的导航点击若绕过 helper（直接 ``humanizer.click``），
+        或 helper 里 hover/click 的顺序被调换，都必须在这里失败。
+        """
+        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        functions = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+        helper_calls = sorted(
+            (node.lineno, f"{node.func.value.id}.{node.func.attr}")
+            for node in ast.walk(functions["_click_nav"])
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+        )
+        self.assertEqual(
+            [call for _line, call in helper_calls],
+            ["humanizer.hover", "humanizer.click", "humanizer.after_navigate"],
+        )
+
+        nav_sites = []
+        for name, function in functions.items():
+            for node in ast.walk(function):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "_click_nav"
+                ):
+                    nav_sites.append((node.lineno, name, ast.unparse(node.args[0])))
+        # 创建入口（_upload_files）与向导「Next」（_advance_media_editor）；
+        # 新站点若不走 helper 会在这里暴露。
+        self.assertEqual(
+            [site[1:] for site in sorted(nav_sites)],
+            [("_upload_files", "entry"), ("_advance_media_editor", "action")],
+        )
+
+        owners = set()
+        for name, function in functions.items():
+            for node in ast.walk(function):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "click"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "humanizer"
+                ):
+                    owners.add(name)
+        self.assertEqual(
+            owners, {"_click_nav", "_click_submit", "_dismiss_optional_prompt"}
+        )
+
     def test_native_clicks_are_only_the_management_path(self):
         # Gate B already enforces markers; this pins the *set* of marked sites so
         # a new native click cannot silently join the package.
@@ -852,6 +945,13 @@ class InstagramHumanizeFastPathTests(unittest.IsolatedAsyncioTestCase):
             [("press", "ControlOrMeta+A"), ("press", "Delete")],
         )
         self.assertEqual(entry.click_count, 1)
+        # 导航入口的 hover 先于 click；关闭人类化时是直通 locator.hover。
+        self.assertEqual(entry.hovers, 1)
+        self.assertLess(
+            page.timeline.kinds().index("locator.hover"),
+            page.timeline.kinds().index("locator.click"),
+        )
+        self.assertEqual(page.timeline.kinds().count("locator.click"), 1)
         self.assertEqual(page.timeline.kinds().count("down"), 0)
         self.assertEqual(pauses, [])
         self.assertEqual(page.timeline.payloads("pause"), [])

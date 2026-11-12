@@ -227,7 +227,15 @@ async def _type_caption(
 
 
 async def _click_nav(locator: Locator, humanizer: Humanizer) -> None:
-    """可见导航点击：坐标点击后付一次 ``after_navigate``。"""
+    """可见导航点击：先悬停让左栏展开落定，再坐标点击，付一次 ``after_navigate``。
+
+    真机 2026-11-13（ticket 05，``--no-publish`` 视频干跑）：Instagram 左侧导航
+    栏悬停即展开，目标包围盒在移动与 stillOn 复核之间位移 >1px，首个导航点击即
+    报 ``point-drift``。spec §2.5.1 的唯一处方是在调用点先 ``Humanizer.hover()``
+    再 ``click``（同小红书 ``.cover-edit-entry`` 模式）；``Humanizer.click`` 内部
+    零重试、零容差改动，hover 后仍遮挡则照常硬失败。
+    """
+    await humanizer.hover(locator)
     await humanizer.click(locator)
     await humanizer.after_navigate()
 
