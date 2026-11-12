@@ -251,6 +251,15 @@ class _FakePage:
         self.keyboard = _FakeKeyboard()
 
 
+class _FakeHumanizer:
+    """行为层替身：语义测试只关心“点了一次开关”，点击机制另由平台人类化用例覆盖。"""
+
+    enabled = True
+
+    async def click(self, locator):
+        await locator.click()
+
+
 class _StubCommentsControl(SwitchControl):
     """替换页面定位：``hidden=True`` 模拟高级设置未展开时的开关缺席。"""
 
@@ -260,6 +269,7 @@ class _StubCommentsControl(SwitchControl):
             labels=("Turn off commenting",),
             panel_labels=("Advanced settings",),
             invert=True,
+            humanizer=_FakeHumanizer(),
         )
         self.switch = switch
         self.hidden = hidden

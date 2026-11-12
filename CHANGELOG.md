@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 人类化交互层（W1 真机探针）
+
+- TikTok：30 个交互点接入人类化，配文/话题逐字输入，选项控件集中在公共底座（`uploader/tk_uploader/main_chrome.py`）。
+- Instagram：§3.9 的 16 个交互点全部处置——文本与可见点击接入人类化，2 处 `set_input_files` 与作品管理路径按规格保留原生（`uploader/meta_uploader/insgraph_uploader/`）。
+
 ### 人类化交互层（W2 国外）
 
 - Facebook 个人主页：3 个交互点接入人类化（正文输入 + 正文聚焦 / 发布点击），删除/管理点击与文件选择保持原生并逐条标记（`uploader/meta_uploader/facebook_uploader/`）。
