@@ -715,6 +715,7 @@ class UploadNoteBuilderTests(unittest.TestCase):
                 "options",
                 "debug",
                 "headless",
+                "no_publish",
             ],
         )
         for param in params[6:]:
