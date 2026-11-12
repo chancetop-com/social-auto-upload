@@ -91,3 +91,4 @@ Status: resolved
 - **2026-11-12 真机验收结果**已回写规格 §9.3「实际结果」列：视频/图文/定时正路 0；注入①/②/③ 均符合预期（10/10/1）。未执行项：20MB PNG（可选）、真实发布（会产生真实笔记，待确认）、托管（本机无凭证）。
 - 真机复测暴露的 5 个问题（probe 轮询、滚动、focus、loading-text、定时全选）已修复并记录在规格 §9.3 末尾。
 - **2026-11-12 真实发布最小验收**：`upload-note --account 180 --images videos/demo1.png --title "SAU真实发布验收"` → 退出 `0`，日志 `图文发布成功`，OBSERVE 确认 URL 离开 `/publish/publish`。该测试笔记待人工删除。
+- **2026-11-12 封面复核**：封面**可用**。`.cover-edit-entry` 在鼠标悬停首帧预览后才从 0×0 变为可见；已新增 `Humanizer.hover` 并在 `set_thumbnail` 中“悬停预览 → 点入口 → 上传 → 完成”。真机 `--thumbnail videos/demo1.png` → `封面已经设置完成`、退出 0。离线回归见 `tests/test_xhs_cover.py`。

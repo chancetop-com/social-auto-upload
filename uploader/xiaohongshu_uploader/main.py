@@ -408,6 +408,12 @@ def _declaration_option_candidates(label: str) -> tuple[Candidate, ...]:
 
 # 13. 封面：入口 .cover-edit-entry（容器 .cover-edit-stack）→ 弹窗；
 #     两个零命中的旧入口（upload-cover / cover-plugin-preview）已删。
+# 左侧首帧预览块（直接子节点唯一）；悬停它才会渲染 .cover-edit-entry。
+XHS_COVER_PREVIEW_SELECTOR = ".cover-plugin-preview .cover > .default"
+XHS_COVER_PREVIEW_CANDIDATES = (
+    Candidate(XHS_COVER_PREVIEW_SELECTOR),
+    Candidate(".cover-plugin-preview .cover .default.row"),
+)
 XHS_COVER_ENTRY_SELECTOR = ".cover-edit-stack .cover-edit-entry"
 XHS_COVER_MODAL_SELECTOR = (
     ".d-modal.cover-modal.creator-modal-style.main-cover-editor-modal"
@@ -415,7 +421,6 @@ XHS_COVER_MODAL_SELECTOR = (
 XHS_COVER_ENTRY_CANDIDATES = (
     Candidate(XHS_COVER_ENTRY_SELECTOR),
     Candidate("编辑封面", kind="text-zh"),
-    Candidate("设置封面", kind="text-zh"),
 )
 XHS_COVER_MODAL_CANDIDATES = (Candidate(XHS_COVER_MODAL_SELECTOR),)
 XHS_COVER_TAB_CANDIDATES = (
@@ -2711,8 +2716,20 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             await _clear_known_overlays(
                 page, XHS_OVERLAY_RULES, budget=self.publish_budget
             )
-            # 1. 封面入口 .cover-edit-entry（容器 .cover-edit-stack），文本仅兜底；
-            #    打开封面弹窗。
+            # 1a. 真机 2026-11-12：入口 .cover-edit-entry 悬停预览后才渲染
+            #     （0×0 → 可见）；先悬停预览区，再解析入口。
+            preview = await _resolve_anchor(
+                page,
+                "封面预览区",
+                XHS_COVER_PREVIEW_CANDIDATES,
+                role="visible",
+                budget=self.publish_budget,
+            )
+            await humanizer.hover(preview.locator)
+            await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
+
+            # 1b. 封面入口 .cover-edit-entry（容器 .cover-edit-stack），文本仅兜底；
+            #     打开封面弹窗。
             entry = await _resolve_anchor(
                 page,
                 "封面入口",

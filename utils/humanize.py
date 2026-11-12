@@ -299,6 +299,36 @@ class Humanizer:
             _mark_maybe_dispatched(exc)
             raise
 
+    async def hover(self, locator: Any, *, point: tuple[float, float] | None = None) -> None:
+        """悬停：移动 → 指针稳定，不按下鼠标。
+
+        真机：小红书视频封面入口只有 hover 后才渲染（0×0 → 可见）。
+        """
+        if not self.enabled:
+            await locator.hover()
+            return
+        ratio = normalise_point(point)
+        scrolled = await ensure_in_viewport(self.page, locator, point=ratio)
+        if scrolled:
+            await self.between_scroll()
+        box = await locator.bounding_box()
+        if not box:
+            raise _not_dispatched("no-bounding-box")
+        try:
+            width = float(box["width"])
+            height = float(box["height"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _not_dispatched("no-bounding-box") from exc
+        if width <= 0 or height <= 0:
+            raise _not_dispatched("zero-box")
+        target = self._inset_point(box, ratio, width, height)
+        start = self._pointer if self._pointer is not None else (0.0, 0.0)
+        for x, y, delay in self._path(start, target):
+            await self._sleep(delay)
+            await self.page.mouse.move(x, y)
+        self._pointer = target
+        await self._pause(self.profile.pointer_settle)
+
     def _inset_point(
         self,
         box: Any,

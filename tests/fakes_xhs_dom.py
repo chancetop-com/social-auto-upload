@@ -245,6 +245,13 @@ class FakeLocator:
     async def focus(self, **kwargs: Any) -> None:
         self.actions.append(("focus",))
 
+    async def hover(self, **kwargs: Any) -> None:
+        self.actions.append(("hover",))
+
+    async def set_input_files(self, files: Any) -> None:
+        self.files = files if isinstance(files, list) else [files]
+        self.actions.append(("set_input_files", self.files))
+
     async def click(self, **kwargs: Any) -> None:
         # Count the attempt *before* dispatch: FIRE must be able to tell
         # "never dispatched" from "dispatch raised" (spec U2).

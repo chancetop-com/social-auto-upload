@@ -1054,7 +1054,7 @@ length   = ceil(weighted / 2)          # ≤ 20
 | 小红书 | 图文 1 张 | 自主拍摄（地点+日期）/ 来源转载 | 0（二级声明菜单已收窄到 `div.d-popover.d-dropdown .d-option`） |
 | 小红书 | 视频 14s | 原创 + 虚构演绎 + 话题 | 0 |
 | 小红书 | 视频 3.5s | 原创 | 1（平台禁用原创开关，属视频时长/资格限制；换成 14s 后 0） |
-| 小红书 | 视频 + `--thumbnail` | 封面 | 0，但封面 warning 跳过：当前账号 UI 为 AI/PK 封面变体，`编辑封面` 节点 0×0 隐藏；“PK封面”引导已纳入清障注册表 |
+| 小红书 | 视频 + `--thumbnail` | 封面 | ✅ 0：先悬停首帧预览 → `.cover-edit-entry` 才渲染 → 弹窗内「上传」→ 选图 → 「完成」，日志 `封面已经设置完成` |
 | 小红书 | 定时 | `--schedule` | 0（C1/C2/C3 通过） |
 | TikTok | 视频 14s | `--privacy friends` + `--no-comments` + `--aigc` | 0，发布按钮就绪 |
 | TikTok | 图文 2/3 张 | `--privacy friends` + 选项 | 0 |
@@ -1062,7 +1062,7 @@ length   = ceil(weighted / 2)          # ≤ 20
 | Instagram | Reel 14s | `--no-comments` + `--ai-generated` | 0，Share 就绪 |
 | Instagram | 轮播 2/3 张 | `--alt-text` ×N + `--no-comments` + `--ai-generated` | 0，选项回读一致 |
 
-真机修正：小红书二级声明菜单多义（已收窄）、PK 封面引导遮挡（已清障）；TikTok / Instagram 的 `--no-publish` 为新实现（就绪窗口 60s 或剩余预算，超时退出 1）。
+真机修正：小红书二级声明菜单多义（已收窄）、PK 封面引导遮挡（已清障）、封面入口需先悬停预览（已加 `Humanizer.hover` 并接线）；TikTok / Instagram 的 `--no-publish` 为新实现（就绪窗口 60s 或剩余预算，超时退出 1）。
 
 **明确不做**的注入：断网/恢复、改 URL/改选择器、真实发布后杀浏览器、真实验证码页面。
 
