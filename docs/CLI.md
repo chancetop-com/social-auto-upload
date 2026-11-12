@@ -645,6 +645,8 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
 
+`--no-publish`：素材上传、配文/话题、全部发布选项完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，只记录平台/标题/选项，不写 `content_id`/`post_id`/`post_url`。
+
 `login` 在工程浏览器中等待人工登录和必要验证，将状态保存为 `cookies/instagram_creator.json`，并通过新会话验证。`check` 检查该账号的登录状态和用户绑定，不能代替发布权限检查；网络或未知页面超时会报告错误，不会直接视为 Cookie 失效。
 
 视频输入为 MP4/MOV；照片为 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际解码与处理受平台限制。多个图片路径按传入顺序创建轮播；当前已实测单张照片及两张不同照片。标题、正文、标签合并为配文，合计最多 2200 字符。`--headless` 可切换无头运行，人工登录使用默认可见模式。
@@ -781,7 +783,8 @@ sau tiktok upload-video \
 - 本地模式读写 `cookies/tiktok_<account>.json`；托管模式不读写 cookie 文件。
 - 托管分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**；本地模式会自动切换页面语言。
 - 本地模式与托管模式共用 15 分钟上传预算；登录页、验证码或 2FA 在托管模式下退出 `10`，本地模式按运行失败退出 `1`。
-- 真实账号的本地登录、`upload-note` / `upload-video` 发布、四项选项与 `delete` 已完成真发验收（2026-11-10）；`--not-before`、`--proxy`、`--headless`、托管模式、中文界面与专业账号仍未验收。
+- 真实账号的本地登录、`upload-note` / `upload-video` 发布、四项选项与 `delete` 已完成真发验收（2026-11-10）；2026-11-12 另用 `--no-publish` 干跑验收视频、图文与三图轮播（含 `--privacy friends` / `--no-comments` / `--aigc`）。`--not-before`、`--proxy`、`--headless`、托管模式、中文界面与专业账号仍未验收。
+- `--no-publish`：上传、标题/正文/话题、全部发布选项、封面与 `--schedule` 完成后，等待发布按钮可点击（`post_video_button` / `Post` / `Schedule`，窗口 `min(60s, 剩余预算)`）即停止，不点击发布，也不等待 `--not-before`；成功退出 `0`，就绪超时退出 `1`。
 - 未注册的子命令仍由 argparse 退出 `2`。
 
 ### 视频发布选项

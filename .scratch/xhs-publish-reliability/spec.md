@@ -882,7 +882,7 @@ length   = ceil(weighted / 2)          # ≤ 20
 | S11 | **会话与 `check`**（U9 A–F） | S7（分类器） | 是 | 前置三态、四出口、写回矩阵 |
 | S12 | **测试收尾 + 文档回写**（U12 + §9） | 全部 | — | 全量 unittest 绿 + 真机清单 |
 
-**硬前置（不在本图实施，但被依赖）**：TikTok / Instagram 补 `--no-publish`（同语义：跑到 ARM 就绪）是 U11 步 2/3 验收的前提，必须写进后续 effort 的待办，不得当成"已完成"。
+**硬前置（已补齐）**：TikTok / Instagram 的 `--no-publish`（同语义：跑到发布就绪点即停）已于 2026-11-12 补齐并通过真机干跑；U11 步 2/3 的迁移可以按计划开始。
 
 **回滚粒度**：一批一提交；S1/S6/S7 是行为变更最集中的三处，出问题时优先回滚它们（其余批依赖它们的接口，回滚须同批回退）。
 
@@ -1043,6 +1043,26 @@ length   = ceil(weighted / 2)          # ≤ 20
 3. 文本输入用坐标点击会被底部固定 `xhs-publish-btn` 遮住：按上游做法改为 `focus()`（仍逐字人类化输入），按钮/开关保留坐标点击。
 4. `.video-container-loading-text` 在正路显示「视频上传中」，不是失败信号；失败态同时有 `div.fail`。因此该节点不再作信号（对照上游：上游只等发布按钮，10 分钟；我们的 `div.fail` 即时中止是加强）。
 5. 定时时间输入框自带默认值（now+~1h）：`focus` 后直接键入会追加成两段日期。改为 `ControlOrMeta+A` 全选后逐字替换，仍只 `blur()`（C2/C3 通过）。
+
+### 9.3.1 三平台 `--no-publish` 真机回归（2026-11-12）
+
+本地 headed + 真实 cookie，全部只跑到“就绪点”即停，未点击发布。
+
+| 平台 | 用例 | 选项 | 结果 |
+| --- | --- | --- | --- |
+| 小红书 | 图文 2 张 | 原创 + AI 声明 + 话题 | 0 |
+| 小红书 | 图文 1 张 | 自主拍摄（地点+日期）/ 来源转载 | 0（二级声明菜单已收窄到 `div.d-popover.d-dropdown .d-option`） |
+| 小红书 | 视频 14s | 原创 + 虚构演绎 + 话题 | 0 |
+| 小红书 | 视频 3.5s | 原创 | 1（平台禁用原创开关，属视频时长/资格限制；换成 14s 后 0） |
+| 小红书 | 视频 + `--thumbnail` | 封面 | 0，但封面 warning 跳过：当前账号 UI 为 AI/PK 封面变体，`编辑封面` 节点 0×0 隐藏；“PK封面”引导已纳入清障注册表 |
+| 小红书 | 定时 | `--schedule` | 0（C1/C2/C3 通过） |
+| TikTok | 视频 14s | `--privacy friends` + `--no-comments` + `--aigc` | 0，发布按钮就绪 |
+| TikTok | 图文 2/3 张 | `--privacy friends` + 选项 | 0 |
+| TikTok | `--privacy public` | — | 1：该账号可见范围菜单只有 `Followers / Friends / Only you`，无 `Everyone/Public`；严格失败正确 |
+| Instagram | Reel 14s | `--no-comments` + `--ai-generated` | 0，Share 就绪 |
+| Instagram | 轮播 2/3 张 | `--alt-text` ×N + `--no-comments` + `--ai-generated` | 0，选项回读一致 |
+
+真机修正：小红书二级声明菜单多义（已收窄）、PK 封面引导遮挡（已清障）；TikTok / Instagram 的 `--no-publish` 为新实现（就绪窗口 60s 或剩余预算，超时退出 1）。
 
 **明确不做**的注入：断网/恢复、改 URL/改选择器、真实发布后杀浏览器、真实验证码页面。
 

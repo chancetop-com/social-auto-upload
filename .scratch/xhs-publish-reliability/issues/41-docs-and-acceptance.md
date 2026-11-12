@@ -46,12 +46,11 @@ Status: resolved
 
 ## Follow-ups
 
-### 硬前置：TikTok / Instagram 的 `--no-publish` 语义
+### ✅ 已补齐：TikTok / Instagram 的 `--no-publish` 语义（2026-11-12）
 
-- **现状**：TikTok 与 Instagram 的 `--no-publish` 仍是「填表完成即返回」，没有「跑到 ARM 就绪」。
-- **要求**：升级为与小红书相同语义——完成上传、元数据、声明/选项与定时设置后，等待发布按钮存在、可交互（hit-test）且未被禁用/遮挡，再返回成功；不进入 FIRE/OBSERVE。
-- **原因**：U11 步 2/3 的真机验收若只到「填表完成」，无法证明选择器、就绪判据与上传完成判定在真实页面上成立，验收会退化为假阳性。
-- **连带**：升级后同步改写各自 `docs/CLI.md` 段落与 skill 契约镜像（`--no-publish` 措辞、超时/观察窗语义）。
+- **状态**：已完成并真机干跑通过。TikTok 在 `post_video_button` / `Post` / `Schedule` 可点击时停止；Instagram 在 Share 可点击时停止；窗口均为 `min(60s, 剩余预算)`，超时退出 `1`，不点击发布、不进入结果观察、不等待 `--not-before`。
+- **真机结果**：TikTok 视频（`--privacy friends` / `--no-comments` / `--aigc`）、图文 2/3 张均 0；Instagram Reel、轮播 2/3 张（含 `--alt-text`）均 0。
+- **文档**：`docs/CLI.md` 的 TikTok / Instagram 段已补 `--no-publish` 语义与验收记录。
 
 ### 真机复检：规格 §8.3 中仍有价值、但本轮无环境验证的项
 
