@@ -21,6 +21,10 @@
 - 视频号：34 个交互点接入人类化（`uploader/tencent_uploader/`）。
 - 快手：13 个交互点接入人类化（描述/正文清空序列与话题逐字、描述聚焦、发布确认弹窗、定时开关与日期 picker、合集下拉与选项、封面入口/上传 tab/确认、视频与图文发布），登录二维码、文件入口、「我知道了」提示条和 Joyride 引导层保持原生并逐条标记（`uploader/ks_uploader/`）。
 
+### 人类化交互层（W5 长尾）
+
+- 虎扑：12 个交互点接入人类化（标题/简介逐字、专区四击、原创/二创、AI 声明下拉收窄后点选、发布前 `before_submit`；QQ 登录与两个 file chooser 入口保持原生并标记，`uploader/hupu_uploader/`）。
+
 ### 移除历史 Web 与旧示例脚本
 
 - 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。
