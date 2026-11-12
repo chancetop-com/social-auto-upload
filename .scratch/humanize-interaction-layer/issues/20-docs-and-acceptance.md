@@ -12,6 +12,7 @@ Status: ready-for-agent
 - [ ] `GLOSSARY.md` 四词条只写「是什么」：人类化交互层 / 交互真实度 / 清空策略 / stillOn
 - [ ] `CHANGELOG.md` 骨架建立，W1 真机结果已写入（未做写「未验证」）
 - [ ] umbrella skill 三行：默认开启、`HUMANIZE=0` 退回原生、出问题先关它再报
-- [ ] `acceptance.md` 模板含三平台表头与 12 平台未验证表，与实际记录一致
+- [ ] `acceptance.md` 模板含三平台表头与 12 平台未验证表；表头固定注明「`--no-publish` 干跑、未点真实发布」
+- [ ] CLI 新节注明：真机验收口径为 `--no-publish` 停在就绪点，发布点击不在本轮验收范围
 - [ ] `README.md` 与平台级 `SKILL.md` 未被改动
 
