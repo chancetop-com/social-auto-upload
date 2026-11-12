@@ -37,6 +37,7 @@ from utils.dom import OverlayRule
 from utils.dom import Resolved
 from utils.dom import check
 from utils.dom import clear_overlays
+from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
@@ -95,6 +96,11 @@ XHS_SESSION_COOKIE_NAME = "galaxy_creator_session_id"
 # 检查发布页的观测窗口：导航 30s + 静置 3s（探测失败是退出 1，不是失效）。
 XHS_PROBE_NAVIGATION_TIMEOUT_MS = 30_000
 XHS_PROBE_SETTLE_MS = XHS_LOGIN_CHECK_SETTLE_MS
+# 真机实测：发布页上传入口在 domcontentloaded 后约 5s 才挂载（冷启动更慢），
+# 因此锚点必须在有界窗口内轮询，不能做 3s 单次快照（U9 D 的 attached 档正是
+# 为了不被慢加载误判）。
+XHS_PROBE_ANCHOR_WINDOW_SECONDS = 15.0
+XHS_PROBE_POLL_MS = 500
 
 # ---------------------------------------------------------------------------
 # 发布链路的等待上限（毫秒）。这些常量只是「上限」：真正传给 Playwright 的
@@ -155,7 +161,6 @@ XHS_VIDEO_READY_POLL_SECONDS = 1.0
 # 失败态只认 class 恰为 fail 的 div（ticket 24 实机）；用属性等值选择器
 # 表达「恰为」，避免命中 fail-* 之类的新增类名。
 XHS_VIDEO_FAIL_SELECTOR = "div[class='fail']"
-XHS_VIDEO_LOADING_TEXT_SELECTOR = ".video-container-loading-text"
 
 # ---------------------------------------------------------------------------
 # 固定 UI 静置/轮询间隔。它们不是超时判据：只覆盖点击/输入后的界面动画与
@@ -190,6 +195,9 @@ XHS_TOPIC_READBACK_POLL_SECONDS = 0.05
 # 主链路零中文依赖：结构候选里不允许出现中文文案。
 # ---------------------------------------------------------------------------
 XHS_ANCHOR_TIMEOUT_MS = 5_000
+# 上传入口在发布页 domcontentloaded 后数秒才挂载（真机测得 ~5s），首目标必须
+# 有界等待；但解析失败后立刻中止，绝不进入 60s 上传完成窗口。
+XHS_UPLOAD_ANCHOR_TIMEOUT_MS = 15_000
 XHS_PUBLISH_BUTTON_POINT = (0.65, 0.5)
 
 
@@ -557,6 +565,8 @@ async def _arm_ready(
     只用于契约对齐（谓词本身无等待）。
     """
     locator = page.locator(XHS_PUBLISH_BUTTON_SELECTOR)
+    # 长表单里发布按钮常在首屏下方：先滚入视口，再做 interactive 落点判定。
+    await ensure_in_viewport(page, locator, point=XHS_PUBLISH_BUTTON_POINT)
     ready, reason = await check(
         locator,
         "interactive",
@@ -741,7 +751,7 @@ async def _dispatch_note_image(
             XHS_NOTE_IMAGE_CANDIDATES,
             role="attached",
             budget=budget,
-            wait=False,
+            timeout_ms=XHS_UPLOAD_ANCHOR_TIMEOUT_MS,
         )
         try:
             await resolved.locator.set_input_files(payload)
@@ -763,7 +773,7 @@ async def _dispatch_note_image(
             (Candidate(XHS_NOTE_ADD_IMAGE_TILE_SELECTOR),),
             role="attached",
             budget=budget,
-            wait=False,
+            timeout_ms=XHS_UPLOAD_ANCHOR_TIMEOUT_MS,
         )
         async with page.expect_file_chooser(
             timeout=budget.clamp_ms(XHS_FILE_CHOOSER_TIMEOUT_MS)
@@ -802,7 +812,7 @@ async def _dispatch_note_image(
         XHS_NOTE_ADD_IMAGE_INPUT_CANDIDATES,
         role="attached",
         budget=budget,
-        wait=False,
+        timeout_ms=XHS_UPLOAD_ANCHOR_TIMEOUT_MS,
     )
     try:
         await fallback.locator.set_input_files(payload)
@@ -922,17 +932,17 @@ async def _note_upload_gate(
 
 
 async def _video_upload_failure(page: Page) -> str | None:
-    """视频的唯一即时失败信号（ticket 24 实机）：结构节点，零文案依赖。
+    """视频的唯一即时失败信号：``div.fail``（class 恰为 fail，ticket 24 实机）。
 
-    ``div.fail``（class 恰为 fail）或 ``.video-container-loading-text``
-    出现即失败。``input.upload-input`` 恒在、``submit-disabled`` 失败态恒
-    ``true``，二者都不能当信号。
+    ``.video-container-loading-text`` **不是**信号：2026-11-12 真机复测显示
+    正路上传中它显示「视频上传中」，失败态才显示失败文案，且同时存在
+    ``div.fail``；因此只用纯结构节点判定，避免把进度当失败，也避免恢复文案扫描。``input.upload-input`` 恒在、``submit-disabled`` 失败
+    态恒 ``true``，二者同样不能当信号。上游只等发布按钮（10 分钟），这里的
+    ``div.fail`` 即时中止是我方有意加强（spec §7）。
     """
     try:
         if await page.locator(XHS_VIDEO_FAIL_SELECTOR).count() > 0:
             return "视频上传失败（div.fail）"
-        if await page.locator(XHS_VIDEO_LOADING_TEXT_SELECTOR).count() > 0:
-            return "视频上传失败（video-container-loading-text）"
     except Exception:
         return None
     return None
@@ -943,8 +953,8 @@ async def _video_upload_gate(
 ) -> None:
     """视频上传完成闸：完成判据 = ARM 谓词满足。
 
-    窗口 ``min(600s, 剩余预算)``、1s 轮询；``div.fail`` /
-    ``.video-container-loading-text`` 立即中止（不等到窗口耗尽）。
+    窗口 ``min(600s, 剩余预算)``、1s 轮询；``div.fail`` 立即中止
+    （不等到窗口耗尽）。``.video-container-loading-text`` 是进度文案，不判失败。
     """
     started = time.monotonic()
     reason = None
@@ -1283,8 +1293,9 @@ async def _resolve_anchor(
     结构分支只打 ``debug``；非结构分支（upstream / text-zh）额外打一条
     ``info``，让真机日志一眼看出是否走了兜底。
 
-    ``wait=False`` 是单趟解析：上传入口/「+」瓦片缺失或多义时必须立即中止
-    （spec §3 U6「不等待」），不进入任何轮询窗口。
+    ``wait=False`` 是单趟解析；上传入口/「+」瓦片用
+    ``XHS_UPLOAD_ANCHOR_TIMEOUT_MS`` 有界等待“挂载”，一旦缺失/多义立即中止
+    （spec §3 U6「不等待」指不进入 60s 上传完成窗口）。
     """
     target = page if scope is None else scope
     if wait:
@@ -1526,13 +1537,26 @@ async def probe_session(context: BrowserContext) -> tuple[str, str]:
         if kind is not None:
             return kind, current_url
 
-        for selector in XHS_LOGIN_POSITIVE_SELECTORS:
-            try:
-                count = await page.locator(selector).count()
-            except Exception:
-                count = 0
-            if count >= 1:
-                return "valid", current_url
+        # 有界轮询：上传入口可能在 domcontentloaded 后数秒才挂载；每轮先看
+        # 风控分类（迟到跳转仍判 10），再看任一上传锚点 attached（count ≥ 1）。
+        deadline = time.monotonic() + XHS_PROBE_ANCHOR_WINDOW_SECONDS
+        while True:
+            kind = await classify_blocked(page)
+            if kind is not None:
+                return kind, current_url
+
+            for selector in XHS_LOGIN_POSITIVE_SELECTORS:
+                try:
+                    count = await page.locator(selector).count()
+                except Exception:
+                    count = 0
+                if count >= 1:
+                    return "valid", current_url
+
+            if time.monotonic() >= deadline:
+                break
+            if wait_for_timeout is not None:
+                await wait_for_timeout(XHS_PROBE_POLL_MS)
 
         raise RuntimeError(
             "小红书发布页检查失败：未找到上传入口（页面结构异常）"
@@ -1716,7 +1740,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             page,
             "定时开关",
             XHS_SCHEDULE_SWITCH_CANDIDATES,
-            role="interactive",
+            role="visible",
             budget=self.publish_budget,
         )
         await humanizer.click(switch.locator)
@@ -1740,8 +1764,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="editable",
             budget=self.publish_budget,
         )
-        # 原生日期输入框点击会展开日历，这里只聚焦后逐字键入。
+        # 真机 2026-11-12：filter input 默认已带一个值（now+~1h），focus 后
+        # 直接键入会**追加**成两段日期。必须先全选，再逐字替换。
         await time_input.locator.focus()
+        await humanizer.press("ControlOrMeta+A")
         await humanizer.type_text(_format_schedule_value(publish_date))
         # 失焦只允许 blur()：Tab 会把焦点交给发布按钮，Enter 会触发暂存离开。
         await time_input.locator.blur()
@@ -1977,7 +2003,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             role="editable",
             budget=self.publish_budget,
         )
-        await humanizer.click(desc.locator)
+        # 输入类字段对照上游：先滚入视口再 focus，不做坐标点击（底部固定
+        # 发布按钮会盖住编辑区中心，坐标落点不可靠）。
+        await ensure_in_viewport(page, desc.locator)
+        await desc.locator.focus()
         await humanizer.press("Backspace")
         await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
@@ -2000,7 +2029,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 role="editable",
                 budget=self.publish_budget,
             )
-            await humanizer.click(desc.locator)
+            await ensure_in_viewport(page, desc.locator)
+            await desc.locator.focus()
 
         for tag in self.tags:
             # 话题是增强项：插入失败降级为纯文本，绝不因此中止发布（spec §3 U7）。
@@ -2315,7 +2345,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 page,
                 "原创开关",
                 XHS_ORIGINAL_SWITCH_CANDIDATES,
-                role="interactive",
+                role="visible",
                 budget=self.publish_budget,
             )
         ).locator
@@ -2345,7 +2375,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                     page,
                     "原创开关",
                     XHS_ORIGINAL_SWITCH_CANDIDATES,
-                    role="interactive",
+                    role="visible",
                     budget=self.publish_budget,
                 )
             ).locator
@@ -2470,7 +2500,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         location = modal.locator('input[placeholder="下拉选择地点"]').first
         if not await location.count():
             raise RuntimeError("未找到「拍摄地点」输入框")
-        await humanizer.click(location)
+        await ensure_in_viewport(page, location)
+        await location.focus()
         await humanizer.type_text(self.shoot_location)
 
         suggestions = page.locator(".el-autocomplete-suggestion li").filter(
@@ -2522,7 +2553,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             state="visible",
             timeout=self._wait_ms(XHS_DECLARATION_MODAL_TIMEOUT_MS),
         )
-        await humanizer.click(source_input)
+        await ensure_in_viewport(page, source_input)
+        await source_input.focus()
         await humanizer.type_text(self.repost_source)
         await self._settle(page, XHS_DECLARATION_FILL_SETTLE_MS)
 
@@ -2773,7 +2805,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             XHS_VIDEO_FILE_CANDIDATES,
             role="attached",
             budget=budget,
-            wait=False,
+            timeout_ms=XHS_UPLOAD_ANCHOR_TIMEOUT_MS,
         )
         try:
             await upload_input.locator.set_input_files(self.file_path)

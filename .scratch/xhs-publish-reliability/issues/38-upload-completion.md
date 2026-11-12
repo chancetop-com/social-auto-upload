@@ -62,3 +62,8 @@ Status: resolved
 - 图文 2 张正路（首图入口 + 「+」→ file chooser）未在真机跑通。
 - 视频正路与假 mp4 注入（`div.fail` → 点击前 `1`、stderr 不含 `publish_attempted=true`）未在真机跑通。
 - `.mask.uploading` 消失 = 客户端上传完成的时序按 ticket 24 取证实现；"服务端收齐"的极端竞态仍只靠一次静默复检防御。
+
+## Comments
+
+- **2026-11-12 真机验收**：视频正路 `--no-publish` → 0（ARM 就绪）；图文 2 张 → 0，第 2 张经 `.img-preview-area .entry` + file chooser；假 mp4 → `div.fail` 点击前 1。
+- **修正**：`.video-container-loading-text` 在正路显示「视频上传中」，不是失败信号（失败态同时有 `div.fail`）。该节点已从失败判据移除，避免恢复文案扫描；`div.fail` 仍是唯一即时失败信号。

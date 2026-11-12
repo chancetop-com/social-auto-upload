@@ -138,6 +138,7 @@ class _ProbePage:
         goto_error: BaseException | None = None,
         anchor_count: int = 1,
         login_box_count: int = 0,
+        anchor_ready_after_waits: int | None = None,
     ) -> None:
         self.url = "about:blank"
         self.main_frame = _ProbeFrame(self)
@@ -145,6 +146,7 @@ class _ProbePage:
         self.status = status
         self.goto_error = goto_error
         self.anchor_count = anchor_count
+        self.anchor_ready_after_waits = anchor_ready_after_waits
         self.login_box_count = login_box_count
         self.goto_calls: list[tuple[str, dict]] = []
         self.wait_timeouts: list[float] = []
@@ -160,6 +162,11 @@ class _ProbePage:
 
     async def wait_for_timeout(self, milliseconds: float) -> None:
         self.wait_timeouts.append(milliseconds)
+        if (
+            self.anchor_ready_after_waits is not None
+            and len(self.wait_timeouts) >= self.anchor_ready_after_waits
+        ):
+            self.anchor_count = 1
 
     def locator(self, selector: str) -> _ProbeLocator:
         if "login-box" in selector:
@@ -281,6 +288,15 @@ class Decision12SessionProbeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "页面结构异常"):
             asyncio.run(xhs_main.probe_session(_ProbeContext(page)))
         self.assertEqual(page.close_calls, 1)
+
+    def test_slow_anchor_mount_is_polled_not_a_structure_error(self):
+        # Real device: upload input mounts ~5s after domcontentloaded.
+        page = _ProbePage(anchor_count=0, anchor_ready_after_waits=3)
+        self.assertEqual(self._probe(page), ("valid", PUBLISH_URL))
+        self.assertGreaterEqual(len(page.wait_timeouts), 3)
+        self.assertEqual(
+            page.wait_timeouts[-1], xhs_main.XHS_PROBE_POLL_MS
+        )
 
     def test_server_error_is_a_probe_failure(self):
         page = _ProbePage(status=503)

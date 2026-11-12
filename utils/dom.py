@@ -245,6 +245,75 @@ def normalise_point(point: Any) -> tuple[float, float]:
     return x, y
 
 
+#: 落点判定前允许的视口边缘空隙；中心落点必须真的在视口内。
+DEFAULT_VIEWPORT_WIDTH = 1280
+DEFAULT_VIEWPORT_HEIGHT = 720
+SCROLL_INTO_VIEW_TIMEOUT_MS = 2000
+
+
+async def ensure_in_viewport(
+    page: Any,
+    locator: Any,
+    *,
+    point: tuple[float, float] | None = None,
+    box: Any = None,
+) -> bool:
+    """把目标滚入视口，使坐标落点真的能在 ``elementFromPoint`` 命中。
+
+    真机：发布页正文编辑区/发布按钮常在首屏下方；不滚动时
+    ``elementFromPoint(x, y)`` 返回 ``null``，会被误判成
+    ``covered-by:unknown``。``box`` 可由调用方预先测量，避免多一次
+    ``bounding_box``（调用方的 stillOn 复核依赖测量次数稳定）。返回是否
+    发生了滚动；任何读取失败都当作“无需滚动”，由后续 ``check`` 按未知档处理。
+    """
+    ratio = normalise_point(point)
+    try:
+        if box is None:
+            box = await locator.bounding_box()
+    except Exception:
+        box = None
+    if box is None:
+        needs_scroll = True
+    else:
+        try:
+            left = float(box["x"])
+            top = float(box["y"])
+            width = float(box["width"])
+            height = float(box["height"])
+        except (KeyError, TypeError, ValueError):
+            needs_scroll = True
+        else:
+            if width <= 0 or height <= 0:
+                needs_scroll = False
+            else:
+                try:
+                    viewport = getattr(page, "viewport_size", None)
+                except Exception:
+                    viewport = None
+                if isinstance(viewport, dict):
+                    vw = int(viewport.get("width") or DEFAULT_VIEWPORT_WIDTH)
+                    vh = int(viewport.get("height") or DEFAULT_VIEWPORT_HEIGHT)
+                else:
+                    vw, vh = DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT
+                target_x = left + width * ratio[0]
+                target_y = top + height * ratio[1]
+                needs_scroll = not (0 <= target_x <= vw and 0 <= target_y <= vh)
+
+    if not needs_scroll:
+        return False
+    scroll = getattr(locator, "scroll_into_view_if_needed", None)
+    if scroll is None:
+        return False
+    try:
+        try:
+            await scroll(timeout=SCROLL_INTO_VIEW_TIMEOUT_MS)
+        except TypeError:
+            await scroll()
+    except Exception:
+        return False
+    return True
+
+
 def _describe(hit: dict[str, Any]) -> str:
     """``covered-by:`` 的标识：tag.class → #id → text[:40]。"""
     tag = str(hit.get("tag") or "").strip().lower()
@@ -628,6 +697,16 @@ async def wait_resolved(
             return resolved
         if blocking is not None:
             last_blocking = blocking
+            # 多义是结构性错误，不会自愈：立刻中止，禁止轮询到超时。
+            if str(blocking[1]).startswith("ambiguous:"):
+                raise _resolve_error(
+                    prepared,
+                    str(role),
+                    last_tried,
+                    last_blocking,
+                    _elapsed_ms(started),
+                    publish_clicked,
+                )
         elapsed_ms = _elapsed_ms(started)
         remaining_ms = limit_ms - elapsed_ms
         if remaining_ms <= 0:

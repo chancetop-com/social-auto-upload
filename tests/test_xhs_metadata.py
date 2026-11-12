@@ -669,6 +669,8 @@ class Decision11ReadbackScheduleReadbackTests(unittest.TestCase):
         # Never Tab/Enter/click-to-blur.
         for action in page.keyboard.actions:
             self.assertNotIn(action, (("press", "Tab"), ("press", "Enter")))
+        # 真机 2026-11-12：filter input 自带默认值，必须先全选再替换。
+        self.assertIn(("press", "ControlOrMeta+A"), page.keyboard.actions)
         self.assertNotIn(("click",), time_input.actions)
 
     def test_c2_parses_and_compares_by_minute(self):

@@ -47,3 +47,7 @@ Status: resolved
 - 测试：新增 `tests/test_xhs_session.py` 31 条（前置三态 + 未知过期 + 坏 JSON；分类型 path / `?redirectPath=/login` / 锚点缺失 / 5xx / 导航异常 / 离开创作域；本地 `check` 0/10/1 与前置失败零浏览器；托管 0/10/1 且不读 cookie；写回矩阵 0/1/9/10 + 托管；原子替换；登录同 context 复核与失败不写；删除清单静态断言）。既有 XHS 用例迁移到 `probe_session`，Kuaishou 全部保留；`test_adspower_video_platforms.py` 的 XHS 分支改 mock `probe_session`，其他平台仍 mock `is_logged_in`。
 - 全量：`python -m unittest discover -s tests -t .` → 1373 tests OK（skipped=2）。
 - 真机项：`未验证（无真机环境）` —— ① 移走账号文件后 `10` 且无浏览器启动日志；② 改坏 cookie 一个字符后浏览器启到发布页、分类命中 `10`、stderr 不含 `publish_attempted=true`。
+
+## Comments
+
+- **2026-11-12 真机验收**：`check --account 180` → `valid` / 0；本地预检+发布页观测正常，并原子写回。注入①（不存在的账号）→ 10 且无 `browser session ready`。注入②：只改 `galaxy_creator_session_id` 服务端仍认会话；改坏 `customer-sso-sid` / `access-token-creator.xiaohongshu.com` / `galaxy.creator.beaker.session.id` 后 → `invalid` / 10，stderr 无 `publish_attempted=true`。

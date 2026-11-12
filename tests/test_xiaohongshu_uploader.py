@@ -317,7 +317,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         )
         self.assertEqual(
             page.locators['div.tiptap[role="textbox"][contenteditable="true"]'].actions,
-            [("click",)],
+            [("focus",)],
         )
         self.assertEqual(
             page.keyboard.actions,
@@ -353,7 +353,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
         self.assertEqual(
             page.locators['div.tiptap[role="textbox"][contenteditable="true"]'].actions,
-            [("click",)],
+            [("focus",)],
         )
         self.assertEqual(
             page.keyboard.actions,
@@ -684,6 +684,9 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
             async def click(self, force=False):
                 self.clicks += 1
+
+            async def focus(self, **kwargs):
+                return None
 
         class FakeOption(FakeTrigger):
             def __init__(self, name):

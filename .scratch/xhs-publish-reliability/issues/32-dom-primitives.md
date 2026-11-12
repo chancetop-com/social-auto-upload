@@ -100,3 +100,7 @@ Reason enums (all strings, stable):
 
 `tests/test_xhs_dom.py`（65 例）、`tests/test_xhs_controls.py`（12 例）；
 全量 `python -m unittest discover -s tests -t .` → 1202 tests OK（skipped=2）。
+
+## Comments
+
+- **2026-11-12 真机复测补充**：新增 `ensure_in_viewport(page, locator, *, point=None, box=None)`。首屏外的坐标落点会让 `elementFromPoint` 返回 `null`（误判 `covered-by:unknown`），行为层与 ARM 谓词现在都先滚入视口再判定；这是对上游 `ScrollIntoView → humanize.ClickAt` 的等价对齐。

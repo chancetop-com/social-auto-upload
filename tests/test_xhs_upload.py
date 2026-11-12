@@ -11,7 +11,7 @@ filled once the media is actually ready.
   (fallback: the single ``multiple`` file input), never ``inputs[0]``/``.first``;
 * video — the one ARM predicate (``_arm_ready``) is the completion signal,
   1s polling, window ``min(600s, remaining budget)``, with the two structural
-  failure states (``div.fail`` / ``.video-container-loading-text``) aborting
+  failure state (``div.fail``) aborting
   immediately.
 
 Every failure is a plain ``RuntimeError`` (exit 1, definitely not published):
@@ -528,8 +528,11 @@ class Decision09UploadNoteInputErrorTests(unittest.TestCase):
                     )
                 )
 
-        # 只有输入解析的短等待，没有进入 60s 上传窗口。
-        self.assertLess(sum(clock.sleep_calls), 1.0)
+        # 只有输入挂载的有界等待，没有进入 60s 上传窗口。
+        self.assertLess(
+            sum(clock.sleep_calls),
+            xhs_main.XHS_UPLOAD_ANCHOR_TIMEOUT_MS / 1000.0 + 1.0,
+        )
 
     def test_budget_exhaustion_uses_the_budget_pre_click_message(self):
         page = _note_page(counts=[0], tiles=[_tile(None)])
@@ -610,20 +613,14 @@ class Decision09UploadVideoGateTests(unittest.TestCase):
         self.assertIn("未点击发布", str(ctx.exception))
         self.assertEqual(clock.sleep_calls, [])
 
-    def test_loading_text_aborts_immediately(self):
+    def test_loading_text_is_progress_not_failure(self):
+        # 2026-11-12 真机：正路上传中 .video-container-loading-text 显示
+        # 「视频上传中」，失败态另有 div.fail；因此不能把该节点当失败。
         page = _video_page(loading_count=1)
-        clock = FakeClock()
-        with clock.patch(xhs_main, publish_timeout, dom):
-            with self.assertRaises(RuntimeError) as ctx:
-                asyncio.run(
-                    xhs_main._video_upload_gate(
-                        page, budget=_budget(), mode="local"
-                    )
-                )
+        clock = self._run(page)
 
-        self.assertIn("video-container-loading-text", str(ctx.exception))
-        self.assertIn("未点击发布", str(ctx.exception))
         self.assertEqual(clock.sleep_calls, [])
+        self.assertEqual(page.locator(PUBLISH).click_count, 0)
 
     def test_ready_window_is_clamped_to_six_hundred_seconds(self):
         page = _video_page(button=_PublishButton("disabled", enabled=False))

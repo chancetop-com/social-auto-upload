@@ -49,7 +49,7 @@ from typing import Any, Awaitable, Callable, Iterator
 
 from loguru import logger
 
-from utils.dom import ElementUnusableError, check, normalise_point
+from utils.dom import ElementUnusableError, check, ensure_in_viewport, normalise_point
 
 #: 关闭整个人类化层：``HUMANIZE=0`` 与 ``profile.enabled=False`` 等价。
 HUMANIZE_ENV = "HUMANIZE"
@@ -256,6 +256,13 @@ class Humanizer:
 
         ratio = normalise_point(point)
         box = await locator.bounding_box()
+        # 坐标点击前先滚入视口：首屏外的目标 elementFromPoint 必然是 null。
+        scrolled = await ensure_in_viewport(
+            self.page, locator, point=ratio, box=box
+        )
+        if scrolled:
+            await self.between_scroll()
+            box = await locator.bounding_box()
         if not box:
             raise _not_dispatched("no-bounding-box")
         try:

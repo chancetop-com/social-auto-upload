@@ -86,3 +86,8 @@ Status: resolved
   - `upload_video_content` / `upload_note_content` 末尾重复的 ARM→FIRE→OBSERVE 尾段：规格定义了两条独立流程，二者共用已测试的 helper；抽取会改变错误归属与 C3 时序，收益不足以抵消回归风险，延后为独立重构。
   - 轮询循环形状重复、请求 dataclass 字段块重复、测试内 fixture 重复、`_wait_ms` 包装、`_page_path`/`_current_path`、`_PROVIDER_LABELS` 重复：均属可读性整理；当前实现有真实回归风险而收益有限。
   - `BlockedKind` / `classify_blocked` 命名：规格 U10/U11 明确使用这两个名字；用户可见术语仍是 glossary 的 `Login required`，不改。
+
+## Comments
+
+- **2026-11-12 真机验收结果**已回写规格 §9.3「实际结果」列：视频/图文/定时正路 0；注入①/②/③ 均符合预期（10/10/1）。未执行项：20MB PNG（可选）、真实发布（会产生真实笔记，待确认）、托管（本机无凭证）。
+- 真机复测暴露的 5 个问题（probe 轮询、滚动、focus、loading-text、定时全选）已修复并记录在规格 §9.3 末尾。

@@ -739,5 +739,57 @@ class Decision06ReadinessSharedLayerTests(unittest.TestCase):
         self.assertEqual(resolved.role, "visible")
 
 
+class _ViewportLocator:
+    def __init__(self, box):
+        self.box = box
+        self.scrolled = 0
+
+    async def bounding_box(self):
+        return None if self.box is None else dict(self.box)
+
+    async def scroll_into_view_if_needed(self, **kwargs):
+        self.scrolled += 1
+        self.box = {"x": 100.0, "y": 100.0, "width": 60.0, "height": 30.0}
+
+
+class _ViewportPage:
+    viewport_size = {"width": 800, "height": 600}
+
+
+class EnsureInViewportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_offscreen_target_is_scrolled_before_hit_test(self):
+        locator = _ViewportLocator(
+            {"x": 10.0, "y": 900.0, "width": 60.0, "height": 30.0}
+        )
+        scrolled = await dom.ensure_in_viewport(_ViewportPage(), locator)
+        self.assertTrue(scrolled)
+        self.assertEqual(locator.scrolled, 1)
+        self.assertEqual(locator.box["y"], 100.0)
+
+    async def test_visible_target_does_not_scroll(self):
+        locator = _ViewportLocator(
+            {"x": 10.0, "y": 100.0, "width": 60.0, "height": 30.0}
+        )
+        scrolled = await dom.ensure_in_viewport(_ViewportPage(), locator)
+        self.assertFalse(scrolled)
+        self.assertEqual(locator.scrolled, 0)
+
+    async def test_point_below_fold_scrolls_even_when_box_starts_above(self):
+        # A 1200px-tall element starting at 100 has its center (700) off-screen.
+        locator = _ViewportLocator(
+            {"x": 10.0, "y": 100.0, "width": 60.0, "height": 1200.0}
+        )
+        scrolled = await dom.ensure_in_viewport(_ViewportPage(), locator)
+        self.assertTrue(scrolled)
+
+    async def test_missing_box_attempts_scroll_and_survives_no_api(self):
+        locator = _ViewportLocator(None)
+        self.assertTrue(await dom.ensure_in_viewport(_ViewportPage(), locator))
+        no_api = FakeLocator("no-scroll-api", box=None)
+        self.assertFalse(
+            await dom.ensure_in_viewport(_ViewportPage(), no_api)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -64,3 +64,7 @@ Status: resolved
 - 测试：`tests/test_xhs_submit.py` 35 条（ARM 四条件、每轮重解析、窗口 60s/预算 3s 用尽、ARM 内 C2、FIRE 恰一次 `mouse.down`、派发前/后异常 1/9/10、OBSERVE 15s/预算/C4 优先、URL 读失败不判成功、`--no-publish` 跳过 `--not-before`、C3 在 ARM 前、零文案扫描）。既有 XHS 预算/上传/分类用例补齐发布按钮脚本，`_wait_publish_outcome` 用例改为 `_observe_publish`。
 - 全量：`python -m unittest discover -s tests -t .` → 1320 tests OK（skipped=2）。
 - 真机项：`未验证（无真机环境）` —— ① 真实发布按钮在 `is-publish` / `submit-disabled` 上的取值时机；② 60s 就绪窗与 15s 观察窗在实机抖动下的余量；③ `--no-publish` 停在按钮前的日志与真实页面状态；④ 派发后异常时页面是否已跳登录/验证页。
+
+## Comments
+
+- **2026-11-12 真机复测**：`probe_session` 的上传入口改为 15s 有界轮询（发布页入口约 5s 才挂载，3s 单次快照会误判结构异常）；ARM 谓词在 hit-test 前先 `ensure_in_viewport`（长表单里发布按钮可能在首屏下方）。视频/图文/定时三条 `--no-publish` 正路均为 0，ARM 就绪后停止。

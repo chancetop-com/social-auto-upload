@@ -54,3 +54,8 @@ Status: resolved
 - 原创：`true` 改用 `utils.controls.read_switch_state` 点前读取；未开/未知 → 点击 + `_confirm_original_declaration`（勾选须知 → `声明原创`），弹窗缺失或任一步异常直接上抛（`1`），点后不回读。`false` 开着则点一次关；控件缺失/不可用视为已关；点后不回读；失败 warning + Escape 继续。`None` 无操作。内容类型声明与封面流程未改。
 - 测试：新增 `tests/test_xhs_metadata.py`（51 项）覆盖标题 ASCII/CJK/emoji/组合字符、自动截断、显式超限文案与不截断、2h/14d 边界、aware offset 忽略、350/500ms 等待窗口、正文 `length-error` 单次检查、C1/C2/C3 的回滚/迟到重置/过期/读失败/不可解析、`--no-publish` 同拦、即时发布不进检查、原创 true/false 失败语义。
 - 真机项：定时 C1/C2/C3 的 simulator class 与日期输入框结构、标题越限后缀节点、原创确认弹窗在真机上的渲染时序 → **未验证（无真机环境）**。
+
+## Comments
+
+- **2026-11-12 真机验收**：定时 `--schedule "2026-11-13 12:00" --no-publish` → 0，C1/C2/C3 全过。
+- **修正**：日期 filter input 自带默认值（now+~1h），`focus` 后直接键入会追加成两段日期；改为 `ControlOrMeta+A` 全选后逐字替换，仍只 `blur()`、不按 Tab/Enter。

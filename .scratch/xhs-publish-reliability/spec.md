@@ -398,7 +398,7 @@ Humanizer(page, *, profile=DEFAULT_PROFILE, rng=None, sleep=asyncio.sleep)
 | 图文 | 静默后计数 < N | 继续等到 60s 窗口耗尽 → 中止 | 1 |
 | 视频 | U2 的 ARM 谓词满足 | 进 `fill_meta` | — |
 | 视频 | 600s（clamp）未满足 | 中止，`unusable`（含禁用原因） | 1 |
-| 视频 | `div.fail`（class 恰为 `fail`）或 `.video-container-loading-text` 出现 | **立即**中止，`unusable`（不等 600s） | 1 |
+| 视频 | `div.fail`（class 恰为 `fail`） | **立即**中止，`unusable`（不等 600s）；`.video-container-loading-text` 是进度文案（正路「视频上传中」），**不判失败** | 1 |
 | 两者 | 预算耗尽 | U1 的 pre-click 文案（不是"处理超时"） | 1 |
 | 两者 | 上传 input 缺失/多义/`set_files` 抛错 | 立即中止（不等待） | 1 |
 | 两者 | `--no-publish` | 仍过就绪闸，然后停 | 0 |
@@ -416,7 +416,7 @@ Humanizer(page, *, profile=DEFAULT_PROFILE, rng=None, sleep=asyncio.sleep)
 
 1. 谓词**只有一份**（U2 ARM helper），两个窗口：就绪窗 `min(600s, 剩余预算)` / 1s；点击窗 `min(60s, 预算)`。
 2. 删除全部关键词扫描、`div.stage` 扫描、"标题框出现即放行"。
-3. `div.fail` / `.video-container-loading-text` 是唯一即时失败信号；`input.upload-input` 恒在、`submit-disabled` 失败态恒 `true`，都**不能**当信号。
+3. `div.fail`（class 恰为 `fail`）是唯一即时失败信号。`.video-container-loading-text` 与进度共用（2026-11-12 真机：正路「视频上传中」，失败「视频上传失败，请重新上传」且同时存在 `div.fail`），因此**不**作信号、不恢复文案扫描。`input.upload-input` 恒在、`submit-disabled` 失败态恒 `true`，都**不能**当信号。
 4. 60s/张 与 600s 就绪窗不缩短（20MB PNG 实测 25.5s，慢时段 >40s）。
 
 **失败语义** 上传失败统一 `RuntimeError`（`missing`/`unusable`，点击前）→ **1**；不按图文/视频/第几张分叉。
@@ -1021,19 +1021,28 @@ length   = ceil(weighted / 2)          # ≤ 20
 
 前置：`--no-publish` 已升级到 ARM 就绪（S5）；显式 `--debug`（默认关）；本地 cookie 有效。
 
+> 2026-11-12 用本地账号 `180` 实跑（macOS + patchright headed）。结论写入下表「实际结果」；
+> 这次实跑同时暴露并修复了 5 个离线测试覆盖不到的真机问题，见本节末尾。
+
 | # | 步骤 | 期望 | 实际结果 |
 | --- | --- | --- | --- |
-| 1 | 视频正路：`sau xiaohongshu upload-video --account <a> --file <mp4> --title T --no-publish` | 0；日志含 ARM 就绪行；命中日志 `xhs-publish-btn` | 未验证（无真机环境） |
-| 2 | 图文正路：2 张图 `upload-note … --no-publish` | 0；第 2 张经"+"瓦片/file chooser；逐瓦片完成态 + 静默复检通过 | 未验证（无真机环境） |
-| 3 | 定时正路：`--schedule <2h–14d>` | 到 ARM 就绪 0；**不验证**定时是否生效（§8.3 #3） | 未验证（无真机环境） |
-| 4 | 注入①：移走账号文件 | 10；**无** `browser session ready` 日志（证明未启浏览器） | 未验证（无真机环境） |
-| 5 | 注入②：改坏 `galaxy_creator_session_id` 一个字符（字段在、未过期） | 启浏览器 → C1 判 login → 10；stderr **不含** `publish_attempted=true` | 未验证（无真机环境） |
-| 6 | 注入③：假 mp4 | `div.fail` → 点击前 1；stderr 不含该行 | 未验证（无真机环境） |
-| 7 | 注入④（可选）：20MB PNG | 逐瓦片完成态正常；60s 不误杀 | 未验证（无真机环境） |
-| 8 | 真实发布（最小验收）：1 篇图文，不带 `--no-publish` | 0；URL 离开 `/publish/publish`；人工删除该笔记 | 未验证（无真机环境） |
-| 9 | 托管（可选）：有账号时重复 1/2 | 同本地；断言一条 `browser session ready` | 未验证（无真机环境） |
+| 1 | 视频正路：`sau xiaohongshu upload-video --account <a> --file <mp4> --title T --no-publish` | 0；日志含 ARM 就绪行；命中日志 `xhs-publish-btn` | ✅ 0；`视频已经传完啦` 后 `ARM 就绪，--no-publish 停在发布按钮前`；命中 `div.upload-content input.upload-input`（structure） |
+| 2 | 图文正路：2 张图 `upload-note … --no-publish` | 0；第 2 张经"+"瓦片/file chooser；逐瓦片完成态 + 静默复检通过 | ✅ 0；第 1 张走上传入口、第 2 张命中 `.img-preview-area .entry`（structure）并 `expect_file_chooser`；两瓦片完成态通过 |
+| 3 | 定时正路：`--schedule <2h–14d>` | 到 ARM 就绪 0；**不验证**定时是否生效（§8.3 #3） | ✅ 0；C1/C2/C3 全部通过（`2026-11-13 12:00`），到 ARM 就绪停止 |
+| 4 | 注入①：移走账号文件（用不存在的账号名） | 10；**无** `browser session ready` 日志（证明未启浏览器） | ✅ 10；stderr 为本地登录句；**无** `browser session ready` |
+| 5 | 注入②：改坏会话 cookie | 启浏览器 → C1 判 login → 10；stderr **不含** `publish_attempted=true` | ✅ 10；`invalid` + 本地登录句；无 `publish_attempted=true`。注意：只改 `galaxy_creator_session_id` **不会**失效（服务端仍认会话），需改 `customer-sso-sid` / `access-token-creator.xiaohongshu.com` / `galaxy.creator.beaker.session.id` 这组 |
+| 6 | 注入③：假 mp4（文本改名 .mp4） | `div.fail` → 点击前 1；stderr 不含该行 | ✅ 1；`div.fail — 视频上传失败（div.fail）`，点击前中止 |
+| 7 | 注入④（可选）：20MB PNG | 逐瓦片完成态正常；60s 不误杀 | 未执行（可选） |
+| 8 | 真实发布（最小验收）：1 篇图文，不带 `--no-publish` | 0；URL 离开 `/publish/publish`；人工删除该笔记 | 未执行（会产生真实笔记，待人工确认） |
+| 9 | 托管（可选）：有账号时重复 1/2 | 同本地；断言一条 `browser session ready` | 未执行（本机无 MLX/AdsPower 凭证） |
 
-> 本次收尾环境没有账号、cookie 与桌面浏览器，**§9.3 全部行未执行**；以上「未验证」不是通过结论，不能当成真机证据。离线证据见 §9.4 的测试尾部日志。
+**2026-11-12 真机复测发现并已修复**
+
+1. `probe_session` 只等 3s 做单次快照：发布页上传入口在 `domcontentloaded` 后约 5s 才挂载 → 误判「页面结构异常」。改为 15s 有界轮询（每轮先分类，命中即 10）。
+2. 坐标点击前未滚动：正文编辑区/发布按钮常在首屏下方，`elementFromPoint` 返回 `null` → `covered-by:unknown`。新增 `utils/dom.ensure_in_viewport`，`Humanizer.click` 与 ARM 谓词先滚入视口（对照上游：上游也是 `ScrollIntoView` + 200ms 再 `humanize.ClickAt`）。
+3. 文本输入用坐标点击会被底部固定 `xhs-publish-btn` 遮住：按上游做法改为 `focus()`（仍逐字人类化输入），按钮/开关保留坐标点击。
+4. `.video-container-loading-text` 在正路显示「视频上传中」，不是失败信号；失败态同时有 `div.fail`。因此该节点不再作信号（对照上游：上游只等发布按钮，10 分钟；我们的 `div.fail` 即时中止是加强）。
+5. 定时时间输入框自带默认值（now+~1h）：`focus` 后直接键入会追加成两段日期。改为 `ControlOrMeta+A` 全选后逐字替换，仍只 `blur()`（C2/C3 通过）。
 
 **明确不做**的注入：断网/恢复、改 URL/改选择器、真实发布后杀浏览器、真实验证码页面。
 

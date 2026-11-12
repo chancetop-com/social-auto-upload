@@ -51,7 +51,6 @@ NOTE_IMAGE_INPUT_FALLBACK = '.img-list .top input[type="file"][multiple]'
 PUBLISH_BUTTON_SELECTOR = "xhs-publish-btn"
 NOTE_TILES_SELECTOR = ".img-preview-area .pr"
 VIDEO_FAIL_SELECTOR = xhs_main.XHS_VIDEO_FAIL_SELECTOR
-VIDEO_LOADING_TEXT_SELECTOR = xhs_main.XHS_VIDEO_LOADING_TEXT_SELECTOR
 
 INPUT_FACTS = {
     "tag": "input",
@@ -300,7 +299,6 @@ def _video_page(clock: FakeClock, *, advance_on_goto: float = 0.0, **overrides):
         ),
         PUBLISH_BUTTON_SELECTOR: _AdvancingClickLocator("publish", clock),
         VIDEO_FAIL_SELECTOR: FakeLocator("video-fail", count=0),
-        VIDEO_LOADING_TEXT_SELECTOR: FakeLocator("video-loading", count=0),
     }
     selectors.update(overrides.pop("selectors", {}))
     page = _AdvancingPage(
@@ -425,8 +423,12 @@ class Decision03BudgetNoteChainTests(unittest.TestCase):
                     _note_app().upload_note_content(page, mode="local")
                 )
 
-        # spec §3 U6：上传入口缺失 → 立即中止，不进入任何轮询窗口。
-        self.assertEqual(clock.sleep_calls, [])
+        # spec §3 U6：上传入口缺失 → 有界等待挂载后立即中止，
+        # 不进入 60s 上传完成窗口。
+        self.assertLess(
+            sum(clock.sleep_calls),
+            xhs_main.XHS_UPLOAD_ANCHOR_TIMEOUT_MS / 1000.0 + 1.0,
+        )
 
 
 # ---------------------------------------------------------------------------
