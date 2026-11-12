@@ -1,6 +1,7 @@
 """雪球长文：结构化原稿、原位置插图、封面、预览与单次发表。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sys
@@ -15,6 +16,7 @@ from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, asyn
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
+from utils.humanize import Humanizer
 from uploader.xueqiu_uploader.constants import (
     XUEQIU_ARTICLE_URL, XUEQIU_CONTEXT_KWARGS, XUEQIU_DECLARATIONS,
     XUEQIU_IMAGE_SUFFIXES, XUEQIU_LAUNCH_KWARGS, XUEQIU_VISIBILITY,
@@ -56,6 +58,29 @@ class XueqiuArticle:
         budget = getattr(self, "_publish_budget", None)
         return budget.clamp_ms(default_ms) if budget else default_ms
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """人类化停顿只吃剩余预算，不自己抛超时。"""
+        budget = getattr(self, "_publish_budget", None)
+        remaining = (
+            max(0.0, budget.remaining_seconds()) if budget is not None else seconds
+        )
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     def validate_upload_args(self, *, check_cookie: bool = True):
         """所有本地参数在创建远端草稿前校验，不猜测尚未观察到的长度上限。
 
@@ -85,6 +110,7 @@ class XueqiuArticle:
 
     async def fill_article_body(self, page, body, *, multilogin: bool = False):
         """在原稿图片位置放置唯一标记，原生上传后再核对完整图文交错顺序。"""
+        humanizer = self._humanizer(page)
         parts = []
         insertions = []
         for part in self.document.parts:
@@ -98,10 +124,10 @@ class XueqiuArticle:
         await page.evaluate("""async html => navigator.clipboard.write([
             new ClipboardItem({'text/html': new Blob([html], {type: 'text/html'})})
         ])""", "".join(parts))
-        await body.click()
+        await humanizer.click(body)
         await body.press("Meta+V" if sys.platform == "darwin" else "Control+V")
         # 标题字段用于失焦；等待本次末尾文字实际进入模型，再开始选择图片标记。
-        await page.get_by_placeholder("请输入标题", exact=True).click()
+        await page.get_by_placeholder("请输入标题", exact=True).click()  # native-click: focus；失焦正文让编辑器落定粘贴块，非内容交互
         for marker, _ in insertions:
             await expect(body).to_contain_text(marker)
         self.uploaded_images = []
@@ -124,7 +150,7 @@ class XueqiuArticle:
             await body.press("Shift")
             # data-tip 是实测上传动作语义；限定 snb_toolbar 排除独立封面 input。
             async with page.expect_file_chooser() as chooser:
-                await page.locator('#snb_toolbar [data-tip="上传图片"]').click()
+                await humanizer.click(page.locator('#snb_toolbar [data-tip="上传图片"]'))
             file_chooser = await chooser.value
             # input 保留旧文件；只清空原生值而不派发空 change，允许相同文件在不同原稿位置出现。
             await file_chooser.element.evaluate("input => { input.value = ''; }")
@@ -138,11 +164,12 @@ class XueqiuArticle:
             if await inserted.evaluate("e => e.naturalWidth") <= 0:
                 raise RuntimeError(f"正文图片无法加载: {image.name}")
             self.uploaded_images.append(await inserted.evaluate("e => e.src"))
-        await page.get_by_placeholder("请输入标题", exact=True).click()
+        await page.get_by_placeholder("请输入标题", exact=True).click()  # native-click: focus；上传结束后再次失焦正文，让编辑器落定图片块
         await check_xueqiu_article_content(body, self.document)
 
     async def fill_article_form(self, page: Page, *, multilogin: bool = False):
         """按真实字段填写、读回选项和正文，再独立检查预览与自动保存。"""
+        humanizer = self._humanizer(page)
         # 标题占位符表达字段职责；正文 placeholder 在输入后消失，使用 editor 直属可编辑节点，
         # 排除上传图片内部 contenteditable=false 的工具容器，填表前后使用同一定位器。
         title = page.get_by_placeholder("请输入标题", exact=True)
@@ -152,7 +179,10 @@ class XueqiuArticle:
         # 新任务只写空编辑器；页面若恢复已有草稿，不覆盖用户原文。
         if (await title.input_value()).strip() or (await body.inner_text()).strip() or await body.locator("img").count():
             raise RuntimeError("雪球编辑器已有内容，拒绝覆盖；请先处理现有草稿")
-        await title.fill(self.title)
+        # 清空形态为 none：平台已有「非空即拒绝」守卫（上方 input_value 检查），
+        # 这里只聚焦后逐字输入，绝不清空标题——全仓清空策略的样板。
+        await humanizer.click(title)
+        await humanizer.type_text(self.title)
         await expect(title).to_have_value(self.title)
         await self.fill_article_body(page, body, multilogin=multilogin)
         self.cover_url = None
@@ -170,7 +200,7 @@ class XueqiuArticle:
             await expect(crop.locator('img[alt="Crop"]')).to_have_js_property("complete", True)
             if await crop.locator('img[alt="Crop"]').evaluate("e => e.naturalWidth") <= 0:
                 raise RuntimeError("封面裁剪预览无法加载")
-            await crop.get_by_role("button", name="确认裁剪", exact=True).click()
+            await humanizer.click(crop.get_by_role("button", name="确认裁剪", exact=True))
             await expect(crop).to_have_count(0, timeout=self._budget_ms(60000))
             # 实测成功封面以背景图展示，原上传按钮被 hidden；不能检查占位 img 的固定地址。
             cover_preview = cover_row.locator('div[class*="index_input-cover-pic-btn_"]')
@@ -183,15 +213,18 @@ class XueqiuArticle:
                 has=page.get_by_text(label, exact=True),
             )
             selected = row.locator('div[class*="index_selectWrap_"]')
-            await selected.click()
+            # 先读当前值：下拉点开再点关会收起容器，已选对时不再动它（幂等）。
+            if (await selected.inner_text()).strip() == value:
+                continue
+            await humanizer.click(selected)
             # optionContainer 是展开选项容器；visible 排除当前未展开的另一菜单。
             option = row.locator('div[class*="index_optionContainer_"]:visible').get_by_text(value, exact=True)
             await expect(option).to_have_count(1)
-            await option.click()
+            await humanizer.click(option)
             await expect(selected).to_contain_text(value)
         # publish_state 是独立自动保存状态区域，不以正文里的同名文字判断保存完成。
         await expect(page.locator('div[class*="publish_state_"]')).to_contain_text("已经保存至草稿", timeout=self._budget_ms(60000))
-        await page.get_by_role("button", name="预览", exact=True).click()
+        await humanizer.click(page.get_by_role("button", name="预览", exact=True))
         # 预览容器的业务前缀在实测 DOM 中稳定；h1 与 content-text 分别承载预览标题、正文。
         preview = page.locator('div[class*="index_preview-content_"]')
         await expect(preview).to_be_visible()
@@ -218,6 +251,20 @@ class XueqiuArticle:
                 raise RuntimeError("预览中的封面无法加载")
         if not multilogin and (await read_xueqiu_identity(page))["uid"] != self.identity["uid"]:
             raise RuntimeError("雪球填写期间账号发生变化，已中止")
+
+    async def _close_preview(self, page: Page) -> None:
+        """预览遮罩：只能坐标点关闭开关，不删遮罩、不强点。"""
+        # index_preview_ 是预览遮罩，直接子级 index_close_ 是实测关闭控件；不删除遮罩或强制点击。
+        humanizer = self._humanizer(page)
+        await humanizer.click(page.locator('div[class*="index_preview_"] > div[class*="index_close_"]'))
+        # 关闭后组件仍保留在 DOM，由父层隐藏；不能要求节点被删除。
+        await expect(page.locator('div[class*="index_preview-content_"]')).to_be_hidden()
+
+    async def _submit(self, page: Page, publish) -> None:
+        """唯一提交点：人类化停顿后坐标点击，异常原样上抛。"""
+        humanizer = self._humanizer(page)
+        await humanizer.before_submit()
+        await humanizer.click(publish)
 
     def results_dir(self) -> Path:
         """Result manifests sit next to the local account; MLX uses a temp dir."""
@@ -269,6 +316,8 @@ class XueqiuArticle:
         page = None
         try:
             page = await session.context.new_page()
+            # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
+            self._humanizer(page)
             response = await page.goto(XUEQIU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:
                 raise RuntimeError(f"雪球编辑器访问失败，HTTP {response.status}")
@@ -287,9 +336,7 @@ class XueqiuArticle:
                 result.update(success=True, status="prepared", url=page.url)
                 return result
             # index_preview_ 是预览遮罩，直接子级 index_close_ 是实测关闭控件；不删除遮罩或强制点击。
-            await page.locator('div[class*="index_preview_"] > div[class*="index_close_"]').click()
-            # 关闭后组件仍保留在 DOM，由父层隐藏；不能要求节点被删除。
-            await expect(page.locator('div[class*="index_preview-content_"]')).to_be_hidden()
+            await self._close_preview(page)
             publish = page.get_by_role("button", name="发布", exact=True)
             # 页面用 class 表达禁用态，不能仅依赖 HTML disabled；保留语义前缀排除哈希变化。
             await expect(publish).not_to_have_class(
@@ -313,7 +360,7 @@ class XueqiuArticle:
                     and response.url == "https://mp.xueqiu.com/xq/statuses/update.json",
                     timeout=budget.clamp_ms(60000),
                 ) as submitted:
-                    await publish.click()
+                    await self._submit(page, publish)
                     publish_clicked = True
                 response = await submitted.value
             except BrowserTimeoutError:

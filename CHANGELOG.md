@@ -32,6 +32,7 @@
 - 支付宝生活号：11 个交互点接入人类化（标题与 `#话题` 全选覆盖后逐字、作品描述 `\r\n` 归一后逐字、封面弹窗入口/上传 tab/「完 成」、合集下拉收窄后与选项合并为一次坐标点击（删除 force 首选）、质量提示「继续发布」、发布与 AIGC 后二次发布各带 `before_submit`），扫码 tab 与文件入口保持原生并逐条标记（`uploader/alipay_uploader/`）。
 - 百家号：14 个交互点接入人类化（标题 `contenteditable` 保留「点标题 → Ctrl+A → Backspace」清空序列后逐字、合集搜索逐字并用有界等待替换固定等待、候选项按合集名全等点选、创作声明改点组件本体并删除 `force`、发布遮挡只清浮层不加 `force`），百度 passport 登录与封面弹窗「上传」tab 保持原生并逐条标记（`uploader/baijiahao_uploader/`）。
 - 虎扑：12 个交互点接入人类化（标题/简介逐字、专区四击、原创/二创、AI 声明下拉收窄后点选、发布前 `before_submit`；QQ 登录与两个 file chooser 入口保持原生并标记，`uploader/hupu_uploader/`）。
+- 雪球：13 个交互点接入人类化（标题 `none` 守卫不清空、正文坐标聚焦、工具栏传图、封面裁剪确认、分享范围/创作声明先读状态、预览与遮罩关闭、发布 `before_submit`），失焦与发布后只读核对保持原生并逐条标记（`uploader/xueqiu_uploader/`）。
 
 ### 移除历史 Web 与旧示例脚本
 
