@@ -31,7 +31,9 @@ from patchright.async_api import (
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.browser_session import BrowserSession
+from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 from utils.log import weibo_logger
 from utils.login_qrcode import build_login_qrcode_path, remove_qrcode_file
 
@@ -471,6 +473,9 @@ class WeiBoVideo(BaseVideoUploader):
         # 1) 点击首页「视频」入口，弹出发布窗口（popup）
         publish_page = await self._open_video_publish_page(page, multilogin=multilogin)
 
+        # 发布页是另一个 page：必须换新实例，首页实例不得跨页复用。
+        humanizer = self._humanizer(publish_page)
+
         # 2) 上传视频文件
         await self._upload_video_file(publish_page)
 
@@ -478,34 +483,60 @@ class WeiBoVideo(BaseVideoUploader):
         await self._wait_upload_complete(publish_page)
 
         # 4) 类型 = 二创（必选）
-        await self._select_type(publish_page)
+        await self._select_type(publish_page, humanizer)
 
         # 5) 内容声明 = 含AI生成内容（必选）
-        await self._select_declaration(publish_page)
+        await self._select_declaration(publish_page, humanizer)
 
         # 6) 填写标题（必填）
-        await self._fill_title(publish_page)
+        await self._fill_title(publish_page, humanizer)
 
         # 7) 上传封面（必填）
-        await self._upload_thumbnail(publish_page)
+        await self._upload_thumbnail(publish_page, humanizer)
 
         # 8) 合集：选已有，没有则新建（配置了 collection_name 时）
         if self.collection_name:
-            await self._apply_collection(publish_page)
+            await self._apply_collection(publish_page, humanizer)
 
         # 9) 填写描述（包含标签）
-        await self._fill_description(publish_page)
+        await self._fill_description(publish_page, humanizer)
 
         # 10) 点击发布并校验真成功
-        await self._submit_publish(publish_page, multilogin=multilogin)
+        await self._submit_publish(
+            publish_page, multilogin=multilogin, humanizer=humanizer
+        )
+
+    def _humanizer(self, page: Page) -> Humanizer:
+        """一个 page 一个实例；``cached.page is not page`` 即弃用重建。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """行为层时延只吃预算上限，从不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            weibo_logger.warning(
+                _msg(
+                    "⚠️",
+                    "人类化停顿被预算裁剪: "
+                    f"{round(seconds, 2)}s > {round(remaining, 2)}s",
+                )
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
 
     async def _open_video_publish_page(self, page: Page, *, multilogin: bool = False) -> Page:
         """点击首页「视频」入口，等待 popup 视频发布页。"""
+        humanizer = self._humanizer(page)
         async with page.expect_popup(timeout=30000) as popup_info:
             # 录制脚本：page.locator("span").filter(has_text="视频").click()
             video_btn = page.locator("span").filter(has_text="视频").first
             await video_btn.wait_for(state="visible", timeout=15000)
-            await video_btn.click()
+            await humanizer.click(video_btn)
+            await humanizer.after_navigate()
         publish_page = await popup_info.value
         await publish_page.wait_for_timeout(3000)
         if multilogin:
@@ -521,7 +552,7 @@ class WeiBoVideo(BaseVideoUploader):
 
         # 通过 file chooser 设置文件
         async with page.expect_file_chooser(timeout=10000) as fc_info:
-            await upload_btn.click()
+            await upload_btn.click()  # native-click: file；文件选择结果只能由 set_files 传入
         file_chooser = await fc_info.value
         await file_chooser.set_files(self.file_path)
         weibo_logger.info(_msg("🏃", f"已选择视频文件: {self.file_path}"))
@@ -574,16 +605,26 @@ class WeiBoVideo(BaseVideoUploader):
                 last_log = time.monotonic()
             await asyncio.sleep(2)
 
-    async def _fill_title(self, page: Page) -> None:
-        """填写标题（最长30字）。"""
+    async def _fill_title(self, page: Page, humanizer: Humanizer) -> None:
+        """填写标题（最长30字）：聚焦合并进输入序列，全选覆盖后逐字输入。"""
         title_field = page.get_by_placeholder("填写标题（0～30个字）")
         await title_field.wait_for(state="visible", timeout=15000)
+        count = await title_field.count()
+        if count != 1:
+            raise ElementUnusableError(
+                what="标题输入框",
+                role="editable",
+                selector="placeholder:填写标题（0～30个字）",
+                reason=f"ambiguous:{count}",
+            )
         title = self.title[:self.max_title_length]
-        await title_field.click()
-        await title_field.fill(title)
+        await humanizer.click(title_field)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(title)
         weibo_logger.info(_msg("🏷️", f"标题已填写: {title}"))
 
-    async def _upload_thumbnail(self, page: Page) -> None:
+    async def _upload_thumbnail(self, page: Page, humanizer: Humanizer) -> None:
         """上传封面（必填）。
 
         真实 DOM/坑位：
@@ -592,15 +633,15 @@ class WeiBoVideo(BaseVideoUploader):
           - **关键坑**：选图后封面要走**服务端裁切**，期间层内显示"裁切处理中/处理中请稍后…"，
             "完成"按钮此时点了也不生效；而「编辑封面」层开着时，微博会把**主表单层
             `_layer_19x8d_246` 置为 display:none** → 之后的合集开关/发布按钮全部 0 尺寸点不动。
-          - 因此必须：等裁切处理结束(cropper 出 blob 图且无"处理中"字样) → 点"完成" →
-            **确认编辑封面层已关闭**（否则重试/抛错），主表单才会恢复可见。
+          - 因此必须：等裁切处理结束(cropper 出 blob 图) → **只点一次**"完成" → 等层关闭
+            （不在等待循环里周期重复点），主表单才会恢复可见。
         """
         # 打开「上传封面」
         upload_link = page.get_by_role("link", name="上传封面").first
         if not await upload_link.count():
             upload_link = page.locator('a:has-text("上传封面")').first
         await upload_link.wait_for(state="visible", timeout=20000)
-        await upload_link.click()
+        await humanizer.click(upload_link)
         await page.wait_for_timeout(1200)
 
         # 「编辑封面」层
@@ -611,6 +652,7 @@ class WeiBoVideo(BaseVideoUploader):
         # 导致"裁切处理中"永久卡住、发不出 picupload 请求）
         file_input = page.locator('input[type="file"][accept*="jpg"]').first
         await file_input.wait_for(state="attached", timeout=15000)
+        # native-click: file；封面文件直接 set_input_files（.last 是隐藏裁切器）
         await file_input.set_input_files(self.thumbnail_path)
         weibo_logger.info(_msg("🏃", f"已选择封面图片: {self.thumbnail_path}"))
 
@@ -622,14 +664,25 @@ class WeiBoVideo(BaseVideoUploader):
             weibo_logger.warning(_msg("⚠️", "cropper 未见 blob 图，仍尝试点完成"))
         await page.wait_for_timeout(500)
 
-        # 高容错收尾：裁切时长因图/网络而异，不赌固定时长、不赌某个请求。
-        # 只认**真实结果**——「编辑封面」层是否关闭；期间**周期性重复点"完成"**
-        # （裁切处理中点了无害，处理完的那次点击就会关闭层），并识别裁切/上传报错。
+        # 「完成」只点一次：先等按钮可用（aria-disabled 解除），再走一次人类化点击。
+        # 裁切处理中重复点击既无收益也会掩盖真实卡死，因此等待阶段不再周期性点击。
         finish_btn = cover_layer.locator('div.wbpro-layer-btn button:has(span:text-is("完成"))').first
         if not await finish_btn.count():
             finish_btn = cover_layer.locator('button:has(span:text-is("完成"))').first
+        for _ in range(15):
+            if not await finish_btn.count():
+                break
+            try:
+                if (await finish_btn.get_attribute("aria-disabled")) != "true":
+                    break
+            except Exception:
+                break
+            await page.wait_for_timeout(1000)
+        clicked_finish = False
+        if await finish_btn.count() and await finish_btn.is_visible():
+            await humanizer.click(finish_btn)
+            clicked_finish = True
         closed = False
-        last_click = 0.0
         start = time.monotonic()
         while time.monotonic() - start < 300:  # 宽松 5 分钟，且不突破总预算
             self.publish_budget.check_pre_click()
@@ -649,18 +702,12 @@ class WeiBoVideo(BaseVideoUploader):
             for err in ("裁切失败", "上传失败", "图片格式", "封面上传失败", "重新上传", "格式不支持"):
                 if err in layer_txt:
                     raise RuntimeError(f"封面裁切/上传失败：{err}")
-            # 周期性点"完成"（每 4s 一次；跳过明确 disabled）
-            if time.monotonic() - last_click > 4:
-                try:
-                    if await finish_btn.count() and await finish_btn.is_visible():
-                        if (await finish_btn.get_attribute("aria-disabled")) != "true":
-                            await finish_btn.click(timeout=3000)
-                except Exception:
-                    pass
-                last_click = time.monotonic()
             await asyncio.sleep(2)
         if not closed:
-            raise RuntimeError("封面「完成」后编辑封面层长时间(>300s)未关闭，疑似裁切服务异常")
+            detail = "" if clicked_finish else "（「完成」按钮未出现）"
+            raise RuntimeError(
+                f"封面「完成」后编辑封面层长时间(>300s)未关闭{detail}，疑似裁切服务异常"
+            )
 
         # 确认主表单层已恢复可见（display 从 none 变回）
         main_form = page.locator('div.wbpro-layer[class*="_layer_19x8d"]').first
@@ -670,7 +717,7 @@ class WeiBoVideo(BaseVideoUploader):
             weibo_logger.warning(_msg("⚠️", "封面关闭后主表单未确认可见，继续尝试"))
         weibo_logger.success(_msg("🖼️", "封面已上传并完成"))
 
-    async def _select_type(self, page: Page) -> None:
+    async def _select_type(self, page: Page, humanizer: Humanizer) -> None:
         """类型（必选）：选择「二创」。
 
         真实 DOM：`<div class="_type_1vpmt_29">` 下两个
@@ -679,12 +726,12 @@ class WeiBoVideo(BaseVideoUploader):
         """
         label = page.locator('label.woo-radio-main:has(span.woo-radio-text:text-is("二创"))').first
         await label.wait_for(state="visible", timeout=20000)
-        await label.click()
+        await humanizer.click(label)
         await page.wait_for_timeout(500)
 
         checked_sel = 'label.woo-radio-main:has(span.woo-radio-text:text-is("二创")) span.woo-radio-checked'
         if not await page.locator(checked_sel).count():
-            # 兜底：直接勾选 radio input
+            # 兜底：直接勾选 radio input（React 受控 radio 偶发吞掉坐标点击）
             try:
                 await label.locator('input.woo-radio-input').check()
                 await page.wait_for_timeout(300)
@@ -694,7 +741,7 @@ class WeiBoVideo(BaseVideoUploader):
             raise RuntimeError("类型「二创」未选中")
         weibo_logger.info(_msg("🏷️", "类型已选：二创"))
 
-    async def _select_declaration(self, page: Page) -> None:
+    async def _select_declaration(self, page: Page, humanizer: Humanizer) -> None:
         """内容声明（必选）：选择「含AI生成内容」。
 
         真实 DOM：
@@ -708,7 +755,7 @@ class WeiBoVideo(BaseVideoUploader):
         if not await trigger.count():
             trigger = page.locator('div:has(> div[class*="_tit1_nsgmr"]) .woo-pop-ctrl').first
         await trigger.wait_for(state="visible", timeout=15000)
-        await trigger.click()
+        await humanizer.click(trigger)
         await page.wait_for_timeout(1000)
 
         panel = page.locator('div[class*="_panel_nsgmr"]').first
@@ -723,7 +770,7 @@ class WeiBoVideo(BaseVideoUploader):
         scope = panel if panel is not None else page
         ai_opt = scope.locator('button:has(span:text-is("含AI生成内容"))').first
         await ai_opt.wait_for(state="visible", timeout=8000)
-        await ai_opt.click()
+        await humanizer.click(ai_opt)
         await page.wait_for_timeout(500)
 
         # 校验选中态
@@ -735,33 +782,43 @@ class WeiBoVideo(BaseVideoUploader):
         if not await confirm.count():
             confirm = scope.locator('button:has(span:text-is("确定"))').last
         if await confirm.count():
-            await confirm.click()
+            await humanizer.click(confirm)
             await page.wait_for_timeout(500)
         weibo_logger.info(_msg("🏷️", "内容声明已选：含AI生成内容"))
 
-    async def _fill_description(self, page: Page) -> None:
-        """填写描述区域（正文 + 标签）。
+    async def _fill_description(self, page: Page, humanizer: Humanizer) -> None:
+        """填写描述区域（正文 + 标签）：全选覆盖后逐字输入。
 
         微博描述区 placeholder: "有什么新鲜事想分享给大家？"
         标签用 #话题# 格式插入到描述末尾。
         """
         desc_field = page.get_by_placeholder("有什么新鲜事想分享给大家？")
-        if not await desc_field.count():
+        count = await desc_field.count()
+        if not count:
             weibo_logger.warning(_msg("⚠️", "未找到描述输入框"))
             return
+        if count != 1:
+            raise ElementUnusableError(
+                what="描述输入框",
+                role="editable",
+                selector="placeholder:有什么新鲜事想分享给大家？",
+                reason=f"ambiguous:{count}",
+            )
 
-        # 组装描述内容：正文 + 标签
-        content = self.desc
+        # 组装描述内容：正文 + 标签；多行先 \r\n → \n（\r 走 insert_text 可能被丢弃）。
+        content = self.desc.replace("\r\n", "\n").replace("\r", "\n")
         if self.tags:
             tag_str = " ".join(f"#{t}#" for t in self.tags)
             content = f"{content}\n{tag_str}" if content else tag_str
 
         if content:
-            await desc_field.click()
-            await desc_field.fill(content)
+            await humanizer.click(desc_field)
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.press("Delete")
+            await humanizer.type_text(content)
             weibo_logger.info(_msg("📝", f"描述已填写（{len(content)}字）"))
 
-    async def _apply_collection(self, page: Page) -> None:
+    async def _apply_collection(self, page: Page, humanizer: Humanizer) -> None:
         """合集：选已有，没有则新建。
 
         真实 DOM：打开「合集」开关后出现合集面板 `._scroll_19x8d_143`——已有合集每行一个
@@ -773,7 +830,7 @@ class WeiBoVideo(BaseVideoUploader):
         if not target:
             return
 
-        # 1) 打开合集开关
+        # 1) 打开合集开关：点装饰层 `span[role=switch]`，失败不再 force / JS。
         block = page.locator('div[class*="_switch_"]:has(div[class*="_tit1_"]:text-is("合集"))').first
         if not await block.count():
             block = page.locator('div:has(> div:text-is("合集")):has(label.woo-switch-main)').first
@@ -789,12 +846,9 @@ class WeiBoVideo(BaseVideoUploader):
                     block.locator('label.woo-switch-main').first,
                 ):
                     try:
-                        await sw.click(timeout=6000)
-                    except Exception:
-                        try:
-                            await sw.click(timeout=4000, force=True)
-                        except Exception:
-                            continue
+                        await humanizer.click(sw)
+                    except ElementUnusableError:
+                        continue
                     await page.wait_for_timeout(1000)
                     try:
                         if await switch_input.is_checked():
@@ -826,7 +880,7 @@ class WeiBoVideo(BaseVideoUploader):
             val = (await inp.get_attribute("value")) or ""
             name = re.sub(r"\(共\d+集\)\s*$", "", val).strip()
             if name and name == target:
-                await row.locator('label.woo-checkbox-main').first.click()
+                await humanizer.click(row.locator('label.woo-checkbox-main').first)
                 await page.wait_for_timeout(400)
                 matched = True
                 weibo_logger.info(_msg("🥳", f"已选已有合集：{target}"))
@@ -845,51 +899,49 @@ class WeiBoVideo(BaseVideoUploader):
                     add_target = add_btn
                 # 新建行的可编辑 input（已有行的 input 都带 disabled，新建行的没有）
                 new_inp = panel.locator('div[class*="_top2_"] input[type="text"]:not([disabled])').last
+                await humanizer.click(add_target)
                 created = False
-                for _ in range(3):
-                    try:
-                        await add_target.scroll_into_view_if_needed(timeout=2000)
-                    except Exception:
-                        pass
-                    try:
-                        await add_target.click(timeout=4000)
-                    except Exception:
-                        try:
-                            await add_target.click(timeout=3000, force=True)
-                        except Exception:
-                            try:
-                                await add_target.evaluate("el => el.click()")
-                            except Exception:
-                                pass
-                    await page.wait_for_timeout(800)
+                for _ in range(5):
                     if await new_inp.count() and await new_inp.is_visible():
                         created = True
                         break
+                    await page.wait_for_timeout(800)
                 if not created:
                     weibo_logger.warning(_msg("⚠️", f"「新建合集」未出现输入行，跳过合集继续发布：{target[:12]}"))
                     return
-                await new_inp.click()
-                await new_inp.fill(target[:12])
+                await humanizer.click(new_inp)
+                await humanizer.press("ControlOrMeta+A")
+                await humanizer.press("Delete")
+                await humanizer.type_text(target[:12])
                 await page.wait_for_timeout(500)
                 weibo_logger.info(_msg("🥳", f"已新建合集：{target[:12]}"))
             except Exception as exc:
                 weibo_logger.warning(_msg("⚠️", f"新建合集失败，跳过合集继续发布：{exc}"))
                 return
 
-    async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
+    async def _submit_publish(
+        self,
+        page: Page,
+        *,
+        multilogin: bool = False,
+        humanizer: Humanizer | None = None,
+    ) -> None:
         """点击发布并校验真成功。
 
         真实 DOM：
           - 发布按钮：`._check_2z30i_81 button`（内容"发布"）。按钮中心可能被空 div 覆盖，
-            用 JS 触发按钮自身 click 绕过遮罩。
+            因此用**比例落点**点击：先 `(0.65, 0.5)`，确认未派发时换 `(0.35, 0.5)` 再试一次；
+            仍失败即上抛 ``ElementUnusableError``，不退回 JS、不加 force。
+            ``mouse.down`` 之后失败 = 可能已派发（``click_dispatched="maybe"``），不得再次派发。
           - 成功唯一可靠判据：隐藏成功层 `_layer1_9a8j7_2` 由 `display:none` 变**可见**，
             其中含"再发一条视频"按钮 → 用它/该按钮可见判定真成功。
             （"视频已上传成功，将在转码后发布"文字是恒存在的隐藏模板，不能作判据。）
           - 60s 内判不到成功 → 抛错（不再冒充成功），交由上层记失败。
         """
+        humanizer = humanizer or self._humanizer(page)
         # 关掉可能残留的下拉/弹层
         try:
-            await page.keyboard.press("Escape")
+            await humanizer.press("Escape")
             await page.wait_for_timeout(300)
         except Exception:
             pass
@@ -909,8 +961,23 @@ class WeiBoVideo(BaseVideoUploader):
             label="微博发布",
         )
         budget.check_pre_click()
-        await publish_btn.evaluate("el => el.click()")
-        weibo_logger.info(_msg("🏃", "已点击发布按钮(JS)"))
+        await humanizer.before_submit()
+        try:
+            await humanizer.click(publish_btn, point=(0.65, 0.5))
+        except ElementUnusableError as exc:
+            dispatched = getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE
+            if dispatched or getattr(exc, "publish_clicked", False):
+                # 按下之后失败：可能已经在页面上触发了提交，禁止二次派发。
+                raise
+            weibo_logger.warning(
+                _msg(
+                    "⚠️",
+                    f"发布按钮 (0.65,0.5) 未派发（{exc.reason or 'unusable'}），"
+                    "改用 (0.35,0.5) 再试一次",
+                )
+            )
+            await humanizer.click(publish_btn, point=(0.35, 0.5))
+        weibo_logger.info(_msg("🏃", "已点击发布按钮"))
 
         success_layer = page.locator('div[class*="_layer1_9a8j7"]').first
         again_btn = page.locator('button:has(span:text-is("再发一条视频"))').first
@@ -938,7 +1005,7 @@ class WeiBoVideo(BaseVideoUploader):
                         for name in ("确定", "确认", "继续", "仍然发布", "发布"):
                             cb = dialog.locator(f'button:has(span:text-is("{name}"))').first
                             if await cb.count() and await cb.is_visible():
-                                await cb.evaluate("el => el.click()")
+                                await humanizer.click(cb)
                                 dialog_confirmed = True
                                 weibo_logger.info(_msg("🏃", f"已确认对话框：{name}"))
                                 break
