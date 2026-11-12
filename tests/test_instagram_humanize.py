@@ -29,14 +29,17 @@ import asyncio
 import os
 import random
 import re
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from uploader.meta_uploader.insgraph_uploader import main as instagram_main
 from uploader.meta_uploader.insgraph_uploader.controls import _rows
 from uploader.meta_uploader.insgraph_uploader.controls._rows import (
     activate,
     click_control,
+    dismiss_suggestions,
 )
 from uploader.meta_uploader.insgraph_uploader.controls import (
     resolve_instagram_option_controls,
@@ -49,12 +52,19 @@ from uploader.meta_uploader.insgraph_uploader.controls.location import (
 )
 from uploader.meta_uploader.insgraph_uploader.controls.toggles import SwitchControl
 from uploader.meta_uploader.insgraph_uploader.main import (
+    INSTAGRAM_CAPTION_EDITOR,
+    INSTAGRAM_CAPTION_EDITOR_FALLBACK,
+    INSTAGRAM_PRIMARY_ACTION_NAME,
     InstagramUploader,
     _dismiss_optional_prompt,
     _click_nav,
     _click_submit,
     _read_back_caption,
     _type_caption,
+)
+from uploader.meta_uploader.insgraph_uploader.options import (
+    PRESENT,
+    InstagramPublishOptions,
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
@@ -274,8 +284,10 @@ class Field:
             f"scripted: {sorted(self._children)}"
         )
 
-    def get_by_role(self, role: str, name=None) -> "Field":
+    def get_by_role(self, role: str, name=None, **kwargs) -> "Field":
         key = f"role:{role}" if name is None else f"role:{role}:{name}"
+        for attribute in sorted(kwargs):
+            key += f":{attribute}={kwargs[attribute]}"
         return self._child(key)
 
     def get_by_text(self, text: str, exact: bool = False) -> "Field":
@@ -414,8 +426,10 @@ class HumanizePage:
             f"page: un-scripted selector {selector!r}; scripted: {sorted(self.selectors)}"
         )
 
-    def get_by_role(self, role: str, name=None) -> Field:
+    def get_by_role(self, role: str, name=None, **kwargs) -> Field:
         key = f"role:{role}" if name is None else f"role:{role}:{name}"
+        for attribute in sorted(kwargs):
+            key += f":{attribute}={kwargs[attribute]}"
         return self.locator(key)
 
     def get_by_text(self, text: str, exact: bool = False) -> Field:
@@ -663,7 +677,7 @@ class InstagramHumanizeEventSequenceTests(unittest.IsolatedAsyncioTestCase):
         control = LocationControl(
             page, budget=StubBudget(1000), humanizer=humanizer
         )
-        entry, candidate = _location_scene(page, "Shang hai")
+        entry, candidate, _heading = _location_scene(page, "Shang hai")
 
         await control.set("Shang hai")
 
@@ -681,7 +695,7 @@ class InstagramHumanizeEventSequenceTests(unittest.IsolatedAsyncioTestCase):
         page = _page()
         humanizer = RecordingHumanizer(page, page.timeline)
         control = LocationControl(page, budget=StubBudget(0), humanizer=humanizer)
-        entry, candidate = _location_scene(page, "Shanghai", suggestions_after=2)
+        entry, candidate, _heading = _location_scene(page, "Shanghai", suggestions_after=2)
 
         await control.set("Shanghai")
 
@@ -841,7 +855,7 @@ class InstagramHumanizeFieldReadbackTests(unittest.IsolatedAsyncioTestCase):
         page = _page()
         humanizer = RecordingHumanizer(page, page.timeline)
         control = LocationControl(page, budget=StubBudget(1000), humanizer=humanizer)
-        entry, _candidate = _location_scene(page, "Shang hai")
+        entry, _candidate, _heading = _location_scene(page, "Shang hai")
 
         await control.set("Shang hai")
 
@@ -861,7 +875,7 @@ class InstagramHumanizeFieldReadbackTests(unittest.IsolatedAsyncioTestCase):
         humanizer = RecordingHumanizer(page, page.timeline)
         control = LocationControl(page, budget=StubBudget(1000), humanizer=humanizer)
         requested = "Shang hai"
-        _entry, _candidate = _location_scene(page, requested)
+        _entry, _candidate, _heading = _location_scene(page, requested)
 
         await control.set(requested)
 
@@ -1382,6 +1396,210 @@ class InstagramHumanizeFastPathTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# 6. Suggestion popovers (ticket 05)
+# ---------------------------------------------------------------------------
+
+
+class InstagramSuggestionPopoverTests(unittest.IsolatedAsyncioTestCase):
+    """Discharge the hashtag/location popovers before touching the options.
+
+    Live 2026-11-13: typing ``#回归测试`` per character opens a hashtag
+    suggestion popover, and typing a location opens a location one.  Both stay
+    open after the option is applied and intercept the next click
+    (``covered-by:button._acmx``).  The proven dismissal is one ``Humanizer``
+    click on the create dialog's level-1 heading (its title bar); a missing
+    heading is a no-op, never a publish failure.
+    """
+
+    def _dialog(self, page: HumanizePage, heading: Field) -> Field:
+        return Field(
+            "dialog", page=page, children={"role:heading:level=1": heading}
+        )
+
+    def _heading(
+        self, page: HumanizePage, *, count: int = 1
+    ) -> Field:
+        return Field("dialog-heading", page=page, count=count, text="New reel")
+
+    async def test_caption_dismissal_runs_after_readback_and_before_the_first_option(
+        self,
+    ):
+        """``_publish``: readback → heading click → first option control."""
+        page = _page()
+        caption = "人类化回归 Reel\n\n人类化交互层回归干跑。\n\n#回归测试 #自动化"
+        editor = Field("editor", page=page, value=caption, text=caption)
+        heading = self._heading(page)
+        share = Field("share", page=page)
+        dialog = Field(
+            "dialog",
+            page=page,
+            children={
+                "role:heading:level=1": heading,
+                INSTAGRAM_CAPTION_EDITOR: editor,
+                INSTAGRAM_CAPTION_EDITOR_FALLBACK: editor,
+                f"role:button:{INSTAGRAM_PRIMARY_ACTION_NAME}": share,
+            },
+        )
+        page.add("role:dialog", dialog)
+
+        class _Comments:
+            """Only the observable part of a control: it records being applied."""
+
+            def __init__(self) -> None:
+                self.applied = False
+
+            async def resolve(self) -> str:
+                return PRESENT
+
+            async def read(self):
+                return self.applied
+
+            async def set(self, requested) -> None:
+                self.applied = True
+                page.timeline.add("option-set", "comments")
+
+        real_read_back = instagram_main._read_back_caption
+
+        async def recording_read_back(*args, **kwargs):
+            page.timeline.add("caption-readback")
+            await real_read_back(*args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as folder:
+            app = InstagramUploader(
+                "unused.json",
+                title="人类化回归 Reel",
+                description="人类化交互层回归干跑。",
+                tags=["回归测试", "自动化"],
+                image_files=["image.png"],
+                options=InstagramPublishOptions(comments=True),
+                result_file=Path(folder) / "result.json",
+                no_publish=True,
+            )
+            app._humanizer_instance = RecordingHumanizer(page, page.timeline)
+            with patch.dict(os.environ, {"HUMANIZE": "1"}):
+                with patch.object(
+                    instagram_main,
+                    "_read_back_caption",
+                    recording_read_back,
+                ), patch.object(
+                    instagram_main,
+                    "resolve_instagram_option_controls",
+                    lambda *args, **kwargs: {"comments": _Comments()},
+                ), patch.object(
+                    InstagramUploader,
+                    "_wait_until_publish_ready",
+                    new=AsyncMock(),
+                ):
+                    await app._publish(
+                        page,
+                        {"user_id": "42", "username": "creator"},
+                        budget=app.start_publish_budget(),
+                    )
+
+        events = page.timeline.events
+        readback_at = page.timeline.index("caption-readback")
+        heading_at = events.index(("hit-test", "dialog-heading"))
+        option_at = events.index(("option-set", "comments"))
+        self.assertLess(readback_at, heading_at)
+        self.assertLess(heading_at, option_at)
+        self.assertEqual(
+            page.timeline.payloads("hit-test").count(
+                ("hit-test", "dialog-heading")
+            ),
+            1,
+        )
+        self.assertEqual(heading.click_count, 0)
+        self.assertEqual(page.timeline.kinds().count("down"), 1)
+
+    async def test_location_dismissal_runs_after_the_candidate_and_before_set_returns(
+        self,
+    ):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        control = LocationControl(
+            page, budget=StubBudget(1000), humanizer=humanizer
+        )
+        entry, candidate, heading = _location_scene(
+            page, "Shanghai", heading=1
+        )
+
+        await control.set("Shanghai")
+
+        events = page.timeline.events
+        candidate_at = events.index(("hit-test", "suggestion"))
+        first_up = events.index(("up",))
+        heading_at = events.index(("hit-test", "dialog-heading"))
+        # The candidate was clicked first; the popover dismissal follows it.
+        self.assertLess(candidate_at, first_up)
+        self.assertLess(first_up, heading_at)
+        self.assertEqual(
+            page.timeline.payloads("hit-test").count(
+                ("hit-test", "dialog-heading")
+            ),
+            1,
+        )
+        self.assertEqual(heading.click_count, 0)
+        self.assertEqual(entry.value, "Shanghai")
+        self.assertEqual(page.timeline.kinds().count("down"), 2)
+        # ``set()`` has returned only after the dismissal ran.
+        self.assertIn(("hit-test", "dialog-heading"), events)
+
+    async def test_missing_heading_is_a_no_op_and_never_fails_the_set(self):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        heading = self._heading(page, count=0)
+        self.assertFalse(
+            await dismiss_suggestions(self._dialog(page, heading), humanizer)
+        )
+        self.assertEqual(page.timeline.events, [])
+
+        entry, _candidate, absent = _location_scene(page, "Shanghai")
+        control = LocationControl(
+            page, budget=StubBudget(1000), humanizer=humanizer
+        )
+        await control.set("Shanghai")
+        self.assertEqual(entry.value, "Shanghai")
+        self.assertEqual(absent.click_count, 0)
+        self.assertNotIn(("hit-test", "dialog-heading"), page.timeline.events)
+
+    async def test_dismissal_clicks_the_heading_once_through_the_humanizer(self):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        heading = self._heading(page)
+        dialog = self._dialog(page, heading)
+
+        self.assertTrue(await dismiss_suggestions(dialog, humanizer))
+        self.assertEqual(heading.click_count, 0)  # humanized: zero native clicks
+        self.assertEqual(heading.native_clicks, [])
+        self.assertEqual(page.timeline.kinds().count("down"), 1)
+        self.assertEqual(page.timeline.kinds().count("up"), 1)
+        hit_at = page.timeline.events.index(("hit-test", "dialog-heading"))
+        self.assertLess(hit_at, page.timeline.kinds().index("down"))
+
+        # Exactly once per call — never a retry.
+        self.assertTrue(await dismiss_suggestions(dialog, humanizer))
+        self.assertEqual(page.timeline.kinds().count("down"), 2)
+        self.assertEqual(heading.click_count, 0)
+
+    async def test_fast_path_dismissal_is_one_native_click_and_zero_pauses(self):
+        page = _page()
+        heading = self._heading(page)
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            humanizer = Humanizer(page, sleep=page.timeline.sleep)
+        self.assertFalse(humanizer.enabled)
+
+        self.assertTrue(
+            await dismiss_suggestions(self._dialog(page, heading), humanizer)
+        )
+
+        self.assertEqual(heading.click_count, 1)
+        self.assertNotIn("force", heading.native_clicks[0])
+        self.assertEqual(page.timeline.kinds().count("locator.click"), 1)
+        self.assertNotIn("down", page.timeline.kinds())
+        self.assertEqual(page.timeline.payloads("pause"), [])
+
+
+# ---------------------------------------------------------------------------
 # scene helpers
 # ---------------------------------------------------------------------------
 
@@ -1414,16 +1632,20 @@ def _location_scene(
     requested: str,
     *,
     suggestions_after: int = 1,
-) -> tuple[Field, Field]:
+    heading: int = 0,
+) -> tuple[Field, Field, Field]:
     """Wire the location input, its portal list and the exact-match row.
 
     ``suggestions_after`` models Instagram's debounce: the first N scans return
-    an empty list (the list has not rendered yet).
+    an empty list (the list has not rendered yet).  ``heading`` is the create
+    dialog's level-1 heading count: 0 keeps the popover dismissal a no-op, 1
+    scripts the title bar the dismissal clicks.
     """
     labels = ["Shanghai, China", requested]
     rows = [{"index": index, "label": label} for index, label in enumerate(labels)]
     entry = Field("location-entry", page=page)
     candidate = Field("suggestion", page=page)
+    dialog_heading = Field("dialog-heading", page=page, count=heading)
     scans = {"value": 0}
 
     def candidate_ready() -> bool:
@@ -1452,12 +1674,17 @@ def _location_scene(
             return entry
         raise UnscriptedSelectorError(f"location: un-scripted selector {selector!r}")
 
-    dialog = Field("dialog", page=page, locator_handler=dialog_locator)
+    dialog = Field(
+        "dialog",
+        page=page,
+        locator_handler=dialog_locator,
+        children={"role:heading:level=1": dialog_heading},
+    )
     page.add("role:dialog", dialog)
     for selector in ENTRY_SELECTORS:
         page.add(selector, entry)
     page.add(", ".join(ENTRY_SELECTORS), entry)
-    return entry, candidate
+    return entry, candidate, dialog_heading
 
 
 if __name__ == "__main__":
