@@ -439,7 +439,7 @@ class InstagramUploader:
                  video_file: str | Path | None = None, image_files: list[str | Path] | None = None,
                  thumbnail: str | Path | None = None,
                  proxy: str | None = None, headless: bool = False, result_file: str | Path | None = None,
-                 options: InstagramPublishOptions | None = None):
+                 options: InstagramPublishOptions | None = None, no_publish: bool = False):
         self.account_file = Path(account_file) if account_file is not None else None
         self.title, self.description = title.strip(), description.strip()
         self.tags = [t.strip().lstrip('#') for t in (tags or []) if t.strip().lstrip('#')]
@@ -447,6 +447,8 @@ class InstagramUploader:
         self.image_files = [Path(p) for p in (image_files or [])]
         self.thumbnail = Path(thumbnail) if thumbnail else None
         self.options = options
+        # 干跑：表单与选项全部完成后停在 Share 前，不点击、不观察结果。
+        self.no_publish = bool(no_publish)
         if not self.title:
             raise ValueError('标题不能为空')
         # 素材互斥 / 封面适用性 / 配文长度统一走共享纯函数（UsageError → 退出码 2）。
@@ -764,6 +766,28 @@ class InstagramUploader:
         if failures:
             raise RuntimeError('Instagram 发布选项未生效: ' + '; '.join(failures))
 
+    async def _wait_until_publish_ready(
+        self, action: Locator, *, budget: PublishTimeoutBudget
+    ) -> None:
+        """``--no-publish`` 就绪窗：Share 存在且可点，上限 ``min(60s, 剩余预算)``。
+
+        与正常发布的就绪检查同源（同一个 ``_primary_action`` locator），但把
+        “存在 + 可点”合并到一个截止时间。超时发生在点击前，所以必须是普通
+        ``RuntimeError``（退出 1），不能映射成结果未知（退出 9）。
+        """
+        budget.check_pre_click()
+        timeout_ms = min(60_000, max(1, int(budget.remaining_seconds() * 1000)))
+        deadline = time.monotonic() + timeout_ms / 1000
+        try:
+            await expect(action).to_have_count(1, timeout=timeout_ms)
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+            await expect(action).to_be_enabled(timeout=remaining_ms)
+        except (BrowserTimeoutError, AssertionError) as error:
+            raise RuntimeError(
+                "Instagram 发布就绪超时（上限 60 秒或剩余预算）："
+                "Share 按钮未出现或不可用；尚未点击发布，未发布任何内容。"
+            ) from error
+
     async def _publish(
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
     ) -> None:
@@ -782,6 +806,17 @@ class InstagramUploader:
             self.stage = 'options'
         await self._apply_options(page, budget=budget)
         action = await _primary_action(dialog)
+        if self.no_publish:
+            # 干跑：上传、配文与全部选项已完成后停在 Share 前；跳过
+            # --not-before，不注册响应监听，也不进入结果观察循环。
+            self.stage = 'publish'
+            await self._wait_until_publish_ready(action, budget=budget)
+            self.result['status'] = 'prepared'
+            self._write_result()
+            logger.info(
+                "Instagram 发布就绪，--no-publish 停在 Share 前（未点击发布）"
+            )
+            return
         await expect(action).to_have_count(
             1, timeout=budget.clamp_ms(30_000)
         )
