@@ -6,7 +6,7 @@ Covers:
 - the Multilogin uploader branch only consuming the injected session;
 - no cookie I/O and no forbidden Playwright APIs in Multilogin mode;
 - ``is_logged_in`` True / False / raise matrices;
-- Weibo publish button scrolling into view before the JS click;
+- Weibo publish button scrolling into view before the humanized pointer click;
 - CLI check ``0/10/1/2`` and upload ``0/10/1`` plus Stop ownership.
 
 Everything is offline: no browser is launched and no network is touched.
@@ -22,7 +22,7 @@ import unittest
 from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import sau_cli
 from sau_commands import alipay as alipay_command
@@ -67,6 +67,24 @@ class _FakeKeyboard:
 
     async def press(self, key: str) -> None:
         self.page.events.append(("press", key))
+
+
+class _PublishHumanizer:
+    """Minimal Humanizer double: records the publish click without a browser."""
+
+    def __init__(self) -> None:
+        self.presses: list[str] = []
+        self.click_points: list[tuple[float, float] | None] = []
+        self.before_submit_calls = 0
+
+    async def press(self, key: str) -> None:
+        self.presses.append(key)
+
+    async def before_submit(self) -> None:
+        self.before_submit_calls += 1
+
+    async def click(self, locator, *, point=None) -> None:
+        self.click_points.append(point)
 
 
 class _FakeResponse:
@@ -609,7 +627,7 @@ class WeiboMultiloginTests(unittest.TestCase):
         self.assertEqual(page.goto_calls[0][0], WEIBO_HOME_URL)
         video._open_video_publish_page.assert_awaited_once_with(page, multilogin=True)
         video._submit_publish.assert_awaited_once_with(
-            publish_page, multilogin=True
+            publish_page, multilogin=True, humanizer=ANY
         )
 
     def test_mlx_validation_skips_cookie_auth_and_cookie_existence(self):
@@ -655,13 +673,15 @@ class WeiboMultiloginTests(unittest.TestCase):
 
         guard.assert_not_called()
 
-    def test_publish_button_scrolls_into_view_before_js_click(self):
+    def test_publish_button_scrolls_into_view_before_humanized_click(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video = _make_video(tmp_dir, platform="weibo", account_file=None)
             page = _FakePage(
                 counts={WEIBO_PUBLISH_SELECTOR: 1},
                 visible={WEIBO_AGAIN_SELECTOR: True},
             )
+            humanizer = _PublishHumanizer()
+            video._humanizer = MagicMock(return_value=humanizer)
 
             asyncio.run(video._submit_publish(page, multilogin=True))
 
@@ -670,8 +690,10 @@ class WeiboMultiloginTests(unittest.TestCase):
         ]
         kinds = [event[0] for event in publish_events]
         self.assertIn("scroll", kinds)
-        self.assertIn("evaluate", kinds)
-        self.assertLess(kinds.index("scroll"), kinds.index("evaluate"))
+        # 发布按钮走人类化坐标点击：不再对按钮本身 evaluate("el => el.click()")。
+        self.assertNotIn("evaluate", kinds)
+        self.assertEqual(humanizer.click_points, [(0.65, 0.5)])
+        self.assertEqual(humanizer.before_submit_calls, 1)
 
     def test_local_publish_also_scrolls_into_view(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -680,6 +702,8 @@ class WeiboMultiloginTests(unittest.TestCase):
                 counts={WEIBO_PUBLISH_SELECTOR: 1},
                 visible={WEIBO_AGAIN_SELECTOR: True},
             )
+            humanizer = _PublishHumanizer()
+            video._humanizer = MagicMock(return_value=humanizer)
 
             asyncio.run(video._submit_publish(page))
 
@@ -689,6 +713,7 @@ class WeiboMultiloginTests(unittest.TestCase):
             if event[1:] and event[1] == WEIBO_PUBLISH_SELECTOR
         ]
         self.assertIn("scroll", kinds)
+        self.assertEqual(humanizer.click_points, [(0.65, 0.5)])
 
     def test_main_with_session_does_not_open_a_second_playwright(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
