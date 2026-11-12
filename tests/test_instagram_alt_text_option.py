@@ -266,22 +266,55 @@ class InstagramAltTextPipelineTests(unittest.TestCase):
 
 
 class _FakeInput:
-    """``Locator.nth(...)`` 的最小替身：只关心值、填写与失焦次数。"""
+    """``Locator.nth(...)`` 的最小替身：只关心值、聚焦、清空键与失焦次数。"""
 
     def __init__(self, value=''):
         self.value = value
         self.fills = []
         self.blurs = 0
+        self.humanizer = None
 
-    async def fill(self, value):
-        self.fills.append(value)
-        self.value = value
+    async def count(self):
+        return 1
+
+    async def focus(self):
+        self.humanizer.target = self
 
     async def input_value(self):
         return self.value
 
     async def evaluate(self, script):
         self.blurs += 1
+
+
+class _FakeHumanizer:
+    """替代 Humanizer 的最小替身：把按键与逐字输入写进当前焦点字段。"""
+
+    enabled = True
+
+    def __init__(self):
+        self.target = None
+        self.select_all = False
+        self.actions = []
+
+    async def press(self, key):
+        self.actions.append(('press', key))
+        if key in ('ControlOrMeta+A', 'Control+A', 'Meta+A'):
+            self.select_all = True
+        elif key in ('Delete', 'Backspace'):
+            if self.select_all:
+                self.target.value = ''
+                self.select_all = False
+            elif self.target.value:
+                self.target.value = self.target.value[:-1]
+
+    async def type_text(self, text):
+        self.actions.append(('type_text', text))
+        self.target.value += text
+
+    async def click(self, locator):
+        self.actions.append(('click', locator))
+        await locator.click()
 
 
 class _FakeInputs:
@@ -299,7 +332,10 @@ class _StubAltTextControl(AltTextControl):
     """把折叠区交互替换成内存替身，直接验证真实控件的数量与顺序决策。"""
 
     def __init__(self, inputs, *, image_count):
-        super().__init__(page=None, image_count=image_count)
+        self.humanizer = _FakeHumanizer()
+        for item in inputs:
+            item.humanizer = self.humanizer
+        super().__init__(page=None, image_count=image_count, humanizer=self.humanizer)
         self.inputs = _FakeInputs(inputs)
         self.opens = 0
         self.closes = 0

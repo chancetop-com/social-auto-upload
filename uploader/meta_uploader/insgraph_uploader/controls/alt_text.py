@@ -15,6 +15,9 @@ import contextlib
 import time
 from typing import TYPE_CHECKING
 
+from utils.dom import ElementUnusableError
+from utils.humanize import Humanizer
+
 from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError, clamp_wait
 from ._rows import activate, press_enter, row_for
 
@@ -50,11 +53,23 @@ class AltTextControl:
     """
 
     def __init__(
-        self, page: 'Page', *, image_count: int, budget: 'PublishTimeoutBudget | None' = None
+        self,
+        page: 'Page',
+        *,
+        image_count: int,
+        budget: 'PublishTimeoutBudget | None' = None,
+        humanizer: Humanizer | None = None,
     ) -> None:
         self.page = page
         self.image_count = image_count
         self.budget = budget
+        self._humanizer = humanizer
+
+    def _behavior(self) -> Humanizer:
+        """发布链路共享的 Humanizer；独立使用时按 page 自建（仍全部人类化）。"""
+        if self._humanizer is None:
+            self._humanizer = Humanizer(self.page)
+        return self._humanizer
 
     def _timeout(self, default_ms: int) -> int:
         """把等待收紧到剩余发布预算；无预算时用默认值。"""
@@ -114,7 +129,11 @@ class AltTextControl:
         if entry is None:
             return False, False
         opened = await activate(
-            self.page, entry, is_open=self._has_inputs, budget=self.budget
+            self.page,
+            entry,
+            is_open=self._has_inputs,
+            humanizer=self._behavior(),
+            budget=self.budget,
         )
         # activate 已用输入框出现作为展开成功的判据。
         return (True, True) if opened else (False, False)
@@ -219,9 +238,15 @@ class AltTextControl:
                     applied=values,
                 )
             # 长度已由 §3.3 静态校验保证在 1..1000，运行时绝不截断。
+            behavior = self._behavior()
             for index, text in enumerate(texts):
                 field = inputs.nth(index)
-                await field.fill(text)
+                await self._require_unique(field, index=index)
+                # 清空必须显式：预填/回读值可能是上一轮的残留。
+                await field.focus()
+                await behavior.press('ControlOrMeta+A')
+                await behavior.press('Delete')
+                await behavior.type_text(text)
                 # 实测必须失焦才写入页面状态；否则折叠后值会丢。
                 await field.evaluate('el => el.blur()')
         except BaseException:
@@ -229,3 +254,20 @@ class AltTextControl:
             raise
         # 正常结束必须真的收起：否则管线的 read() 只是同一会话的就地读取。
         await self._collapse()
+
+    async def _require_unique(self, field: 'Locator', *, index: int) -> None:
+        """每个文本点先收窄到 ``count() == 1``；多义直接硬错，不自动取首个。"""
+        try:
+            count = await field.count()
+        except Exception as error:
+            raise ElementUnusableError(
+                what=f'Instagram 替代文字第 {index + 1} 张',
+                role='editable',
+                reason='probe-failed',
+            ) from error
+        if count != 1:
+            raise ElementUnusableError(
+                what=f'Instagram 替代文字第 {index + 1} 张',
+                role='editable',
+                reason=f'ambiguous:{count}',
+            )

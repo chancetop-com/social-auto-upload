@@ -86,7 +86,8 @@ async def instagram_post_action(account_file: Path, *, post_url: str, expected_t
                 # 不用 “More options” 文案兜底，避免命中评论的溢出菜单后误删评论。
                 menu_button = page.locator('[role="button"][aria-haspopup="dialog"]').filter(has=page.locator('svg circle'))
                 await expect(menu_button).to_have_count(1)
-                await menu_button.click()
+                # 作品管理/删除路径不在发布交互层范围内（spec §3.9）。
+                await menu_button.click()  # native-click: manage；作品管理/删除不是发布交互层
                 menu = page.get_by_role('dialog')
                 buttons = menu.get_by_role('button')
                 # 实测 2026-11 菜单项由 8 项增至 9 项（Instagram 新增条目），不再按数量/下标定位：
