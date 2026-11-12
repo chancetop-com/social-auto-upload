@@ -597,7 +597,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         <script>async function submitPost() {
                           await fetch('/api/v1/media/configure_to_clips/', {method:'POST'});
                           document.body.dataset.processing='true';
-                          setTimeout(() => fetch('/api/v1/media/configure_to_clips/', {method:'POST'}), 350);
+                          // 202 与最终响应之间留出足够窗口：人类化点击后事件循环更忙，
+                          // 350ms 会让“任务仍未结束”的断言偶发失败，与 202 语义无关。
+                          setTimeout(() => fetch('/api/v1/media/configure_to_clips/', {method:'POST'}), 1500);
                         }</script>'''
                     calls = 0
                     async def route(request):
