@@ -25,6 +25,9 @@ from patchright.async_api import (
 from uploader.meta_uploader.insgraph_uploader.controls import (
     resolve_instagram_option_controls,
 )
+from uploader.meta_uploader.insgraph_uploader.controls._rows import (
+    dismiss_suggestions,
+)
 from uploader.meta_uploader.insgraph_uploader.options import (
     APPLY_ORDER,
     DEFAULT_OFF,
@@ -946,6 +949,10 @@ class InstagramUploader:
         # 清空后逐字写入（>1000 码点整段 insert_text），随后按渲染文本回读。
         await _type_caption(editor, caption, humanizer)
         await _read_back_caption(editor, caption, page=page, budget=budget)
+        # 真机 2026-11-13：逐字输入 #标签 弹出的 hashtag 联想浮层会盖住右侧
+        # 选项面板（后续点击报 covered-by）。点标题栏关闭浮层，不改写正文；
+        # 标题栏缺席时该 helper 静默跳过，不因此让发布失败。
+        await dismiss_suggestions(dialog, humanizer)
         # 选项必须在点击 Share 之前完成；失败时尚未发布，按普通失败处理。
         if self.options is not None:
             # 未请求时保持既有 stage（legacy 失败证据不变）。

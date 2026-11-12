@@ -87,3 +87,44 @@ Status: ready-for-human
 `_rows.py`、其他平台、真实 C 层 fixture 均零改动。
 
 `Status:` 未改（真机复跑仍需按上面清单执行）。
+
+### 第四次干跑：联想浮层关闭（同日，integration tip `57e9b0f`）
+
+开关修好后同一支视频干跑（`--no-publish`，`HUMANIZE=1`）进入 `options`：逐字符键入
+`#回归测试 #自动化` 后 Instagram 在右侧选项面板上弹出 hashtag 联想浮层；键入地点后
+又弹出地点联想浮层。两处浮层在对应选项已应用后仍留在 DOM 且盖住面板，后续点击以
+`covered-by:button._acmx`（联想行）失败；地点控件还因浮层未关而把输入值误判为已选。
+用 `Humanizer.click` 点一次创建弹窗的 `role="heading"`（“New reel” / “Create new
+post” 标题栏）即可关闭；完整干跑（配文回读后一次、地点选中后一次）随即通过，退出 0、
+四项选项全部 `set`。诊断用的打印与临时原生 `candidate.click()` 探针**未提交**。
+
+`uploader/meta_uploader/insgraph_uploader/controls/_rows.py`（新增唯一共享助手，
+`main.py` / `location.py` 各自调用）：
+- `dismiss_suggestions(dialog, humanizer)`：取 `dialog.get_by_role('heading',
+  level=1).first`，仅当 `count() == 1` 时 `await humanizer.click(heading)` 并返回
+  `True`；标题栏缺席（或探测失败）返回 `False`，**不抛错、不影响发布**。没有
+  `force`、没有 JS 点击、没有重试。
+- `main.py` `_publish`：配文回读之后、`_apply_options` 之前调用一次；未用
+  `editor.blur()` 之类的失焦兜底——标题栏点击才是实测有效机制。
+- `location.py` `LocationControl.set`：`_wait_row_detached` 通过之后、回读
+  `applied` 之前调用；visible-parent 开关修复与人类化候选点击均保持原样。
+
+覆盖（`tests/test_instagram_humanize.py`，39 passed = 原 34 + 5）：
+- `test_caption_dismissal_runs_after_readback_and_before_the_first_option`：真实
+  `_publish`（注入 `comments` 控件），事件序 `caption-readback` <
+  `hit-test:heading` < `option-set:comments`，标题栏恰好一次、零原生点击。
+- `test_location_dismissal_runs_after_the_candidate_and_before_set_returns`：候选
+  命中与 `up` 之后才出现标题栏 `hit-test`，`set()` 返回时已关闭；两次 `down`
+  （候选 + 标题栏），标题栏零原生点击。
+- `test_missing_heading_is_a_no_op_and_never_fails_the_set`：标题栏 `count()==0`
+  时零事件、返回 `False`；`LocationControl.set` 照常成功。
+- `test_dismissal_clicks_the_heading_once_through_the_humanizer`：`HUMANIZE=1` 下
+  每次调用恰好一次 `down`/`up`、`stillOn` 先于按下、`native_clicks` 为空；连续
+  两次调用就是两次点击（不重试、不多点）。
+- `test_fast_path_dismissal_is_one_native_click_and_zero_pauses`：`HUMANIZE=0` 下
+  恰好一次 `locator.click`、无 `force`、零 `down`、零暂停。
+
+全库：1717 passed / 2 skipped（781 subtests）。`utils/humanize.py`、`utils/dom.py`、
+`toggles.py`、其他平台零改动。
+
+`Status:` 未改（真机复跑仍需按上面清单执行）。

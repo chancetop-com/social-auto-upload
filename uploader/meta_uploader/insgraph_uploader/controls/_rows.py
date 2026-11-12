@@ -129,3 +129,26 @@ async def click_control(
     with contextlib.suppress(Exception):
         await locator.scroll_into_view_if_needed()
     await humanizer.click(locator)
+
+
+async def dismiss_suggestions(
+    dialog: 'Locator', humanizer: 'Humanizer'
+) -> bool:
+    """点击创建弹窗标题栏，关闭 hashtag / 地点联想浮层。
+
+    真机 2026-11-13（ticket 05 ``--no-publish`` 干跑）：逐字输入 ``#话题`` 会
+    弹出 hashtag 联想，输入地点会弹出地点联想；两者都是 portal，选中后仍挂在
+    DOM 上盖住右侧选项面板，下一次点击报 ``covered-by:button._acmx``（地点控件
+    还会误以为已选）。实测唯一稳定的关闭方式是用真实指针点击弹窗的
+    ``role="heading"`` 标题栏（“New reel” / “Create new post”）。标题栏缺席
+    （联想本就没出现）时直接返回 ``False``，绝不让“没有标题”变成发布失败。
+    没有 ``force``、没有 JS 点击、没有重试。
+    """
+    heading = dialog.get_by_role('heading', level=1).first
+    try:
+        if await heading.count() != 1:
+            return False
+    except Exception:
+        return False
+    await humanizer.click(heading)
+    return True

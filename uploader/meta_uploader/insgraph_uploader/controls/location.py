@@ -33,6 +33,7 @@ from ..options import (
     location_matches,
     normalize_text,
 )
+from ._rows import dismiss_suggestions
 
 if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchright 绑进注册表。
     from patchright.async_api import Page
@@ -192,6 +193,9 @@ class LocationControl:
                 f'被选「{label}」',
                 applied=await self.read(),
             )
+        # 真机 2026-11-13：地点联想浮层选中后仍挂在 DOM 上盖住右侧选项面板，
+        # 下一次点击报 covered-by。点弹窗标题栏关闭浮层（不改写已选地点）。
+        await dismiss_suggestions(self._dialog(), self._behavior())
         applied = await self.read()
         if not location_matches(label, applied):
             # 回读必须与被点候选规范化一致；不一致按实际回读值记 mismatch。
