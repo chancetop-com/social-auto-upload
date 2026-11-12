@@ -22,4 +22,4 @@ Status: ready-for-agent
 - 三个文本点：配文与 Alt text 用 `sel`（聚焦 → `ControlOrMeta+A` → `Delete` → `type_text`），地点首次只聚焦、重试用全选 + `Backspace`；每点先 `count()==1`（多义 `ambiguous:N`），Alt text 逐张显式清空并保留 blur。
 - 可见点击：创建入口、裁剪下一步走 `Humanizer.click` + `after_navigate`；Share 先 `before_submit`；提示关闭、折叠行与开关、地点候选全部坐标点击；候选经一次性属性戳转成 `Locator`（无 `ElementHandle` 点击、无 JS 点击）。
 - 地点节奏：逐字由 `Humanizer.type_text` 派发（均值 136ms），整段不足 `TYPE_DELAY_MS × 字数` 时补一次预算内停顿；debounce 期间不重复输入。
-- 测试：`tests/test_instagram_humanize.py` 22 条（事件序列 / 字段读回 / 门 A–E / `HUMANIZE=0`）；合并 `humanize-interaction-layer` 后全量 `1581 passed, 2 skipped`。真机探针仍属 05（本轮离线 + 既有真实 Chrome DOM 回归，未跑真机）。
+- 测试：`tests/test_instagram_humanize.py` 22 条（事件序列 / 字段读回 / 门 A–E / `HUMANIZE=0`）；跟随集成分支最新 tip（`bad93b9`）合并后全量 `1639 passed, 2 skipped`。真机探针仍属 05（本轮离线 + 既有真实 Chrome DOM 回归，未跑真机）。
