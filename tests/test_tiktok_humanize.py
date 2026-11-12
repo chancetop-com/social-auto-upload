@@ -21,17 +21,14 @@ never need a browser.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import unittest
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import TiktokNote, TiktokPublishOptions, TiktokVideo
-from utils.humanize import Humanizer
 
 TK_PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "tk_uploader"
 TK_MAIN_CHROME = TK_PACKAGE / "main_chrome.py"
@@ -406,7 +403,7 @@ def _silent_humanizer_sleep():
         yield
 
 
-def _hashtag_page(*, option_texts=(), selected=False) -> tuple[FakePage, FakeNode]:
+def _hashtag_page(*, option_texts=()) -> tuple[FakePage, FakeNode]:
     page = FakePage()
     page.editor = EditorNode("editor", page=page)
     base = FakeNode("base", page=page, children={"div.public-DraftEditor-content": page.editor})
@@ -436,10 +433,6 @@ def _hashtag_page(*, option_texts=(), selected=False) -> tuple[FakePage, FakeNod
 
     for node in options:
         node.on_down = _close
-    if selected and options:
-        async def _aria(name, node=options[0]):
-            return "true" if name == "aria-selected" else None
-        options[0].get_attribute = _aria  # type: ignore[assignment]
     page.selectors['[role="dialog"]'] = FakeNode(
         "dialogs", page=page, count=0
     )
