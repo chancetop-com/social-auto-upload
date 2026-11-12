@@ -290,7 +290,7 @@
 | 10 | 原创开关 | `.custom-switch-card` 过滤「原创声明」→ `.d-switch` | `.original-wrapper .d-switch` | 中文卡片（容器限定 + 精确） | 仅兜底 | 实机 | 稳定后删中文 |
 | 11 | 原创确认弹窗 | `[role=dialog], .d-modal, .d-dialog` 过滤「声明原创」 | `div.d-modal.creator-modal-style` | 确认按钮 `div.d-modal button.custom-button` → 文本 `声明原创` | 仅兜底 | 主=实机 1 样本；按钮=上游 | 两个账号各出现一次后删 `[role=dialog]` |
 | 12 | 内容类型声明 | `get_by_text("添加内容类型声明")` + **`#publish-container div`（恒 0）** | `.publish-container` 内文本 `添加内容类型声明` 的 `[tabindex="1"]` | 同文案点击；选项限定 `.declaration-drop-down .d-option` + 精确文案 | **必须**（选项是中文枚举） | 实机（22） | 修 `.publish-container` 后 JS 兜底仅作后备 |
-| 13 | 封面弹窗 | `text=设置封面` / `div.upload-cover`（**0**）/ `div.cover-plugin-preview div.default.pointer`（**0**）/「上传封面」/`div.upload-wrapper input[type=file]`/「确定」 | `.cover-edit-entry`（容器 `.cover-edit-stack`）→ `.d-modal.cover-modal.creator-modal-style.main-cover-editor-modal` | 文本 `编辑封面` → `设置封面`；弹窗内 `上传` / `完成`；input 限定弹窗内 | 仅兜底 | 实机（22 入口/弹窗；动作未执行） | 真机跑通一次后删 `text=设置封面` |
+| 13 | 封面弹窗 | `text=设置封面` / `div.upload-cover`（**0**）/ `div.cover-plugin-preview div.default.pointer`（**0**）/「上传封面」/`div.upload-wrapper input[type=file]`/「确定」 | 悬停 `.cover-plugin-preview .cover > .default` → `.cover-edit-entry`（容器 `.cover-edit-stack`）→ `.d-modal.cover-modal.creator-modal-style.main-cover-editor-modal` → 弹窗内 `input[type=file][accept*=image]` 直接 `set_input_files` → `完成` | 文本 `编辑封面`；`上传` tab 仅在 input 缺失时兜底（点 tab 会拉起系统文件选择器，禁止作为主路径） | 仅兜底 | 实机（2026-11-12 跑通） | 已删 `设置封面` 文本兜底 |
 | 14 | 登录二维码 | `.login-box-container` + 「APP扫一扫登录」+ xpath `following-sibling::div//img`；`img.css-wemwzq` | 切换图标 `img.css-wemwzq` → 二维码 `img.css-1lhmg90` | 文本 `APP扫一扫登录` 容器内 `img` | 仅兜底 | 实机（22） | 真机确认结构后删文本 xpath |
 | 15 | 登录态正向锚点 | `input.upload-input`、`div.progress-div [class^="upload-btn-input"]`、`div[class*=upload-content] input`、`button:has-text("发布")`（**0**） | 前三条（零文本） | 无 | 无 | 实机（空状态） | **本次删**中文发布按钮 |
 | 16 | 登录失效（负向） | `div[class*=login-box]` + URL `/login` 前缀 | **URL path 前缀优先**（`/login` → login；`/website-login/captcha` → verification；裸 `/website-login` → login），DOM 仅佐证 | — | 无 | 实机（`/login` + login-box；`/website-login*` 未观察到） | 不删；`/website-login*` 确认不出现后可由实施删除 |
@@ -1041,6 +1041,7 @@ length   = ceil(weighted / 2)          # ≤ 20
 1. `probe_session` 只等 3s 做单次快照：发布页上传入口在 `domcontentloaded` 后约 5s 才挂载 → 误判「页面结构异常」。改为 15s 有界轮询（每轮先分类，命中即 10）。
 2. 坐标点击前未滚动：正文编辑区/发布按钮常在首屏下方，`elementFromPoint` 返回 `null` → `covered-by:unknown`。新增 `utils/dom.ensure_in_viewport`，`Humanizer.click` 与 ARM 谓词先滚入视口（对照上游：上游也是 `ScrollIntoView` + 200ms 再 `humanize.ClickAt`）。
 3. 文本输入用坐标点击会被底部固定 `xhs-publish-btn` 遮住：按上游做法改为 `focus()`（仍逐字人类化输入），按钮/开关保留坐标点击。
+   封面入口 `.cover-edit-entry` 只有悬停首帧预览后才渲染；弹窗内的图片 input 直接 `set_input_files`，不点「上传」tab（点 tab 会拉起系统文件选择器并留在屏幕上）。
 4. `.video-container-loading-text` 在正路显示「视频上传中」，不是失败信号；失败态同时有 `div.fail`。因此该节点不再作信号（对照上游：上游只等发布按钮，10 分钟；我们的 `div.fail` 即时中止是加强）。
 5. 定时时间输入框自带默认值（now+~1h）：`focus` 后直接键入会追加成两段日期。改为 `ControlOrMeta+A` 全选后逐字替换，仍只 `blur()`（C2/C3 通过）。
 

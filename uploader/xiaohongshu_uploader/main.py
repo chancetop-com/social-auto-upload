@@ -120,6 +120,7 @@ XHS_DECLARATION_SCROLL_TIMEOUT_MS = 5_000
 XHS_DECLARATION_MODAL_TIMEOUT_MS = 8_000
 XHS_DECLARATION_SUGGESTION_TIMEOUT_MS = 10_000
 XHS_DECLARATION_CONFIRM_TIMEOUT_MS = 5_000
+XHS_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
 XHS_COVER_SCROLL_TIMEOUT_MS = 5_000
 XHS_COVER_TAB_TIMEOUT_MS = 10_000
 XHS_COVER_CONFIRM_TIMEOUT_MS = 10_000
@@ -2759,29 +2760,54 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                 budget=self.publish_budget,
             )
 
-            # 3. 切换到「上传封面」tab（默认在「截取封面」）
-            upload_tab = await _resolve_anchor(
-                page,
-                "封面-上传 tab",
-                XHS_COVER_TAB_CANDIDATES,
-                role="visible",
-                scope=modal.locator,
-                timeout_ms=XHS_COVER_TAB_TIMEOUT_MS,
-                budget=self.publish_budget,
-            )
-            await humanizer.click(upload_tab.locator)
-            await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
-
-            # 4. 封面图片 file input：限定弹窗内，命中数必须为 1（禁止 .first/.last）。
-            file_input = await _resolve_anchor(
-                page,
-                "封面文件输入",
-                XHS_COVER_FILE_INPUT_CANDIDATES,
-                role="attached",
-                scope=modal.locator,
-                budget=self.publish_budget,
-            )
-            await file_input.locator.set_input_files(thumbnail_path)
+            # 3. 封面图片 file input 在弹窗里已经存在：优先直接写 input。
+            #    禁止先点「上传」tab——那一下会真的拉起系统文件选择器，
+            #    随后 set_input_files 把文件塞进去，选择器会留在屏幕上
+            #    （2026-11-12 真机复现）。tab 只在 input 缺失时兜底。
+            try:
+                file_input = await _resolve_anchor(
+                    page,
+                    "封面文件输入",
+                    XHS_COVER_FILE_INPUT_CANDIDATES,
+                    role="attached",
+                    scope=modal.locator,
+                    timeout_ms=XHS_COVER_INPUT_PROBE_TIMEOUT_MS,
+                    budget=self.publish_budget,
+                )
+            except (ElementMissingError, ElementUnusableError):
+                upload_tab = await _resolve_anchor(
+                    page,
+                    "封面-上传 tab",
+                    XHS_COVER_TAB_CANDIDATES,
+                    role="visible",
+                    scope=modal.locator,
+                    timeout_ms=XHS_COVER_TAB_TIMEOUT_MS,
+                    budget=self.publish_budget,
+                )
+                chooser = None
+                try:
+                    async with page.expect_file_chooser(
+                        timeout=self._wait_ms(XHS_COVER_TAB_TIMEOUT_MS)
+                    ) as chooser_info:
+                        await humanizer.click(upload_tab.locator)
+                    chooser = await chooser_info.value
+                except Exception:
+                    chooser = None
+                if chooser is not None:
+                    await chooser.set_files(thumbnail_path)
+                else:
+                    await self._settle(page, XHS_COVER_OPEN_SETTLE_MS)
+                    file_input = await _resolve_anchor(
+                        page,
+                        "封面文件输入",
+                        XHS_COVER_FILE_INPUT_CANDIDATES,
+                        role="attached",
+                        scope=modal.locator,
+                        budget=self.publish_budget,
+                    )
+                    await file_input.locator.set_input_files(thumbnail_path)
+            else:
+                await file_input.locator.set_input_files(thumbnail_path)
             # 等图片加载+裁剪渲染
             await self._settle(page, XHS_COVER_RENDER_SETTLE_MS)
 
