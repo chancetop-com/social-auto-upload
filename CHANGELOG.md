@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 人类化交互层（W2 国外）
+
+- Facebook Page：14 个交互点接入人类化（`uploader/meta_uploader/facebook_page_uploader/`）。
+
 ### 移除历史 Web 与旧示例脚本
 
 - 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。
