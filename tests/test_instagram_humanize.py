@@ -49,6 +49,7 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     _dismiss_optional_prompt,
     _click_nav,
     _click_submit,
+    _read_back_caption,
     _type_caption,
 )
 from tests.humanize_gates import assert_clean
@@ -731,6 +732,75 @@ class InstagramHumanizeFieldReadbackTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(editor.value, "标题\n正文")
 
+    async def test_caption_readback_accepts_br_rendered_inner_text(self):
+        """Lexical 插 ``<br><br>``：``innerText`` 保留换行，``textContent`` 不保留。"""
+        page = _page()
+        caption = (
+            "人类化回归 Reel 1113\n\n人类化交互层回归干跑。\n\n#回归测试 #自动化"
+        )
+        editor = Field("editor", page=page, text=caption)
+
+        await _read_back_caption(
+            editor, caption, page=page, budget=StubBudget(30_000)
+        )
+
+        # 首次采样即相等：不付任何轮询等待。
+        self.assertEqual(page.wait_calls, [])
+
+    async def test_caption_readback_polls_until_the_editor_catches_up(self):
+        """单次采样不够：Lexical 落字可能晚一拍，回读必须轮询到相等或超时。"""
+        page = _page()
+        caption = "标题\n正文"
+
+        class _CatchingUpEditor:
+            """前两次探测还是旧值，第三次才与键入一致。"""
+
+            def __init__(self) -> None:
+                self.probes = 0
+
+            async def inner_text(self) -> str:
+                self.probes += 1
+                return "标题" if self.probes < 3 else caption
+
+        editor = _CatchingUpEditor()
+
+        await _read_back_caption(
+            editor, caption, page=page, budget=StubBudget(30_000)
+        )
+
+        self.assertEqual(editor.probes, 3)
+        # 两次失败采样之间各付一次短轮询，而不是固定长眠。
+        self.assertEqual(page.wait_calls, [200, 200])
+
+    async def test_caption_readback_fails_loudly_when_the_probe_errors(self):
+        """探测失败不得静默通过：异常向上抛，绝不把读不到的配文当成一致。"""
+        page = _page()
+
+        class _BrokenEditor:
+            async def inner_text(self) -> str:
+                raise RuntimeError("probe failed")
+
+        with self.assertRaises(RuntimeError):
+            await _read_back_caption(
+                _BrokenEditor(), "标题", page=page, budget=StubBudget(30_000)
+            )
+
+
+    async def test_caption_readback_fails_on_a_single_missing_character(self):
+        """丢一个字符也必须失败：只比较前缀或只比较开头会放过这种情况。"""
+        page = _page()
+        caption = "人类化回归 Reel 1113"
+        editor = Field("editor", page=page, text="人类化回归 Reel 111")
+
+        with self.assertRaises(AssertionError) as raised:
+            await _read_back_caption(
+                editor, caption, page=page, budget=StubBudget(1)
+            )
+
+        message = str(raised.exception)
+        self.assertIn(repr(caption), message)
+        self.assertIn(repr("人类化回归 Reel 111"), message)
+
     async def test_long_caption_is_one_bulk_insert(self):
         page = _page()
         humanizer = RecordingHumanizer(page, page.timeline)
@@ -893,6 +963,28 @@ class InstagramHumanizeGateTests(unittest.TestCase):
         self.assertEqual(
             owners, {"_click_nav", "_click_submit", "_dismiss_optional_prompt"}
         )
+
+    def test_caption_readback_compares_rendered_text_not_to_have_text(self):
+        """回归：``to_have_text`` 走 ``textContent``，会丢掉 Lexical 的换行。
+
+        真机 2026-11-13（ticket 05）在 ``_publish`` 的配文回读处失败：逐字输入把
+        ``\\n`` 打成 Enter，Lexical 在段间插 ``<br><br>``，``textContent`` 把
+        两行粘在一起而 ``innerText`` 保留换行。哨兵：``_publish`` 不得再对配文
+        调用 ``to_have_text``，且读回 helper 必须取渲染文本。
+        """
+        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        functions = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+
+        publish_source = ast.unparse(functions["_publish"])
+        self.assertNotIn("to_have_text", publish_source)
+        self.assertIn("_read_back_caption", publish_source)
+
+        self.assertIn("inner_text()", ast.unparse(functions["_read_back_caption"]))
 
     def test_native_clicks_are_only_the_management_path(self):
         # Gate B already enforces markers; this pins the *set* of marked sites so
