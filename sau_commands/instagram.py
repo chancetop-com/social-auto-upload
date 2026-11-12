@@ -69,6 +69,7 @@ def register(platform_parsers):
     instagram_video.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_video.add_argument("--result", type=Path)
     add_not_before_flag(instagram_video)
+    _add_no_publish_flag(instagram_video)
     _add_instagram_option_flags(instagram_video, include_alt_text=False)
     add_runtime_flags(instagram_video)
     add_browser_flags(instagram_video)
@@ -82,6 +83,7 @@ def register(platform_parsers):
     instagram_note.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_note.add_argument("--result", type=Path)
     add_not_before_flag(instagram_note)
+    _add_no_publish_flag(instagram_note)
     _add_instagram_option_flags(instagram_note, include_alt_text=True)
     add_runtime_flags(instagram_note)
     add_browser_flags(instagram_note)
@@ -95,6 +97,15 @@ def register(platform_parsers):
         action_parser.add_argument("--result", type=Path)
         add_runtime_flags(action_parser)
         action_parser.set_defaults(headless=False)
+
+
+def _add_no_publish_flag(parser) -> None:
+    """干跑：跑到发布就绪点即停止，不点击发布（与小红书同语义）。"""
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="跑到发布就绪点即停止，不点击发布（回归测试用）",
+    )
 
 
 def _add_instagram_option_flags(parser, *, include_alt_text: bool) -> None:
@@ -170,6 +181,7 @@ class InstagramUploadRequest:
     result_file: Path | None = None
     publish_not_before: datetime | None = None
     options: InstagramPublishOptions | None = None
+    no_publish: bool = False
 
 
 def _build_publish_options(args) -> InstagramPublishOptions | None:
@@ -230,6 +242,7 @@ def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramU
         headless=request.headless,
         result_file=request.result_file,
         options=request.options,
+        no_publish=request.no_publish,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -338,6 +351,7 @@ async def run(args):
             result_file=args.result,
             publish_not_before=args.not_before,
             options=_build_publish_options(args),
+            no_publish=args.no_publish,
         )
         validate_instagram_publish_request(request)
         result = await upload_instagram_content(request, target=target)
