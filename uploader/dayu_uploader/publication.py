@@ -13,15 +13,19 @@ from uploader.dayu_uploader.schedule import (
     read_dayu_schedule,
     target_from_result,
 )
+from uploader.dayu_uploader.interaction import unique
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.humanize import Humanizer
 from utils.log import dayu_logger
 
 
 async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
                                   article_html: str | None = None,
                                   publish_not_before=None,
-                                  budget: PublishTimeoutBudget | None = None) -> None:
+                                  budget: PublishTimeoutBudget | None = None,
+                                  humanizer: Humanizer | None = None) -> None:
     """提交动作各执行一次；每次远端写入前后保存阶段与作品标识，供只读查询。"""
+    humanizer = humanizer or Humanizer(page)
     budget = budget or PublishTimeoutBudget("大鱼号")
     result["status"] = "preview_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -41,12 +45,17 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         ]))
     if article_html is not None:
         await page.route(save_url, preserve_article_html)
+    publish = await unique(
+        page.get_by_role("button", name="发表", exact=True), "发表"
+    )
     try:
+        # 首次“发表”生成预览：先付 before_submit，再在响应上下文内坐标点击。
+        await humanizer.before_submit()
         async with page.expect_response(
             lambda r: urlsplit(r.url).path == "/dashboard/save-draft" and r.request.method == "POST",
             timeout=budget.clamp_ms(45000),
         ) as draft_event:
-            await page.get_by_role("button", name="发表", exact=True).click()
+            await humanizer.click(publish)
     finally:
         if article_html is not None:
             await page.unroute(save_url, preserve_article_html)
@@ -88,7 +97,9 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         finally:
             await preview.close()
     # 预览页的最终提交按钮有独立名称，不能复用主表单的“发表”定位。
-    confirm = page.get_by_role("button", name="确认发表", exact=True)
+    confirm = await unique(
+        page.get_by_role("button", name="确认发表", exact=True), "确认发表"
+    )
     await expect(confirm).to_be_visible(timeout=budget.clamp_ms(30000))
     await budget.wait_until_allowed(
         publish_not_before,
@@ -101,11 +112,13 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     publish_clicked = False
     try:
+        # 不可逆提交前付一次 before_submit；响应上下文仍包住同一次坐标点击。
+        await humanizer.before_submit()
         async with page.expect_response(
             lambda r: urlsplit(r.url).path == "/dashboard/submit-article" and r.request.method == "POST",
             timeout=budget.clamp_ms(45000),
         ) as submit_event:
-            await confirm.click()
+            await humanizer.click(confirm)
             publish_clicked = True
         response = await submit_event.value
     except BrowserTimeoutError:

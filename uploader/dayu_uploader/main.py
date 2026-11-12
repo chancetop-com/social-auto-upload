@@ -28,6 +28,7 @@ from uploader.dayu_uploader.session import (
     read_dayu_identity,
 )
 from uploader.dayu_uploader.constants import DAYU_SOURCE_REPRINT, DAYU_SOURCE_TYPES, DAYU_VIDEO_CATEGORIES
+from uploader.dayu_uploader.interaction import DayuHumanizeMixin, unique
 from utils.browser_session import BrowserSession, browser_session
 from utils.log import dayu_logger
 
@@ -65,7 +66,7 @@ async def wait_dayu_processing(
     raise TimeoutError("等待大鱼号上传/处理超时；未提交发表，请检查当前素材状态")
 
 
-class DayuVideo(BaseVideoUploader):
+class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
     """以实际页面流程发表一个视频，持久化提交 ID 供断线后只读核验。"""
 
     publish_platform_label = "大鱼号"
@@ -147,41 +148,73 @@ class DayuVideo(BaseVideoUploader):
 
     async def fill_video_form(self, page: Page) -> None:
         """填写并读回标题、简介、分类、标签、封面与来源，不代选来源。"""
+        humanizer = self._humanizer(page)
         # 标题实际为 contenteditable；固定 placeholder 区分简介输入框和其他可编辑区域。
-        title = page.locator('[contenteditable="true"][placeholder="视频标题最少5个字"]')
-        await title.fill(self.title)
+        title = await unique(
+            page.locator('[contenteditable="true"][placeholder="视频标题最少5个字"]'),
+            "视频标题",
+        )
+        await title.focus()
+        # 预填未知（spec §9 #17）：先读空再决定；原 fill 语义是整体替换，
+        # 空字段直接逐字输入，非空才走 sel 清空，避免把预填标题追加到末尾。
+        if (await title.inner_text()).strip():
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.press("Delete")
+        await humanizer.type_text(self.title)
         await expect(title).to_have_text(self.title)
         # 表单中简介使用 textarea；分类通过字段 label 限定，避免点击其他同构下拉框。
-        description = page.locator(".w-form-field").filter(has=page.locator("textarea")).locator("textarea")
-        await description.fill(self.desc)
+        field = page.locator(".w-form-field")
+        description = await unique(
+            field.filter(has=page.locator("textarea")).locator("textarea"),
+            "视频简介",
+        )
+        await description.focus()
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(self.desc)
         await expect(description).to_have_value(self.desc)
-        category = page.locator(".w-form-field").filter(
+        category = field.filter(
             has=page.locator("label").filter(has_text="视频分类"),
         )
-        await category.locator(".widgets-selects_container").click()
-        await category.get_by_role("link", name=self.category, exact=True).click()
-        await expect(category.locator(".widgets-selects_container")).to_have_text(self.category)
+        container = await unique(
+            category.locator(".widgets-selects_container"), "视频分类下拉"
+        )
+        await humanizer.click(container)
+        option = await unique(
+            category.get_by_role("link", name=self.category, exact=True),
+            "视频分类选项",
+        )
+        await humanizer.click(option)
+        await expect(container).to_have_text(self.category)
         if self.tags:
             # 标签组件内会动态增加输入槽，先限定组件再按用户输入顺序选槽位。
-            tags = page.locator(".article-write_video-tags")
-            await tags.click()
+            tags = await unique(page.locator(".article-write_video-tags"), "视频标签组件")
+            await humanizer.click(tags)
             for index, tag in enumerate(self.tags):
                 # 标签槽按用户给定顺序排列；Enter 在末尾新增一个空槽，并非任意选第 N 个控件。
                 inputs = tags.locator("input")
                 await expect(inputs).to_have_count(index + 1)
-                await inputs.nth(index).fill(tag)
-                await inputs.nth(index).press("Enter")
-            await title.click()
+                slot = inputs.nth(index)
+                await slot.focus()
+                await humanizer.press("ControlOrMeta+A")
+                await humanizer.press("Delete")
+                await humanizer.type_text(tag)
+                await humanizer.press("Enter")
             # 实测 Enter/失焦后会短暂少一个字并保留空槽，Vue 随后才恢复最终标签值。
+            await title.click()  # native-click: focus；失焦标签组件触发 Vue 归并，坐标点击可能落进标签槽
             await expect(tags.locator("input")).to_have_count(len(self.tags))
             for index, tag in enumerate(self.tags):
                 await expect(tags.locator("input").nth(index)).to_have_value(tag)
         # coverImg 是封面字段的语义 ID，限定其中 input 避免把封面传给主视频上传器。
         await page.locator("#coverImg input[type=file]").set_input_files(str(self.thumbnail_path))
+        # native-click: file；文件入口保持 set_input_files，坐标点击无法携带文件
         # 裁剪与素材选择共用弹窗组件，只定位本次可见实例，排除隐藏模板。
         dialog = page.locator(".article-material-image-dialog:visible")
         await expect(dialog).to_have_count(1, timeout=30000)
-        await dialog.get_by_role("button", name="保存", exact=True).click()
+        save = await unique(
+            dialog.get_by_role("button", name="保存", exact=True), "封面裁剪保存"
+        )
+        await humanizer.click(save)
         await expect(page.locator(".article-material-image-dialog:visible")).to_have_count(0, timeout=30000)
         cover = page.locator("#coverImg #form_main_cover_img")
         await expect(cover).to_be_visible()
@@ -195,11 +228,15 @@ class DayuVideo(BaseVideoUploader):
             has=page.locator("label").filter(has_text="原文链接"),
         ).locator('input[type="text"]')
         if self.source == DAYU_SOURCE_REPRINT:
-            await original_link.fill(self.source_url)
-            await expect(original_link).to_have_value(self.source_url)
+            link = await unique(original_link, "原文链接")
+            await link.focus()
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.press("Delete")
+            await humanizer.type_text(self.source_url)
+            await expect(link).to_have_value(self.source_url)
         else:
             await expect(original_link).to_have_count(0)
-        await fill_dayu_schedule(page, self.schedule)
+        await fill_dayu_schedule(page, self.schedule, humanizer)
 
     async def main(self, *, session: BrowserSession | None = None) -> dict:
         """提交只执行一次；平台最终发表响应确认本次作品 ID 后即成功。"""
@@ -235,7 +272,9 @@ class DayuVideo(BaseVideoUploader):
         page = None
         try:
             page = await session.context.new_page()
+            humanizer = self._humanizer(page)
             await page.goto(DAYU_VIDEO_URL, wait_until="domcontentloaded", timeout=45000)
+            await humanizer.after_navigate()
             if multilogin:
                 await raise_if_login_required(page)
             else:
@@ -270,7 +309,7 @@ class DayuVideo(BaseVideoUploader):
             await submit_dayu_publication(
                 page, result, result_file,
                 publish_not_before=getattr(self, "publish_not_before", None),
-                budget=budget,
+                budget=budget, humanizer=humanizer,
             )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号{action}: {result['content_id']}")
