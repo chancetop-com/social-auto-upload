@@ -14,6 +14,10 @@
 - YouTube：标题/简介逐字输入（含 `#` 逐段等待候选并按文本全等点选、失败降级纯文本继续）、播放列表名与标签改为全选覆盖后逐字、12 处可见点击（含 `_click_if_present`）统一走人类化指针（uploader/youtube_uploader）。
 - Facebook Page：14 个交互点接入人类化（`uploader/meta_uploader/facebook_page_uploader/`）。
 
+### 人类化交互层（W4 国内主体）
+
+- 知乎：30 个交互点接入人类化（视频表单标题/介绍、领域与标记下拉、原创勾选、文章标题与正文聚焦、定时表单 17 处、两个发布点），失焦点击与发布后详情跳转保持原生并逐条标记（`uploader/zhihu_uploader/`）。
+
 ### 移除历史 Web 与旧示例脚本
 
 - 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。
