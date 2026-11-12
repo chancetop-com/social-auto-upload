@@ -29,6 +29,7 @@ from unittest.mock import patch
 
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import TiktokNote, TiktokPublishOptions, TiktokVideo
+from utils.dom import ElementUnusableError
 
 TK_PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "tk_uploader"
 TK_MAIN_CHROME = TK_PACKAGE / "main_chrome.py"
@@ -630,6 +631,186 @@ class CaptionSequenceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(page.mouse.down_count, 1)
         self.assertEqual(button.native_click_calls, 0)
+
+
+class OptionClickHoverTests(unittest.IsolatedAsyncioTestCase):
+    """Real-device ``point-drift`` remedy for option controls (spec §2.5.1).
+
+    A 2026-11-13 ``--no-publish`` run failed inside ``Humanizer.click`` with
+    ``ElementUnusableError(reason="point-drift")`` while clicking the first
+    option (privacy).  The remedy is to hover the call site's target first and
+    then click it; ``Humanizer.click`` itself keeps zero retries and the ±1px
+    tolerance.
+    """
+
+    def _label_control(self, page, *, box=_box(40.0, 40.0, 120.0, 24.0)):
+        label = FakeNode("label-body", page=page, box=box)
+        checkbox = FakeNode(
+            "checkbox",
+            page=page,
+            count=1,
+            children={"xpath=ancestor-or-self::label[1]": label},
+        )
+        video = _video()
+        return video, label, checkbox
+
+    def _recording_humanizer(self, video, page):
+        """Humanizer whose pauses are appended to ``page.events``.
+
+        The pause tail of the hover burst is otherwise invisible: it is a
+        platform sleep, not a pointer event.
+        """
+        pauses: list[float] = []
+
+        async def _pause(seconds: float) -> None:
+            pauses.append(seconds)
+            page.events.append(("pause", seconds))
+
+        video._humanize_pause = _pause  # type: ignore[assignment]
+        return video._humanizer(page), pauses
+
+    async def test_option_click_hover_burst_precedes_click_move_and_down(self):
+        page = FakePage()
+        video, label, checkbox = self._label_control(page)
+        humanizer, _pauses = self._recording_humanizer(video, page)
+        control = tk_main._LocatorControl(checkbox, humanizer=humanizer)
+
+        await control.click()
+
+        names = [event[0] for event in page.events]
+        down = names.index("down")
+        # Exactly one press for the whole humanized option click.
+        self.assertEqual(page.mouse.down_count, 1)
+        self.assertEqual(names.count("down"), 1)
+        self.assertEqual(label.native_click_calls, 0)
+        self.assertEqual(checkbox.native_click_calls, 0)
+
+        # Two move bursts: the hover burst, then the click's own burst.  Each
+        # burst closes with a settle (>= ``pointer_settle``'s 0.2s minimum),
+        # far longer than the 5-9ms step delays, so the settles are
+        # distinguishable from the per-step pauses.
+        moves = [index for index, name in enumerate(names) if name == "move"]
+        settles = [
+            index
+            for index, event in enumerate(page.events)
+            if event[0] == "pause" and event[1] >= 0.1
+        ]
+        hover_settle = next(
+            index
+            for index in settles
+            if index < down and any(move < index for move in moves)
+        )
+        self.assertTrue([index for index in moves if index < hover_settle], names)
+        # The click's own burst only starts after the hover settle.
+        self.assertTrue(
+            [index for index in moves if hover_settle < index < down], names
+        )
+        # ...and it closes with its own settle before the single press.
+        click_settle = next(
+            index for index in settles if hover_settle < index < down
+        )
+        self.assertGreater(
+            click_settle, max(index for index in moves if index < down)
+        )
+
+    async def test_locator_control_hovers_then_clicks_the_label_body(self):
+        page = FakePage()
+        video, label, checkbox = self._label_control(page)
+        humanizer = video._humanizer(page)
+        control = tk_main._LocatorControl(checkbox, humanizer=humanizer)
+        calls = self._spy_pointer_calls(humanizer)
+
+        with _silent_humanizer_sleep():
+            await control.click()
+
+        self.assertEqual([name for name, _ in calls], ["hover", "click"])
+        self.assertIs(calls[0][1], label)
+        self.assertIs(calls[1][1], label)
+
+    async def test_privacy_control_hovers_then_clicks_the_visible_trigger(self):
+        page = FakePage()
+        trigger = FakeNode(
+            "privacy-trigger", page=page, box=_box(200.0, 60.0, 160.0, 24.0)
+        )
+        video = _video()
+        humanizer = video._humanizer(page)
+        control = tk_main._LocatorPrivacyControl(
+            trigger, page, humanizer=humanizer
+        )
+        calls = self._spy_pointer_calls(humanizer)
+
+        with _silent_humanizer_sleep():
+            await control.click()
+
+        self.assertEqual([name for name, _ in calls], ["hover", "click"])
+        self.assertIs(calls[0][1], trigger)
+        self.assertIs(calls[1][1], trigger)
+        self.assertEqual(page.mouse.down_count, 1)
+        self.assertEqual(trigger.native_click_calls, 0)
+
+    async def test_humanize_zero_hovers_then_clicks_with_zero_pauses(self):
+        page = FakePage()
+        video, label, checkbox = self._label_control(page)
+        pauses: list[float] = []
+
+        async def _pause(seconds: float) -> None:
+            pauses.append(seconds)
+
+        video._humanize_pause = _pause  # type: ignore[assignment]
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            humanizer = video._humanizer(page)
+            control = tk_main._LocatorControl(checkbox, humanizer=humanizer)
+            await control.click()
+
+        self.assertFalse(humanizer.enabled)
+        # ``Humanizer.hover`` passes straight through in the fast path; it is
+        # not skipped, so the order stays hover → click.
+        self.assertEqual(label.actions, [("hover",), ("click", {})])
+        self.assertEqual(label.native_click_calls, 1)
+        self.assertEqual(page.mouse.down_count, 0)
+        self.assertEqual(pauses, [])
+
+    async def test_hover_failure_propagates_without_a_fallback_click(self):
+        page = FakePage()
+        video, label, checkbox = self._label_control(page, box={})
+        humanizer = video._humanizer(page)
+        control = tk_main._LocatorControl(checkbox, humanizer=humanizer)
+        clicks: list[object] = []
+
+        async def _click(locator, **kwargs):
+            clicks.append(locator)
+
+        # A zero-box target makes the real ``Humanizer.hover`` fail.  The tap
+        # is replaced so a fallback click cannot pass silently.
+        humanizer.click = _click  # type: ignore[assignment]
+
+        with _silent_humanizer_sleep():
+            with self.assertRaises(ElementUnusableError) as caught:
+                await control.click()
+
+        self.assertEqual(caught.exception.reason, "no-bounding-box")
+        self.assertEqual(clicks, [])
+        self.assertEqual(page.mouse.down_count, 0)
+        self.assertEqual(label.native_click_calls, 0)
+        self.assertEqual(checkbox.native_click_calls, 0)
+
+    @staticmethod
+    def _spy_pointer_calls(humanizer):
+        calls: list[tuple[str, object]] = []
+        hover = humanizer.hover
+        click = humanizer.click
+
+        async def _hover(locator, **kwargs):
+            calls.append(("hover", locator))
+            await hover(locator, **kwargs)
+
+        async def _click(locator, **kwargs):
+            calls.append(("click", locator))
+            await click(locator, **kwargs)
+
+        humanizer.hover = _hover  # type: ignore[assignment]
+        humanizer.click = _click  # type: ignore[assignment]
+        return calls
 
 
 class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):

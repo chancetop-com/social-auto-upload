@@ -1078,6 +1078,7 @@ class TiktokOptionStepTests(unittest.TestCase):
                 self.visible = visible
                 self.checked = checked
                 self.click_calls = 0
+                self.hover_calls = 0
 
             async def is_checked(self):
                 return self.checked
@@ -1093,6 +1094,9 @@ class TiktokOptionStepTests(unittest.TestCase):
 
             def locator(self, _selector):
                 return _MissingLocator()
+
+            async def hover(self, **_kwargs):
+                self.hover_calls += 1
 
             async def click(self, **_kwargs):
                 self.click_calls += 1
@@ -1119,7 +1123,9 @@ class TiktokOptionStepTests(unittest.TestCase):
         self.assertTrue(asyncio.run(control.is_checked()))
         asyncio.run(control.click())
         self.assertEqual(visible.click_calls, 1)
+        self.assertEqual(visible.hover_calls, 1)
         self.assertEqual(hidden.click_calls, 0)
+        self.assertEqual(hidden.hover_calls, 0)
 
     def test_find_candidate_skips_hidden_first_match(self):
         class _Node:

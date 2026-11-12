@@ -147,8 +147,19 @@ def _offline_humanizer() -> Humanizer:
 
 
 async def _humanized_click(humanizer: Humanizer | None, target) -> None:
+    """Hover the target, then click it (spec §2.5.1).
+
+    A 2026-11-13 real-device ``--no-publish`` run failed inside
+    ``Humanizer.click`` with ``ElementUnusableError(reason="point-drift")`` on
+    the first option applied (privacy), before any cover/schedule step.  On a
+    device that shows point drift, hovering the call site's target first
+    settles the pointer before the click's own move/stillOn check.  The click
+    primitive keeps zero retries and its ±1px tolerance; the fast path still
+    passes ``hover`` through to ``locator.hover()``.
+    """
     if humanizer is None:
         humanizer = _offline_humanizer()
+    await humanizer.hover(target)
     await humanizer.click(target)
 
 
