@@ -1995,5 +1995,23 @@ class HashtagEntityTests(unittest.TestCase):
         self.assertEqual(page.clicked, [])
 
 
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    os.environ.pop("HUMANIZE", None)
+
 if __name__ == "__main__":
     unittest.main()

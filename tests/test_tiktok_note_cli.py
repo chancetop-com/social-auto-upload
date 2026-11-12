@@ -152,6 +152,10 @@ class _Locator:
         self.page.events.append(("click", self.selector))
         if "button-group" in self.selector:
             self.page.publish_clicked = True
+        if "catchy" in self.selector:
+            self.page.keyboard_target = "title"
+        elif "DraftEditor" in self.selector or "caption" in self.selector:
+            self.page.keyboard_target = "caption"
 
     async def inner_text(self) -> str:
         if 'item_id=' in self.selector:
@@ -191,7 +195,10 @@ class _Keyboard:
 
     async def insert_text(self, text: str) -> None:
         self.page.events.append(("insert_text", text))
-        self.page.caption_text += text
+        if self.page.keyboard_target == "title":
+            self.page.title_text += text
+        else:
+            self.page.caption_text += text
 
     async def press(self, key: str) -> None:
         self.page.events.append(("press", key))
@@ -239,6 +246,7 @@ class _StudioPage:
         self.publish_clicked = False
         self.title_text = ""
         self.caption_text = ""
+        self.keyboard_target = "caption"
         self.keyboard = _Keyboard(self)
 
     async def goto(self, url: str, **kwargs):
@@ -1303,7 +1311,7 @@ class UploadNoteMetadataTests(unittest.TestCase):
         self.assertEqual(page.title_text, "My photo title")
         self.assertEqual(page.caption_text, "")
         self.assertFalse(
-            any(event[0] == "insert_text" for event in page.events)
+            any(event[0] == "fill" for event in page.events)
         )
 
     def test_absent_or_empty_title_never_overwrites_the_page(self):
@@ -1638,6 +1646,24 @@ class UploadNoteConstantsTests(unittest.TestCase):
             "https://www.tiktok.com/tiktokstudio/upload?tab=photo",
         )
 
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    os.environ.pop("HUMANIZE", None)
 
 if __name__ == "__main__":
     unittest.main()
