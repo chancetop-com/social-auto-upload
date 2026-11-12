@@ -282,6 +282,10 @@ _DELAYED_NOTIFICATION_SCRIPT = """
           dialog.style.zIndex = '10';
           const icon = document.createElement('img');
           icon.src = 'https://static.cdninstagram.com/rsrc/xxhdpi_launcher.png?test';
+          // 固定图标尺寸：占位图异步加载会移动按钮，人类化点击的 stillOn 会按
+          // point-drift 硬失败（真实页面的 launcher 图标是已加载的本地资源）。
+          icon.style.width = '16px';
+          icon.style.height = '16px';
           const zone = document.createElement('div');
           zone.className = '_a9-z';
           const turnOn = document.createElement('button');
@@ -312,7 +316,8 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     html = '''<script>
                       function notification(){document.body.insertAdjacentHTML('beforeend',
                         `<div role="dialog" id="notifications">
-                        <img src="https://static.cdninstagram.com/rsrc/xxhdpi_launcher.png?test">
+                        <img src="https://static.cdninstagram.com/rsrc/xxhdpi_launcher.png?test"
+                             style="width:16px;height:16px">
                         <div class="_a9-z"><button onclick="throw Error('wrong action')">Enable</button>
                         <button onclick="this.closest('[role=dialog]').remove()">後で</button></div></div>`);}
                       function create(){document.body.insertAdjacentHTML('beforeend',
@@ -321,7 +326,8 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         document.querySelector('[role=dialog]').insertAdjacentHTML('beforeend',
                           '<div role="button">Next</div>');
                         if(document.body.dataset.prompts==='true') document.body.insertAdjacentHTML('beforeend',
-                          `<div role="dialog"><img src="https://static.cdninstagram.com/rsrc/reels_nux_icon.png?test">
+                          `<div role="dialog"><img src="https://static.cdninstagram.com/rsrc/reels_nux_icon.png?test"
+                               style="width:16px;height:16px">
                           <div class="_a9-z"><div><div><span><button onclick="throw Error('wrong action')">詳しく見る</button></span></div>
                           <div><button onclick="this.closest('[role=dialog]').remove()">OK</button></div></div></div></div>`);
                       },250);}
@@ -434,7 +440,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                       </div>''')
                     notify = page.get_by_role('dialog')
                     self.assertTrue(
-                        await InstagramUploader._dismiss_prompt(notify)
+                        await InstagramUploader._dismiss_prompt(page, notify)
                     )
                     self.assertEqual(await page.get_by_role('dialog').count(), 0)
                 finally:
@@ -591,7 +597,9 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                         <script>async function submitPost() {
                           await fetch('/api/v1/media/configure_to_clips/', {method:'POST'});
                           document.body.dataset.processing='true';
-                          setTimeout(() => fetch('/api/v1/media/configure_to_clips/', {method:'POST'}), 350);
+                          // 202 与最终响应之间留出足够窗口：人类化点击后事件循环更忙，
+                          // 350ms 会让“任务仍未结束”的断言偶发失败，与 202 语义无关。
+                          setTimeout(() => fetch('/api/v1/media/configure_to_clips/', {method:'POST'}), 1500);
                         }</script>'''
                     calls = 0
                     async def route(request):
