@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 人类化交互层（W4 国内主体）
+
+- 视频号：34 个交互点接入人类化（`uploader/tencent_uploader/`）。
+
 ### 人类化交互层（W2 国外）
 
 - Facebook 个人主页：3 个交互点接入人类化（正文输入 + 正文聚焦 / 发布点击），删除/管理点击与文件选择保持原生并逐条标记（`uploader/meta_uploader/facebook_uploader/`）。
