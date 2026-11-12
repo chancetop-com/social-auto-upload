@@ -21,7 +21,9 @@ from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
+from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError
+from utils.humanize import Humanizer
 from utils.log import alipay_logger
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -92,6 +94,24 @@ ALIPAY_LOGIN_POSITIVE_SELECTORS = (
     'a:has-text("发布视频推荐分辨率720p及以上，建议1080p")',
     'a:has-text("发布视频")',
     "text=发布视频",
+)
+
+# 发布按钮 / 质量提示弹窗 / 结果 toast：选择器集中定义，实现与测试共用一份。
+ALIPAY_PUBLISH_BUTTON_NAME = "确认发布"
+ALIPAY_QUALITY_MODAL_BUTTON_SELECTOR = (
+    '.antd5-modal-wrap button:has-text("继续发布"), '
+    '.antd5-modal button:has-text("继续发布")'
+)
+ALIPAY_SUCCESS_TOAST_SELECTOR = (
+    '.antd5-message-notice-content:has-text("发布成功"), '
+    '.antd5-message-notice-content:has-text("提交成功"), '
+    '.antd5-message-notice-content:has-text("提交审核"), '
+    '.antd5-message-notice-content:has-text("审核中")'
+)
+ALIPAY_FAIL_TOAST_SELECTOR = (
+    '.antd5-message-notice-content:has-text("发布失败"), '
+    '.antd5-message-notice-content:has-text("提交失败"), '
+    '.antd5-message-notice-content:has-text("请稍后重试")'
 )
 
 
@@ -192,6 +212,24 @@ def format_title_with_tags(title: str, tags: list[str], max_length: int = 30) ->
     return result
 
 
+def _normalise_text(text: str) -> str:
+    """多行正文先 ``\\r\\n`` → ``\\n``；共享层的 ``\\r`` 会被 ``insert_text`` 丢弃。"""
+    return str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+
+async def _unique(locator, what: str, *, role: str = "interactive"):
+    """把 ``locator`` 收窄到唯一匹配：多义（``count > 1``）硬错，不静默取 ``.first``。"""
+    count = await locator.count()
+    if count == 1:
+        return locator
+    raise ElementUnusableError(
+        what=what,
+        role=role,
+        reason=f"ambiguous:{count}" if count > 1 else "missing",
+        publish_clicked=False,
+    )
+
+
 async def _capture_alipay_qr(page: Page, account_file: str, previous_qrcode_path: Path | None = None) -> dict:
     """严格按支付宝登录页固定 DOM 截二维码（只认扫码 tab + barcode canvas）。"""
     login_iframe = page.locator('iframe[title="login"]')
@@ -201,7 +239,7 @@ async def _capture_alipay_qr(page: Page, account_file: str, previous_qrcode_path
     try:
         await frame.locator("#J-loginMethod-tabs").first.wait_for(state="visible", timeout=15000)
         # 固定切到扫码 tab（若本来已是扫码，重复点击无副作用）
-        await frame.locator("#J-loginMethod-tabs li[data-status='show_qr']").first.click(timeout=5000)
+        await frame.locator("#J-loginMethod-tabs li[data-status='show_qr']").first.click(timeout=5000)  # native-click: login；登录 iframe 内切换二维码方式，属范围外登录路径
     except PWTimeoutError:
         # 兼容另一种渲染：直接落在扫码区（无 tabs）
         pass
@@ -413,6 +451,23 @@ class AlipayVideo(BaseVideoUploader):
         if self.thumbnail_path:
             self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """行为层时延只吃预算上限，从不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            alipay_logger.warning(_msg(
+                "⚠️", f"人类化停顿被预算裁剪: {round(seconds, 2)}s > {round(remaining, 2)}s"))
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     async def open_upload_page(self, page: Page, *, multilogin: bool = False) -> None:
         # 进内容创作平台首页，点"发布视频"卡片（JS 跳转）进入短视频发布表单
         await page.goto(
@@ -427,13 +482,16 @@ class AlipayVideo(BaseVideoUploader):
         except Exception:
             pass
 
+        humanizer = self._humanizer(page)
         publish_entry = page.locator('a:has-text("发布视频推荐分辨率720p及以上，建议1080p")').first
         try:
             await publish_entry.wait_for(state="visible", timeout=30000)
-            await publish_entry.click()
+            await humanizer.click(publish_entry)
         except Exception as exc:
             alipay_logger.warning(_msg("😵", f"点击「发布视频」入口失败: {exc}"))
             raise
+        # SPA 路由跳到发布表单：点后付一次 after_navigate，再等 URL 自证。
+        await humanizer.after_navigate()
 
         await page.wait_for_url("**/content-creation/publish/short-video**", timeout=60000)
 
@@ -444,27 +502,42 @@ class AlipayVideo(BaseVideoUploader):
         alipay_logger.info(_msg("🏃", f"已选择视频文件: {file_path}"))
 
     async def fill_title_and_tags(self, page: Page) -> None:
-        title_field = page.get_by_placeholder("一个好的标题，能获得更多人的喜欢哦").first
+        humanizer = self._humanizer(page)
+        title_field = page.get_by_placeholder("一个好的标题，能获得更多人的喜欢哦")
         await title_field.wait_for(state="visible", timeout=30000)
+        title_field = await _unique(title_field, "标题输入框", role="editable")
         value = format_title_with_tags(self.title, self.tags, max_length=self.max_title_length)
-        await title_field.fill(value)
+        # 标题（含 #话题）是单行 input：sel 形态整体替换，清空与输入同一次会话。
+        await humanizer.click(title_field)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(value)
         alipay_logger.info(_msg("🏷️", f"标题已填写（含标签共 {len(value)} 字）: {value}"))
 
     async def fill_description(self, page: Page) -> None:
         if not self.desc:
             return
-        desc_field = page.get_by_placeholder("填写作品描述，让你的作品更容易被看到").first
-        await desc_field.fill(self.desc)
-        alipay_logger.info(_msg("🏷️", f"作品描述已填写: {self.desc[:40]}"))
+        humanizer = self._humanizer(page)
+        desc_field = page.get_by_placeholder("填写作品描述，让你的作品更容易被看到")
+        await desc_field.wait_for(state="visible", timeout=30000)
+        desc_field = await _unique(desc_field, "作品描述输入框", role="editable")
+        # 多行 textarea：先归一换行（\r 会被 insert_text 丢弃），>1000 由共享层整段 bulk。
+        value = _normalise_text(self.desc)
+        await humanizer.click(desc_field)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(value)
+        alipay_logger.info(_msg("🏷️", f"作品描述已填写: {value[:40]}"))
 
     async def upload_thumbnail(self, page: Page) -> None:
         if not self.thumbnail_path:
             return
         try:
+            humanizer = self._humanizer(page)
             # 1) 点发布表单的"上传封面"入口，弹出"截取封面"弹窗
             cover_el = page.get_by_text("上传封面", exact=True).first
             await cover_el.scroll_into_view_if_needed()
-            await cover_el.click(timeout=10000)
+            await humanizer.click(cover_el)
             await page.wait_for_timeout(2000)
 
             modal_body = page.locator(".antd5-modal-body").last
@@ -472,13 +545,13 @@ class AlipayVideo(BaseVideoUploader):
             # 2) 弹窗首次是"截取封面/上传封面"两入口；点"上传封面"展开图片上传区
             inner = modal_body.get_by_text("上传封面", exact=True).first
             if await inner.count():
-                await inner.click(timeout=8000)
+                await humanizer.click(inner)
                 await page.wait_for_timeout(1500)
 
             # 3) 点"上传图片"打开图片选择器
             upload_img_btn = modal_body.get_by_role("button", name="上传图片").first
             await upload_img_btn.wait_for(state="visible", timeout=10000)
-            await upload_img_btn.click()
+            await upload_img_btn.click()  # native-click: file；文件选择器必须由原生点击派发，与下一行 set_input_files 成对
             await page.wait_for_timeout(1500)
 
             # 4) 设置图片到新出现的图片 file input
@@ -492,7 +565,7 @@ class AlipayVideo(BaseVideoUploader):
             if not await done_btn.count():
                 done_btn = page.get_by_role("button", name="完成").first
             await done_btn.wait_for(state="visible", timeout=15000)
-            await done_btn.click()
+            await humanizer.click(done_btn)
             await page.wait_for_timeout(800)
             alipay_logger.success(_msg("🖼️", "封面已上传"))
         except Exception as exc:
@@ -502,32 +575,32 @@ class AlipayVideo(BaseVideoUploader):
         if not self.collection_name:
             return
         try:
+            humanizer = self._humanizer(page)
             # antd5-select：点击合集下拉的可点开关（compilation input 的父容器），展开选项
             compilation = page.locator('input[id*="_compilationInfo"]').first
             await compilation.scroll_into_view_if_needed()
-            select = compilation.locator("xpath=../../..").first
+            # 两条候选分支先各自计数、再收窄到唯一 Locator（多义硬错，不静默取 first）。
+            select = compilation.locator("xpath=../../..")
             if not await select.count():
                 select = page.locator(
                     '.antd5-select:has(.antd5-select-selection-placeholder)'
-                ).first
-            await select.click(timeout=8000)
+                )
+            select = await _unique(select, "合集下拉开关")
+            await humanizer.click(select)
             await page.wait_for_timeout(2000)
 
             # 只在选项里精确找映射合集名；找不到就不归集（用户后续手工建合集后会自动选中）
             options = page.locator('[role="option"]')
             target = options.filter(has_text=self.collection_name).first
             if await target.count():
-                try:
-                    await target.click(timeout=5000, force=True)
-                except Exception:
-                    await target.scroll_into_view_if_needed()
-                    await target.click(timeout=5000)
+                # 两级点击合并为一次坐标点击：滚入视口由 Humanizer 负责，不再 force 首选。
+                await humanizer.click(target)
                 await page.wait_for_timeout(800)
                 alipay_logger.success(_msg("🥳", f"已选择合集：{self.collection_name}"))
                 return
 
             alipay_logger.warning(_msg("😵", f"账号中无「{self.collection_name}」合集，跳过归集"))
-            await page.keyboard.press("Escape")
+            await humanizer.press("Escape")
         except Exception as exc:
             alipay_logger.warning(_msg("😵", f"选择合集失败，跳过归集继续发布: {exc}"))
 
@@ -547,7 +620,7 @@ class AlipayVideo(BaseVideoUploader):
     async def wait_for_upload_complete(self, page: Page, timeout: int = 1800) -> None:
         # 等待"确认发布"按钮变为可点击（视频上传+转码完成）
         budget = self.publish_budget
-        publish_btn = page.get_by_role("button", name="确认发布").first
+        publish_btn = page.get_by_role("button", name=ALIPAY_PUBLISH_BUTTON_NAME).first
         start = time.monotonic()
         timeout = budget.clamp_seconds(timeout)
         while True:
@@ -570,7 +643,8 @@ class AlipayVideo(BaseVideoUploader):
 
     async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         budget = self.publish_budget
-        publish_btn = page.get_by_role("button", name="确认发布").first
+        humanizer = self._humanizer(page)
+        publish_btn = page.get_by_role("button", name=ALIPAY_PUBLISH_BUTTON_NAME).first
         await publish_btn.wait_for(
             state="visible", timeout=budget.clamp_ms(30000)
         )
@@ -690,11 +764,10 @@ class AlipayVideo(BaseVideoUploader):
             返回是否点了「继续发布」。"""
             try:
                 btn = page.locator(
-                    '.antd5-modal-wrap button:has-text("继续发布"), '
-                    '.antd5-modal button:has-text("继续发布")'
+                    ALIPAY_QUALITY_MODAL_BUTTON_SELECTOR
                 ).first
                 if await btn.count() and await btn.is_visible():
-                    await btn.click(timeout=3000)
+                    await humanizer.click(btn)
                     alipay_logger.info(_msg("✅", "已点击优化项弹窗「继续发布」放行提交"))
                     await page.wait_for_timeout(500)
                     return True
@@ -709,15 +782,16 @@ class AlipayVideo(BaseVideoUploader):
         )
         budget.check_pre_click()
         await _collect_click_diag("点击前")
-        await publish_btn.click()
+        await humanizer.before_submit()
+        await humanizer.click(publish_btn)
         publish_clicked = True
         await page.wait_for_timeout(600)
         await _collect_click_diag("首次点击后")
         # 首次点击后可能立即弹出优化项拦截弹窗，先放行一次
         await _dismiss_quality_modal()
 
-        success_toast = page.locator('.antd5-message-notice-content:has-text("发布成功"), .antd5-message-notice-content:has-text("提交成功"), .antd5-message-notice-content:has-text("提交审核"), .antd5-message-notice-content:has-text("审核中")').first
-        fail_toast = page.locator('.antd5-message-notice-content:has-text("发布失败"), .antd5-message-notice-content:has-text("提交失败"), .antd5-message-notice-content:has-text("请稍后重试")').first
+        success_toast = page.locator(ALIPAY_SUCCESS_TOAST_SELECTOR).first
+        fail_toast = page.locator(ALIPAY_FAIL_TOAST_SELECTOR).first
 
         retried_after_aigc = False
         try:
@@ -745,7 +819,8 @@ class AlipayVideo(BaseVideoUploader):
                     )
                     if saw_aigc_done and not retried_after_aigc and no_submit_signal:
                         if await publish_btn.count() and not await publish_btn.is_disabled():
-                            await publish_btn.click()
+                            await humanizer.before_submit()
+                            await humanizer.click(publish_btn)
                             retried_after_aigc = True
                             alipay_logger.info(_msg("🔁", "检测到 AIGC 预处理完成，已二次点击确认发布"))
                             await page.wait_for_timeout(500)
@@ -822,6 +897,8 @@ class AlipayVideo(BaseVideoUploader):
         self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
+        # 一个 page 一个 Humanizer：构造点紧跟 new_page，之后所有交互都用它。
+        self._humanizer(page)
         await self.open_upload_page(page, multilogin=multilogin)
         alipay_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
 
