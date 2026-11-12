@@ -226,6 +226,48 @@ async def _type_caption(
     await humanizer.type_text(text)
 
 
+# 配文回读：比较渲染文本（``innerText``）而非 ``textContent``。逐字输入把
+# ``\n`` 打成 Enter，Lexical 在段间插 ``<br><br>``：``textContent`` 把两行
+# 直接粘在一起，``innerText`` 才保留换行。轮询上限沿用原 ``to_have_text``。
+CAPTION_READBACK_TIMEOUT_MS = 30_000
+CAPTION_READBACK_POLL_MS = 200
+
+
+def _normalise_caption_text(text: str) -> str:
+    """比较前统一换行并去掉尾部空白；两侧走同一规则。"""
+    return str(text).replace('\r\n', '\n').replace('\r', '\n').rstrip()
+
+
+async def _read_back_caption(
+    editor: Locator,
+    caption: str,
+    *,
+    page: Page,
+    budget: PublishTimeoutBudget,
+) -> None:
+    """轮询编辑器的渲染文本，直到与键入的配文**全等**（逐字哨兵）。
+
+    真机 2026-11-13（ticket 05，``--no-publish`` 视频干跑）：键入本身正确，
+    旧的 ``to_have_text`` 读 ``textContent`` 丢了 ``<br><br>`` 的换行而误报。
+    只换读取形态，不放松比较：丢字、追加、换行丢失都照常失败
+    （``AssertionError``；stage ``publish``，退出 1，未发布任何内容）。
+    探测异常照常向上抛，绝不因探测失败而放行。
+    """
+    expected = _normalise_caption_text(caption)
+    timeout_ms = budget.clamp_ms(CAPTION_READBACK_TIMEOUT_MS)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        actual = _normalise_caption_text(await editor.inner_text())
+        if actual == expected:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                'Instagram 配文回读不一致：'
+                f'期望 {expected!r}，实际 {actual!r}'
+            )
+        await page.wait_for_timeout(CAPTION_READBACK_POLL_MS)
+
+
 async def _click_nav(locator: Locator, humanizer: Humanizer) -> None:
     """可见导航点击：先悬停让左栏展开落定，再坐标点击，付一次 ``after_navigate``。
 
@@ -901,11 +943,9 @@ class InstagramUploader:
         dialog = page.get_by_role('dialog')
         editor = await _caption_editor(dialog)
         caption = self._caption()
-        # 清空后逐字写入（>1000 码点整段 insert_text），随后按页面文本回读。
+        # 清空后逐字写入（>1000 码点整段 insert_text），随后按渲染文本回读。
         await _type_caption(editor, caption, humanizer)
-        await expect(editor).to_have_text(
-            caption, timeout=budget.clamp_ms(30_000)
-        )
+        await _read_back_caption(editor, caption, page=page, budget=budget)
         # 选项必须在点击 Share 之前完成；失败时尚未发布，按普通失败处理。
         if self.options is not None:
             # 未请求时保持既有 stage（legacy 失败证据不变）。

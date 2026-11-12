@@ -29,3 +29,21 @@ Status: ready-for-human
 
 `Status:` 未改（真机复跑仍需按上面清单执行）。
 
+### 第二次干跑：配文回读（同日，integration tip `3d506a8`）
+
+导航修好后流程 ~58s 到达配文页，随后在 `expect(editor).to_have_text(caption)` 失败（stage `publish`，退出 1）：期望 `人类化回归 Reel 1113\n\n人类化交互层回归干跑。\n\n#回归测试 #自动化`，`textContent` 实得 `人类化回归 Reel 1113人类化交互层回归干跑。#回归测试 #自动化`。证据 `.local/instagram-errors/8d8c8d8794aa4040863d4c5eb3b1d773/page.html` 显示 Lexical 段间插入的是 `<br><br>` 而非多个 `<p>`：`textContent` 丢换行，`innerText` 保留。人类化移植前该字段用 `editor.fill(caption)`，DOM 形态不同才让 `textContent` 恰好相等；移植后按 spec §2.4 rule 3 把 `\n` 打成 Enter，因此**只改编读取形态，不改编键入**。
+
+`uploader/meta_uploader/insgraph_uploader/main.py`：
+- 新增 `_normalise_caption_text`（`\r\n`/`\r` → `\n`，去尾部空白）、`_read_back_caption`（取 `locator.inner_text()`，每 200ms 轮询，`budget.clamp_ms(30_000)` 上限，不等即 `AssertionError` 带上期望/实际）与两个上限常量。
+- `_publish` 里那次 `to_have_text` 换成单次 `_read_back_caption(...)`。比较仍是**全等**（非前缀），探测异常不捕获、照常上抛；失败仍是点击前普通失败（stage `publish`、退出 1、未发布）。
+- 共享层、其他平台、依赖：零改动。
+
+覆盖（`tests/test_instagram_humanize.py`，29 passed = 原 24 + 5；全库 1707 passed / 2 skipped）：
+- `test_caption_readback_accepts_br_rendered_inner_text`：真机原配文（`\n\n` 段间）通过，首次采样即相等、零轮询等待。
+- `test_caption_readback_fails_on_a_single_missing_character`：少一个字符即失败，消息含期望与实际。
+- `test_caption_readback_polls_until_the_editor_catches_up`：前两次探测不等、第三次相等，恰好两次 `wait_for_timeout(200)`。
+- `test_caption_readback_fails_loudly_when_the_probe_errors`：探测抛错向上抛，绝不静默放行。
+- `test_caption_readback_compares_rendered_text_not_to_have_text`：静态哨兵，`_publish` 不再出现 `to_have_text` 且调用 `_read_back_caption`，helper 必须用 `inner_text()`。
+
+`Status:` 未改（真机复跑仍需按上面清单执行）。
+
