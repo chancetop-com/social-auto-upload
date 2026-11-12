@@ -14,6 +14,8 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from utils.humanize import Humanizer
+
 from ..options import (
     INELIGIBLE,
     MISSING,
@@ -80,6 +82,7 @@ class SwitchControl:
         panel_labels: tuple[str, ...] | None = None,
         invert: bool = False,
         budget: 'PublishTimeoutBudget | None' = None,
+        humanizer: Humanizer | None = None,
     ) -> None:
         if not labels:
             raise ValueError("SwitchControl 至少需要一个文案回退")
@@ -88,7 +91,14 @@ class SwitchControl:
         self._panel_labels = tuple(panel_labels) if panel_labels else ()
         self._invert = invert
         self._budget = budget
+        self._humanizer = humanizer
         self._panel_open = False
+
+    def _behavior(self) -> Humanizer:
+        """发布链路共享的 Humanizer；独立使用时按 page 自建（仍全部人类化）。"""
+        if self._humanizer is None:
+            self._humanizer = Humanizer(self._page)
+        return self._humanizer
 
     def _dialog(self) -> 'Locator':
         return self._page.get_by_role("dialog")
@@ -177,7 +187,11 @@ class SwitchControl:
         if row is None:
             return
         await activate(
-            self._page, row, is_open=self._panel_open_in_dom, budget=self._budget
+            self._page,
+            row,
+            is_open=self._panel_open_in_dom,
+            humanizer=self._behavior(),
+            budget=self._budget,
         )
 
     async def _ensure(self) -> 'Locator | None':
@@ -223,7 +237,12 @@ class SwitchControl:
                 f"Instagram 开关入口缺失: {self._labels[0]}"
                 f"{_panel_hint(self._panel_labels)}"
             )
-        await click_control(self._page, switch, budget=self._budget)
+        await click_control(
+            self._page,
+            switch,
+            humanizer=self._behavior(),
+            budget=self._budget,
+        )
         await self._wait_readback(requested)
 
     async def _wait_readback(self, requested: bool) -> None:

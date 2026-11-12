@@ -4,9 +4,10 @@
 ARIA role**，是一列普通 ``div`` 行。因此候选只能从输入框元素出发，按几何 + 精确
 文本定位：取输入框正下方的滚动容器——``top`` 落在 ``bottom-12`` 到
 ``bottom+160`` 之间、``height >= 40``、``width >= 100``、水平中心相距不超过
-320px，多个命中取最内层；候选行是该容器的直接子节点。点击用真实的指针事件
-（Playwright 的 ``node.click()``），实测 ``el.click()`` 不会触发选中；模糊候选
-永不点击，同名候选取第一个。回读值以页面输入框为准，比较对象始终是“被点候选的
+320px，多个命中取最内层；候选行是该容器的直接子节点。定位到行之后，用一次性
+属性戳把它变成 Playwright ``Locator``，点击统一走 ``Humanizer.click``（真实
+指针事件）：实测 ``el.click()`` 与句柄点击都不能可靠触发选中。模糊候选永不
+点击，同名候选取第一个。回读值以页面输入框为准，比较对象始终是“被点候选的
 标签”，而不是原始请求值。
 """
 from __future__ import annotations
@@ -14,11 +15,14 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from patchright.async_api import (
     Locator,
     TimeoutError as BrowserTimeoutError,
 )
+
+from utils.humanize import Humanizer
 
 from ..options import (
     INELIGIBLE,
@@ -31,7 +35,7 @@ from ..options import (
 )
 
 if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchright 绑进注册表。
-    from patchright.async_api import ElementHandle, Page
+    from patchright.async_api import Page
 
     from uploader.publish_timeout import PublishTimeoutBudget
 
@@ -47,17 +51,21 @@ ENTRY_SELECTORS = (
 # 等待联想列表的建议窗口（spec §4.3.1）；有预算时按剩余预算收紧。
 ENTRY_TIMEOUT_MS = 5_000
 SUGGESTION_TIMEOUT_MS = 10_000
-CLICK_TIMEOUT_MS = 10_000
 # 联想列表可能分批挂载：出现后短暂静置，避免只看到第一条就判“无精确匹配”。
 SUGGESTION_SETTLE_MS = 250
-# 逐字符输入更接近人工操作，实测 fill() 不会触发联想列表。
+# 逐字符输入更接近人工操作，实测 fill() 不会触发联想列表。Humanizer 的
+# keystroke 采样均值 136ms、下界 30ms；本控件按“整段不短于 TYPE_DELAY_MS/字”
+# 补齐缺口，保证不比旧的 press_sequentially(delay=80) 更快。
 TYPE_DELAY_MS = 80
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
+# 候选行没有 role，只能由 JS 找到节点；一次性属性戳把它变成 Locator。
+_SUGGESTION_ATTR = 'data-instagram-suggestion'
 
 # 几何 + 文本探针：默认返回联想列表的候选行（保留原始下标）；传入
-# ``{index, label, return_node: True}`` 时返回该下标对应的行节点，供调用方用真实
-# 指针事件点击。行是普通 div（无 role），所以不依赖类名，只看尺寸与位置。
+# ``{index, label, stamp}`` 时校验该下标行的精确文本，打上一次性属性戳并返回
+# 是否命中，供调用方用 ``page.locator`` 取回 Locator 后走 Humanizer 点击。
+# 行是普通 div（无 role），所以不依赖类名，只看尺寸与位置。
 _SUGGESTION_JS = """(el, action) => {
   const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const rect = el.getBoundingClientRect();
@@ -77,14 +85,15 @@ _SUGGESTION_JS = """(el, action) => {
     (node) => !containers.some((other) => other !== node && node.contains(other))
   );
   const list = innermost.sort((a, b) => b.children.length - a.children.length)[0];
-  if (!list) return action && action.return_node ? null : [];
+  if (!list) return action && action.stamp ? false : [];
   const rows = [...list.children].filter((row) => norm(row.textContent));
-  if (action && action.return_node) {
+  if (action && action.stamp) {
     const node = rows[action.index];
-    if (!node) return null;
+    if (!node) return false;
     if (norm(node.textContent).toLowerCase() !==
-        String(action.label || '').toLowerCase()) return null;
-    return node;
+        String(action.label || '').toLowerCase()) return false;
+    node.setAttribute('data-instagram-suggestion', String(action.stamp));
+    return true;
   }
   return rows
     .map((node, index) => ({index, label: norm(node.textContent)}))
@@ -96,10 +105,21 @@ class LocationControl:
     """配文页地点输入框；``read()`` 返回输入框值或已选地点区块文本。"""
 
     def __init__(
-        self, page: 'Page', *, budget: 'PublishTimeoutBudget | None' = None
+        self,
+        page: 'Page',
+        *,
+        budget: 'PublishTimeoutBudget | None' = None,
+        humanizer: Humanizer | None = None,
     ) -> None:
         self._page = page
         self._budget = budget
+        self._humanizer = humanizer
+
+    def _behavior(self) -> Humanizer:
+        """发布链路共享的 Humanizer；独立使用时按 page 自建（仍全部人类化）。"""
+        if self._humanizer is None:
+            self._humanizer = Humanizer(self._page)
+        return self._humanizer
 
     def _dialog(self) -> Locator:
         """创建弹窗；四个选项共用同一个弹窗，绝不使用全页定位。"""
@@ -184,15 +204,41 @@ class LocationControl:
     async def _type_and_wait(
         self, entry: Locator, requested: str
     ) -> list[tuple[int, str]]:
-        """逐字符输入并等待联想；列表始终为空时清空重输一次，规避 debounce 竞态。"""
+        """逐字符输入并等待联想；列表始终为空时清空重输一次，规避 debounce 竞态。
+
+        首次输入前只聚焦（``T/none``）；重试时用全选 + Backspace 覆盖旧值，不再
+        ``fill('')``。每次输入都由 ``Humanizer.type_text`` 逐字派发并自带一次
+        ``after_type``；debounce 期间不重复输入。
+        """
+        humanizer = self._behavior()
+        await entry.focus()
         for attempt in range(2):
             if attempt:
-                await entry.fill('')
-            await entry.press_sequentially(requested, delay=TYPE_DELAY_MS)
+                await humanizer.press('ControlOrMeta+A')
+                await humanizer.press('Backspace')
+            started = time.monotonic()
+            await humanizer.type_text(requested)
+            await self._hold_cadence(started, len(requested))
             entries = await self._wait_for_suggestions(entry)
             if entries:
                 return entries
         return []
+
+    async def _hold_cadence(self, started: float, chars: int) -> None:
+        """保证整段输入不比旧的 ``TYPE_DELAY_MS`` 更快。
+
+        逐字节奏来自共享层（均值 136ms、下界 30ms）；这里只在采样偏快时补齐
+        缺口，不复制第二份节奏表，也不在 ``HUMANIZE=0`` 的快速路径上加停顿。
+        """
+        if not self._behavior().enabled:
+            return
+        deficit = chars * TYPE_DELAY_MS / 1000.0 - (time.monotonic() - started)
+        if deficit <= 0:
+            return
+        if self._budget is not None:
+            deficit = min(deficit, max(0.0, self._budget.remaining_seconds()))
+        if deficit > 0:
+            await asyncio.sleep(deficit)
 
     async def _suggestions(self, entry: Locator) -> list[tuple[int, str]]:
         """按几何 + 文本枚举输入框下方的联想行（保留原始下标）。"""
@@ -222,28 +268,36 @@ class LocationControl:
 
     async def _click_entry(
         self, entry: Locator, index: int, label: str
-    ) -> 'ElementHandle | None':
-        """返回被点候选的元素句柄并派发真实指针点击；文本在点击前再核对一次。"""
+    ) -> Locator | None:
+        """把被选候选变成 ``Locator`` 并走 Humanizer 点击；文本在点击前再核对一次。
+
+        联想行没有 role、也不是输入框后代，唯一的桥是把 JS 找到的节点打上一次
+        性属性戳，再由 ``page.locator`` 取回 Locator。点击必须是坐标点击：
+        实测联想只响应真实指针事件，句柄/JS 点击都不会触发选中。
+        """
+        token = f's{index}-{uuid4().hex}'
         try:
-            handle = await entry.evaluate_handle(
+            stamped = await entry.evaluate(
                 _SUGGESTION_JS,
-                {'index': index, 'label': label, 'return_node': True},
+                {'index': index, 'label': label, 'stamp': token},
             )
         except Exception:
             return None
-        node = handle.as_element()
-        if node is None:
+        if not stamped:
             return None
-        # 实测：联想行只响应真实指针事件；``el.click()`` 不会触发选中，
-        # 因此这里用 Playwright 的真实点击，失败即按未选中处理。
+        candidate = self._page.locator(
+            f'[{_SUGGESTION_ATTR}="{token}"]'
+        )
         try:
-            await node.scroll_into_view_if_needed()
-            await node.click(timeout=self._timeout(CLICK_TIMEOUT_MS))
+            if await candidate.count() != 1:
+                return None
         except Exception:
             return None
-        return node
+        humanizer = self._behavior()
+        await humanizer.click(candidate)
+        return candidate
 
-    async def _wait_row_detached(self, node: 'ElementHandle') -> bool:
+    async def _wait_row_detached(self, node: Locator) -> bool:
         """选中后 Instagram 会卸载整个联想列表：以被点节点脱离 DOM 为准。
 
         实测（2026-11-10）：点击候选后列表节点 ``isConnected === false``，而
@@ -256,7 +310,7 @@ class LocationControl:
                 if await node.evaluate('el => !el.isConnected'):
                     return True
             except Exception:
-                # 句柄已随旧文档销毁，同样视为消失。
+                # Locator 已随旧文档销毁，同样视为消失。
                 return True
             if time.monotonic() >= deadline:
                 return False
