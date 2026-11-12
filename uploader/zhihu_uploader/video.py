@@ -18,6 +18,7 @@ from patchright.async_api import Page, async_playwright, expect
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
+from utils.humanize import Humanizer
 from uploader.zhihu_uploader.constants import (
     ZHIHU_LAUNCH_KWARGS, ZHIHU_ORIGINALITY,
     ZHIHU_VIDEO_DESCRIPTION_MAX, ZHIHU_VIDEO_EXTENSIONS, ZHIHU_VIDEO_MAX_BYTES,
@@ -52,6 +53,29 @@ class ZhihuVideo:
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
         self.publish_not_before = publish_not_before
+
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """人类化停顿只吃剩余预算，不自己抛超时。"""
+        budget = getattr(self, "_publish_budget", None)
+        remaining = (
+            max(0.0, budget.remaining_seconds()) if budget is not None else seconds
+        )
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
 
     def validate_upload_args(self, *, check_cookie: bool = True) -> None:
         """依据页面提示检查视频、标题、简介和当前上传所需的分类参数。
@@ -101,26 +125,27 @@ class ZhihuVideo:
 
     async def video_options(self, page: Page) -> dict:
         """从本次素材实际渲染的菜单读取完整候选；不拿旧版二级领域代替新版表单。"""
+        humanizer = self._humanizer(page)
         # 所属领域标签限定业务行，visible 限定本次展开的列表，排除隐藏菜单。
         field = page.locator(".VideoUploadForm-item").filter(has=page.get_by_text("所属领域", exact=True))
         await expect(field).to_have_count(1)
         control = field.get_by_role("combobox")
-        await control.click()
+        await humanizer.click(control)
         menu = page.locator(".VideoUploadForm-selectList:visible")
         await expect(menu).to_have_count(1)
         # 页面源码对每个领域只渲染一个 name；逐行读取完整菜单，不依赖未观察的子组件 class。
         await expect(menu).to_contain_text(re.compile(r"\S"))
         categories = [text.strip() for text in await menu.get_by_role("option").all_inner_texts()
                       if text.strip() and text.strip() != "选择领域"]
-        await control.click()
+        await humanizer.click(control)
         mark_field = page.locator(".VideoUploadForm-item").filter(has=page.get_by_text("视频标记", exact=True))
-        await mark_field.get_by_role("button", name="选择视频标记", exact=True).click()
+        await humanizer.click(mark_field.get_by_role("button", name="选择视频标记", exact=True))
         modal = page.locator(".VideoUploadForm-videoTypeModal:visible")
         await expect(modal).to_be_visible()
         marks = [text.strip() for text in await modal.locator(".VideoUploadForm-videoTypeModalOption").all_inner_texts()
                  if text.strip() and text.strip() not in {"确认", "取消", "关闭"}]
         # 只读完选项后取消弹层，不把第一个候选当成用户选择。
-        await modal.get_by_role("button", name="取消", exact=True).click()
+        await humanizer.click(modal.get_by_role("button", name="取消", exact=True))
         await expect(modal).to_be_hidden()
         if not categories or not marks or len(categories) != len(set(categories)) or len(marks) != len(set(marks)):
             raise RuntimeError("知乎候选为空或重复，无法安全生成选择菜单")
@@ -144,20 +169,28 @@ class ZhihuVideo:
 
     async def fill_video_options(self, page: Page) -> None:
         """只选择已核对的实时菜单值，选择后读回表单。"""
+        humanizer = self._humanizer(page)
         field = page.locator(".VideoUploadForm-item").filter(has=page.get_by_text("所属领域", exact=True))
         control = field.get_by_role("combobox")
-        await control.click()
-        await page.locator(".VideoUploadForm-selectList:visible").get_by_role("option", name=self.category, exact=True).click()
+        await humanizer.click(control)
+        await humanizer.click(
+            page.locator(".VideoUploadForm-selectList:visible").get_by_role(
+                "option", name=self.category, exact=True
+            )
+        )
         await expect(control).to_contain_text(self.category)
         mark_field = page.locator(".VideoUploadForm-item").filter(has=page.get_by_text("视频标记", exact=True))
-        await mark_field.get_by_role("button", name="选择视频标记", exact=True).click()
+        await humanizer.click(
+            mark_field.get_by_role("button", name="选择视频标记", exact=True)
+        )
         modal = page.locator(".VideoUploadForm-videoTypeModal:visible")
-        await modal.get_by_role("button", name=self.video_mark, exact=True).click()
-        await modal.get_by_role("button", name="确认", exact=True).click()
+        await humanizer.click(modal.get_by_role("button", name=self.video_mark, exact=True))
+        await humanizer.click(modal.get_by_role("button", name="确认", exact=True))
         await expect(modal).to_be_hidden()
 
     async def fill_video_form(self, page: Page) -> None:
         """等本次视频传输成功，再填写并读回页面要求的元数据。"""
+        humanizer = self._humanizer(page)
         form = page.locator(".VideoUploadForm-item").filter(
             has=page.get_by_text("标题与介绍", exact=True),
         )
@@ -170,11 +203,21 @@ class ZhihuVideo:
 
         title = form.locator("textarea")
         await expect(title).to_have_count(1)
-        await title.fill(self.title)
+        # 单行标题按全选覆盖：上传页可能带预填内容，追加会留下旧标题前缀。
+        await humanizer.click(title)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(self.title)
         await expect(title).to_have_value(self.title)
         description = form.locator('[contenteditable="true"][role="textbox"]')
         await expect(description).to_have_count(1)
-        await description.fill(self.description)
+        await humanizer.click(description)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        # 多行介绍先归一换行：type_text 把 "\n" 走具名 Enter，"\\r" 会被当作字符丢弃。
+        description_text = self.description.replace("\r\n", "\n").replace("\r", "\n")
+        if description_text:
+            await humanizer.type_text(description_text)
         if self.description.strip():
             await expect(description).to_contain_text(self.description[:80])
 
@@ -187,14 +230,21 @@ class ZhihuVideo:
         ).get_by_role("checkbox")
         await expect(originality).to_have_count(1)
         wanted_original = self.originality == "original"
+        # 先读状态再决定是否点击：已勾选时重复点击会取消勾选。
         if await originality.is_checked() != wanted_original:
-            await originality.click()
+            await humanizer.click(originality)
         if wanted_original:
             await expect(originality).to_be_checked()
         else:
             await expect(originality).not_to_be_checked()
 
-        await fill_zhihu_video_schedule(page, self.schedule)
+        await fill_zhihu_video_schedule(page, self.schedule, humanizer)
+
+    async def _submit(self, page: Page, publish) -> None:
+        """唯一提交点：人类化停顿后坐标点击，异常原样上抛。"""
+        humanizer = self._humanizer(page)
+        await humanizer.before_submit()
+        await humanizer.click(publish)
 
     def results_dir(self) -> Path:
         """Result manifests sit next to the local account; MLX uses a temp dir."""
@@ -234,6 +284,7 @@ class ZhihuVideo:
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: upload page operations plus a single publish click."""
         budget = PublishTimeoutBudget("知乎视频")
+        self._publish_budget = budget
         results_dir = self.results_dir()
         results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
@@ -253,6 +304,8 @@ class ZhihuVideo:
         submitted = False
         try:
             page = await session.context.new_page()
+            # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
+            self._humanizer(page)
             response = await page.goto(ZHIHU_VIDEO_URL, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:
                 raise RuntimeError(f"知乎视频上传页访问失败，HTTP {response.status}")
@@ -299,7 +352,7 @@ class ZhihuVideo:
             submitted = True
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-            await publish.click()
+            await self._submit(page, publish)
             try:
                 await expect(page.get_by_text("发布成功", exact=True)).to_be_visible(
                     timeout=budget.post_click_timeout_ms(60000)
@@ -309,7 +362,7 @@ class ZhihuVideo:
             result.update(success=True, status="published")
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             async with page.expect_popup() as detail_info:
-                await page.get_by_text("查看详情", exact=True).click()
+                await page.get_by_text("查看详情", exact=True).click()  # native-click: read；发布后详情 tab 只读，独立窗口由平台打开
             detail = await detail_info.value
             await detail.wait_for_url(re.compile(r"^https://www\.zhihu\.com/(?:pin|zvideo|video)/\d+"), timeout=60000)
             result["url"] = detail.url
