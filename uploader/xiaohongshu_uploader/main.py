@@ -234,9 +234,17 @@ XHS_OVERLAY_POPOVER_RULE = OverlayRule(
     action="esc",
     label="浮层",
 )
+# 2026-11-12 真机：视频发布页的「PK封面」功能引导会盖住封面入口与选项区。
+XHS_OVERLAY_PK_COVER_RULE = OverlayRule(
+    "div.pk-cover-guide",
+    action="click-child",
+    target_selector=".pk-cover-guide-close",
+    label="PK封面引导",
+)
 XHS_OVERLAY_RULES = (
     XHS_OVERLAY_GUIDE_RULE,
     XHS_OVERLAY_NOTE_EDITOR_RULE,
+    XHS_OVERLAY_PK_COVER_RULE,
     XHS_OVERLAY_POPOVER_RULE,
 )
 # 正文字段输入期间只允许清「我知道了」引导按钮（数据子集，不是模式开关）。
@@ -374,13 +382,24 @@ XHS_DECLARATION_CONFIRM_CANDIDATES = (
 
 
 def _declaration_option_candidates(label: str) -> tuple[Candidate, ...]:
-    """声明下拉选项：结构下拉 + 精确文案 → 裸文案点击。"""
+    """声明下拉选项：一级下拉 → 二级来源下拉 → 裸文案点击。
+
+    真机 2026-11-12：「内容来源声明」的二级菜单是普通
+    ``div.d-popover.d-dropdown``（没有 ``declaration-drop-down``），裸文案
+    会命中父项/名称/span 共 3 个节点；必须先用容器收窄。
+    """
     pattern = re.compile(rf"^{re.escape(label)}$")
     return (
         _zh_css(
             f'.declaration-drop-down .d-option:text-is("{label}")',
             factory=lambda scope: scope.locator(
                 XHS_DECLARATION_OPTION_SELECTOR
+            ).filter(has_text=pattern),
+        ),
+        _zh_css(
+            f'div.d-popover.d-dropdown .d-option:text-is("{label}")',
+            factory=lambda scope: scope.locator(
+                "div.d-popover.d-dropdown .d-option"
             ).filter(has_text=pattern),
         ),
         Candidate(label, kind="text-zh", exact=True),
@@ -2688,6 +2707,10 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
 
         # 封面设置为增强步骤：失败时记 warning 跳过、继续发布（用视频首帧兜底）。
         try:
+            # 0. PK封面引导会盖住封面入口（2026-11-12 真机）：先按注册表清障。
+            await _clear_known_overlays(
+                page, XHS_OVERLAY_RULES, budget=self.publish_budget
+            )
             # 1. 封面入口 .cover-edit-entry（容器 .cover-edit-stack），文本仅兜底；
             #    打开封面弹窗。
             entry = await _resolve_anchor(
