@@ -61,6 +61,13 @@ _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
 TIKTOK_RESULT_READ_TIMEOUT_MS = 30_000
 TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS = 3_000
 TIKTOK_HASHTAG_SETTLE_MS = 600
+#: ``--no-publish`` dry run: upper bound for the publish-ready wait.  It is
+#: also clamped by whatever remains of the shared publish budget.
+TIKTOK_DRY_RUN_READY_TIMEOUT_MS = 60_000
+TIKTOK_DRY_RUN_POLL_MS = 500
+TIKTOK_DRY_RUN_READY_MESSAGE = (
+    "TikTok 发布就绪，--no-publish 停在发布按钮前（未点击发布）"
+)
 
 # ---------------------------------------------------------------------------
 # Ordered selector candidates (spec §5.5)
@@ -1242,7 +1249,13 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self.apply_cover(page)
         # 7. schedule, when requested
         await self.apply_schedule(page)
-        # 8. publish
+        # 8. publish (``--no-publish`` stops at the ready point instead)
+        if getattr(self, "no_publish", False):
+            await self.wait_publish_ready(
+                page, deadline=budget, multilogin=multilogin
+            )
+            tiktok_logger.success(TIKTOK_DRY_RUN_READY_MESSAGE)
+            return
         await self.click_publish(
             page, deadline=budget, multilogin=multilogin
         )
@@ -2439,6 +2452,79 @@ class TiktokBaseUploader(BaseVideoUploader):
             await self._apply_hashtag(page, tag)
             await page.keyboard.press("End")
 
+    async def wait_publish_ready(
+        self,
+        page,
+        *,
+        deadline: float | PublishTimeoutBudget | None = None,
+        multilogin: bool = False,
+    ) -> None:
+        """Wait until the publish button is present and enabled; never clicks.
+
+        ``--no-publish`` uses this to stop at the publish-ready point.  The
+        window is ``min(60s, remaining budget)`` and it is *not* extended by
+        ``--not-before``: the dry run skips that wait entirely.  On timeout the
+        error is a plain ``RuntimeError`` (exit 1) because no click was sent,
+        so the post was definitely not published.
+        """
+        budget = self._coerce_budget(deadline)
+        window = max(0.0, min(
+            TIKTOK_DRY_RUN_READY_TIMEOUT_MS / 1000,
+            budget.remaining_seconds(),
+        ))
+        ready_deadline = time.monotonic() + window
+        poll = TIKTOK_DRY_RUN_POLL_MS / 1000
+        while True:
+            if budget.remaining_seconds() <= 0:
+                raise budget.pre_click_error()
+            if multilogin:
+                _raise_if_login_required(page)
+            if await self._publish_button_ready(page, multilogin=multilogin):
+                return
+            remaining = min(
+                ready_deadline - time.monotonic(),
+                budget.remaining_seconds(),
+            )
+            if remaining <= 0:
+                raise RuntimeError(
+                    "TikTok 发布就绪超时（最多 "
+                    f"{int(window)} 秒）：发布按钮未出现或仍不可用，"
+                    "未点击发布，未发布任何内容。"
+                )
+            await asyncio.sleep(min(poll, remaining))
+
+    async def _publish_button_ready(self, page, *, multilogin: bool) -> bool:
+        """Whether a visible publish button is enabled; never clicks it."""
+        if multilogin:
+            _raise_if_login_required(page)
+        found = await _find_candidate(
+            self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True
+        )
+        if found is None:
+            return False
+        button, index, description = found
+        try:
+            enabled = await button.is_enabled()
+        except Exception:
+            enabled = True
+        if enabled:
+            get_attribute = getattr(button, "get_attribute", None)
+            if callable(get_attribute):
+                try:
+                    if str(
+                        await get_attribute("aria-disabled")
+                    ).lower() == "true":
+                        enabled = False
+                except Exception:
+                    pass
+        if enabled:
+            tiktok_logger.info(
+                "[+] TikTok publish ready: candidate "
+                f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} matched "
+                f"({description})"
+            )
+        return enabled
+
     async def click_publish(
         self,
         page,
@@ -2675,6 +2761,7 @@ class TiktokVideo(TiktokBaseUploader):
         *,
         options: TiktokPublishOptions | None = None,
         headless: bool | None = None,
+        no_publish: bool = False,
     ):
         self.title = title
         self.file_path = file_path
@@ -2683,6 +2770,7 @@ class TiktokVideo(TiktokBaseUploader):
         self.thumbnail_path = thumbnail_path
         self.account_file = account_file
         self.options = options
+        self.no_publish = no_publish
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = (
             LOCAL_CHROME_HEADLESS if headless is None else headless
@@ -3037,6 +3125,7 @@ class TiktokNote(TiktokBaseUploader):
         options=None,
         debug=False,
         headless=True,
+        no_publish=False,
     ):
         self.image_paths = list(image_paths)
         self.note = note
@@ -3045,6 +3134,7 @@ class TiktokNote(TiktokBaseUploader):
         self.account_file = account_file
         self.title = title
         self.options = options
+        self.no_publish = no_publish
         self.debug = debug
         self.headless = headless
         self.local_executable_path = LOCAL_CHROME_PATH
