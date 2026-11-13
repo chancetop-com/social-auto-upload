@@ -900,11 +900,13 @@ async def _set_privacy_option(
         )
 
 
-def _raise_if_login_required(page) -> None:
+def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this.  Local mode keeps its historical
-    retry-until-timeout behaviour.
+    Only the Multilogin branch calls this. Local mode keeps its historical
+    retry-until-timeout behaviour. ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched, so exit 10
+    never claims "not published".
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -913,7 +915,8 @@ def _raise_if_login_required(page) -> None:
     if any(marker in path for marker in _LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "TikTok 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -2713,52 +2716,34 @@ class TiktokBaseUploader(BaseVideoUploader):
         # a raise after ``mouse.down`` must never be re-dispatched.
         publish_clicked = False
 
-        # Phase 1 — readiness only. Poll for a visible, enabled publish button;
-        # no click is dispatched here. A missing/disabled button is a wait, not
-        # a retry: the click below happens exactly once.
-        readiness_iterations = 0
-        while True:
-            readiness_iterations += 1
-            if readiness_iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
-                raise budget.timeout_error(False)
-            try:
-                budget.check_pre_click()
-            except RuntimeError:
-                raise budget.timeout_error(False) from None
-            if multilogin:
-                _raise_if_login_required(page)
-            found = await _find_candidate(
-                self.locator_base,
-                _PUBLISH_BUTTON_CANDIDATES,
-                visible=True,
+        # Phase 1 — readiness only (60s window, min(60s, remaining budget)).
+        # Reuses the same predicate as the --no-publish gate: visible + enabled
+        # + no aria-disabled. A missing/disabled button fails here (exit 1)
+        # instead of being retried.
+        await self.wait_publish_ready(
+            page, deadline=budget, multilogin=multilogin
+        )
+        found = await _find_candidate(
+            self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True
+        )
+        if found is None:
+            raise RuntimeError(
+                "TikTok 发布按钮在就绪检查后消失：未点击发布，未发布任何内容。"
             )
-            if found is not None:
-                publish_button, index, description = found
-                enabled = True
-                try:
-                    enabled = await publish_button.is_enabled()
-                except Exception:
-                    enabled = True
-                if enabled:
-                    tiktok_logger.info(
-                        "[+] TikTok publish: candidate "
-                        f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} "
-                        f"matched ({description})"
-                    )
-                    break
-            tiktok_logger.info("  [-] publish button not ready yet")
-            await asyncio.sleep(0.5)
+        publish_button, _index, _description = found
 
         # Single dispatch. A failure before mouse.down is a hard failure (exit
         # 1) — never re-click. A failure after mouse.down may already have
         # published, so it is treated as sent and never re-dispatched.
-        budget.check_pre_click()
         await humanizer.before_submit()
+        budget.check_pre_click()
         try:
             await _humanized_click(humanizer, publish_button)
         except Exception as e:
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(
+                    page, publish_attempted=_maybe_dispatched(e)
+                )
             if not _maybe_dispatched(e):
                 raise
             publish_clicked = True
@@ -2777,14 +2762,12 @@ class TiktokBaseUploader(BaseVideoUploader):
             poll_iterations += 1
             if poll_iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
                 raise budget.timeout_error(True)
+            if multilogin:
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             try:
                 budget.check_pre_click()
             except RuntimeError:
-                if multilogin:
-                    _raise_if_login_required(page)
                 raise budget.timeout_error(True) from None
-            if multilogin:
-                _raise_if_login_required(page)
             try:
                 await page.wait_for_url(
                     re.compile(r".*tiktokstudio/content.*"), timeout=3000
@@ -2793,7 +2776,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 # Photo posts may show a "Post now" confirmation instead of
                 # navigating. Attempt it at most once; a failed click is never
                 # retried, and the success-URL wait still owns the outcome.
-                if publish_clicked and not dialog_clicked:
+                if not dialog_clicked:
                     dialog_clicked = True
                     await self._click_post_now(page)
                 tiktok_logger.info("  [-] video publishing")
@@ -2801,8 +2784,12 @@ class TiktokBaseUploader(BaseVideoUploader):
                 continue
             except Exception as e:
                 if multilogin:
-                    _raise_if_login_required(page)
-                raise budget.timeout_error(True) from e
+                    _raise_if_login_required(
+                        page, publish_attempted=publish_clicked
+                    )
+                if publish_clicked:
+                    raise budget.timeout_error(True) from e
+                raise
 
             tiktok_logger.success("  [-] video published success")
             return
