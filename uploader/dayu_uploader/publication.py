@@ -153,13 +153,20 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if result.get("schedule"):
         # content_id 确认已提交，再从作品列表复核原作品及安排；草稿不能算定时提交成功。
-        target = target_from_result(result["schedule"])
-        record, saved_actual = await wait_dayu_publication(
-            page.context, content_id=result["content_id"],
-            origin_id=result["origin_id"], title=result.get("title"),
-            target=target)
-        apply_schedule_result(result, record, target, saved_actual)
-        result.update(success=True, platform_status=record["status"])
+        try:
+            target = target_from_result(result["schedule"])
+            record, saved_actual = await wait_dayu_publication(
+                page.context, content_id=result["content_id"],
+                origin_id=result["origin_id"], title=result.get("title"),
+                target=target)
+            apply_schedule_result(result, record, target, saved_actual)
+            result.update(success=True, platform_status=record["status"])
+        except (RuntimeError, TimeoutError) as error:
+            # 发表已被平台受理；回读失败只标记未核验，不能退出 1 诱发重复发表。
+            dayu_logger.warning(
+                f"大鱼号发表已确认，但定时回读未完成，保留成功结果: {error}"
+            )
+            result.update(success=True, status="scheduled", schedule_verified=False)
     else:
         result.update(success=True, status="submitted")
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

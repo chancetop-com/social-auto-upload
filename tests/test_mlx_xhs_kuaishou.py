@@ -361,6 +361,56 @@ class LocalGoldenTests(unittest.TestCase):
         self.assertTrue(context.closed)
         self.assertTrue(browser.closed)
 
+    def test_xhs_video_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            app = _make_xhs_video(tmp_dir, "/tmp/xhs-cookie.json")
+            app.validate_upload_args = AsyncMock()
+            app.upload_in = AsyncMock()
+            playwright = FakePlaywright()
+            with (
+                patch.object(
+                    xhs_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
+                ),
+                patch.object(
+                    xhs_main,
+                    "save_storage_state_atomic",
+                    AsyncMock(side_effect=RuntimeError("磁盘已满")),
+                ),
+                patch.object(xhs_main.xiaohongshu_logger, "warning") as warning,
+            ):
+                asyncio.run(app.upload(playwright))
+
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[-1]
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
+    def test_xhs_note_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            app = _make_xhs_note(tmp_dir, "/tmp/xhs-note-cookie.json")
+            app.validate_upload_args = AsyncMock()
+            app.upload_in = AsyncMock()
+            playwright = FakePlaywright()
+            with (
+                patch.object(
+                    xhs_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
+                ),
+                patch.object(
+                    xhs_main,
+                    "save_storage_state_atomic",
+                    AsyncMock(side_effect=RuntimeError("磁盘已满")),
+                ),
+                patch.object(xhs_main.xiaohongshu_logger, "warning") as warning,
+            ):
+                asyncio.run(app.upload(playwright))
+
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[-1]
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
     def test_ks_launch_kwargs_are_golden_for_both_branches(self):
         expected = (
             {"executable_path": LOCAL_CHROME_PATH}

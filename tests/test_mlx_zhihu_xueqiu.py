@@ -846,6 +846,154 @@ class XueqiuPostDispatchResponseTests(unittest.TestCase):
         self.assertEqual(result["content_id"], "789")
 
 
+class XueqiuPostSuccessBookkeepingTests(unittest.TestCase):
+    """发表已确认后的核验/截图/cookie 失败只能告警，不能退出 1。"""
+
+    def _expect(self, *args, **kwargs):
+        return SimpleNamespace(
+            to_have_count=AsyncMock(return_value=None),
+            to_be_visible=AsyncMock(return_value=None),
+            to_be_enabled=AsyncMock(return_value=None),
+            not_to_have_class=AsyncMock(return_value=None),
+        )
+
+    def _run(
+        self,
+        page: _PublishPage,
+        *,
+        multilogin: bool = False,
+        content_check=None,
+        query=None,
+        screenshot=None,
+    ) -> dict:
+        with tempfile.TemporaryDirectory() as folder:
+            app, _ = _make_xueqiu_article(
+                folder,
+                account_file=None if multilogin else Path(folder) / "cookie.json",
+                prepare_only=False,
+            )
+            app.identity = {"uid": "123"}
+            app.fill_article_form = AsyncMock()
+            app._close_preview = AsyncMock()
+            app._submit = AsyncMock()
+            session, context = (
+                _mlx_session(page) if multilogin else _local_session(page)
+            )
+            if screenshot is not None:
+                page.screenshot = screenshot
+            with patch.object(xueqiu_article, "expect", self._expect), patch.object(
+                xueqiu_article,
+                "read_xueqiu_identity",
+                AsyncMock(return_value={"uid": "123"}),
+            ), patch.object(
+                xueqiu_article,
+                "check_xueqiu_article_content",
+                content_check or AsyncMock(),
+            ), patch.object(
+                xueqiu_article,
+                "query_xueqiu_article",
+                query or AsyncMock(return_value={"text": "<p>正文</p>"}),
+            ):
+                return asyncio.run(app.upload_in(session))
+
+    def _page(self, *, user_id=123) -> _PublishPage:
+        payload = {
+            "id": 789,
+            "title": "雪球标题",
+            "is_private": False,
+            "text": "<p>正文</p>",
+        }
+        if user_id is not None:
+            payload["user_id"] = user_id
+        return _PublishPage(response=_DispatchResponse(payload))
+
+    def test_content_check_failure_keeps_published_result(self):
+        page = self._page()
+
+        result = self._run(
+            page,
+            content_check=AsyncMock(side_effect=RuntimeError("正文不一致")),
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "published")
+        self.assertEqual(result["content_id"], "789")
+        self.assertFalse(result["management_verified"])
+        page.expect_response.assert_called_once()
+
+    def test_management_query_failure_keeps_published_result(self):
+        page = self._page()
+
+        result = self._run(
+            page,
+            query=AsyncMock(side_effect=RuntimeError("查询失败")),
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["content_id"], "789")
+        self.assertFalse(result["management_verified"])
+        self.assertEqual(result["url"], "https://xueqiu.com/123/789")
+
+    def test_screenshot_failure_keeps_published_result(self):
+        page = self._page()
+        original = page.screenshot
+        calls = 0
+
+        async def screenshot(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("截图失败")
+            await original(*args, **kwargs)
+
+        result = self._run(page, screenshot=screenshot)
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["management_verified"])
+        self.assertNotIn("published_screenshot", result)
+
+    def test_cookie_save_failure_keeps_published_result(self):
+        page = self._page()
+        with tempfile.TemporaryDirectory() as folder:
+            app, _ = _make_xueqiu_article(
+                folder, account_file=Path(folder) / "cookie.json", prepare_only=False
+            )
+            app.identity = {"uid": "123"}
+            app.fill_article_form = AsyncMock()
+            app._close_preview = AsyncMock()
+            app._submit = AsyncMock()
+            session, context = _local_session(page)
+            context.storage_state = AsyncMock(side_effect=RuntimeError("磁盘已满"))
+            with patch.object(xueqiu_article, "expect", self._expect), patch.object(
+                xueqiu_article,
+                "read_xueqiu_identity",
+                AsyncMock(return_value={"uid": "123"}),
+            ), patch.object(
+                xueqiu_article, "check_xueqiu_article_content", AsyncMock()
+            ), patch.object(
+                xueqiu_article,
+                "query_xueqiu_article",
+                AsyncMock(return_value={"text": "<p>正文</p>"}),
+            ):
+                result = asyncio.run(app.upload_in(session))
+
+        self.assertTrue(result["success"])
+        context.storage_state.assert_awaited_once()
+
+    def test_uncomputable_url_is_left_empty(self):
+        page = self._page(user_id=None)
+
+        result = self._run(page, multilogin=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["url"], "")
+
+
+def _local_session(page: _RecordingPage) -> tuple[BrowserSession, _SeamContext]:
+    context = _SeamContext(page)
+    return BrowserSession(browser=MagicMock(), context=context, mode="local"), context
+
+
 # ---------------------------------------------------------------------------
 # CLI wiring
 # ---------------------------------------------------------------------------

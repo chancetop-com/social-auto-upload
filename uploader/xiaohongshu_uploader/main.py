@@ -2990,8 +2990,13 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await save_storage_state_atomic(context, self.account_file)
-            xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+            try:
+                await save_storage_state_atomic(context, self.account_file)
+                xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+            except Exception as error:
+                xiaohongshu_logger.warning(
+                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
+                )
         finally:
             await context.close()
             await browser.close()
@@ -3199,8 +3204,13 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await save_storage_state_atomic(context, self.account_file)
-            xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+            try:
+                await save_storage_state_atomic(context, self.account_file)
+                xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
+            except Exception as error:
+                xiaohongshu_logger.warning(
+                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
+                )
         finally:
             await context.close()
             await browser.close()

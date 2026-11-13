@@ -366,6 +366,58 @@ class LegacyLocalUploadTests(unittest.TestCase):
         self.assertTrue(browser.closed)
         self.assertEqual(playwright.events, ["launch", "context.close", "browser.close"])
 
+    def test_video_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = _make_video(tmp_dir, "/tmp/couple-cookie.json")
+            video.validate_upload_args = AsyncMock()
+
+            async def fail_cookie_save(session) -> None:
+                session.context.storage_state_error = OSError("磁盘已满")
+
+            video.upload_in = AsyncMock(side_effect=fail_cookie_save)
+            playwright = FakePlaywright()
+            with (
+                patch.object(
+                    douyin_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
+                ),
+                patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
+                patch.object(douyin_main.douyin_logger, "warning") as warning,
+            ):
+                asyncio.run(video.upload(playwright))
+
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[0]
+        self.assertEqual(context.storage_state_calls, ["/tmp/couple-cookie.json"])
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
+    def test_note_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            note = _make_note(tmp_dir, "/tmp/note-cookie.json")
+            note.validate_upload_args = AsyncMock()
+
+            async def fail_cookie_save(session) -> None:
+                session.context.storage_state_error = OSError("磁盘已满")
+
+            note.upload_in = AsyncMock(side_effect=fail_cookie_save)
+            playwright = FakePlaywright()
+            with (
+                patch.object(
+                    douyin_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
+                ),
+                patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
+                patch.object(douyin_main.douyin_logger, "warning") as warning,
+            ):
+                asyncio.run(note.upload(playwright))
+
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[0]
+        self.assertEqual(context.storage_state_calls, ["/tmp/note-cookie.json"])
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
     def test_note_local_teardown_saves_cookie_and_closes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             note = _make_note(tmp_dir, "/tmp/note-cookie.json")

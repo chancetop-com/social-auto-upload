@@ -740,7 +740,12 @@ class MetaBusinessUploader(BaseVideoUploader):
                 if await _is_business_logged_out(page):
                     raise RuntimeError("Business Suite 登录态失效，请先执行对应平台 login")
                 await self._publish_on_page(page)
-                await context.storage_state(path=str(self.account_file))
+                try:
+                    await context.storage_state(path=str(self.account_file))
+                except Exception as error:
+                    logger.warning(
+                        f"Facebook Page cookie 保存失败（发布已成功，不影响结果）: {error}"
+                    )
                 return self.result
             finally:
                 self._write_result()

@@ -1148,8 +1148,13 @@ class DouYinVideo(DouYinBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await context.storage_state(path=self.account_file)
-            douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+            try:
+                await context.storage_state(path=self.account_file)
+                douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+            except Exception as error:
+                douyin_logger.warning(
+                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
+                )
             await asyncio.sleep(2)
         finally:
             # 声明/发布失败也要释放浏览器；单独吞掉关闭异常，避免覆盖原始错误。
@@ -1504,8 +1509,13 @@ class DouYinNote(DouYinBaseUploader):
             upload_success = True
         finally:
             if upload_success:
-                await context.storage_state(path=self.account_file)
-                douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+                try:
+                    await context.storage_state(path=self.account_file)
+                    douyin_logger.success(_msg("🥳", "cookie 更新完毕"))
+                except Exception as error:
+                    douyin_logger.warning(
+                        _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
+                    )
                 await asyncio.sleep(2)
             await context.close()
             await browser.close()
