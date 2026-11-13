@@ -3098,6 +3098,8 @@ class TiktokVideo(TiktokBaseUploader):
              lambda scope: (
                  scope.locator(_COVER_FILE_ACCEPT_SELECTOR)
                  if editor is not None
+                 # No tab ⇒ no editor scope either: ``None`` is swallowed as
+                 # "unmatched" by ``_find_candidate``.
                  else editor_query
              )),
         )

@@ -115,7 +115,6 @@ async def _cover_input_attached(locator) -> bool:
 
 
 async def _focus_desc_editor(page, humanizer: Humanizer) -> None:
-
     """定位并聚焦快手发布页的『描述』编辑区。
 
     快手创作者中心 DOM 时有改版，旧的
