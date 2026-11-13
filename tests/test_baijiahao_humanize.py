@@ -729,6 +729,48 @@ class LoginRedirectPublishAttemptTests(unittest.TestCase):
         self.assertTrue(caught.exception.publish_attempted)
 
 
+class SecurityVerificationAfterPublishTests(unittest.TestCase):
+    """发布点击之后的「百度安全验证」不得落回「未发布」的失败路径。"""
+
+    def _page(self):
+        log: list = []
+        publish_btn = _Clickable("publish-button", log=log)
+        page = _page(
+            {
+                PUBLISH_BUTTON_SELECTOR: publish_btn,
+                DECLARATION_MODAL_SELECTOR: FakeLocator("modal", count=0),
+                'text="百度安全验证"': FakeLocator("security-check", count=1),
+            },
+            log=log,
+        )
+        page.url = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2"
+        return page
+
+    def test_security_verification_after_publish_is_marked_as_dispatched(self):
+        page = self._page()
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            app.start_publish_budget()
+            humanizer = app._humanizer(page)
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(
+                    app._submit_publish(page, multilogin=True, humanizer=humanizer)
+                )
+
+        self.assertTrue(caught.exception.publish_attempted)
+
+    def test_local_security_verification_after_publish_is_result_unknown(self):
+        page = self._page()
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            app.start_publish_budget()
+            humanizer = app._humanizer(page)
+            with self.assertRaises(PublishResultUnknownError):
+                asyncio.run(app._submit_publish(page, humanizer=humanizer))
+
+
 # ---------------------------------------------------------------------------
 # 1b. 封面兜底：chooser 超时才降级，人类化点击失败必须上抛
 # ---------------------------------------------------------------------------

@@ -601,7 +601,8 @@ class PublishLoginRedirectTests(unittest.TestCase):
 
         self.assertTrue(caught.exception.publish_attempted)
 
-    def test_zhihu_video_post_click_redirect_is_marked_as_dispatched(self):
+    def test_zhihu_video_post_publish_redirect_keeps_the_published_result(self):
+        # 发布已经确认；「查看详情」时的登录跳转只能丢掉详情 URL，不能把成功变成退出 10。
         signin = "https://www.zhihu.com/signin?next=%2Fupload-video"
 
         async def _submit(page, publish) -> None:
@@ -625,10 +626,10 @@ class PublishLoginRedirectTests(unittest.TestCase):
             session, _context = _mlx_session(page)
 
             with patch.object(zhihu_video, "expect", self._expect):
-                with self.assertRaises(LoginRequiredError) as caught:
-                    asyncio.run(app.upload_in(session))
+                result = asyncio.run(app.upload_in(session))
 
-        self.assertTrue(caught.exception.publish_attempted)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "published")
 
     def test_xueqiu_article_post_click_redirect_is_marked_as_dispatched(self):
         signin = "https://xueqiu.com/account/login"

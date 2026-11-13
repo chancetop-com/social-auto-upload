@@ -40,6 +40,7 @@ from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
+from uploader.publish_timeout import PublishTimeoutBudget
 
 PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "weibo_uploader"
 
@@ -544,6 +545,64 @@ class WeiboPublishPointTests(unittest.TestCase):
         self.assertTrue(caught.exception.publish_clicked)
         self.assertEqual(humanizer.points, [(0.65, 0.5)])
         self.assertEqual(publish.click_count, 0)
+
+
+CONFIRM_DIALOG = '.woo-dialog-main, .woo-modal-wrap, [class*="Dialog"]'
+
+
+class _ConfirmFailingHumanizer(RecordingHumanizer):
+    """二次确认按钮派发时抛可能已派发的异常；记录尝试次数。"""
+
+    def __init__(self, page, *, target: str, error: BaseException) -> None:
+        super().__init__(page)
+        self.target = target
+        self.error = error
+        self.confirm_attempts = 0
+
+    async def click(self, locator, *, point=None) -> None:
+        if getattr(locator, "name", "") == self.target:
+            self.confirm_attempts += 1
+            self.clicks.append(self.target)
+            raise self.error
+        await super().click(locator, point=point)
+
+
+class WeiboConfirmDialogTests(unittest.TestCase):
+    """二次确认：派发即落锁；可能已派发的失败 → 结果未知且绝不再点。"""
+
+    def _page(self):
+        publish = Element("publish")
+        confirm = Element("confirm")
+        dialog = FakeLocator(
+            "dialog",
+            children={'button:has(span:text-is("确定"))': confirm},
+        )
+        page = WeiboPage(
+            selectors={
+                PUBLISH_BUTTON: publish,
+                AGAIN_BUTTON: FakeLocator("again", visible=False),
+                SUCCESS_LAYER: FakeLocator("success-layer", visible=False),
+                CONFIRM_DIALOG: dialog,
+            }
+        )
+        return page, confirm
+
+    def test_a_maybe_dispatched_confirm_is_result_unknown_and_never_repeated(self):
+        page, confirm = self._page()
+        error = RuntimeError("confirm click failed")
+        setattr(error, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+
+        with patch.object(weibo_main, "Humanizer", RecordingHumanizer):
+            app = _video()
+            app._publish_budget = PublishTimeoutBudget("微博", timeout_seconds=1.0)
+            humanizer = _ConfirmFailingHumanizer(
+                page, target="confirm", error=error
+            )
+            with self.assertRaises(PublishResultUnknownError):
+                asyncio.run(app._submit_publish(page, humanizer=humanizer))
+
+        self.assertEqual(humanizer.confirm_attempts, 1)
+        self.assertEqual(confirm.click_count, 0)
 
 
 class LoginRedirectPublishAttemptTests(unittest.TestCase):

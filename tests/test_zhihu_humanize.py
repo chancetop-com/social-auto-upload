@@ -867,6 +867,71 @@ class PublishDispatchGuardTests(unittest.TestCase):
             self.assertIs(caught.exception, error)
 
 
+class ZhihuPostPublishLoginTests(unittest.IsolatedAsyncioTestCase):
+    """已发表之后的登录跳转不能改写结果：返回 published，不抛退出 10。"""
+
+    class _PopupInfo:
+        def __init__(self, detail) -> None:
+            self._detail = detail
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        @property
+        def value(self):
+            async def _resolve():
+                return self._detail
+
+            return _resolve()
+
+    async def test_video_returns_the_published_result_when_the_detail_popup_redirects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _video(tmp)
+            app.identity = {"name": "知乎用户"}
+            log: list = []
+            publish = _Clickable("video-publish", log=log)
+            page = _page(
+                {
+                    "input.VideoUploadButton-fileInput[type=file]": FakeLocator(
+                        "video-input"
+                    ),
+                    "text:上传成功:exact": FakeLocator("uploaded"),
+                    "role:button:发布视频": publish,
+                    "text:发布成功:exact": FakeLocator("published"),
+                    "text:查看详情:exact": _Clickable("video-detail", log=log),
+                },
+                log=log,
+                url="https://www.zhihu.com/creator",
+            )
+
+            async def _wait_for_url(url, *, timeout=None) -> None:
+                # 查看详情弹窗被登录页接管：此时作品已经发表成功。
+                page.url = "https://www.zhihu.com/signin?next=%2Fvideo%2F123"
+                raise AssertionError("详情窗口被登录页接管")
+
+            detail = SimpleNamespace(url="", wait_for_url=_wait_for_url)
+            page.expect_popup = lambda timeout=None: self._PopupInfo(detail)
+
+            app.video_options = AsyncMock(
+                return_value={"category": [], "video_mark": []}
+            )
+            app.select_option = AsyncMock(return_value="生活")
+            app.fill_video_form = AsyncMock()
+            session = SimpleNamespace(
+                managed=True,
+                context=SimpleNamespace(new_page=AsyncMock(return_value=page)),
+            )
+
+            with _humanized():
+                result = await app.upload_in(session)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "published")
+
+
 # ---------------------------------------------------------------------------
 # 2. 字段值读回
 # ---------------------------------------------------------------------------

@@ -780,6 +780,149 @@ class PublishDispatchGuardTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 1c. 创建响应之后：作品可能已存在 → 一律结果未知（退出 9）
+# ---------------------------------------------------------------------------
+
+
+class _CloseFailingHumanizer(_QuietHumanizer):
+    """只在 Reel 完成框关闭按钮上失败：发布结果已在响应里确认。"""
+
+    def __init__(self, page, *, target: str, error: BaseException, **kwargs) -> None:
+        super().__init__(page, **kwargs)
+        self.target = target
+        self.error = error
+        self.attempts = 0
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        if getattr(locator, "name", "") == self.target:
+            self.attempts += 1
+            raise self.error
+
+
+class PostResponseFailureTests(unittest.TestCase):
+    def _run(self, tmp, *, payload, page, video=False, humanizer=None, post=None):
+        app = _app(
+            tmp,
+            image_files=None if video else [Path(tmp) / "a.png"],
+            video_file=Path(tmp) / "v.mp4" if video else None,
+        )
+        app.page_name = "Page"
+        app.result["page_id"] = "123"
+        app.publish_not_before = None
+        app._publish_budget = app.start_publish_budget()
+        app._publish_budget.wait_until_allowed = AsyncMock(return_value=None)
+        page.expect_response = lambda predicate, timeout=None: _ResponseContext(
+            _Response(payload)
+        )
+        if humanizer is None:
+            humanizer = _QuietHumanizer(page)
+        with (
+            patch.object(fb_main, "Humanizer", lambda p, **kw: humanizer),
+            patch.object(fb_main, "expect", _expect),
+            patch(
+                "uploader.meta_uploader.facebook_page_uploader.posts.open_meta_post",
+                new=post or AsyncMock(return_value=(Mock(), "456", False)),
+            ),
+        ):
+            asyncio.run(app._publish(page))
+        return app
+
+    def _footer_page(self, log, *, close_button=None, video=False):
+        children = {
+            "role:button:Publish": _Clickable("publish", log=log),
+        }
+        if video:
+            children['[role="button"]:not([aria-label])'] = FakeLocator(
+                "reel-footer-actions", count=2
+            )
+        else:
+            children['[role="button"]'] = FakeLocator("footer-actions", count=3)
+        footer = _RegexLocator("post-footer", log=log, children=children)
+        selectors = {POST_FOOTER: footer}
+        if video:
+            selectors[REEL_FOOTER] = footer
+        if close_button is not None:
+            selectors['[role="dialog"][aria-labelledby][tabindex="-1"]'] = (
+                _RegexLocator(
+                    "completion",
+                    log=log,
+                    children={
+                        "role:heading": FakeLocator("completion-heading"),
+                        "role:button": FakeLocator("completion-buttons", count=2),
+                        "role:button:Done": close_button,
+                    },
+                )
+            )
+        return _page(selectors, log=log)
+
+    def test_error_payload_after_the_create_response_is_result_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(tmp, payload={"errors": [{"message": "boom"}]}, page=page)
+
+    def test_missing_content_id_after_the_create_response_is_result_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(tmp, payload={"data": {"xfamily_content_create": {}}}, page=page)
+
+    def test_completion_close_click_failure_does_not_fail_a_published_reel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            close = _Clickable("completion-close", log=log)
+            page = self._footer_page(log, close_button=close, video=True)
+            error = RuntimeError("mouse up failed")
+            setattr(error, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+            humanizer = _CloseFailingHumanizer(
+                page, target="completion-close", error=error
+            )
+
+            app = self._run(
+                tmp,
+                payload={
+                    "data": {
+                        "xfamily_content_create": {
+                            "items": [{"pending_publish_content_id": None}]
+                        }
+                    }
+                },
+                page=page,
+                video=True,
+                humanizer=humanizer,
+            )
+
+        # 只尝试一次关闭，绝不重试；发布结果保持成功。
+        self.assertEqual(humanizer.attempts, 1)
+        self.assertEqual(close.click_count, 0)
+        self.assertEqual(app.result["status"], "processing")
+
+    def test_open_meta_post_failure_after_the_create_response_is_result_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(
+                    tmp,
+                    payload={
+                        "data": {
+                            "xfamily_content_create": {
+                                "items": [{"pending_publish_content_id": None}]
+                            }
+                        }
+                    },
+                    page=page,
+                    post=AsyncMock(side_effect=RuntimeError("列表未就绪")),
+                )
+
+
+# ---------------------------------------------------------------------------
 # 2. 字段值读回
 # ---------------------------------------------------------------------------
 

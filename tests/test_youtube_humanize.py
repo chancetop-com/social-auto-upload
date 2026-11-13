@@ -703,6 +703,55 @@ class YouTubePublishDispatchGuardTests(unittest.TestCase):
         self.assertIs(caught.exception, error)
 
 
+class YouTubePostPublishCloseTests(unittest.TestCase):
+    """发布完成后的关闭按钮失败只记日志：视频已经发布，不能被它变成失败。"""
+
+    def _video(self):
+        app = YouTubeVideo("标题", "demo.mp4", [], "account.json")
+        app.start_publish_budget()
+        return app
+
+    def _page(self):
+        page = MagicMock()
+        locator = MagicMock()
+        locator.first = locator
+        locator.wait_for = AsyncMock(return_value=True)
+        locator.set_input_files = AsyncMock(return_value=None)
+        locator.is_visible = AsyncMock(return_value=True)
+        locator.count = AsyncMock(return_value=1)
+        page.locator.return_value = locator
+        page.wait_for_timeout = AsyncMock(return_value=None)
+        return page
+
+    def test_a_maybe_dispatched_close_click_does_not_fail_the_run(self):
+        page = self._page()
+        app = self._video()
+        app._humanizer_instance = SimpleNamespace(page=page, before_submit=AsyncMock())
+        error = RuntimeError("close click failed")
+        setattr(error, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        close_selectors: list[str] = []
+
+        async def _click_if_present(page, selector, timeout=4000, *, humanizer):
+            if selector == "#done-button":
+                return True
+            if "Close" in selector:
+                close_selectors.append(selector)
+                raise error
+            return True
+
+        with (
+            patch.object(youtube_main, "_click_if_present", _click_if_present),
+            patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(
+                youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
+            ),
+        ):
+            asyncio.run(app._upload_video_on_page(page, multilogin=False))
+
+        # 只尝试一次，绝不重试第二次关闭。
+        self.assertEqual(len(close_selectors), 1)
+
+
 class YouTubeHumanizeDisabledTests(unittest.TestCase):
     def test_humanize_zero_falls_back_to_one_native_click_and_insert(self):
         timeline = Timeline()

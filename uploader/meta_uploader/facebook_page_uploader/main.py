@@ -25,7 +25,7 @@ from uploader.base_video import BaseVideoUploader
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 
@@ -588,16 +588,23 @@ class MetaBusinessUploader(BaseVideoUploader):
         except BrowserTimeoutError:
             raise budget.timeout_error(publish_clicked) from None
         payload = await response.json()
+        # 创建响应已经返回：作品可能已存在，之后任何无法确认的失败都是结果未知。
         if payload.get('errors'):
-            raise RuntimeError('平台创建作品响应包含错误；请查原记录，勿重复提交')
+            raise PublishResultUnknownError(
+                '平台创建作品响应包含错误；帖子可能已经发布，请查原记录，勿重复提交'
+            )
         creation = payload.get('data', {}).get('xfamily_content_create', {})
         if any(creation.get('errors', {}).values()):
-            raise RuntimeError('平台返回作品创建错误；请查原记录，勿重复提交')
+            raise PublishResultUnknownError(
+                '平台返回作品创建错误；帖子可能已经发布，请查原记录，勿重复提交'
+            )
         items = creation.get('items')
         if isinstance(items, dict):
             items = [items]
         if not isinstance(items, list) or len(items) != 1:
-            raise RuntimeError('已提交但未取得唯一内容编号；结果待查询')
+            raise PublishResultUnknownError(
+                '已提交但未取得唯一内容编号；结果待查询，勿重复提交'
+            )
         # 实测 Reels 响应的 pending_publish_content_id 为空，需在成功确认后查原作品详情。
         pending_id = items[0].get('pending_publish_content_id')
         if pending_id:
@@ -620,8 +627,12 @@ class MetaBusinessUploader(BaseVideoUploader):
                 completion.get_by_role('button', name=_COMPLETION_CLOSE_NAMES),
                 "Reel 完成框关闭",
             )
-            await humanizer.click(close_button)
-            await expect(completion).to_have_count(0)
+            # 关闭按钮只是界面收尾，创建响应已经确认受理：绝不因它把发布变成失败，也不重试。
+            try:
+                await humanizer.click(close_button)
+                await expect(completion).to_have_count(0)
+            except Exception as error:
+                logger.warning(f'Reel 完成框关闭失败（不影响发布结果）: {error}')
             if not self.schedule:
                 # Reel 创建响应实测可能没有 pending_publish_content_id，作品列表也可能在视频处理期间不展示。
                 # 完成弹窗和无错误的创建响应已经是“提交成功、正在处理”的业务证据；编号只用于后续核验/删除，不能阻断发布结果。
@@ -634,8 +645,15 @@ class MetaBusinessUploader(BaseVideoUploader):
         from uploader.meta_uploader.facebook_page_uploader.posts import open_meta_post
         state = 'scheduled_posts' if self.schedule else 'published_posts'
         list_url = f'https://business.facebook.com/latest/posts/{state}?asset_id={self.result["page_id"]}'
-        _, content_id, _ = await open_meta_post(page, list_url=list_url, page_name=self.page_name,
-            expected_text=self.title, content_id=self.result.get('content_id'), schedule=self.schedule)
+        try:
+            _, content_id, _ = await open_meta_post(page, list_url=list_url, page_name=self.page_name,
+                expected_text=self.title, content_id=self.result.get('content_id'), schedule=self.schedule)
+        except Exception as error:
+            # 创建响应已受理，读不回原作品只能说明结果待核验，不能当成未发布。
+            raise PublishResultUnknownError(
+                'Facebook Page 已提交但无法读取原作品；帖子可能已经发布，'
+                f'请查原记录，勿重复提交（{error}）'
+            ) from error
         self.result['content_id'] = content_id
         self.result['status'] = 'scheduled' if self.schedule else ('processing' if self.video_file else 'published')
         self.result['schedule'] = self.schedule.isoformat() if self.schedule else None

@@ -32,6 +32,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from uploader.meta_uploader.insgraph_uploader import main as instagram_main
@@ -68,7 +69,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
-from utils.errors import PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
@@ -830,6 +831,182 @@ class PublishDispatchGuardTests(unittest.IsolatedAsyncioTestCase):
             await self._publish(page, share, error)
 
         self.assertIs(caught.exception, error)
+
+
+class PublishAttemptedTests(unittest.IsolatedAsyncioTestCase):
+    """``publish_attempted`` 只看点击是否派发，不能由 ``submission_unknown`` 推断。"""
+
+    class _Expectation:
+        async def to_have_count(self, count: int, timeout=None) -> None:
+            return None
+
+        async def to_be_enabled(self, timeout=None) -> None:
+            return None
+
+    class _ResponsePage(HumanizePage):
+        """记录 ``response`` 回调，让测试在点击后投递创建响应。"""
+
+        on_response = None
+
+        def on(self, event: str, callback) -> None:
+            super().on(event, callback)
+            if event == "response":
+                self.on_response = callback
+
+    class _Responding(RecordingHumanizer):
+        """Share 点击之后投递一条已观察到的创建响应。"""
+
+        def __init__(self, page, timeline, on_click) -> None:
+            super().__init__(page, timeline)
+            self._on_click = on_click
+
+        async def click(self, locator, *, point=None) -> None:
+            await super().click(locator, point=point)
+            if getattr(locator, "name", "") == "share":
+                self._on_click()
+
+    def _app(self, folder: str) -> InstagramUploader:
+        return InstagramUploader(
+            "unused.json",
+            title="发布值守回归",
+            description="正文",
+            tags=[],
+            image_files=["image.png"],
+            result_file=Path(folder) / "result.json",
+            no_publish=False,
+        )
+
+    def _scene(self, page=None):
+        page = page if page is not None else _page()
+        share = page.add("share", Field("share", page=page))
+        page.add("role:dialog", Field("dialog", page=page))
+        return page, share
+
+    def _patch_common(self, page, share):
+        return (
+            patch.object(instagram_main, "_caption_editor", AsyncMock(return_value=None)),
+            patch.object(instagram_main, "_type_caption", AsyncMock()),
+            patch.object(instagram_main, "dismiss_suggestions", AsyncMock()),
+            patch.object(
+                instagram_main, "_primary_action", AsyncMock(return_value=share)
+            ),
+            patch(
+                "uploader.meta_uploader.insgraph_uploader.main.expect",
+                lambda locator: self._Expectation(),
+            ),
+        )
+
+    async def test_a_pre_dispatch_failure_leaves_the_flag_unset(self):
+        page, share = self._scene()
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(folder)
+            app._humanizer_instance = RecordingHumanizer(page, page.timeline)
+            patches = self._patch_common(page, share) + (
+                patch.object(
+                    instagram_main,
+                    "_read_back_caption",
+                    AsyncMock(side_effect=RuntimeError("配文回读失败")),
+                ),
+            )
+            for item in patches:
+                item.start()
+                self.addCleanup(item.stop)
+            with self.assertRaises(RuntimeError):
+                await app._publish(
+                    page,
+                    {"user_id": "42", "username": "creator"},
+                    budget=app.start_publish_budget(),
+                )
+
+        self.assertFalse(app.publish_clicked)
+
+    async def test_a_dispatched_share_sets_the_flag(self):
+        page, share = self._scene(self._ResponsePage())
+
+        class _CreatedResponse:
+            request = SimpleNamespace(method="POST")
+            url = "https://www.instagram.com/api/v1/media/configure/"
+
+            async def text(self) -> str:
+                return "{}"
+
+        response = _CreatedResponse()
+        humanizer = self._Responding(
+            page,
+            page.timeline,
+            lambda: page.on_response(response),
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(folder)
+            app._humanizer_instance = humanizer
+            patches = self._patch_common(page, share) + (
+                patch.object(instagram_main, "_read_back_caption", AsyncMock()),
+                patch.object(
+                    instagram_main,
+                    "instagram_response_payload",
+                    lambda text: {"payload": {"status": "ok", "media": {}}},
+                ),
+                patch.object(
+                    instagram_main,
+                    "instagram_created_media",
+                    lambda payload, *, owner_id, caption: {
+                        "id": "1",
+                        "code": "abc",
+                    },
+                ),
+            )
+            for item in patches:
+                item.start()
+                self.addCleanup(item.stop)
+            result = await app._publish(
+                page,
+                {"user_id": "42", "username": "creator"},
+                budget=app.start_publish_budget(),
+            )
+
+        self.assertTrue(app.publish_clicked)
+        self.assertEqual(app.result["status"], "published")
+        self.assertEqual(share.click_count, 0)
+
+    async def test_upload_in_marks_a_login_redirect_from_the_flag_not_the_status(self):
+        page = HumanizePage()
+        page.set_default_timeout = lambda milliseconds: None
+        page.goto = AsyncMock(return_value=None)
+        session = SimpleNamespace(
+            managed=True,
+            context=SimpleNamespace(new_page=AsyncMock(return_value=page)),
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(folder)
+
+            async def _upload_steps(page, identity, *, budget):
+                # 旧的实现用 status 推断：提交前失败也会被记成 submission_unknown。
+                app.result["status"] = "submission_unknown"
+                app.publish_clicked = False
+                page.url = "https://www.instagram.com/accounts/login/?next=/"
+                raise RuntimeError("点击前就失败了")
+
+            for item in (
+                patch.object(
+                    instagram_main, "_is_instagram_logged_out", AsyncMock(return_value=False)
+                ),
+                patch.object(
+                    instagram_main,
+                    "_multilogin_identity",
+                    AsyncMock(return_value={"user_id": "42", "username": "creator"}),
+                ),
+                patch.object(app, "_upload_steps", _upload_steps),
+                patch.object(app, "_capture_failure", AsyncMock(return_value=RuntimeError("x"))),
+            ):
+                item.start()
+                self.addCleanup(item.stop)
+
+            from utils.errors import LoginRequiredError
+
+            with self.assertRaises(LoginRequiredError) as caught:
+                await app.upload_in(session)
+
+        self.assertFalse(caught.exception.publish_attempted)
 
 
 class InstagramHumanizeFieldReadbackTests(unittest.IsolatedAsyncioTestCase):

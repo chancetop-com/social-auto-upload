@@ -949,12 +949,14 @@ class BaiJiaHaoVideo(BaseVideoUploader):
                 return
             # 检查是否出现百度安全验证
             if await page.locator('text="百度安全验证"').count():
+                # 发布点击已经发出：验证码页面等于结果未知，不能落回「未发布」。
                 if multilogin:
                     raise LoginRequiredError(
                         "百家号上传过程中需要人工完成百度安全验证："
-                        "请在 Multilogin 应用中登录 Profile 后重试。"
+                        "请在 Multilogin 应用中登录 Profile 后重试。",
+                        publish_attempted=publish_clicked,
                     )
-                raise RuntimeError("出现百度安全验证，需人工处理")
+                raise budget.timeout_error(publish_clicked)
             # 检查是否有错误提示阻止发布
             error_toast = page.locator('.cheetah-message-error, .cheetah-message-warning').first
             if await error_toast.count() and await error_toast.is_visible():

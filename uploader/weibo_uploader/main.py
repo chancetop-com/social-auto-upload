@@ -1013,18 +1013,34 @@ class WeiBoVideo(BaseVideoUploader):
                 pass
             # 二次确认对话框只点一次，避免循环里重复提交。
             if not dialog_confirmed:
+                # 先只做探测：探测失败沿用旧行为（跳过本轮），不碰确认按钮。
+                confirm_button = None
+                confirm_name = ""
                 try:
                     dialog = page.locator('.woo-dialog-main, .woo-modal-wrap, [class*="Dialog"]').first
                     if await dialog.count() and await dialog.is_visible():
                         for name in ("确定", "确认", "继续", "仍然发布", "发布"):
                             cb = dialog.locator(f'button:has(span:text-is("{name}"))').first
                             if await cb.count() and await cb.is_visible():
-                                await humanizer.click(cb)
-                                dialog_confirmed = True
-                                weibo_logger.info(_msg("🏃", f"已确认对话框：{name}"))
+                                confirm_button = cb
+                                confirm_name = name
                                 break
                 except Exception:
-                    pass
+                    confirm_button = None
+                if confirm_button is not None:
+                    # 派发前先落锁：即便这一次点击失败（可能已经派发），也绝不第二次点击。
+                    dialog_confirmed = True
+                    try:
+                        await humanizer.click(confirm_button)
+                    except Exception as exc:
+                        if maybe_dispatched(exc):
+                            # 确认点击可能已经发出：帖子可能已提交，按结果未知上抛。
+                            raise budget.timeout_error(True) from exc
+                        weibo_logger.warning(
+                            _msg("⚠️", f"确认对话框点击失败（不重试）: {exc}")
+                        )
+                    else:
+                        weibo_logger.info(_msg("🏃", f"已确认对话框：{confirm_name}"))
             await page.wait_for_timeout(1500)
 
         raise budget.timeout_error(True)
