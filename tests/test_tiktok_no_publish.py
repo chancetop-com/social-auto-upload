@@ -332,6 +332,26 @@ class TiktokDryRunFlowTests(unittest.TestCase):
         video.click_publish.assert_awaited_once()
         video.read_result.assert_awaited_once()
 
+    def test_post_publish_link_read_failure_does_not_fail_the_run(self):
+        # 发布点击已经成功；Content 列表读取失败只能告警，不能退出 1。
+        video = _video()
+        self._install_form_hooks(video, [])
+        video.apply_options = AsyncMock()
+        video.click_publish = AsyncMock()
+        video.read_result = AsyncMock(
+            side_effect=RuntimeError("Content 列表未找到链接")
+        )
+
+        with patch.object(tk_main.tiktok_logger, "warning") as warning:
+            asyncio.run(
+                video._upload_on_page(object(), multilogin=False, budget=None)
+            )
+
+        video.click_publish.assert_awaited_once()
+        video.read_result.assert_awaited_once()
+        self.assertIsNone(video.last_item_id)
+        warning.assert_called_once()
+
 
 class PublishReadyWaitTests(unittest.TestCase):
     def test_ready_button_returns_without_clicking(self):

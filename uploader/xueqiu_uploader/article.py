@@ -396,26 +396,48 @@ class XueqiuArticle:
             # 先持久化已返回的 ID，即使后续内容核对异常也只能查询原作品，禁止重发。
             result["content_id"] = str(content_id)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-            # 用平台返回的已发表正文创建独立页面核对，不改写编辑器模型，也不追加真实发表动作。
-            check_page = await session.context.new_page()
-            await check_page.set_content(payload.get("text") or "")
-            await check_xueqiu_article_content(check_page.locator("body"), self.document, self.uploaded_images)
-            author_id = payload.get("user_id") if multilogin else self.identity["uid"]
-            result.update(success=True, status="published",
-                          url=f"https://xueqiu.com/{author_id}/{content_id}")
-            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 平台已确认受理；后续核验、截图与 cookie 保存都是附加记录，失败只能告警。
+            result.update(success=True, status="published", url="")
+            try:
+                author_id = payload.get("user_id") if multilogin else self.identity["uid"]
+                if author_id is None or author_id == "":
+                    raise ValueError("发表响应缺少作者 ID")
+                result["url"] = f"https://xueqiu.com/{author_id}/{content_id}"
+            except Exception as error:
+                logger.warning(f"雪球发表成功但作品地址生成失败: {error}")
             if not multilogin:
-                # 发表响应已确认受理；再查已发布原 ID，核验不能误触发第二次提交。
-                record = await query_xueqiu_article(page, self.identity, content_id, self.title, self.visibility)
-                await check_page.set_content(record.get("text") or "")
+                result["management_verified"] = False
+            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 用平台返回的已发表正文创建独立页面核对，不改写编辑器模型，也不追加真实发表动作。
+            check_page = None
+            try:
+                check_page = await session.context.new_page()
+                await check_page.set_content(payload.get("text") or "")
                 await check_xueqiu_article_content(check_page.locator("body"), self.document, self.uploaded_images)
-                await check_page.close()
-                result["management_verified"] = True
-                await page.screenshot(path=str(result_file.with_suffix(".published.png")), full_page=True)
-                result["published_screenshot"] = str(result_file.with_suffix(".published.png"))
-                await session.context.storage_state(path=str(self.account_file))
-            else:
-                await check_page.close()
+                if not multilogin:
+                    # 发表响应已确认受理；再查已发布原 ID，核验不能误触发第二次提交。
+                    record = await query_xueqiu_article(page, self.identity, content_id, self.title, self.visibility)
+                    await check_page.set_content(record.get("text") or "")
+                    await check_xueqiu_article_content(check_page.locator("body"), self.document, self.uploaded_images)
+                    result["management_verified"] = True
+            except Exception as error:
+                logger.warning(f"雪球发表后核验未完成（发表已确认，结果保留）: {error}")
+            finally:
+                if check_page is not None:
+                    try:
+                        await check_page.close()
+                    except Exception as error:
+                        logger.warning(f"雪球核验页关闭失败（不影响发表结果）: {error}")
+            if not multilogin:
+                try:
+                    await page.screenshot(path=str(result_file.with_suffix(".published.png")), full_page=True)
+                    result["published_screenshot"] = str(result_file.with_suffix(".published.png"))
+                except Exception as error:
+                    logger.warning(f"雪球发表截图失败（不影响发表结果）: {error}")
+                try:
+                    await session.context.storage_state(path=str(self.account_file))
+                except Exception as error:
+                    logger.warning(f"雪球 cookie 保存失败（不影响发表结果）: {error}")
             return result
         except PublishResultUnknownError:
             raise

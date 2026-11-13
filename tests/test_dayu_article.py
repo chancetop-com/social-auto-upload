@@ -329,6 +329,32 @@ class DayuPublicationResponseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "submitted")
         self.assertTrue(result["success"])
 
+    async def test_post_submit_readback_failure_keeps_successful_result(self):
+        # content_id 已确认；定时列表回读失败只能标记未核验，不能退出 1。
+        for error in (TimeoutError("查询超时"), RuntimeError("标题不一致")):
+            with self.subTest(error=type(error).__name__):
+                page = self._page(
+                    submit=_FakeResponse(
+                        {"data": {"content_id": "cid-1", "_id": "draft-1"}}
+                    )
+                )
+                result = {
+                    "manifest": {},
+                    "style_check": {},
+                    "schedule": "2027-01-01T10:30:00+08:00",
+                }
+
+                with patch(
+                    "uploader.dayu_uploader.publication.wait_dayu_publication",
+                    new=AsyncMock(side_effect=error),
+                ):
+                    await self._submit(page, result)
+
+                self.assertTrue(result["success"])
+                self.assertEqual(result["content_id"], "cid-1")
+                self.assertEqual(result["status"], "scheduled")
+                self.assertFalse(result["schedule_verified"])
+
     async def test_pre_dispatch_preview_failure_still_propagates(self):
         # 预览响应在不可逆的确认发表之前：普通失败仍然退出 1。
         page = self._page(preview=_FakeResponse({"error": "rejected"}))
@@ -447,16 +473,20 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
                         )
                         if scenario == "query_timeout":
                             query.side_effect = TimeoutError("查询超时")
-                        if scenario == "scheduled":
+                        if scenario in {"scheduled", "query_timeout"}:
                             await submit_dayu_publication(page, timed, path)
+                            self.assertTrue(timed["success"])
                             self.assertEqual(timed["status"], "scheduled")
-                            self.assertTrue(timed["schedule_verified"])
-                            self.assertEqual(
-                                query.call_args.kwargs["target"],
-                                datetime.fromisoformat(timed["schedule"]),
-                            )
+                            if scenario == "scheduled":
+                                self.assertTrue(timed["schedule_verified"])
+                                self.assertEqual(
+                                    query.call_args.kwargs["target"],
+                                    datetime.fromisoformat(timed["schedule"]),
+                                )
+                            else:
+                                self.assertFalse(timed["schedule_verified"])
                         else:
-                            with self.assertRaisesRegex((RuntimeError, TimeoutError), "不一致|查询超时"):
+                            with self.assertRaisesRegex(RuntimeError, "不一致"):
                                 await submit_dayu_publication(page, timed, path)
                             self.assertFalse(timed["success"])
                         count = "0" if scenario == "wrong_time" else "1"
@@ -465,7 +495,8 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(saved["origin_id"], "b" * 32)
                         if scenario == "query_timeout":
                             self.assertEqual(saved["content_id"], "123")
-                            self.assertEqual(saved["status"], "submission_unknown")
+                            self.assertEqual(saved["status"], "scheduled")
+                            self.assertFalse(saved["schedule_verified"])
 
     async def test_theme_conversion_preserves_all_theme_content_images_and_colors(self):
         page = await self.browser.new_page()

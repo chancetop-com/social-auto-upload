@@ -416,6 +416,44 @@ class LocalGoldenTests(unittest.TestCase):
         self.assertEqual(context.storage_state_calls, [str(cookie)])
         self.assertTrue(browser.closed)
 
+    def test_facebook_page_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            cookie = Path(directory) / "page.json"
+            cookie.write_text("{}", encoding="utf-8")
+            result_file = Path(directory) / "result.json"
+            page = _PageStub()
+            context = _ContextStub(page)
+            context.storage_state = AsyncMock(side_effect=OSError("磁盘已满"))
+            browser = _LaunchBrowser(context, page)
+            app = MetaBusinessUploader(
+                "facebook-page",
+                cookie,
+                title="标题",
+                video_file=media,
+                result_file=result_file,
+            )
+            app._publish_on_page = AsyncMock()
+
+            with patch.object(
+                facebook_page_main,
+                "_open_business_page",
+                AsyncMock(return_value=(browser, context, page)),
+            ), patch.object(
+                facebook_page_main,
+                "_is_business_logged_out",
+                AsyncMock(return_value=False),
+            ), patch.object(
+                facebook_page_main.logger, "warning"
+            ) as warning:
+                result = asyncio.run(app.upload())
+
+            self.assertTrue(result_file.is_file())
+
+        self.assertEqual(result["platform"], "facebook-page")
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
     def test_instagram_local_launch_and_context_are_golden(self):
         page = _PageStub()
         chromium, context, browser = _local_launcher(page)

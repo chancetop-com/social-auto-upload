@@ -1331,8 +1331,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 await self._upload_on_page(
                     page, multilogin=False, budget=budget
                 )
-                await context.storage_state(path=f"{self.account_file}")
-                tiktok_logger.info('  [-] update cookie！')
+                try:
+                    await context.storage_state(path=f"{self.account_file}")
+                    tiktok_logger.info('  [-] update cookie！')
+                except Exception as error:
+                    tiktok_logger.warning(
+                        f"[+] TikTok cookie 保存失败（发布已成功，不影响结果）: {error}"
+                    )
                 await asyncio.sleep(2)
             finally:
                 await context.close()
@@ -1410,7 +1415,15 @@ class TiktokBaseUploader(BaseVideoUploader):
             # post was untouched.
             _raise_if_login_required(page, publish_attempted=True)
         # 9. read back the published item
-        self.last_item_id = await self.read_result(page)
+        # The publish click already succeeded; a missing link is only a bookkeeping
+        # failure and must never turn a confirmed publish into exit 1.
+        try:
+            self.last_item_id = await self.read_result(page)
+        except RuntimeError as error:
+            self.last_item_id = None
+            tiktok_logger.warning(
+                f"[+] TikTok 发布已确认，但作品链接读取失败；保留发布结果: {error}"
+            )
         tiktok_logger.success(self.result_label(self.last_item_id))
 
     async def open_upload_page(self, page, *, multilogin: bool) -> None:
