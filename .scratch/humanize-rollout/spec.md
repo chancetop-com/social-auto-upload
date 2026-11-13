@@ -704,7 +704,7 @@ AST：Call 有 keyword(arg=="force", value=Constant(True))
        `# humanize-impossible: <失败模式>；<code|inferred|needs-live>；<已排除替代>`
 ```
 
-不锁位置、不锁数量、不要求归零。**唯一合法残余 4 条**：`douyin:846/:854`（2FA）、`ks:582`（引导层）、`tk:2904`（hidden file input）。前三者是「不走」的原生路径，不是白名单扩容。
+不锁位置、不锁数量、不要求归零。**唯一合法残余 3 条**：`douyin:846/:854`（2FA）、`ks:582`（引导层）、~~`tk:2904`（hidden file input）~~。TikTok 那条已于 2026-11-13 移除：封面改为直写隐藏 input / 消费 file chooser，不再需要 `force`。前二者是「不走」的原生路径，不是白名单扩容。
 
 ### 4.5 门 D：`fill(` 归零（1 条例外）
 

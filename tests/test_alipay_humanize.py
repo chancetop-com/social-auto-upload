@@ -27,6 +27,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import uploader.alipay_uploader.main as alipay_main
+from patchright.async_api import TimeoutError as PWTimeoutError
 from tests.fakes_xhs_dom import (
     FakeLocator,
     RecordingKeyboard,
@@ -36,6 +37,7 @@ from tests.fakes_xhs_dom import (
     UnscriptedSelectorError,
 )
 from tests.humanize_gates import assert_clean
+from utils.dom import ElementUnusableError
 from utils.humanize import HumanizeProfile, Humanizer, LogNormal
 
 TITLE_PLACEHOLDER = "一个好的标题，能获得更多人的喜欢哦"
@@ -610,7 +612,7 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             },
             timeline=timeline,
         )
-        page.fail_file_chooser = TimeoutError("no file chooser")
+        page.fail_file_chooser = PWTimeoutError("no file chooser")
         upload_image.on_click_effect = lambda: setattr(img_input, "_count", 1)
         with _TempDir() as tmp:
             app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
@@ -621,6 +623,46 @@ class HumanizeEventSequenceTests(unittest.TestCase):
         self.assertEqual(page.file_chooser_files(), [])
         self.assertEqual(img_input.files, [Path(tmp) / "cover.jpg"])
         self.assertEqual(done.click_count, 0)
+
+    def test_cover_click_failure_propagates_instead_of_writing_the_input(self):
+        timeline = _Timeline()
+        inner = Element("cover-tab", timeline=timeline)
+        unusable = ElementUnusableError(
+            what="上传图片", role="interactive", reason="covered-by:div.mask"
+        )
+        upload_image = _ChooserDepthElement(
+            "cover-chooser", timeline=timeline, click_error=unusable
+        )
+        img_input = FakeLocator("cover-file", count=0)
+        modal = Element(
+            "cover-modal",
+            timeline=timeline,
+            children={
+                COVER_TEXT: inner,
+                COVER_UPLOAD_IMAGE: upload_image,
+            },
+        )
+        page = _page(
+            {
+                COVER_MODAL: modal,
+                COVER_FILE_INPUT: img_input,
+            },
+            timeline=timeline,
+        )
+        with _TempDir() as tmp:
+            app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            with _humanized():
+                humanizer = app._humanizer(page)
+                with self.assertRaises(ElementUnusableError):
+                    asyncio.run(
+                        app._set_cover_via_chooser(
+                            page, humanizer, page.locator(COVER_MODAL)
+                        )
+                    )
+
+        # 人类化/原生点击错误不是「chooser 没到」：不得降级成直接写 input。
+        self.assertEqual(img_input.actions, [])
+        self.assertEqual(page.file_chooser_files(), [])
 
     def test_collection_dropdown_narrowed_and_option_clicked_once_without_force(self):
         for branch in ("ancestor", "placeholder"):

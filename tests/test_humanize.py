@@ -853,9 +853,10 @@ class XhsStaticGateTests(unittest.TestCase):
         self.assertIn("ControlOrMeta+A", sources)
 
 
-#: The 15 wired platform entry points of spec §4.2.  TikTok is entry-point
-#: scoped because ``uploader/tk_uploader/`` also ships the legacy, unwired
-#: ``main.py``; spec §3.12 only covers ``main_chrome.py``.
+#: The 15 wired platforms of spec §4.2.  That is 12 platform packages + 3
+#: meta packages = 15 platforms, but 16 scan targets below: TikTok is
+#: file-scoped because ``uploader/tk_uploader/`` also ships the legacy,
+#: unwired ``main.py``; spec §3.12 only covers ``main_chrome.py``.
 WIRED_PLATFORM_PACKAGES = (
     "alipay_uploader",
     "baijiahao_uploader",
@@ -878,7 +879,7 @@ WIRED_META_PACKAGES = (
 
 
 class PlatformWideGateTests(unittest.TestCase):
-    """Gates A–E across all 15 wired entry points (spec §4.2), not per package only.
+    """Gates A–E across all 15 wired platforms (spec §4.2, 16 scan targets).
 
     TikTok is checked file-scoped at ``uploader/tk_uploader/main_chrome.py``:
     the sibling legacy ``uploader/tk_uploader/main.py`` is unwired and out of

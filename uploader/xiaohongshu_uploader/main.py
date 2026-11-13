@@ -1699,36 +1699,6 @@ async def xiaohongshu_cookie_gen(
         return result
 
 
-async def _switch_platform_disabled(switch) -> bool:
-    """开关是否被平台自身禁用（非共享层判定）。
-
-    真机：原创开关是 ``d-switch disabled``，样式 ``pointer-events: none``，
-    内部 ``input[type=checkbox]`` 带 ``disabled``，外层
-    ``d-disabled-compatible-wrapper``。达到任一条件都说明平台不允许操作，
-    继续坐标点击只会得到无上下文的 ``disabled``。
-    """
-    try:
-        result = await switch.evaluate(
-                """el => {
-                  const cs = getComputedStyle(el);
-                  const input = el.querySelector('input[type="checkbox"]');
-                  const cls = String(el.className || '');
-                  const parent = el.parentElement;
-                  const pcls = parent ? String(parent.className || '') : '';
-                  return (
-                    cls.indexOf('disabled') !== -1 ||
-                    (input ? input.disabled === true : false) ||
-                    cs.pointerEvents === 'none' ||
-                    pcls.indexOf('disabled') !== -1
-                  );
-                }"""
-        )
-    except Exception:
-        return False
-    # JS 返回布尔；测试替身可能返回其它结构，只有明确的 True 才算被禁用。
-    return result is True
-
-
 class XiaoHongShuBaseUploader(BaseVideoUploader):
     def __init__(
         self,
@@ -2414,7 +2384,11 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             )
         ).locator
 
-        if await _switch_platform_disabled(switch):
+        ok, reason = await check(switch, "interactive")
+        if not ok and reason == "disabled":
+            # 共享层唯一判定：``disabled`` / ``pointer-events-none`` 等不可点
+            # 原因都由 ``utils.dom`` 给出。只有 ``disabled`` 视为「平台禁用」；
+            # 其它原因继续走正常点击路径，由点击自己报可操作的上下文。
             raise RuntimeError(
                 "原创声明开关被平台禁用（d-switch disabled / pointer-events:none）："
                 "当前账号或这条视频不支持开启原创。请去掉 --original 后重试，"

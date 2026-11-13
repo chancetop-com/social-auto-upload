@@ -1187,6 +1187,30 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(humanizer.enabled)
 
 
+class OfflineHumanizerSeamTests(unittest.TestCase):
+    """Test-seam humanizer must disable through the documented profile rule.
+
+    ``utils.humanize`` forbids post-construction mutation: ``enabled`` is
+    snapshotted in ``Humanizer.__init__`` and platforms may only derive a
+    profile via ``dataclasses.replace(DEFAULT_PROFILE, ...)``.
+    """
+
+    def test_offline_seam_disables_through_a_derived_profile(self):
+        from dataclasses import replace
+
+        from utils.humanize import DEFAULT_PROFILE
+
+        humanizer = tk_main._offline_humanizer()
+
+        self.assertFalse(humanizer.enabled)
+        self.assertEqual(
+            humanizer.profile, replace(DEFAULT_PROFILE, enabled=False)
+        )
+        self.assertIsNot(humanizer.profile, DEFAULT_PROFILE)
+        # The shared parameter table itself is never mutated.
+        self.assertTrue(DEFAULT_PROFILE.enabled)
+
+
 class StaticGateTests(unittest.TestCase):
     def test_shipped_module_passes_gates_a_to_e(self):
         from tests.humanize_gates import assert_clean

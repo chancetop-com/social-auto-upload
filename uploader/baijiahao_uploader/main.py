@@ -712,9 +712,6 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             #    set_input_files 把文件塞进去，选择器会留在屏幕上（先例：小红书
             #    bbc5361，2026-11-12 TikTok 复现）。
             img_input = page.locator(COVER_IMAGE_INPUT_SELECTOR).first
-            if not await img_input.count():
-                # 通用 fallback：弹窗内最新出现的 file input
-                img_input = page.locator('input[type="file"]').last
             if await _cover_input_attached(img_input):
                 await img_input.set_input_files(self.thumbnail_path)
             else:
@@ -846,7 +843,8 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         """兜底：只有 input 缺失时才点「上传」tab，点击必须被 chooser 消费。
 
         chooser 事件没到也不能裸点第二次：点击可能已经把 input 渲染出来，
-        这里改为重新解析 input 再直接写。
+        这里改为重新解析封面专用 input 再直接写。绝不回退到页面级的通用
+        ``input[type=file]``——那会绑到页面自己的视频输入框。
         """
         upload_btn = page.locator(COVER_UPLOAD_BUTTON_SELECTOR).first
         if not await upload_btn.count():
@@ -858,7 +856,9 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             ) as chooser_info:
                 await upload_btn.click(timeout=8000)  # native-click: file；封面弹窗「上传」tab 只能由原生点击唤起文件选择器，且必须被 expect_file_chooser 消费
             chooser = await chooser_info.value
-        except Exception:
+        except PWTimeoutError:
+            # 只有「选择器事件没到」才降级；人类化/原生点击错误必须上抛
+            # （spec §4.1-7：人类化失败不得自动降级）。
             chooser = None
         if chooser is not None:
             await chooser.set_files(self.thumbnail_path)
@@ -866,7 +866,11 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         await page.wait_for_timeout(1500)
         img_input = page.locator(COVER_IMAGE_INPUT_SELECTOR).first
         if not await img_input.count():
-            img_input = page.locator('input[type="file"]').last
+            raise RuntimeError(
+                "封面图片 input 未出现：点击「上传」后既没有文件选择器，也没有 "
+                f"{COVER_IMAGE_INPUT_SELECTOR}；不绑定页面级 input[type=file]，"
+                "避免把视频输入框当成封面"
+            )
         await img_input.set_input_files(self.thumbnail_path)
 
     async def _wait_cover_ready(self, page: Page, timeout: int = 120) -> None:
