@@ -40,7 +40,27 @@
 
 ## Instagram（W1）
 
-待跑（ticket 05，依赖 ticket 02 合并后）。
+2026-11-13 · 账号 `luke`（`cookies/instagram_luke.json`）· 本地模式 · `--headed` · `--debug`
+
+| # | 发布类型 | 触碰字段 | 墙钟 | 预算消耗 | 停止点 / 就绪证据 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 视频（Reel） | 配文（标题+正文+话题）、封面、地点、关闭评论、AI 标识、Share 就绪 | 63s（H1） | 63/900 ≈ 7% | `Instagram 发布就绪，--no-publish 停在 Share 前（未点击发布）`，exit 0，`status=prepared` | pass |
+| 2 | 视频（Reel） | 同上（H0 基线） | 42s（H0） | 42/900 ≈ 5% | 同上 | pass |
+| 3 | 图文 carousel | 2 图、配文 1080 码点（>1000 bulk）、alt text ×2、地点、评论、AI、Share 就绪 | 64s（H1） | 64/900 ≈ 7% | 同上 | pass |
+| 4 | 图文 carousel | 同上（H0 基线） | 44s（H0） | 44/900 ≈ 5% | 同上 | pass |
+
+双基线：视频 H1 63s / H0 42s（+21s）；carousel H1 64s / H0 44s（+20s）。
+`--result` 状态均为 `prepared`，未写 `content_id` / `post_url`；未出现验证码 / 滑块 / 限流提示。
+
+真机暴露并已修复的四处（全部在 Instagram 平台层，未改共享层，未回滚 02）：
+
+1. 首页导航栏 hover 展开 → 导航点击 `point-drift`：`_click_nav` 先 `hover` 再 `click`（§2.5.1）。
+2. 逐字输入话题后 hashtag 联想浮层、地点联想浮层盖住右侧选项面板 → 选项点击 `covered-by:button._acmx`：
+   配文回读后与地点选中后各点一次弹窗标题栏（`role=heading`）关闭浮层。
+3. Lexical 把换行渲染成 `<br>`，`textContent` 读不到换行 → 配文回读改用 `innerText()`（有界轮询）。
+4. `role=switch` 原生 input 为 `opacity:0` → 改点其可见父容器（§2.6），回读仍在 input 上。
+
+以上四条均有离线回归测试；发布点击本身仍未验（§9-28）。
 
 ## TikTok（W1）
 
