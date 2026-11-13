@@ -556,6 +556,10 @@ class FakeDialogButton:
     async def count(self) -> int:
         return self._count
 
+    async def hover(self) -> None:
+        # The platform click entry hovers before clicking (spec §2.5.1).
+        return None
+
     async def click(self) -> None:
         self.click_calls += 1
         self._count = 0
@@ -1889,6 +1893,9 @@ class HashtagEntityTests(unittest.TestCase):
         async def get_attribute(self, name):
             if name == "aria-selected" and self.selected:
                 return "true"
+            return None
+
+        async def hover(self):
             return None
 
         async def click(self, **_kwargs):

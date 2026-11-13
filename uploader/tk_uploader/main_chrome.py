@@ -147,15 +147,19 @@ def _offline_humanizer() -> Humanizer:
 
 
 async def _humanized_click(humanizer: Humanizer | None, target) -> None:
-    """Hover the target, then click it (spec §2.5.1).
+    """The module's only click entry: hover the target, then click it (§2.5.1).
 
-    A 2026-11-13 real-device ``--no-publish`` run failed inside
-    ``Humanizer.click`` with ``ElementUnusableError(reason="point-drift")`` on
-    the first option applied (privacy), before any cover/schedule step.  On a
-    device that shows point drift, hovering the call site's target first
-    settles the pointer before the click's own move/stillOn check.  The click
-    primitive keeps zero retries and its ±1px tolerance; the fast path still
-    passes ``hover`` through to ``locator.hover()``.
+    TikTok Studio animates/hover-expands most controls (option rows, dialogs,
+    date pickers, the cover editor, tabs), so this is the platform-wide policy,
+    not just the option adapters.
+
+    Two 2026-11-13 real-device ``--no-publish`` runs failed inside
+    ``Humanizer.click`` with ``ElementUnusableError(reason="point-drift")``:
+    first on the first option applied (privacy), then on the AIGC first-run
+    dialog's ``Turn on`` button.  Hovering the call site's target first settles
+    the pointer before the click's own move/stillOn check.  The click primitive
+    keeps zero retries and its ±1px tolerance; the fast path still passes
+    ``hover`` through to ``locator.hover()``.
     """
     if humanizer is None:
         humanizer = _offline_humanizer()
@@ -1566,7 +1570,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         humanizer = self._humanizer(page)
         try:
-            await humanizer.click(button)
+            await _humanized_click(humanizer, button)
             await button.wait_for(
                 state="detached", timeout=_AIGC_DIALOG_TIMEOUT_MS
             )
@@ -1969,7 +1973,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     "Show more", exact=True
                 )
                 if await show_more.count():
-                    await humanizer.click(show_more.first)
+                    await _humanized_click(humanizer, show_more.first)
                     await self._wait_for_settings_surface(page)
                     tiktok_logger.info(
                         "[+] expanded photo settings via Show more"
@@ -1985,7 +1989,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             if await more_btn.count():
                 text = (await more_btn.first.inner_text()).strip().casefold()
                 if collapsed or "show more" in text:
-                    await humanizer.click(more_btn.first)
+                    await _humanized_click(humanizer, more_btn.first)
                     await self._wait_for_settings_surface(page)
                     return
         except Exception:
@@ -1994,7 +1998,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         show_more = container.get_by_text("Show more", exact=True)
         try:
             if await show_more.count():
-                await humanizer.click(show_more.first)
+                await _humanized_click(humanizer, show_more.first)
                 await self._wait_for_settings_surface(page)
         except Exception:
             pass
@@ -2107,7 +2111,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             ):
                 for target in (scope, page):
                     try:
-                        await humanizer.click(target.locator(selector).first)
+                        await _humanized_click(humanizer, target.locator(selector).first)
                     except Exception as exc:
                         if _maybe_dispatched(exc):
                             raise
@@ -2137,14 +2141,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                 if date_visible:
                     break
                 if allow_visible:
-                    await humanizer.click(allow.first)
+                    await _humanized_click(humanizer, allow.first)
                 await page.wait_for_timeout(500)
             if await date_cb.count() and await date_cb.first.is_visible():
                 break
         await date_cb.first.wait_for(state="visible", timeout=10000)
 
         # Date picker: navigate months, then click the exact day.
-        await humanizer.click(date_cb.first)
+        await _humanized_click(humanizer, date_cb.first)
         await page.wait_for_timeout(500)
         target_month = publish_date.strftime("%B")
         target_year = str(publish_date.year)
@@ -2164,12 +2168,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                 publish_date.year,
                 publish_date.month,
             ):
-                await humanizer.click(
-                    page.get_by_role("button", name="Next month").first
+                await _humanized_click(
+                    humanizer,
+                    page.get_by_role("button", name="Next month").first,
                 )
             else:
-                await humanizer.click(
-                    page.get_by_role("button", name="Previous month").first
+                await _humanized_click(
+                    humanizer,
+                    page.get_by_role("button", name="Previous month").first,
                 )
             await page.wait_for_timeout(250)
 
@@ -2179,7 +2185,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         day_button = page.get_by_role("button", name=day_pattern)
         if await day_button.count():
-            await humanizer.click(day_button.first)
+            await _humanized_click(humanizer, day_button.first)
         else:
             days = page.locator(
                 '.DatePicker__day[data-outside="false"]:not([disabled])'
@@ -2189,7 +2195,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 if (await days.nth(index).inner_text()).strip() == str(
                     publish_date.day
                 ):
-                    await humanizer.click(days.nth(index))
+                    await _humanized_click(humanizer, days.nth(index))
                     clicked = True
                     break
             if not clicked:
@@ -2203,13 +2209,14 @@ class TiktokBaseUploader(BaseVideoUploader):
         # Time picker: 5-minute granularity, matching the Studio picker.
         hour_str = publish_date.strftime("%H")
         minute_str = f"{(publish_date.minute // 5) * 5:02d}"
-        await humanizer.click(
-            page.get_by_role("combobox", name="Select time").first
+        await _humanized_click(
+            humanizer,
+            page.get_by_role("combobox", name="Select time").first,
         )
         await page.wait_for_timeout(500)
         hour_option = page.get_by_role("option", name=f"Hours {hour_str}")
         if await hour_option.count():
-            await humanizer.click(hour_option.first)
+            await _humanized_click(humanizer, hour_option.first)
         else:
             raise RuntimeError(
                 f"TikTok 定时设置失败：时间选择器中没有 {hour_str} 时。"
@@ -2218,7 +2225,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             "option", name=f"Minutes {minute_str}"
         )
         if await minute_option.count():
-            await humanizer.click(minute_option.first)
+            await _humanized_click(humanizer, minute_option.first)
         else:
             minutes = page.locator(
                 '[aria-label="Minutes"] [role="option"]'
@@ -2226,7 +2233,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             clicked = False
             for index in range(await minutes.count()):
                 if (await minutes.nth(index).inner_text()).strip() == minute_str:
-                    await humanizer.click(minutes.nth(index))
+                    await _humanized_click(humanizer, minutes.nth(index))
                     clicked = True
                     break
             if not clicked:
@@ -2400,7 +2407,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         for _ in range(8):
             await self.dismiss_blocking_overlays(page)
             try:
-                await humanizer.click(editor_locator)
+                await _humanized_click(humanizer, editor_locator)
                 return
             except Exception as exc:
                 # ``mouse.down`` already happened: never dispatch a second time.
@@ -2494,7 +2501,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                             await humanizer.press("Enter")
                         else:
                             try:
-                                await humanizer.click(option)
+                                await _humanized_click(humanizer, option)
                             except Exception as exc:
                                 # Keep the plain text and fire the association
                                 # suggestion instead of aborting the publish.
@@ -2707,7 +2714,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                             f"matched ({description})"
                         )
                         await humanizer.before_submit()
-                        await humanizer.click(publish_button)
+                        await _humanized_click(humanizer, publish_button)
                         publish_clicked = True
                         tiktok_logger.info("  [-] publish click sent")
                 except Exception as e:
@@ -2799,7 +2806,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 button, _, _ = found
                 humanizer = self._humanizer(page)
                 try:
-                    await humanizer.click(button)
+                    await _humanized_click(humanizer, button)
                 except Exception as exc:
                     # Do not turn a failed optional fallback into a different
                     # exit code; the success-URL wait still owns the outcome.
@@ -2987,7 +2994,7 @@ class TiktokVideo(TiktokBaseUploader):
             page=page,
             visible=True,
         )
-        await humanizer.click(edit_cover)
+        await _humanized_click(humanizer, edit_cover)
 
         upload_tab = await _resolve_candidate(
             base,
@@ -2997,7 +3004,7 @@ class TiktokVideo(TiktokBaseUploader):
             page=page,
             visible=True,
         )
-        await humanizer.click(upload_tab)
+        await _humanized_click(humanizer, upload_tab)
 
         # Scope the broad fallback input to the cover editor so it cannot hit
         # the main form's video input.  When the ancestor is not found the
@@ -3104,7 +3111,7 @@ class TiktokVideo(TiktokBaseUploader):
             )
 
         try:
-            await humanizer.click(save_button)
+            await _humanized_click(humanizer, save_button)
         except Exception as exc:
             raise _cover_error(
                 "Save",
@@ -3318,7 +3325,7 @@ class TiktokNote(TiktokBaseUploader):
                 try:
                     tab = get_by_role("tab", name=label).first
                     if await tab.count() > 0:
-                        await humanizer.click(tab)
+                        await _humanized_click(humanizer, tab)
                         await humanizer.after_navigate()
                         clicked = True
                         break
@@ -3332,7 +3339,7 @@ class TiktokNote(TiktokBaseUploader):
                     try:
                         tab = get_by_text(label, exact=True).first
                         if await tab.count() > 0:
-                            await humanizer.click(tab)
+                            await _humanized_click(humanizer, tab)
                             await humanizer.after_navigate()
                             clicked = True
                             break
@@ -3378,7 +3385,7 @@ class TiktokNote(TiktokBaseUploader):
                     if await locator.count() == 0:
                         continue
                     # ``sel`` clear: focus/click → select all → delete → type.
-                    await humanizer.click(locator)
+                    await _humanized_click(humanizer, locator)
                     await humanizer.press("ControlOrMeta+A")
                     await humanizer.press("Delete")
                     await humanizer.type_text(self.title)

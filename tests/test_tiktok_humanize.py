@@ -21,11 +21,14 @@ never need a browser.
 
 from __future__ import annotations
 
+import ast
 import os
+import re
 import unittest
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import TiktokNote, TiktokPublishOptions, TiktokVideo
@@ -404,6 +407,70 @@ def _silent_humanizer_sleep():
         yield
 
 
+def _pause_recorder(video, page):
+    """Humanizer whose pauses are appended to ``page.events``.
+
+    The pause tail of the hover burst is otherwise invisible: it is a platform
+    sleep, not a pointer event.
+    """
+    pauses: list[float] = []
+
+    async def _pause(seconds: float) -> None:
+        pauses.append(seconds)
+        page.events.append(("pause", seconds))
+
+    video._humanize_pause = _pause  # type: ignore[assignment]
+    return video._humanizer(page), pauses
+
+
+def _pointer_call_spy(humanizer):
+    """Record ``hover``/``click`` in call order, then delegate."""
+    calls: list[tuple[str, object]] = []
+    hover = humanizer.hover
+    click = humanizer.click
+
+    async def _hover(locator, **kwargs):
+        calls.append(("hover", locator))
+        await hover(locator, **kwargs)
+
+    async def _click(locator, **kwargs):
+        calls.append(("click", locator))
+        await click(locator, **kwargs)
+
+    humanizer.hover = _hover  # type: ignore[assignment]
+    humanizer.click = _click  # type: ignore[assignment]
+    return calls
+
+
+def _assert_hover_burst_precedes_the_press(case, page) -> None:
+    """The hover burst/settle must close before the click's own burst."""
+    names = [event[0] for event in page.events]
+    case.assertEqual(names.count("down"), 1)
+    case.assertEqual(page.mouse.down_count, 1)
+    down = names.index("down")
+    moves = [index for index, name in enumerate(names) if name == "move"]
+    settles = [
+        index
+        for index, event in enumerate(page.events)
+        if event[0] == "pause" and event[1] >= 0.1
+    ]
+    hover_settle = next(
+        index
+        for index in settles
+        if index < down and any(move < index for move in moves)
+    )
+    case.assertTrue([index for index in moves if index < hover_settle], names)
+    case.assertTrue(
+        [index for index in moves if hover_settle < index < down], names
+    )
+    click_settle = next(
+        index for index in settles if hover_settle < index < down
+    )
+    case.assertGreater(
+        click_settle, max(index for index in moves if index < down)
+    )
+
+
 def _hashtag_page(*, option_texts=()) -> tuple[FakePage, FakeNode]:
     page = FakePage()
     page.editor = EditorNode("editor", page=page)
@@ -655,19 +722,8 @@ class OptionClickHoverTests(unittest.IsolatedAsyncioTestCase):
         return video, label, checkbox
 
     def _recording_humanizer(self, video, page):
-        """Humanizer whose pauses are appended to ``page.events``.
-
-        The pause tail of the hover burst is otherwise invisible: it is a
-        platform sleep, not a pointer event.
-        """
-        pauses: list[float] = []
-
-        async def _pause(seconds: float) -> None:
-            pauses.append(seconds)
-            page.events.append(("pause", seconds))
-
-        video._humanize_pause = _pause  # type: ignore[assignment]
-        return video._humanizer(page), pauses
+        """Humanizer whose pauses are appended to ``page.events``."""
+        return _pause_recorder(video, page)
 
     async def test_option_click_hover_burst_precedes_click_move_and_down(self):
         page = FakePage()
@@ -796,21 +852,256 @@ class OptionClickHoverTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _spy_pointer_calls(humanizer):
-        calls: list[tuple[str, object]] = []
-        hover = humanizer.hover
-        click = humanizer.click
+        return _pointer_call_spy(humanizer)
 
-        async def _hover(locator, **kwargs):
-            calls.append(("hover", locator))
-            await hover(locator, **kwargs)
 
-        async def _click(locator, **kwargs):
-            calls.append(("click", locator))
-            await click(locator, **kwargs)
+class PlatformWideClickHoverTests(unittest.IsolatedAsyncioTestCase):
+    """Hover-before-click is the whole module's click policy (spec §2.5.1).
 
-        humanizer.hover = _hover  # type: ignore[assignment]
-        humanizer.click = _click  # type: ignore[assignment]
-        return calls
+    Two 2026-11-13 ``--no-publish`` runs failed inside ``Humanizer.click``
+    with ``ElementUnusableError(reason="point-drift")``: first on the privacy
+    option, then on the AIGC dialog's ``Turn on`` button, which still used a
+    bare ``humanizer.click``.  TikTok Studio animates/hover-expands option
+    rows, dialogs, date pickers, the cover editor and tabs, so every click in
+    this module goes through ``_humanized_click``.
+    """
+
+    def test_module_has_no_bare_humanizer_click_outside_the_helper(self):
+        tree = ast.parse(TK_MAIN_CHROME.read_text(encoding="utf-8"))
+        helper = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "_humanized_click"
+        )
+        within_helper = set(range(helper.lineno, helper.end_lineno + 1))
+        bare = [
+            (node.lineno, ast.unparse(node))
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "click"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "humanizer"
+            and node.lineno not in within_helper
+        ]
+        self.assertEqual(bare, [])
+
+        wrapped = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_humanized_click"
+        ]
+        # Two pre-existing option adapters plus the 25 sites converted here.
+        self.assertEqual(len(wrapped), 27, wrapped)
+
+    # -- AIGC first-run dialog ------------------------------------------
+    @staticmethod
+    def _aigc_page():
+        page = FakePage()
+        dialog = FakeNode("aigc-dialog", page=page)
+        button = FakeNode(
+            "aigc-turn-on", page=page, box=_box(360.0, 300.0, 120.0, 32.0)
+        )
+        page.selectors['[role="dialog"]'] = dialog
+        dialog._children[
+            f"role:button:{re.compile(r'^Turn on$')}"
+        ] = button
+        return page, button
+
+    async def test_aigc_turn_on_hover_burst_precedes_the_click(self):
+        page, button = self._aigc_page()
+        video = _video()
+        _pause_recorder(video, page)
+
+        await video._confirm_aigc_turn_on(page)
+
+        _assert_hover_burst_precedes_the_press(self, page)
+        self.assertEqual(button.native_click_calls, 0)
+        self.assertEqual(button.wait_calls[0]["state"], "detached")
+
+    async def test_aigc_turn_on_fast_path_is_one_hover_then_one_click(self):
+        page, button = self._aigc_page()
+        video = _video()
+        pauses: list[float] = []
+
+        async def _pause(seconds: float) -> None:
+            pauses.append(seconds)
+
+        video._humanize_pause = _pause  # type: ignore[assignment]
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            await video._confirm_aigc_turn_on(page)
+
+        self.assertEqual(button.actions, [("hover",), ("click", {})])
+        self.assertEqual(button.native_click_calls, 1)
+        self.assertEqual(page.mouse.down_count, 0)
+        self.assertEqual(pauses, [])
+
+    # -- schedule picker -------------------------------------------------
+    def _schedule_page(self, publish_date):
+        page = FakePage()
+        base = FakeNode("base", page=page)
+        selectors = (
+            'label:has(input[name="postSchedule"][value="schedule"])',
+            'input[name="postSchedule"][value="schedule"]',
+            'label:has-text("Schedule")',
+        )
+        for selector in selectors:
+            node = FakeNode(f"radio::{selector}", page=page)
+            base._children[selector] = node
+            page.selectors[selector] = node
+
+        page.roles["combobox:Select date"] = FakeNode(
+            "date-combobox", page=page
+        )
+        page.selectors['[role="dialog"]'] = FakeNode(
+            "dialogs", page=page, children={
+                f"role:button:{re.compile(r'^Allow$')}": FakeNode(
+                    "allow-dialog", page=page, count=0
+                )
+            }
+        )
+        page.roles[f"button:{re.compile(r'^Allow$')}"] = FakeNode(
+            "allow-page", page=page, count=0
+        )
+
+        month = publish_date.strftime("%B")
+        year = str(publish_date.year)
+        page.selectors[".DatePicker__titleMonth"] = FakeNode(
+            "title-month", page=page, text=month
+        )
+        page.selectors[".DatePicker__titleYear"] = FakeNode(
+            "title-year", page=page, text=year
+        )
+        day_pattern = re.compile(
+            rf"{month} {publish_date.day}(st|nd|rd|th), {year}"
+        )
+        day = FakeNode("day", page=page)
+        page.roles[f"button:{day_pattern}"] = day
+
+        hour_str = publish_date.strftime("%H")
+        minute_str = f"{(publish_date.minute // 5) * 5:02d}"
+        page.roles["combobox:Select time"] = FakeNode(
+            "time-combobox", page=page
+        )
+        hour = FakeNode("hour", page=page)
+        page.roles[f"option:Hours {hour_str}"] = hour
+        minute = FakeNode("minute", page=page)
+        page.roles[f"option:Minutes {minute_str}"] = minute
+        page.selectors[
+            ".Picker__root.schedule-picker .Picker__value"
+        ] = FakeNode(
+            "picker-values",
+            page=page,
+            items=[
+                FakeNode(
+                    "date-value",
+                    page=page,
+                    text=f"{publish_date.strftime('%b')} "
+                    f"{publish_date.day}, {year}",
+                ),
+                FakeNode(
+                    "time-value", page=page, text=f"{hour_str}:{minute_str}"
+                ),
+            ],
+        )
+        targets = {
+            "date": page.roles["combobox:Select date"],
+            "day": day,
+            "hour": hour,
+            "minute": minute,
+        }
+        return page, base, targets
+
+    async def test_schedule_day_and_time_options_hover_then_click(self):
+        publish_date = datetime(2026, 11, 13, 14, 30)
+        page, base, targets = self._schedule_page(publish_date)
+        video = TiktokVideo(
+            "caption", "/tmp/demo.mp4", [], publish_date, None
+        )
+        video.locator_base = base
+        humanizer, _pauses = _pause_recorder(video, page)
+        calls = _pointer_call_spy(humanizer)
+
+        with patch.object(
+            tk_main,
+            "prepare_schedule",
+            AsyncMock(return_value=publish_date),
+        ):
+            await video.apply_schedule(page)
+
+        # Every schedule target is hovered and then clicked, with no other
+        # humanizer call in between (the exact burst is covered by the AIGC
+        # event-order test).
+        for name, target in targets.items():
+            with self.subTest(target=name):
+                pairs = [
+                    (index, call[0])
+                    for index, call in enumerate(calls)
+                    if call[1] is target
+                ]
+                self.assertEqual(
+                    [verb for _index, verb in pairs], ["hover", "click"]
+                )
+                self.assertEqual(
+                    pairs[1][0], pairs[0][0] + 1, (name, calls)
+                )
+
+    # -- cover editor ----------------------------------------------------
+    def _cover_page(self):
+        page = FakePage()
+        base = FakeNode("base", page=page)
+        base._children["text:Edit cover:exact"] = FakeNode(
+            "edit-cover-text", page=page, count=0
+        )
+        edit_cover = FakeNode("edit-cover", page=page)
+        base._children["role:button:Edit cover"] = edit_cover
+        upload_tab = FakeNode("upload-tab", page=page)
+        base._children["text:Upload cover:exact"] = upload_tab
+        editor = FakeNode("cover-editor", page=page)
+        upload_tab._children[tk_main.COVER_EDITOR_SCOPE_SELECTOR] = editor
+        file_input = FakeNode("cover-file", page=page)
+        editor._children[tk_main._COVER_FILE_ARIA_SELECTOR] = file_input
+        editor._children['[aria-label="Uploaded cover image"]'] = FakeNode(
+            "cover-preview", page=page
+        )
+        save = FakeNode("cover-save", page=page)
+        editor._children[
+            f"role:button:{re.compile(r'^(Save|Confirm)$')}"
+        ] = save
+        return page, base, edit_cover, upload_tab, save, file_input
+
+    async def test_cover_edit_upload_and_save_hover_then_click(self):
+        page, base, edit_cover, upload_tab, save, file_input = (
+            self._cover_page()
+        )
+        video = TiktokVideo(
+            "caption",
+            "/tmp/demo.mp4",
+            [],
+            0,
+            None,
+            "/tmp/cover.jpg",
+        )
+        video.locator_base = base
+        humanizer, _pauses = _pause_recorder(video, page)
+        calls = _pointer_call_spy(humanizer)
+
+        await video.apply_cover(page)
+
+        self.assertEqual(
+            [target.name for verb, target in calls if verb == "click"],
+            ["edit-cover", "upload-tab", "cover-save"],
+        )
+        for index, (verb, _target) in enumerate(calls):
+            self.assertEqual(verb, "hover" if index % 2 == 0 else "click")
+            if verb == "click":
+                self.assertIs(calls[index - 1][1], calls[index][1])
+        self.assertIn(
+            ("set_input_files", "/tmp/cover.jpg"), file_input.actions
+        )
 
 
 class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):

@@ -150,6 +150,9 @@ class FakeNode:
         )
 
     # -- actions ---------------------------------------------------------
+    async def hover(self, **kwargs):
+        self.recorder.append(("hover", self.name))
+
     async def click(self, **kwargs):
         self.recorder.append(("click", self.name))
         if self.on_click is not None:
