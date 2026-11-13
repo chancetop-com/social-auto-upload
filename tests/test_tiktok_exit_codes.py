@@ -355,7 +355,11 @@ class ClickPublishTests(unittest.TestCase):
         self.assertIn("boom", str(ctx.exception))
 
     def test_maybe_dispatched_failure_is_not_reclicked(self):
-        """``HUMANIZE=0`` marks a click raise as maybe-dispatched: wait only."""
+        """``HUMANIZE=0`` marks a click raise as maybe-dispatched.
+
+        The raise may have reached the page, so the loop only waits for the
+        success URL and never re-dispatches; the iteration cap ends it.
+        """
         video = _video()
         button = _FakeLocator(click_error=RuntimeError("boom"))
         video.locator_base = _FakeLocatorBase(button)

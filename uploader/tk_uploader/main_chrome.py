@@ -75,7 +75,7 @@ TIKTOK_DRY_RUN_READY_MESSAGE = (
 )
 
 #: 发布点击循环的硬上限：预算之外的第二道闸。正常路径由 15 分钟预算终止；
-#: 这两条只在「按钮一直点不中」或「sleep 被吞掉」时兜底，避免全速空转。
+#: 结果轮询的硬上限：只在 sleep 被吞掉（测试替身）时兜底，避免全速空转。
 TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS = 2000
 
 # ---------------------------------------------------------------------------
@@ -1395,7 +1395,9 @@ class TiktokBaseUploader(BaseVideoUploader):
             page, deadline=budget, multilogin=multilogin
         )
         if multilogin:
-            _raise_if_login_required(page)
+            # The click already happened; a late redirect must not claim the
+            # post was untouched.
+            _raise_if_login_required(page, publish_attempted=True)
         # 9. read back the published item
         self.last_item_id = await self.read_result(page)
         tiktok_logger.success(self.result_label(self.last_item_id))
@@ -2778,7 +2780,12 @@ class TiktokBaseUploader(BaseVideoUploader):
                 # retried, and the success-URL wait still owns the outcome.
                 if not dialog_clicked:
                     dialog_clicked = True
-                    await self._click_post_now(page)
+                    try:
+                        await self._click_post_now(page)
+                    except Exception as exc:
+                        # The publish click was already dispatched: a dialog
+                        # failure is a result-unknown, never a pre-click error.
+                        raise budget.timeout_error(True) from exc
                 tiktok_logger.info("  [-] video publishing")
                 await asyncio.sleep(0.5)
                 continue
@@ -2787,9 +2794,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     _raise_if_login_required(
                         page, publish_attempted=publish_clicked
                     )
-                if publish_clicked:
-                    raise budget.timeout_error(True) from e
-                raise
+                raise budget.timeout_error(True) from e
 
             tiktok_logger.success("  [-] video published success")
             return
