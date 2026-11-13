@@ -16,7 +16,7 @@ def validate_zhihu_schedule(value: datetime | None, now: datetime | None = None)
     if value is None:
         return None
     if not isinstance(value, datetime):
-        raise ValueError("知乎定时时间必须为 datetime；CLI 使用带时区的 ISO 8601")
+        raise ValueError("知乎定时时间必须为 datetime；CLI 使用 UTC 零偏移的 ISO 8601（…Z）")
     if value.second or value.microsecond:
         raise ValueError("知乎定时精确到分钟，不接受秒或微秒")
     window_message = (

@@ -3,7 +3,7 @@
 与平台原生定时发布（``--schedule``）不同，这里的等待发生在本地：上传、
 填表、封面、声明等全部准备完成后，浏览器保持打开，直到到达
 ``publish_not_before`` 指定的绝对时刻才继续执行发布点击，因此语义是
-「不早于」。CLI 参数层会把带时区输入换算到运行机器的本地时区；
+「不早于」。CLI 参数层会把 UTC 零偏移输入换算到运行机器的本地时区；
 这里只负责按该时刻等待。
 """
 from __future__ import annotations
@@ -71,7 +71,7 @@ async def wait_until_publish_allowed(
 
     if logger is not None:
         logger.info(
-            f"⏳ 已准备就绪，将在 {target.strftime('%Y-%m-%d %H:%M')} 之后点击{label}，"
+            f"⏳ 已准备就绪，将在 {target.strftime('%Y-%m-%d %H:%M:%S')} 之后点击{label}，"
             f"预计还需等待 {_format_remaining(remaining)}"
         )
 
@@ -89,4 +89,4 @@ async def wait_until_publish_allowed(
             await sleep(min(remaining, poll_seconds))
 
     if logger is not None:
-        logger.success(f"⏰ 已到 {target.strftime('%Y-%m-%d %H:%M')}，开始点击{label}")
+        logger.success(f"⏰ 已到 {target.strftime('%Y-%m-%d %H:%M:%S')}，开始点击{label}")

@@ -68,7 +68,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 客户端发布闸门（`--not-before`）
 
-所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区偏移的绝对时刻）：
+所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，保留秒级精度，不接受小数秒；`--schedule` 则要求秒/微秒为 0）：
 
 - 上传素材、填写标题/正文、封面、声明、合集等准备工作照常执行；
 - 全部准备完成后，如果本地当前时间早于目标时间，保持浏览器打开并等待；
@@ -76,8 +76,8 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 - 不传该参数时立即发布；目标时间已在过去时也立即发布。
 
 ```bash
-# 先完成所有准备，20:00 之后才点发布
-sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --not-before "2026-12-01T20:00:00+08:00"
+# 先完成所有准备，东八区 20:00（12:00 UTC）之后才点发布
+sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --not-before "2026-12-01T12:00:00Z"
 ```
 
 它与平台原生的 `--schedule` 是两套机制，可以同时使用：
@@ -89,7 +89,7 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 
 注意事项：
 
-- 等待时间使用**带时区偏移的绝对时刻**，例如 `2026-12-01T20:00:00+08:00` 或 `2026-12-01T12:00:00Z`；CLI 解析后换算到运行机器的本地时区再等待/打印，不再接受无时区的 `YYYY-MM-DD HH:MM`；
+- 等待时间使用 **UTC 绝对时刻**（零偏移，`Z`/`+00:00` 等写法均可；必须用 `T` 分隔日期与时间，保留秒级精度），例如 `2026-12-01T12:00:00Z`；CLI 解析后换算到运行机器的本地时区再等待/打印，非零偏移、无时区或空格分隔会退出 `2`；
 - 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
 - 主动等待不计入上传/发布超时预算；所有支持客户端发布闸门的平台都会把等待时长从 deadline 中顺延；
 - **禁止用 `--not-before` 做发布间隔或节流**：等待发生在填表之后、点击发布之前，浏览器与托管 Profile 全程被占用；节流、冷却与排程属于调用方 App（见[调度侧责任](#调度侧责任)）；
@@ -837,7 +837,7 @@ sau tiktok upload-video \
 
 ## 定时发布
 
-抖音、快手、小红书、视频号、知乎、Facebook Page 的图文或视频上传，TikTok（本地或托管浏览器模式）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。时间统一传 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`）。除 Bilibili 直接映射为 `--dtime` epoch 外，CLI 填写前从页面读取实际浏览器时区（`Intl.DateTimeFormat().resolvedOptions().timeZone`）再换算；读取失败直接退出 `1`，不回退到机器时区。不传则默认立即发布。大鱼号和 TikTok 的定时精确到 5 分钟，其它平台精确到分钟。百家号、支付宝生活号、微博、虎扑和 YouTube 当前不支持 `--schedule`。
+抖音、快手、小红书、视频号、知乎、Facebook Page 的图文或视频上传，TikTok（本地或托管浏览器模式）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。时间统一传 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`，秒/微秒必须为 0，否则退出 `2`）。除 Bilibili 直接映射为 `--dtime` epoch 外，CLI 填写前从页面读取实际浏览器时区（`Intl.DateTimeFormat().resolvedOptions().timeZone`）再换算；读取失败直接退出 `1`，不回退到机器时区。不传则默认立即发布。大鱼号和 TikTok 的定时精确到 5 分钟，其它平台精确到分钟。百家号、支付宝生活号、微博、虎扑和 YouTube 当前不支持 `--schedule`。
 
 ```bash
 sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
