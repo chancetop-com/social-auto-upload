@@ -335,6 +335,15 @@ class FakePage:
         self.pressed: list[FakeNode] = []
         self.wait_for_url_error: BaseException | None = None
         self.wait_for_url_calls = 0
+        self.expect_file_chooser_calls = 0
+
+    def expect_file_chooser(self, *, timeout=None):
+        # Counted before refusing so a wrongly-opened chooser is still visible
+        # in ``expect_file_chooser_calls`` after the code swallows the error.
+        self.expect_file_chooser_calls += 1
+        raise AssertionError(
+            "TikTok cover must write the existing hidden input directly"
+        )
 
     # -- selector maps ---------------------------------------------------
     def locator(self, selector: str) -> FakeNode:
@@ -1093,8 +1102,11 @@ class PlatformWideClickHoverTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [target.name for verb, target in calls if verb == "click"],
-            ["edit-cover", "upload-tab", "cover-save"],
+            ["edit-cover", "cover-save"],
         )
+        # The existing hidden input is written directly: the upload tab is never
+        # clicked, so no OS file chooser can be opened.
+        self.assertEqual(page.expect_file_chooser_calls, 0)
         for index, (verb, _target) in enumerate(calls):
             self.assertEqual(verb, "hover" if index % 2 == 0 else "click")
             if verb == "click":

@@ -91,6 +91,13 @@ TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS = 2000
 # fallback so it can never reach the main video upload input.
 COVER_EDITOR_SCOPE_SELECTOR = "xpath=ancestor::*[.//input[@type='file']][1]"
 _COVER_PREVIEW_TIMEOUT_MS = 10_000
+#: Short, read-only probe for an already-attached cover image input.  The tab
+#: click (and its consumed file chooser) is the fallback, never the first move.
+_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
+#: Bound for the tab click's file-chooser event, and the settle that lets the
+#: click reveal the input when no chooser arrives.
+_COVER_CHOOSER_TIMEOUT_MS = 10_000
+_COVER_TAB_SETTLE_MS = 1_500
 
 _COVER_EDIT_CANDIDATES = (
     ('get_by_text("Edit cover", exact=True)',
@@ -264,6 +271,31 @@ async def _resolve_candidate(
     tiktok_logger.info(
         f"[+] cover {stage}: {control} candidate {index + 1}/{len(candidates)}"
         f" matched ({description})"
+    )
+    return locator
+
+
+async def _probe_cover_file_input(scope, candidates):
+    """Return the cover image input when it is already attached, else ``None``.
+
+    Read-only by design: it never clicks the upload tab, because that click
+    opens a real OS file chooser that then lingers while ``set_input_files``
+    injects the file (XHS precedent, bbc5361).  Candidates are tried in order,
+    so a later-scoped selector still proves the input is attached.
+    """
+    found = await _find_candidate(scope, candidates)
+    if found is None:
+        return None
+    locator, index, description = found
+    try:
+        await locator.wait_for(
+            state="attached", timeout=_COVER_INPUT_PROBE_TIMEOUT_MS
+        )
+    except Exception:
+        return None
+    tiktok_logger.info(
+        "[+] cover probe cover file: Upload cover file input candidate "
+        f"{index + 1}/{len(candidates)} matched ({description})"
     )
     return locator
 
@@ -3031,22 +3063,28 @@ class TiktokVideo(TiktokBaseUploader):
         )
         await _humanized_click(humanizer, edit_cover)
 
-        upload_tab = await _resolve_candidate(
-            base,
-            _COVER_UPLOAD_TAB_CANDIDATES,
-            control="Upload cover",
-            stage="select upload tab",
-            page=page,
-            visible=True,
+        # Resolve (never click) the upload tab: its nearest ancestor that holds a
+        # file input is the editor scope for the broad fallback selector.  The
+        # click itself is a fallback only — see the chooser branch below.
+        tab_match = await _find_candidate(
+            base, _COVER_UPLOAD_TAB_CANDIDATES, visible=True
         )
-        await _humanized_click(humanizer, upload_tab)
+        upload_tab = tab_match[0] if tab_match is not None else None
 
         # Scope the broad fallback input to the cover editor so it cannot hit
         # the main form's video input.  When the ancestor is not found the
         # aria-labelled candidate above is still tried against the base.
-        editor_query = upload_tab.locator(COVER_EDITOR_SCOPE_SELECTOR)
+        editor_query = (
+            upload_tab.locator(COVER_EDITOR_SCOPE_SELECTOR)
+            if upload_tab is not None
+            else None
+        )
         try:
-            editor = editor_query.first if await editor_query.count() else None
+            editor = (
+                editor_query.first
+                if editor_query is not None and await editor_query.count()
+                else None
+            )
         except Exception:
             editor = None
         control_scope = editor if editor is not None else base
@@ -3060,34 +3098,40 @@ class TiktokVideo(TiktokBaseUploader):
              lambda scope: (
                  scope.locator(_COVER_FILE_ACCEPT_SELECTOR)
                  if editor is not None
+                 # No tab ⇒ no editor scope either: ``None`` is swallowed as
+                 # "unmatched" by ``_find_candidate``.
                  else editor_query
              )),
         )
-        file_input = await _resolve_candidate(
-            control_scope,
-            file_candidates,
-            control="Upload cover file input",
-            stage="set cover file",
-            page=page,
+
+        # The editor already exposes the hidden image input.  Write it directly:
+        # clicking "Upload cover" first opens a real OS file chooser that then
+        # stays on screen while set_input_files injects the file (same defect as
+        # XHS, bbc5361).  The tab is a consumed fallback only.
+        file_input = await _probe_cover_file_input(
+            control_scope, file_candidates
         )
-        try:
-            # The input is hidden but ``set_input_files`` works on it directly.
-            await file_input.set_input_files(self.thumbnail_path)
-        except Exception as exc:
-            # Last resort: keep the legacy file-chooser pattern.
+        set_files_error = None
+        if file_input is not None:
             try:
-                async with page.expect_file_chooser() as fc_info:
-                    await file_input.click(force=True)  # native-click: file；hidden file input 兜底; # humanize-impossible: hidden-file-input；code；set_input_files 失败后只剩文件选择器这一条原生路径
-                file_chooser = await fc_info.value
-                await file_chooser.set_files(self.thumbnail_path)
-            except Exception:
-                raise _cover_error(
-                    "Upload cover file input",
-                    "set cover file",
-                    file_candidates,
-                    page,
-                    detail=f"set_input_files failed: {exc}",
-                ) from exc
+                # The input is hidden but ``set_input_files`` works on it directly.
+                await file_input.set_input_files(self.thumbnail_path)
+            except Exception as exc:
+                set_files_error = exc
+                file_input = None
+        if file_input is None:
+            await self._set_cover_file_via_chooser(
+                page,
+                humanizer,
+                upload_tab,
+                control_scope,
+                file_candidates,
+                detail=(
+                    f"set_input_files failed: {set_files_error}"
+                    if set_files_error is not None
+                    else None
+                ),
+            )
 
         # The Save button is a page-level header button in the current Studio;
         # older editors kept it inside the editor scope.  Try all scopes.
@@ -3168,7 +3212,7 @@ class TiktokVideo(TiktokBaseUploader):
                 editor_closed = True
             except Exception as exc:
                 close_error = exc
-        if not editor_closed:
+        if not editor_closed and upload_tab is not None:
             try:
                 await upload_tab.wait_for(
                     state="hidden", timeout=_COVER_EDITOR_CLOSE_TIMEOUT_MS
@@ -3187,6 +3231,74 @@ class TiktokVideo(TiktokBaseUploader):
             )
 
         await page.wait_for_timeout(3000)  # wait 3s, fix it later
+
+    async def _set_cover_file_via_chooser(
+        self,
+        page,
+        humanizer,
+        upload_tab,
+        control_scope,
+        file_candidates,
+        *,
+        detail=None,
+    ) -> None:
+        """Fallback: click "Upload cover" only because the input was absent.
+
+        The click must be consumed by ``expect_file_chooser`` so the OS chooser
+        never stays open.  When the event does not arrive, the click may still
+        have revealed the hidden input: resolve it and write it directly instead
+        of clicking a second time.
+        """
+        if upload_tab is None:
+            raise _cover_error(
+                "Upload cover",
+                "select upload tab",
+                _COVER_UPLOAD_TAB_CANDIDATES,
+                page,
+                detail=detail,
+            )
+        chooser = None
+        try:
+            async with page.expect_file_chooser(
+                timeout=_COVER_CHOOSER_TIMEOUT_MS
+            ) as fc_info:
+                await _humanized_click(humanizer, upload_tab)
+            chooser = await fc_info.value
+        except Exception:
+            chooser = None
+        if chooser is not None:
+            try:
+                await chooser.set_files(self.thumbnail_path)
+            except Exception as exc:
+                raise _cover_error(
+                    "Upload cover file input",
+                    "set cover file",
+                    file_candidates,
+                    page,
+                    detail=f"chooser.set_files failed: {exc}",
+                ) from exc
+            return
+        await page.wait_for_timeout(_COVER_TAB_SETTLE_MS)
+        try:
+            file_input = await _resolve_candidate(
+                control_scope,
+                file_candidates,
+                control="Upload cover file input",
+                stage="set cover file",
+                page=page,
+            )
+            await file_input.set_input_files(self.thumbnail_path)
+        except Exception as exc:
+            raise _cover_error(
+                "Upload cover file input",
+                "set cover file",
+                file_candidates,
+                page,
+                detail=(
+                    f"no file chooser after the upload tab click: {exc}"
+                    + (f" | {detail}" if detail else "")
+                ),
+            ) from exc
 
     async def read_result(self, page):
         if self.publish_date != 0:

@@ -144,6 +144,27 @@ class _Clickable(RecordingLocator):
         return dict(FACTS)
 
 
+class _ChooserDepthClickable(_Clickable):
+    """封面「上传」tab fake：记录点击时的 ``chooser_depth`` 并可在点击后改 DOM。
+
+    深度 1 = 这一下被 ``expect_file_chooser`` 消费；0 = 裸点击、系统选择器
+    会留在屏幕上。``RecordingLocator.click`` 是原生 click，所以这里在
+    ``super().click`` 之前取样。
+    """
+
+    def __init__(self, name: str, *, log: list, **kwargs) -> None:
+        super().__init__(name, log=log, **kwargs)
+        self.click_depths: list[int] = []
+        self.on_click_effect = None
+
+    async def click(self, **kwargs) -> None:
+        if self._page is not None:
+            self.click_depths.append(self._page.chooser_depth)
+        await super().click(**kwargs)
+        if self.on_click_effect is not None:
+            self.on_click_effect()
+
+
 class _TypingField(_Clickable):
     """持有键入缓冲的 locator；键盘事件写回当前 focus 的实例。"""
 
@@ -405,10 +426,12 @@ class BaijiahaoEventSequenceTests(unittest.TestCase):
             humanizer = app._humanizer(page)
             asyncio.run(app._upload_thumbnail(page, humanizer))
 
-        # 「选择封面」与裁剪确认是坐标点击；「上传」tab 与 set_input_files 成对原生。
+        # 「选择封面」与裁剪确认是坐标点击；弹窗里已有隐藏 input，直接写，
+        # 既不点「上传」tab，也不拉起系统文件选择器（先例：小红书 bbc5361）。
         self.assertEqual(cover_entry.click_count, 0)
         self.assertEqual(confirm.click_count, 0)
-        self.assertEqual(upload_tab.click_count, 1)
+        self.assertEqual(upload_tab.click_count, 0)
+        self.assertEqual(page.expect_file_chooser_calls, 0)
         self.assertEqual(image_input.files, ["cover.png"])
         self.assertEqual(page.mouse.down_count, 2)
         # 两次坐标点击都先过 stillOn。
@@ -416,9 +439,70 @@ class BaijiahaoEventSequenceTests(unittest.TestCase):
         self.assertEqual(len(hit_tests), 2)
         self.assertLess(log.index(hit_tests[0]), _downs_after(log, hit_tests[0]))
         self.assertLess(log.index(hit_tests[1]), _downs_after(log, hit_tests[1]))
-        for target in (cover_entry, confirm, upload_tab):
+        for target in (cover_entry, confirm):
             for call in target.click_calls:
                 self.assertNotIn("force", call)
+
+    def test_cover_upload_tab_is_clicked_inside_the_file_chooser(self):
+        log: list = []
+        cover_entry = _Clickable("cover-entry", log=log)
+        upload_tab = _ChooserDepthClickable("cover-upload-tab", log=log)
+        image_input = FakeLocator("cover-image-input", count=0)
+        confirm = _Clickable("cover-confirm", log=log)
+        page = _page(
+            {
+                COVER_ENTRY_SELECTOR: cover_entry,
+                COVER_UPLOAD_BUTTON_SELECTOR: upload_tab,
+                COVER_IMAGE_INPUT_SELECTOR: image_input,
+                COVER_CONFIRM_SELECTOR: confirm,
+                'input[type="file"]': FakeLocator("generic-file", count=0),
+            },
+            log=log,
+        )
+        upload_tab._page = page
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            humanizer = app._humanizer(page)
+            asyncio.run(app._upload_thumbnail(page, humanizer))
+
+        # input 缺失才点「上传」tab，且这一下必须被 expect_file_chooser 消费
+        # （深度 1），不是裸点击（深度 0）。
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(upload_tab.click_depths, [1])
+        self.assertIsNone(upload_tab.click_calls[0].get("force"))
+        self.assertEqual(page.file_chooser_files(), ["cover.png"])
+        self.assertEqual(page.chooser_depth, 0)
+        self.assertNotIn("set_input_files", [a[0] for a in image_input.actions])
+
+    def test_cover_input_is_written_when_no_file_chooser_arrives(self):
+        log: list = []
+        cover_entry = _Clickable("cover-entry", log=log)
+        upload_tab = _ChooserDepthClickable("cover-upload-tab", log=log)
+        image_input = FakeLocator("cover-image-input", count=0)
+        confirm = _Clickable("cover-confirm", log=log)
+        page = _page(
+            {
+                COVER_ENTRY_SELECTOR: cover_entry,
+                COVER_UPLOAD_BUTTON_SELECTOR: upload_tab,
+                COVER_IMAGE_INPUT_SELECTOR: image_input,
+                COVER_CONFIRM_SELECTOR: confirm,
+                'input[type="file"]': FakeLocator("generic-file", count=0),
+            },
+            log=log,
+        )
+        upload_tab._page = page
+        page.fail_file_chooser = TimeoutError("no file chooser")
+        upload_tab.on_click_effect = lambda: setattr(image_input, "_count", 1)
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            humanizer = app._humanizer(page)
+            asyncio.run(app._upload_thumbnail(page, humanizer))
+
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.file_chooser_files(), [])
+        self.assertEqual(image_input.files, ["cover.png"])
 
     def test_declaration_clicks_the_component_body_without_force(self):
         log: list = []

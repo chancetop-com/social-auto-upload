@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 封面上传不再拉起系统文件选择器
+
+封面弹窗里本来就有隐藏的图片 `input[type=file]`：先点「上传封面 / 上传」tab 再
+`set_input_files` 会让那一下真的打开系统文件选择器，并把选择器留在屏幕上。四个平台
+按小红书先例（`bbc5361`）改成「先直接写 input；只有 input 缺失才在
+`expect_file_chooser` 里点 tab 兜底」：
+
+- TikTok 视频封面（`uploader/tk_uploader/main_chrome.py`）：`apply_cover` 不再先点
+  `Upload cover`；该 tab 只在 input 缺失时被点击，且必须由 `expect_file_chooser` 消费。
+- 快手视频封面（`uploader/ks_uploader/main.py`）：`set_thumbnail` 不再先点「上传封面」；
+  弹窗里的 `input[type="file"]` 直接写。
+- 支付宝生活号视频封面（`uploader/alipay_uploader/main.py`）：`upload_thumbnail` 先写
+  弹窗里的图片 input，不再无条件点「上传封面」+「上传图片」。
+- 百家号视频封面（`uploader/baijiahao_uploader/main.py`）：`_upload_thumbnail` 先写
+  封面 input，不再无条件点「上传」tab/按钮。
+
+chooser 事件没到时不再重复点击，而是重新解析 input 后直接写；封面裁剪、确认、保存
+以及「失败降级为警告」的语义不变。
+
 ### 日志与发布重试
 
 - 日志默认只输出到控制台，不再写入 `logs/`；需要文件日志时设置 `SAU_LOG_TO_FILES=1`（仍按 `logs/<platform>.log` 写入，10MB 轮转、保留 10 天）。避免长跑或测试把磁盘写满。

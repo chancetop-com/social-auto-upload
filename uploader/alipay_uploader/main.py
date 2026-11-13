@@ -114,6 +114,30 @@ ALIPAY_FAIL_TOAST_SELECTOR = (
     '.antd5-message-notice-content:has-text("请稍后重试")'
 )
 
+# Cover: the crop dialog already holds a hidden image input.  Probe it briefly
+# and write it directly; only a missing input falls back to 「上传图片」, and that
+# click must be consumed by ``expect_file_chooser`` (XHS precedent bbc5361).
+ALIPAY_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
+ALIPAY_COVER_CHOOSER_TIMEOUT_MS = 10_000
+
+
+async def _cover_input_attached(locator) -> bool:
+    """Short, read-only probe: is the hidden cover image input already there?
+
+    Never clicks the upload tab/button to find out: that click opens a real OS
+    file chooser which then lingers while ``set_input_files`` injects the file
+    (same defect as XHS, bbc5361).
+    """
+    try:
+        if not await locator.count():
+            return False
+        await locator.wait_for(
+            state="attached", timeout=ALIPAY_COVER_INPUT_PROBE_TIMEOUT_MS
+        )
+        return True
+    except Exception:
+        return False
+
 
 def _raise_if_login_required(page) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
@@ -542,25 +566,51 @@ class AlipayVideo(BaseVideoUploader):
 
             modal_body = page.locator(".antd5-modal-body").last
 
-            # 2) 弹窗首次是"截取封面/上传封面"两入口；点"上传封面"展开图片上传区
-            inner = modal_body.get_by_text("上传封面", exact=True).first
-            if await inner.count():
-                await humanizer.click(inner)
-                await page.wait_for_timeout(1500)
+            # 2) 封面图片 file input 在弹窗里已经存在：优先直接写 input。禁止先点
+            #    「上传封面」/「上传图片」——那一下会真的拉起系统文件选择器，随后
+            #    set_input_files 把文件塞进去，选择器会留在屏幕上（先例：小红书
+            #    bbc5361，2026-11-12 TikTok 复现）。
+            img_input = page.locator(
+                'input[type="file"][accept*="jpg"], '
+                'input[type="file"][accept*="png"]'
+            ).first
+            if await _cover_input_attached(img_input):
+                await img_input.set_input_files(self.thumbnail_path)
+            else:
+                # 3) 兜底：先展开上传区，再点「上传图片」；这一下必须被
+                #    expect_file_chooser 消费，绝不允许裸点击。
+                inner = modal_body.get_by_text("上传封面", exact=True).first
+                if await inner.count():
+                    await humanizer.click(inner)
+                    await page.wait_for_timeout(1500)
 
-            # 3) 点"上传图片"打开图片选择器
-            upload_img_btn = modal_body.get_by_role("button", name="上传图片").first
-            await upload_img_btn.wait_for(state="visible", timeout=10000)
-            await upload_img_btn.click()  # native-click: file；文件选择器必须由原生点击派发，与下一行 set_input_files 成对
-            await page.wait_for_timeout(1500)
-
-            # 4) 设置图片到新出现的图片 file input
-            img_input = page.locator('input[type="file"][accept*="jpg"], input[type="file"][accept*="png"]').first
-            await img_input.wait_for(state="attached", timeout=10000)
-            await img_input.set_input_files(self.thumbnail_path)
+                upload_img_btn = modal_body.get_by_role(
+                    "button", name="上传图片"
+                ).first
+                await upload_img_btn.wait_for(state="visible", timeout=10000)
+                chooser = None
+                try:
+                    async with page.expect_file_chooser(
+                        timeout=ALIPAY_COVER_CHOOSER_TIMEOUT_MS
+                    ) as chooser_info:
+                        await upload_img_btn.click()  # native-click: file；文件选择器只能由原生点击唤起，且必须被 expect_file_chooser 消费
+                    chooser = await chooser_info.value
+                except Exception:
+                    chooser = None
+                if chooser is not None:
+                    await chooser.set_files(self.thumbnail_path)
+                else:
+                    # chooser 事件没到：点击可能已经渲染出 input，改为直接写。
+                    await page.wait_for_timeout(1500)
+                    img_input = page.locator(
+                        'input[type="file"][accept*="jpg"], '
+                        'input[type="file"][accept*="png"]'
+                    ).first
+                    await img_input.wait_for(state="attached", timeout=10000)
+                    await img_input.set_input_files(self.thumbnail_path)
             await page.wait_for_timeout(3000)
 
-            # 5) 裁剪弹窗里点"完 成"
+            # 4) 裁剪弹窗里点"完 成"
             done_btn = page.get_by_role("button", name="完 成").first
             if not await done_btn.count():
                 done_btn = page.get_by_role("button", name="完成").first
