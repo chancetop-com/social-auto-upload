@@ -12,10 +12,12 @@ from __future__ import annotations
 import asyncio
 import unittest
 
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from uploader.tk_uploader.main_chrome import (
     COVER_EDITOR_SCOPE_SELECTOR,
     TiktokVideo,
 )
+from utils.dom import ElementUnusableError
 
 THUMBNAIL = "/tmp/cover.png"
 PAGE_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
@@ -150,6 +152,9 @@ class FakeNode:
         )
 
     # -- actions ---------------------------------------------------------
+    async def hover(self, **kwargs):
+        self.recorder.append(("hover", self.name))
+
     async def click(self, **kwargs):
         self.recorder.append(("click", self.name))
         if self.on_click is not None:
@@ -176,18 +181,67 @@ class FakeNode:
             raise TimeoutError(f"{self.name} never became visible")
 
 
+class FakeChooser:
+    """Records every ``set_files`` payload handed to the chooser double."""
+
+    def __init__(self) -> None:
+        self.files: list = []
+
+    async def set_files(self, files, **kwargs) -> None:
+        self.files.append(files)
+
+
+class _ChooserInfo:
+    def __init__(self, page: "FakePage") -> None:
+        self.page = page
+
+    async def __aenter__(self) -> "_ChooserInfo":
+        self.page.chooser_depth += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        self.page.chooser_depth -= 1
+        return False
+
+    @property
+    def value(self):
+        async def _resolve() -> FakeChooser:
+            if self.page.fail_chooser:
+                raise self.page.fail_chooser_error or TimeoutError(
+                    "no file chooser event"
+                )
+            return self.page.chooser
+
+        return _resolve()
+
+
 class FakePage:
     def __init__(self, url: str = PAGE_URL) -> None:
         self.url = url
         self.events: list = []
         self.wait_timeouts: list[int] = []
+        self.chooser = FakeChooser()
+        self.chooser_depth = 0
+        self.expect_file_chooser_calls = 0
+        self.expect_file_chooser_timeouts: list = []
+        self.fail_chooser = False
+        self.fail_chooser_error: BaseException | None = None
+        #: Off by default so an early (buggy) chooser cannot pass silently:
+        #: the call is still counted, then the harness refuses it.
+        self.allow_file_chooser = False
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_timeouts.append(ms)
         self.events.append(("wait_for_timeout", ms))
 
-    def expect_file_chooser(self):
-        raise AssertionError("cover must prefer set_input_files over a file chooser")
+    def expect_file_chooser(self, *, timeout=None):
+        self.expect_file_chooser_calls += 1
+        self.expect_file_chooser_timeouts.append(timeout)
+        if not self.allow_file_chooser:
+            raise AssertionError(
+                "cover must prefer set_input_files over a file chooser"
+            )
+        return _ChooserInfo(self)
 
 
 def _video(thumbnail: str | None = THUMBNAIL) -> TiktokVideo:
@@ -256,9 +310,98 @@ class ApplyCoverCandidateTests(unittest.TestCase):
 
         self.assertIn(("click", "edit-cover-role"), tree.recorder)
         self.assertNotIn(("click", "edit-cover-text"), tree.recorder)
+        # The editor already exposes the hidden input: no tab click at all.
+        self.assertNotIn(("click", "upload-tab"), tree.recorder)
+        self.assertIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
+        self.assertIn(("click", "cover-save"), tree.recorder)
+        self.assertEqual(page.expect_file_chooser_calls, 0)
+
+    def test_attached_input_never_opens_a_file_chooser(self):
+        tree = CoverTree()
+        page = FakePage()
+        video = _video()
+        video.locator_base = tree.base
+
+        asyncio.run(video.apply_cover(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 0)
+        self.assertEqual(page.chooser.files, [])
+        self.assertEqual(page.chooser_depth, 0)
+        self.assertEqual(
+            [event for event in tree.recorder if event[0] == "click"],
+            [("click", "edit-cover-role"), ("click", "cover-save")],
+        )
+
+    def test_missing_input_clicks_the_tab_inside_the_file_chooser(self):
+        tree = CoverTree()
+        # Neither the aria-labelled input nor the editor-scoped fallback exists.
+        tree.file_input.count_value = 0
+        page = FakePage()
+        page.allow_file_chooser = True
+        depths: list[int] = []
+        tree.upload_tab.on_click = lambda: depths.append(page.chooser_depth)
+        video = _video()
+        video.locator_base = tree.base
+
+        asyncio.run(video.apply_cover(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.chooser.files, [THUMBNAIL])
+        self.assertEqual(page.chooser_depth, 0)
+        # The tab click was consumed by the expectation instead of opening the
+        # OS chooser behind the harness' back.
+        self.assertEqual(depths, [1])
+        self.assertNotIn(
+            ("set_input_files", "cover-file", THUMBNAIL), tree.recorder
+        )
+
+    def test_chooser_timeout_falls_back_to_set_input_files_after_the_click(self):
+        tree = CoverTree()
+        tree.file_input.count_value = 0
+        page = FakePage()
+        page.allow_file_chooser = True
+        page.fail_chooser = True
+        page.fail_chooser_error = PlaywrightTimeoutError("no file chooser event")
+        tree.upload_tab.on_click = lambda: setattr(
+            tree.file_input, "count_value", 1
+        )
+        video = _video()
+        video.locator_base = tree.base
+
+        asyncio.run(video.apply_cover(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.chooser.files, [])
         self.assertIn(("click", "upload-tab"), tree.recorder)
         self.assertIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
         self.assertIn(("click", "cover-save"), tree.recorder)
+
+    def test_click_failure_during_the_tab_click_propagates(self):
+        tree = CoverTree()
+        tree.file_input.count_value = 0
+        page = FakePage()
+        page.allow_file_chooser = True
+
+        def _unusable() -> None:
+            raise ElementUnusableError(
+                what="Upload cover",
+                role="interactive",
+                reason="point-drift",
+            )
+
+        tree.upload_tab.on_click = _unusable
+        video = _video()
+        video.locator_base = tree.base
+
+        with self.assertRaises(ElementUnusableError):
+            asyncio.run(video.apply_cover(page))
+
+        # A humanize/native click error is not "no chooser arrived": it must
+        # not be downgraded into writing the input directly.
+        self.assertEqual(page.chooser.files, [])
+        self.assertNotIn(
+            ("set_input_files", "cover-file", THUMBNAIL), tree.recorder
+        )
 
     def test_file_input_falls_back_to_editor_scoped_selector(self):
         tree = CoverTree()
@@ -272,6 +415,10 @@ class ApplyCoverCandidateTests(unittest.TestCase):
 
         self.assertIn(("set_input_files", "cover-file-fallback", THUMBNAIL), tree.recorder)
         self.assertNotIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
+        # A later candidate being present still means the input is attached:
+        # the tab remains untouched and no chooser is opened.
+        self.assertNotIn(("click", "upload-tab"), tree.recorder)
+        self.assertEqual(page.expect_file_chooser_calls, 0)
 
     def test_all_candidates_absent_reports_control_stage_candidates_and_url(self):
         recorder: list = []
@@ -370,6 +517,32 @@ class ApplyCoverPreviewTests(unittest.TestCase):
         self.assertNotIn(("click", "cover-save"), tree.recorder)
         self.assertEqual(page.wait_timeouts, [])
 
+
+
+_HUMANIZE_BEFORE = None
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,6 +36,175 @@ from utils.errors import LoginRequiredError
 TOKEN = "SENTINEL-MLX-TOKEN-ticket17"
 
 
+class _LoopNode:
+    """Minimal locator double for the video publish loop."""
+
+    def __init__(self, name: str, *, count: int = 1) -> None:
+        self.name = name
+        self._count = count
+        self.clicked = 0
+
+    @property
+    def first(self):
+        return self
+
+    async def count(self) -> int:
+        return self._count
+
+    async def wait_for(self, **kwargs) -> None:
+        return None
+
+    async def set_input_files(self, *args, **kwargs) -> None:
+        return None
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def is_disabled(self) -> bool:
+        return False
+
+    async def get_attribute(self, name: str) -> str:
+        return ""
+
+    async def click(self, **kwargs) -> None:
+        self.clicked += 1
+
+    async def bounding_box(self):
+        return {"x": 0.0, "y": 0.0, "width": 120.0, "height": 32.0}
+
+    async def scroll_into_view_if_needed(self, **kwargs) -> None:
+        return None
+
+    async def evaluate(self, expression, arg=None):
+        text = str(expression)
+        if "elementFromPoint" in text:
+            return {"self": True, "tag": "button", "className": "", "id": "", "text": ""}
+        if "getBoundingClientRect" in text:
+            return {
+                "width": 120.0,
+                "height": 32.0,
+                "inside": True,
+                "clipped": False,
+                "childFrame": False,
+            }
+        return {
+            "tag": "button",
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1.0,
+            "ariaHidden": None,
+            "ancestorAriaHidden": False,
+            "disabled": False,
+            "disabledClass": False,
+            "pointerEvents": "auto",
+            "contentEditable": None,
+            "readOnly": False,
+            "isConnected": True,
+        }
+
+
+class _PublishLoopPage:
+    """Page double for ``_upload_video_on_page``'s publish phase only."""
+
+    def __init__(self, *, on_publish=None) -> None:
+        self.url = DOUYIN_UPLOAD_URL
+        self.on_publish = on_publish
+        self.publish = _LoopNode("publish")
+        self.upload_input = _LoopNode("upload-input")
+        self.nodes = {
+            "input.upload-btn-input, div[class^='container'] input[accept]": self.upload_input,
+            '[class^="long-card"] div:has-text("重新上传")': _LoopNode("uploaded"),
+            'input[placeholder*="验证码"], input[type="tel"], input[placeholder*="短信"], input[placeholder*="手机号"]': _LoopNode(
+                "sms", count=0
+            ),
+        }
+
+    def locator(self, selector: str) -> _LoopNode:
+        return self.nodes.get(selector, _LoopNode(f"unscripted:{selector}", count=0))
+
+    def get_by_role(self, role: str, name=None, exact: bool = False) -> _LoopNode:
+        if role == "button" and name == "发布":
+            return self.publish
+        return _LoopNode(f"role:{role}:{name}", count=0)
+
+    def get_by_text(self, text: str, exact: bool = False) -> _LoopNode:
+        return _LoopNode(f"text:{text}", count=0)
+
+    async def evaluate(self, expression, arg=None):
+        return None
+
+    async def wait_for_url(self, url, *, timeout=None, **kwargs) -> None:
+        if "content/manage" in str(url):
+            raise RuntimeError("not published yet")
+        return None
+
+    async def wait_for_timeout(self, milliseconds) -> None:
+        return None
+
+
+class _PublishHumanizer:
+    """Clicks once and hands control back to the page double."""
+
+    def __init__(self, page, *, on_publish=None) -> None:
+        self.page = page
+        self.on_publish = on_publish
+        self.clicks: list[str] = []
+
+    async def before_submit(self) -> None:
+        return None
+
+    async def click(self, locator, *, point=None) -> None:
+        self.clicks.append(getattr(locator, "name", "?"))
+        if getattr(locator, "name", "") == "publish" and self.on_publish is not None:
+            self.on_publish()
+
+
+class DouyinPublishLoginRedirectTests(unittest.IsolatedAsyncioTestCase):
+    """A login redirect after the publish click must say "possibly published"."""
+
+    async def test_post_click_login_redirect_carries_publish_attempted(self):
+        def _redirect() -> None:
+            page.url = "https://creator.douyin.com/login/?redirect=%2Fcreator-micro"
+
+        page = _PublishLoopPage(on_publish=_redirect)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = DouYinVideo(
+                "标题", Path(tmp_dir) / "clip.mp4", [], 0, Path(tmp_dir) / "account.json"
+            )
+            humanizer = _PublishHumanizer(page, on_publish=_redirect)
+            video._humanizer_instance = humanizer
+
+            async def _noop(*args, **kwargs) -> None:
+                return None
+
+            with patch.object(video, "fill_title_and_description", _noop), patch.object(
+                video, "apply_self_declaration", _noop
+            ), patch.object(video, "apply_collection", _noop), patch.object(
+                video, "set_thumbnail", _noop
+            ), patch.object(
+                video, "handle_auto_video_cover", _noop
+            ), patch.object(
+                douyin_main, "Humanizer", lambda p, **kw: humanizer
+            ):
+                with self.assertRaises(LoginRequiredError) as caught:
+                    await video._upload_video_on_page(page, multilogin=True)
+
+        self.assertIs(caught.exception.publish_attempted, True)
+        self.assertIn("发布点击已发出", str(caught.exception))
+        self.assertEqual(page.publish.clicked, 0)
+
+    def test_pre_dispatch_login_message_has_no_duplicate_warning(self):
+        page = _RecordingPage()
+        page.url = "https://creator.douyin.com/login/?redirect=x"
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            douyin_main._raise_if_login_required(page)
+
+        self.assertIn("请在 Multilogin 应用中登录 Profile 后重试", str(caught.exception))
+        self.assertNotIn("发布点击已发出", str(caught.exception))
+        self.assertIs(caught.exception.publish_attempted, False)
+
+
 class _RecordingPage:
     """Minimal page double that records navigation and login redirects."""
 
@@ -196,6 +365,58 @@ class LegacyLocalUploadTests(unittest.TestCase):
         self.assertTrue(context.closed)
         self.assertTrue(browser.closed)
         self.assertEqual(playwright.events, ["launch", "context.close", "browser.close"])
+
+    def test_video_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = _make_video(tmp_dir, "/tmp/couple-cookie.json")
+            video.validate_upload_args = AsyncMock()
+
+            async def fail_cookie_save(session) -> None:
+                session.context.storage_state_error = OSError("磁盘已满")
+
+            video.upload_in = AsyncMock(side_effect=fail_cookie_save)
+            playwright = FakePlaywright()
+            with (
+                patch.object(
+                    douyin_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
+                ),
+                patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
+                patch.object(douyin_main.douyin_logger, "warning") as warning,
+            ):
+                asyncio.run(video.upload(playwright))
+
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[0]
+        self.assertEqual(context.storage_state_calls, ["/tmp/couple-cookie.json"])
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
+    def test_note_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            note = _make_note(tmp_dir, "/tmp/note-cookie.json")
+            note.validate_upload_args = AsyncMock()
+
+            async def fail_cookie_save(session) -> None:
+                session.context.storage_state_error = OSError("磁盘已满")
+
+            note.upload_in = AsyncMock(side_effect=fail_cookie_save)
+            playwright = FakePlaywright()
+            with (
+                patch.object(
+                    douyin_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
+                ),
+                patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
+                patch.object(douyin_main.douyin_logger, "warning") as warning,
+            ):
+                asyncio.run(note.upload(playwright))
+
+        browser = playwright.chromium.launch_browser
+        context = browser.contexts[0]
+        self.assertEqual(context.storage_state_calls, ["/tmp/note-cookie.json"])
+        self.assertTrue(context.closed)
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
 
     def test_note_local_teardown_saves_cookie_and_closes(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

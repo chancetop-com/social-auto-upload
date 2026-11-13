@@ -6,13 +6,20 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
-- [ ] 先改公共底座 `activate` / `click_control`：零 `el.click()`，保留原键盘优先顺序
-- [ ] 每个文本点先收窄到 `count()==1`；清空按 §3.9 的形态手写；每次输入恰一次 `after_type`
-- [ ] 分享点带 `before_submit`；零 `force`、零 JS 点击、零 `fill(`（清空动作改键）
-- [ ] 地点候选逐字节奏不快于原有 `TYPE_DELAY_MS`，debounce 期间不重复输入
-- [ ] `tests/test_instagram_humanize.py` 三条：事件序列、字段值读回、平台静态门
-- [ ] IG 入册门 A–E 并通过；`HUMANIZE=0` 用例同绿
-- [ ] `CHANGELOG.md` 的 W1 小节加本平台一行
+- [x] 先改公共底座 `activate` / `click_control`：零 `el.click()`，保留原键盘优先顺序
+- [x] 每个文本点先收窄到 `count()==1`；清空按 §3.9 的形态手写；每次输入恰一次 `after_type`
+- [x] 分享点带 `before_submit`；零 `force`、零 JS 点击、零 `fill(`（清空动作改键）
+- [x] 地点候选逐字节奏不快于原有 `TYPE_DELAY_MS`，debounce 期间不重复输入
+- [x] `tests/test_instagram_humanize.py` 三条：事件序列、字段值读回、平台静态门
+- [x] IG 入册门 A–E 并通过；`HUMANIZE=0` 用例同绿
+- [x] `CHANGELOG.md` 的 W1 小节加本平台一行
 
+## Answer
+
+- 公共底座已归零：`_rows.activate` 保留 `focus` + Enter，最后一级只做一次 `Humanizer.click`；`click_control` 直接坐标点击；两处 `el.click()` 删除，点击失败原样上抛。
+- 三个文本点：配文与 Alt text 用 `sel`（聚焦 → `ControlOrMeta+A` → `Delete` → `type_text`），地点首次只聚焦、重试用全选 + `Backspace`；每点先 `count()==1`（多义 `ambiguous:N`），Alt text 逐张显式清空并保留 blur。
+- 可见点击：创建入口、裁剪下一步走 `Humanizer.click` + `after_navigate`；Share 先 `before_submit`；提示关闭、折叠行与开关、地点候选全部坐标点击；候选经一次性属性戳转成 `Locator`（无 `ElementHandle` 点击、无 JS 点击）。
+- 地点节奏：逐字由 `Humanizer.type_text` 派发（均值 136ms），整段不足 `TYPE_DELAY_MS × 字数` 时补一次预算内停顿；debounce 期间不重复输入。
+- 测试：`tests/test_instagram_humanize.py` 22 条（事件序列 / 字段读回 / 门 A–E / `HUMANIZE=0`）；跟随集成分支最新 tip（`bad93b9`）合并后全量 `1639 passed, 2 skipped`。真机探针仍属 05（本轮离线 + 既有真实 Chrome DOM 回归，未跑真机）。

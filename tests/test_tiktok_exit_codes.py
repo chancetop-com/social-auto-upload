@@ -27,8 +27,14 @@ LOGIN_URL = "https://www.tiktok.com/login?lang=en"
 class _FakeLocator:
     """The publish button; ``nth`` keeps pointing at the same fake button."""
 
-    def __init__(self, *, click_error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        click_error: BaseException | None = None,
+        hover_error: BaseException | None = None,
+    ) -> None:
         self.click_error = click_error
+        self.hover_error = hover_error
         self.click_calls = 0
 
     @property
@@ -40,6 +46,11 @@ class _FakeLocator:
 
     async def count(self) -> int:
         return 1
+
+    async def hover(self) -> None:
+        """Platform click entry hovers before clicking (spec §2.5.1)."""
+        if self.hover_error is not None:
+            raise self.hover_error
 
     async def click(self) -> None:
         self.click_calls += 1
@@ -89,6 +100,10 @@ class _CandidateLocator:
 
     async def is_enabled(self) -> bool:
         return True
+
+    async def hover(self) -> None:
+        """Platform click entry hovers before clicking (spec §2.5.1)."""
+        return None
 
     async def click(self) -> None:
         self.click_calls += 1
@@ -220,6 +235,50 @@ class _MultiDialogPage(_FakePage):
         return _CandidateLocator(count=0)
 
 
+class _LateDialogLocator(_CandidateLocator):
+    """Confirmation dialog that only appears after the first poll attempt.
+
+    TikTok renders the ``Post now`` dialog a beat after the publish click, so
+    the first ``wait_for_url`` timeout can legitimately see no dialog at all.
+    """
+
+    def __init__(self, *, absent_count_calls: int) -> None:
+        super().__init__(count=0)
+        self._absent_count_calls = absent_count_calls
+        self.count_calls = 0
+
+    async def count(self) -> int:
+        self.count_calls += 1
+        return 0 if self.count_calls <= self._absent_count_calls else 1
+
+
+class _FlakyDialogLocator(_CandidateLocator):
+    """Dialog whose confirmation click fails a fixed number of times."""
+
+    def __init__(self, *, failures: int) -> None:
+        super().__init__()
+        self.remaining_failures = failures
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        if self.remaining_failures > 0:
+            self.remaining_failures -= 1
+            raise RuntimeError("dialog click failed")
+
+
+class _LateButtonLocator(_CandidateLocator):
+    """Dialog that is visible at once; its exact-name button renders later."""
+
+    def __init__(self, *, absent_count_calls: int) -> None:
+        super().__init__()
+        self._absent_count_calls = absent_count_calls
+        self.count_calls = 0
+
+    async def count(self) -> int:
+        self.count_calls += 1
+        return 0 if self.count_calls <= self._absent_count_calls else 1
+
+
 class _PostNowPage(_FakePage):
     """Publish page whose success URL arrives after a ``Post now`` dialog."""
 
@@ -230,6 +289,37 @@ class _PostNowPage(_FakePage):
     def locator(self, selector: str):
         if selector == '[role="dialog"]':
             return _DialogScope(self.dialog)
+        return _CandidateLocator(count=0)
+
+    def get_by_role(self, _role: str, name=None):
+        return _CandidateLocator(count=0)
+
+
+class _LateButtonDialogNode(_DialogNode):
+    """A dialog that is visible immediately while its button appears later."""
+
+    def __init__(self, dialog: _CandidateLocator, button: _CandidateLocator) -> None:
+        super().__init__(dialog)
+        self.button = button
+
+    def get_by_role(self, role: str, name=None):
+        if role == "button":
+            return self.button
+        return _CandidateLocator(count=0)
+
+
+class _LateButtonPage(_FakePage):
+    """Publish page whose ``Post now`` button renders a beat after its dialog."""
+
+    def __init__(
+        self, dialog: _CandidateLocator, button: _CandidateLocator, **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
+        self._node = _LateButtonDialogNode(dialog, button)
+
+    def locator(self, selector: str):
+        if selector == '[role="dialog"]':
+            return _DialogList([self._node])
         return _CandidateLocator(count=0)
 
     def get_by_role(self, _role: str, name=None):
@@ -304,6 +394,31 @@ class CliExitCodeTests(unittest.TestCase):
         self.assertEqual(code, 10)
 
 
+class LoginRequiredMessageTests(unittest.TestCase):
+    def test_post_dispatch_login_message_warns_about_a_duplicate(self):
+        page = _FakePage(url=LOGIN_URL)
+
+        with self.assertRaises(LoginRequiredError) as ctx:
+            tk_main._raise_if_login_required(page, publish_attempted=True)
+
+        message = str(ctx.exception)
+        self.assertIn("请在 Multilogin 应用中登录 Profile 后重试", message)
+        self.assertIn("发布点击已发出", message)
+        self.assertIn("作品列表", message)
+        self.assertIs(ctx.exception.publish_attempted, True)
+
+    def test_pre_dispatch_login_message_has_no_duplicate_warning(self):
+        page = _FakePage(url=LOGIN_URL)
+
+        with self.assertRaises(LoginRequiredError) as ctx:
+            tk_main._raise_if_login_required(page)
+
+        message = str(ctx.exception)
+        self.assertIn("请在 Multilogin 应用中登录 Profile 后重试", message)
+        self.assertNotIn("发布点击已发出", message)
+        self.assertIs(ctx.exception.publish_attempted, False)
+
+
 class ClickPublishTests(unittest.TestCase):
     def test_success_returns_normally(self):
         video = _video()
@@ -318,6 +433,46 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(page.wait_calls, 1)
         self.assertEqual(page.url, CONTENT_URL)
         sleep.assert_not_awaited()
+
+    def test_click_failure_is_reported_immediately_without_retry(self):
+        """A failure before the click is dispatched is a hard failure.
+
+        Publishing is a single dispatch: a humanized click that raises before
+        ``mouse.down`` must surface as the original error (exit 1), never be
+        retried in a loop.
+        """
+        video = _video()
+        button = _FakeLocator(hover_error=RuntimeError("boom"))
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage()
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 0)
+        self.assertEqual(page.wait_calls, 0)
+        self.assertIn("boom", str(ctx.exception))
+
+    def test_maybe_dispatched_failure_is_not_reclicked(self):
+        """``HUMANIZE=0`` marks a click raise as maybe-dispatched.
+
+        The raise may have reached the page, so the loop only waits for the
+        success URL and never re-dispatches; the iteration cap ends it.
+        """
+        video = _video()
+        button = _FakeLocator(click_error=RuntimeError("boom"))
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage()
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            with self.assertRaises(PublishResultUnknownError):
+                asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertLessEqual(
+            page.wait_calls, tk_main.TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS + 1
+        )
 
     def test_never_clicked_deadline_is_exit_1_not_9(self):
         video = _video()
@@ -484,17 +639,19 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(dialog.click_calls, 1)
 
-    def test_failing_post_now_click_is_attempted_only_once(self):
+    def test_failed_post_now_click_is_not_retried(self):
+        """A confirmation click that raised may have dispatched: latch it.
+
+        The first Post-now click fails (pre- or post-dispatch is unknowable),
+        so the loop must not click the confirmation again; it only waits for
+        the success URL and ends as result-unknown.
+        """
         button = _CandidateLocator()
         base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
-        dialog = _CandidateLocator(
-            click_error=RuntimeError("dialog click failed")
-        )
+        dialog = _FlakyDialogLocator(failures=1)
         page = _PostNowPage(
             dialog,
-            # Five timeouts would be five retries if the attempt flag followed
-            # the click result instead of the attempt itself.
-            wait_outcomes=[("timeout", None)] * 5 + [CONTENT_URL],
+            wait_outcomes=[("timeout", None)] * 3 + [CONTENT_URL],
         )
         video = _video()
         video.locator_base = base
@@ -504,6 +661,50 @@ class ClickPublishTests(unittest.TestCase):
 
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(dialog.click_calls, 1)
+
+    def test_post_now_dialog_that_appears_late_is_still_clicked(self):
+        button = _CandidateLocator()
+        base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
+        # The fake page only scripts the role=dialog selector, so the first
+        # poll attempt sees no dialog and the second one does.
+        dialog = _LateDialogLocator(absent_count_calls=1)
+        page = _PostNowPage(
+            dialog,
+            wait_outcomes=[("timeout", None), ("timeout", None), CONTENT_URL],
+        )
+        video = _video()
+        video.locator_base = base
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(dialog.click_calls, 1)
+
+    def test_post_now_dialog_with_a_late_button_is_clicked_once(self):
+        """A rendered dialog without its button must not latch.
+
+        The dialog exists on the first poll but its exact-name ``Post now``
+        button has not rendered yet.  ``_click_post_now`` returns ``None`` so
+        the loop polls again; ``False`` stays reserved for a raised click.
+        """
+        button = _CandidateLocator()
+        base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
+        dialog = _CandidateLocator()
+        late_button = _LateButtonLocator(absent_count_calls=1)
+        page = _LateButtonPage(
+            dialog,
+            late_button,
+            wait_outcomes=[("timeout", None), ("timeout", None), CONTENT_URL],
+        )
+        video = _video()
+        video.locator_base = base
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(late_button.click_calls, 1)
 
     def test_confirmation_without_visible_dialog_clicks_nothing(self):
         button = _CandidateLocator()
@@ -535,6 +736,39 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(unrelated.click_calls, 0)
         self.assertEqual(real.click_calls, 1)
 
+    def test_publish_clicks_the_locator_the_readiness_gate_returned(self):
+        gated = _CandidateLocator()
+        re_resolved = _CandidateLocator()
+        video = _video()
+        video.locator_base = _CandidateBase(
+            {'[data-e2e="post_video_button"]': re_resolved}
+        )
+        page = _FakePage(wait_outcomes=[CONTENT_URL])
+
+        with patch.object(
+            video, "wait_publish_ready", AsyncMock(return_value=gated)
+        ):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(gated.click_calls, 1)
+        self.assertEqual(re_resolved.click_calls, 0)
+
+    def test_missing_locator_from_the_gate_fails_before_clicking(self):
+        video = _video()
+        video.locator_base = _CandidateBase(
+            {'[data-e2e="post_video_button"]': _CandidateLocator()}
+        )
+        page = _FakePage()
+
+        with patch.object(
+            video, "wait_publish_ready", AsyncMock(return_value=None)
+        ), patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertIn("未点击发布", str(ctx.exception))
+        self.assertEqual(page.wait_calls, 0)
+
     def test_pre_publish_media_deadline_is_exit_1(self):
         video = _video()
         page = _FakePage()
@@ -551,6 +785,32 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotIn("禁止自动重发", err)
 
+
+
+_HUMANIZE_BEFORE = None
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
 
 if __name__ == "__main__":
     unittest.main()

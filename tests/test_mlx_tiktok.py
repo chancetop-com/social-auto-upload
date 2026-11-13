@@ -870,6 +870,27 @@ class UploaderSeamTests(unittest.TestCase):
         self.assertTrue(context.closed)
         self.assertTrue(browser.closed)
 
+    def test_local_cookie_save_failure_after_publish_is_log_only(self):
+        video = self._video(account_file="/tmp/cookie.json")
+        video.change_language = AsyncMock()
+        video._upload_on_page = AsyncMock()
+
+        context = FakeContext()
+        context.storage_state_error = OSError("磁盘已满")
+        playwright = FakePlaywright()
+        with (
+            patch.object(
+                tk_main, "_new_local_context", AsyncMock(return_value=context)
+            ),
+            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
+            patch.object(tk_main.tiktok_logger, "warning") as warning,
+        ):
+            asyncio.run(video.upload(playwright))
+
+        self.assertTrue(context.closed)
+        self.assertTrue(playwright.chromium.launch_browser.closed)
+        warning.assert_called_once()
+
     def test_local_upload_without_playwright_fails_before_browser(self):
         video = self._video(account_file="/tmp/cookie.json")
         with self.assertRaises(ValueError):
@@ -1527,6 +1548,32 @@ class StopOwnershipTests(unittest.TestCase):
         self.assertEqual(session.mode, "multilogin")
         self.assertFalse(hasattr(session, "stop"))
 
+
+
+_HUMANIZE_BEFORE = None
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
 
 if __name__ == "__main__":
     unittest.main()

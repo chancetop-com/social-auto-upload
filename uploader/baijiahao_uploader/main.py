@@ -21,7 +21,10 @@ from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.browser_session import BrowserSession
+from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError
+from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import baijiahao_logger
 from utils.login_qrcode import build_login_qrcode_path, decode_qrcode_from_path, print_terminal_qrcode, remove_qrcode_file
 
@@ -31,6 +34,39 @@ BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
 BAIJIAHAO_PUBLISH_URL = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2"
 # 发布成功后跳转到的 URL 前缀
 BAIJIAHAO_SUCCESS_URL_PREFIX = "https://baijiahao.baidu.com/builder/rc/clue"
+
+# 标题是 contenteditable；页面可能把上传文件名自动填进来。
+TITLE_EDITOR_SELECTOR = 'div[class*="contentEditable"]'
+
+# 创作声明：点组件本体（antd 装饰层会拦截 placeholder input 的落点，不再用 force）。
+AI_DECLARATION_TRIGGER_SELECTOR = '.cheetah-select:has(input[placeholder="请选择创作声明"])'
+AI_DECLARATION_TRIGGER_FALLBACK = 'input[placeholder="请选择创作声明"]'
+AI_DECLARATION_OPTION_SELECTOR = '.cheetah-modal-wrap :text("含AI生成内容")'
+AI_DECLARATION_OPTION_FALLBACK = 'text="含AI生成内容"'
+DECLARATION_MODAL_SELECTOR = '.cheetah-modal-wrap:visible'
+DECLARATION_CONFIRM_SELECTOR = 'button:has-text("确定")'
+
+# 合集：cheetah-select 下拉，搜索框逐字输入后按候选文本全等点选。
+COLLECTION_SELECTOR = '.cheetah-select:has(.cheetah-select-selection-placeholder:has-text("选择同主题的合集"))'
+COLLECTION_PLACEHOLDER_SELECTOR = '.cheetah-select-selection-placeholder:has-text("合集")'
+COLLECTION_SEARCH_INPUT_SELECTOR = 'input.cheetah-select-selection-search-input'
+COLLECTION_OPTION_SELECTOR = '.cheetah-select-item, [role="option"]'
+COLLECTION_OPTION_TIMEOUT_MS = 8000
+
+# 封面
+COVER_ENTRY_SELECTOR = '[data-testid="select-cover"]'
+COVER_UPLOAD_BUTTON_SELECTOR = 'button:has-text("上传"), div:has-text("上传"):not(:has(*)):visible'
+COVER_IMAGE_INPUT_SELECTOR = 'input[type="file"][accept*="image"], input[type="file"][accept*="jpg"], input[type="file"][accept*="png"]'
+COVER_CONFIRM_SELECTOR = 'button:has-text("确定"), button:has-text("完成"), button:has-text("确认")'
+# 封面弹窗里已有隐藏图片 input。先短探测直接写；只有 input 缺失才点「上传」
+# tab，且那一下必须由 expect_file_chooser 消费（先例：小红书 bbc5361）。
+COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
+COVER_CHOOSER_TIMEOUT_MS = 10_000
+
+# 发布
+PUBLISH_BUTTON_SELECTOR = '[data-testid="publish-btn"]'
+PUBLISH_BUTTON_TEXT_SELECTOR = 'button:text-is("发布")'
+PUBLISH_BUTTON_CONTAINS_SELECTOR = 'button:has-text("发布")'
 
 # 百度 passport 二维码图片选择器
 QR_SELECTOR = 'img[src^="https://passport.baidu.com/v2/api/qrcode"]'
@@ -61,11 +97,31 @@ _BAIJIAHAO_LOGIN_HINTS = (
 )
 
 
-def _raise_if_login_required(page: Page) -> None:
+async def _cover_input_attached(locator) -> bool:
+    """Short, read-only probe: is the hidden cover image input already there?
+
+    Never clicks the 「上传」 tab/button to find out: that click opens a real OS
+    file chooser which then lingers while ``set_input_files`` injects the file
+    (same defect as XHS, bbc5361).
+    """
+    try:
+        if not await locator.count():
+            return False
+        await locator.wait_for(
+            state="attached", timeout=COVER_INPUT_PROBE_TIMEOUT_MS
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour.
+    retry-until-timeout behaviour.  ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched, so exit 10
+    never claims "not published".
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -73,7 +129,8 @@ def _raise_if_login_required(page: Page) -> None:
     if any(marker in url for marker in _BAIJIAHAO_LOGIN_HINTS):
         raise LoginRequiredError(
             "百家号上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -198,7 +255,7 @@ async def baijiahao_cookie_gen(account_file, qrcode_callback=None, poll_interval
             # 点击「登录」按钮触发百度 passport 弹窗
             login_btn = page.get_by_text("登录", exact=True).first
             try:
-                await login_btn.click(timeout=10000)
+                await login_btn.click(timeout=10000)  # native-click: login；百度 passport 二维码弹窗属登录路径，非用户内容交互
             except Exception:
                 # 有些情况直接就在登录状态
                 pass
@@ -361,6 +418,52 @@ async def baijiahao_setup(account_file, handle=False, return_detail=False, qrcod
     return result if return_detail else True
 
 
+async def _require_unique(locator, what: str):
+    """收窄到 ``count()==1``：多义直接硬错，不自动 ``.first``。"""
+    count = await locator.count()
+    if count != 1:
+        raise ElementUnusableError(
+            what=what,
+            role="interactive",
+            selector="",
+            reason=f"ambiguous:{count}",
+        )
+    return locator
+
+
+async def _wait_for_collection_options(options, timeout_ms: int) -> None:
+    """有界等待候选渲染（固定 sleep 的替代）。
+
+    候选缺席时只降级为「找不到合集 → 跳过」，不抛出、不中止发布。
+    """
+    try:
+        await options.first.wait_for(state="visible", timeout=timeout_ms)
+    except PWTimeoutError:
+        pass
+
+
+async def _find_exact_option(options, name: str):
+    """按候选文本**全等**匹配合集名；命中不到返回 ``None``。
+
+    同一合集可能被渲染成多个节点：只有在全等命中集合内部才取第一个
+    （``.first`` 仅作降级），绝不对未过滤的候选集取 ``.first``。
+    """
+    wanted = " ".join(str(name).split())
+    try:
+        count = await options.count()
+    except Exception:
+        return None
+    for index in range(count):
+        option = options.nth(index)
+        try:
+            text = await option.inner_text()
+        except Exception:
+            continue
+        if " ".join(str(text or "").split()) == wanted:
+            return option
+    return None
+
+
 class BaiJiaHaoVideo(BaseVideoUploader):
     """百家号视频上传。
 
@@ -395,6 +498,26 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         self.headless = headless
         self.local_executable_path = LOCAL_CHROME_PATH
         self.max_title_length = 30
+
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """人类化停顿只吃剩余预算，耗尽收缩到 0，不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            baijiahao_logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
         if check_cookie:
@@ -444,6 +567,8 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
+        # 一个 page 一个实例：之后的键入与点击都走同一套指针/随机流。
+        humanizer = self._humanizer(page)
         await page.goto(
             BAIJIAHAO_PUBLISH_URL,
             timeout=self.publish_budget.clamp_ms(120000),
@@ -467,43 +592,45 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         baijiahao_logger.info(_msg("🏃", f"已选择视频文件: {self.file_path}"))
 
         # 2) 等待进入表单页面（contenteditable 标题区出现即表单渲染完毕）
-        title_editor = page.locator('div[class*="contentEditable"]').first
+        title_editor = page.locator(TITLE_EDITOR_SELECTOR).first
         await title_editor.wait_for(
             state="visible", timeout=self.publish_budget.clamp_ms(180000)
         )
         await page.wait_for_timeout(1000)
 
         # 3) 填写标题
-        await self._fill_title(page)
+        await self._fill_title(page, humanizer)
 
         # 4) 等待视频上传完成
         await self._wait_upload_complete(page, multilogin=multilogin)
 
         # 5) 上传横版封面（必填）
-        await self._upload_thumbnail(page)
+        await self._upload_thumbnail(page, humanizer)
 
         # 6) 勾选「含AI生成内容」
-        await self._check_ai_declaration(page)
+        await self._check_ai_declaration(page, humanizer)
 
         # 7) 选择合集（如有配置）
-        await self._apply_collection(page)
+        await self._apply_collection(page, humanizer)
 
         # 8) 点击发布
         await self._submit_publish(page, multilogin=multilogin)
 
-    async def _fill_title(self, page: Page) -> None:
-        title_field = page.locator('div[class*="contentEditable"]').first
-        await title_field.wait_for(state="visible", timeout=15000)
+    async def _fill_title(self, page: Page, humanizer: Humanizer) -> None:
+        title_field = page.locator(TITLE_EDITOR_SELECTOR)
+        await title_field.first.wait_for(state="visible", timeout=15000)
+        title_field = await _require_unique(title_field, "视频标题")
         title = self.title
         # 百家号标题最少9字
         if len(title) <= 8:
             title += " 你不知道的"
         title = title[: self.max_title_length]
-        # 清空原有内容（可能自动填了文件名），再输入标题
-        await title_field.click()
-        await page.keyboard.press("Control+a")
-        await page.keyboard.press("Backspace")
-        await title_field.fill(title)
+        # 标题是 contenteditable 且页面可能自动填了文件名：保留「点标题 →
+        # Ctrl+A → Backspace」清空序列（只把键换成 humanizer.press），再逐字。
+        await humanizer.click(title_field)
+        await humanizer.press("Control+a")
+        await humanizer.press("Backspace")
+        await humanizer.type_text(title)
         baijiahao_logger.info(_msg("🏷️", f"标题已填写: {title}"))
 
     async def _wait_upload_complete(self, page: Page, timeout: int = 600, *, multilogin: bool = False) -> None:
@@ -563,7 +690,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
                 return
             await asyncio.sleep(2)
 
-    async def _upload_thumbnail(self, page: Page) -> None:
+    async def _upload_thumbnail(self, page: Page, humanizer: Humanizer) -> None:
         """上传横版封面（必填）。
 
         流程：点击「选择封面」→ 弹窗中点「上传」按钮 → 设置图片文件 → 等待上传完成 → 确认。
@@ -576,30 +703,23 @@ class BaiJiaHaoVideo(BaseVideoUploader):
 
         try:
             # 1) 点击「选择封面」入口
-            cover_entry = page.locator('[data-testid="select-cover"]').first
+            cover_entry = page.locator(COVER_ENTRY_SELECTOR).first
             if not await cover_entry.count():
                 # 备选：通过文本定位
                 cover_entry = page.get_by_text("选择封面", exact=True).first
-            await cover_entry.scroll_into_view_if_needed()
-            await cover_entry.click(timeout=10000)
+            await humanizer.click(cover_entry)
             baijiahao_logger.info(_msg("🏃", "已点击「选择封面」"))
             await page.wait_for_timeout(2000)
 
-            # 2) 弹窗中找「上传」按钮并点击
-            # 百家号封面弹窗通常有「上传」tab/按钮
-            upload_btn = page.locator('button:has-text("上传"), div:has-text("上传"):not(:has(*)):visible').first
-            if not await upload_btn.count():
-                upload_btn = page.get_by_text("上传", exact=True).first
-            await upload_btn.click(timeout=8000)
-            await page.wait_for_timeout(1500)
-
-            # 3) 设置图片文件到 file input
-            # 弹窗中会出现 input[type=file]
-            img_input = page.locator('input[type="file"][accept*="image"], input[type="file"][accept*="jpg"], input[type="file"][accept*="png"]').first
-            if not await img_input.count():
-                # 通用 fallback：弹窗内最新出现的 file input
-                img_input = page.locator('input[type="file"]').last
-            await img_input.set_input_files(self.thumbnail_path)
+            # 2) 封面图片 input 在弹窗里已经存在：优先直接写 input。禁止先点
+            #    「上传」tab/按钮——那一下会真的拉起系统文件选择器，随后
+            #    set_input_files 把文件塞进去，选择器会留在屏幕上（先例：小红书
+            #    bbc5361，2026-11-12 TikTok 复现）。
+            img_input = page.locator(COVER_IMAGE_INPUT_SELECTOR).first
+            if await _cover_input_attached(img_input):
+                await img_input.set_input_files(self.thumbnail_path)
+            else:
+                await self._upload_cover_via_chooser(page, humanizer)
             baijiahao_logger.info(_msg("🏃", f"已选择封面图片: {self.thumbnail_path}"))
 
             # 4) 等待并点击确认/完成按钮（如有裁剪弹窗）。
@@ -608,11 +728,11 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             #    导致封面选择实际未提交，但日志仍打「封面已上传」成功——这是本次线上
             #    百家号视频没有封面、日志却显示成功的根因。改为轮询等待（不放大超时时长本身
             #    不算错误：裁剪弹窗本就是可选的，等不到也可能是流程本身没有该弹窗）。
-            confirm_btn = page.locator('button:has-text("确定"), button:has-text("完成"), button:has-text("确认")').first
+            confirm_btn = page.locator(COVER_CONFIRM_SELECTOR).first
             confirmed = False
             try:
                 await confirm_btn.wait_for(state="visible", timeout=15000)
-                await confirm_btn.click(timeout=8000)
+                await humanizer.click(confirm_btn)
                 await page.wait_for_timeout(1000)
                 confirmed = True
             except PWTimeoutError:
@@ -629,86 +749,133 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             # fallback：等系统自动生成
             await self._wait_cover_ready(page)
 
-    async def _check_ai_declaration(self, page: Page) -> None:
+    async def _check_ai_declaration(self, page: Page, humanizer: Humanizer) -> None:
         """选择「含AI生成内容」创作声明。
 
-        点击「请选择创作声明」input → 弹出 modal 弹窗 → 点选「含AI生成内容」→ 点「确定」。
+        点创作声明**组件本体**（antd 装饰层会吃掉 placeholder input 的落点，
+        所以不再 force 强点 input）→ 弹出 modal 弹窗 → 点选「含AI生成内容」
+        → 点「确定」。
         """
         try:
-            # 点击创作声明输入框触发弹窗
-            trigger = page.locator('input[placeholder="请选择创作声明"]').first
-            await trigger.scroll_into_view_if_needed()
-            await trigger.click(force=True, timeout=8000)
+            # 点击创作声明组件本体触发弹窗
+            trigger = page.locator(AI_DECLARATION_TRIGGER_SELECTOR).first
+            if not await trigger.count():
+                trigger = page.locator(AI_DECLARATION_TRIGGER_FALLBACK).first
+            await humanizer.click(trigger)
             await page.wait_for_timeout(3000)
 
             # 弹窗内点选「含AI生成内容」
-            ai_option = page.locator('.cheetah-modal-wrap :text("含AI生成内容")').first
+            ai_option = page.locator(AI_DECLARATION_OPTION_SELECTOR).first
             if not await ai_option.count():
-                ai_option = page.locator('text="含AI生成内容"').first
+                ai_option = page.locator(AI_DECLARATION_OPTION_FALLBACK).first
             await ai_option.wait_for(state="visible", timeout=10000)
-            await ai_option.click(timeout=5000)
+            await humanizer.click(ai_option)
             await page.wait_for_timeout(1000)
 
             # 点「确定」按钮关闭弹窗（弹窗可能在点选后仍存在）
-            modal = page.locator('.cheetah-modal-wrap:visible').first
+            modal = page.locator(DECLARATION_MODAL_SELECTOR).first
             if await modal.count():
-                confirm_btn = modal.locator('button:has-text("确定")').first
+                confirm_btn = modal.locator(DECLARATION_CONFIRM_SELECTOR).first
                 if await confirm_btn.count() and await confirm_btn.is_visible():
-                    await confirm_btn.click(timeout=5000)
+                    await humanizer.click(confirm_btn)
                     await page.wait_for_timeout(500)
                 else:
-                    # 确定按钮不可见，尝试 force click 或按 Escape 关闭
-                    await page.keyboard.press("Escape")
+                    # 确定按钮不可见：只用具名键收起弹窗，不做坐标强点。
+                    await humanizer.press("Escape")
                     await page.wait_for_timeout(500)
 
             baijiahao_logger.success(_msg("🏷️", "已选择「含AI生成内容」"))
         except Exception as exc:
             # 如果失败，尝试关闭可能残留的弹窗
             try:
-                await page.keyboard.press("Escape")
+                await humanizer.press("Escape")
                 await page.wait_for_timeout(500)
             except Exception:
                 pass
             baijiahao_logger.warning(_msg("⚠️", f"选择 AI 声明失败: {exc}"))
 
-    async def _apply_collection(self, page: Page) -> None:
+    async def _apply_collection(self, page: Page, humanizer: Humanizer) -> None:
         """选择合集（cheetah-select 下拉搜索框）。
 
         placeholder: "选择同主题的合集，可获得更多播放机会"
-        有 collection_name 时点开下拉 → 搜索/选中目标合集；没有则跳过。
+        有 collection_name 时点开下拉 → 逐字输入搜索词 → 有界等待候选 →
+        按合集名**全等**点选；候选里没有全等项时沿用「警告 + Escape」跳过，
+        不中止发布。
         """
         if not self.collection_name:
             return
         try:
             # 定位合集下拉框（通过 placeholder 文案）
-            select_box = page.locator('.cheetah-select:has(.cheetah-select-selection-placeholder:has-text("选择同主题的合集"))').first
+            select_box = page.locator(COLLECTION_SELECTOR).first
             if not await select_box.count():
-                select_box = page.locator('.cheetah-select-selection-placeholder:has-text("合集")').locator('xpath=ancestor::div[contains(@class,"cheetah-select")]').first
+                select_box = page.locator(COLLECTION_PLACEHOLDER_SELECTOR).locator('xpath=ancestor::div[contains(@class,"cheetah-select")]').first
             if not await select_box.count():
                 baijiahao_logger.warning(_msg("⚠️", "未找到合集选择器，跳过"))
                 return
 
-            await select_box.scroll_into_view_if_needed()
-            await select_box.click(timeout=8000)
-            await page.wait_for_timeout(1500)
+            await humanizer.click(select_box)
 
-            # 在搜索框中输入合集名（触发搜索过滤）
-            search_input = select_box.locator('input.cheetah-select-selection-search-input').first
+            # 在搜索框中逐字输入合集名（触发搜索过滤）；搜索框每次都是空的，
+            # 因此不清空，只聚焦后输入。
+            search_input = select_box.locator(COLLECTION_SEARCH_INPUT_SELECTOR)
             if await search_input.count():
-                await search_input.fill(self.collection_name)
-                await page.wait_for_timeout(1500)
+                search_input = await _require_unique(search_input, "合集搜索框")
+                await humanizer.click(search_input)
+                await humanizer.type_text(str(self.collection_name))
 
-            # 从下拉选项中选中目标合集
-            option = page.locator(f'[role="option"]:has-text("{self.collection_name}"), .cheetah-select-item:has-text("{self.collection_name}")').first
-            if await option.count():
-                await option.click(timeout=5000)
+            # 有界等待候选项渲染：固定 sleep 的替代。
+            options = page.locator(COLLECTION_OPTION_SELECTOR)
+            await _wait_for_collection_options(
+                options, self.publish_budget.clamp_ms(COLLECTION_OPTION_TIMEOUT_MS)
+            )
+
+            # 从下拉选项中按合集名全等选中目标合集。
+            option = await _find_exact_option(options, str(self.collection_name))
+            if option is not None:
+                await humanizer.click(option)
                 await page.wait_for_timeout(500)
                 baijiahao_logger.success(_msg("🥳", f"已选择合集：{self.collection_name}"))
             else:
                 baijiahao_logger.warning(_msg("⚠️", f"账号中无「{self.collection_name}」合集，跳过"))
-                await page.keyboard.press("Escape")
+                await humanizer.press("Escape")
         except Exception as exc:
             baijiahao_logger.warning(_msg("⚠️", f"选择合集失败，跳过: {exc}"))
+
+    async def _upload_cover_via_chooser(
+        self, page: Page, humanizer: Humanizer
+    ) -> None:
+        """兜底：只有 input 缺失时才点「上传」tab，点击必须被 chooser 消费。
+
+        chooser 事件没到也不能裸点第二次：点击可能已经把 input 渲染出来，
+        这里改为重新解析封面专用 input 再直接写。绝不回退到页面级的通用
+        ``input[type=file]``——那会绑到页面自己的视频输入框。
+        """
+        upload_btn = page.locator(COVER_UPLOAD_BUTTON_SELECTOR).first
+        if not await upload_btn.count():
+            upload_btn = page.get_by_text("上传", exact=True).first
+        chooser = None
+        try:
+            async with page.expect_file_chooser(
+                timeout=COVER_CHOOSER_TIMEOUT_MS
+            ) as chooser_info:
+                await upload_btn.click(timeout=8000)  # native-click: file；封面弹窗「上传」tab 只能由原生点击唤起文件选择器，且必须被 expect_file_chooser 消费
+            chooser = await chooser_info.value
+        except PWTimeoutError:
+            # 只有「选择器事件没到」才降级；人类化/原生点击错误必须上抛
+            # （spec §4.1-7：人类化失败不得自动降级）。
+            chooser = None
+        if chooser is not None:
+            await chooser.set_files(self.thumbnail_path)
+            return
+        await page.wait_for_timeout(1500)
+        img_input = page.locator(COVER_IMAGE_INPUT_SELECTOR).first
+        if not await img_input.count():
+            raise RuntimeError(
+                "封面图片 input 未出现：点击「上传」后既没有文件选择器，也没有 "
+                f"{COVER_IMAGE_INPUT_SELECTOR}；不绑定页面级 input[type=file]，"
+                "避免把视频输入框当成封面"
+            )
+        await img_input.set_input_files(self.thumbnail_path)
 
     async def _wait_cover_ready(self, page: Page, timeout: int = 120) -> None:
         """等待百家号自动生成封面图。"""
@@ -726,21 +893,31 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             baijiahao_logger.info(_msg("🏃", "等待封面生成..."))
             await asyncio.sleep(3)
 
-    async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
-        """点击发布按钮并确认成功。"""
+    async def _submit_publish(
+        self,
+        page: Page,
+        *,
+        multilogin: bool = False,
+        humanizer: Humanizer | None = None,
+    ) -> None:
+        """点击发布按钮并确认成功。
+
+        遮挡只走「清浮层」（Escape 收残留 modal），绝不给发布点击加 force。
+        """
         budget = self.publish_budget
+        humanizer = humanizer or self._humanizer(page)
         # 确保没有残留弹窗遮挡
-        modal = page.locator('.cheetah-modal-wrap:visible').first
+        modal = page.locator(DECLARATION_MODAL_SELECTOR).first
         if await modal.count():
-            await page.keyboard.press("Escape")
+            await humanizer.press("Escape")
             await page.wait_for_timeout(1000)
 
         # 百家号发布按钮有 data-testid="publish-btn"
-        publish_btn = page.locator('[data-testid="publish-btn"]').first
+        publish_btn = page.locator(PUBLISH_BUTTON_SELECTOR).first
         if not await publish_btn.count():
-            publish_btn = page.locator('button:text-is("发布")').first
+            publish_btn = page.locator(PUBLISH_BUTTON_TEXT_SELECTOR).first
         if not await publish_btn.count():
-            publish_btn = page.locator('button:has-text("发布")').last
+            publish_btn = page.locator(PUBLISH_BUTTON_CONTAINS_SELECTOR).last
         await publish_btn.wait_for(
             state="visible", timeout=budget.clamp_ms(15000)
         )
@@ -750,14 +927,21 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             label="百家号发布",
         )
         budget.check_pre_click()
-        await publish_btn.click(force=True)
+        await humanizer.before_submit()
+        try:
+            await humanizer.click(publish_btn)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                raise budget.timeout_error(True) from exc
+            raise
         publish_clicked = True
         baijiahao_logger.info(_msg("🏃", "已点击发布按钮"))
 
         # 发布后共享整条流程的 15 分钟 deadline。
         while budget.remaining_seconds() > 0:
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             url = page.url
             # 发布成功跳转
             if BAIJIAHAO_SUCCESS_URL_PREFIX in url or "/rc/content" in url or "/rc/home" in url:
@@ -765,12 +949,14 @@ class BaiJiaHaoVideo(BaseVideoUploader):
                 return
             # 检查是否出现百度安全验证
             if await page.locator('text="百度安全验证"').count():
+                # 发布点击已经发出：验证码页面等于结果未知，不能落回「未发布」。
                 if multilogin:
                     raise LoginRequiredError(
                         "百家号上传过程中需要人工完成百度安全验证："
-                        "请在 Multilogin 应用中登录 Profile 后重试。"
+                        "请在 Multilogin 应用中登录 Profile 后重试。",
+                        publish_attempted=publish_clicked,
                     )
-                raise RuntimeError("出现百度安全验证，需人工处理")
+                raise budget.timeout_error(publish_clicked)
             # 检查是否有错误提示阻止发布
             error_toast = page.locator('.cheetah-message-error, .cheetah-message-warning').first
             if await error_toast.count() and await error_toast.is_visible():

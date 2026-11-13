@@ -13,15 +13,21 @@ from uploader.dayu_uploader.schedule import (
     read_dayu_schedule,
     target_from_result,
 )
+from uploader.dayu_uploader.interaction import unique
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.errors import PublishResultUnknownError
+from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import dayu_logger
 
 
 async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
                                   article_html: str | None = None,
                                   publish_not_before=None,
-                                  budget: PublishTimeoutBudget | None = None) -> None:
+                                  budget: PublishTimeoutBudget | None = None,
+                                  humanizer: Humanizer | None = None) -> None:
     """提交动作各执行一次；每次远端写入前后保存阶段与作品标识，供只读查询。"""
+    humanizer = humanizer or Humanizer(page)
     budget = budget or PublishTimeoutBudget("大鱼号")
     result["status"] = "preview_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -41,12 +47,17 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         ]))
     if article_html is not None:
         await page.route(save_url, preserve_article_html)
+    publish = await unique(
+        page.get_by_role("button", name="发表", exact=True), "发表"
+    )
     try:
+        # 首次“发表”生成预览：先付 before_submit，再在响应上下文内坐标点击。
+        await humanizer.before_submit()
         async with page.expect_response(
             lambda r: urlsplit(r.url).path == "/dashboard/save-draft" and r.request.method == "POST",
             timeout=budget.clamp_ms(45000),
         ) as draft_event:
-            await page.get_by_role("button", name="发表", exact=True).click()
+            await humanizer.click(publish)
     finally:
         if article_html is not None:
             await page.unroute(save_url, preserve_article_html)
@@ -88,7 +99,9 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         finally:
             await preview.close()
     # 预览页的最终提交按钮有独立名称，不能复用主表单的“发表”定位。
-    confirm = page.get_by_role("button", name="确认发表", exact=True)
+    confirm = await unique(
+        page.get_by_role("button", name="确认发表", exact=True), "确认发表"
+    )
     await expect(confirm).to_be_visible(timeout=budget.clamp_ms(30000))
     await budget.wait_until_allowed(
         publish_not_before,
@@ -101,32 +114,59 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     publish_clicked = False
     try:
+        # 不可逆提交前付一次 before_submit；响应上下文仍包住同一次坐标点击。
+        await humanizer.before_submit()
         async with page.expect_response(
             lambda r: urlsplit(r.url).path == "/dashboard/submit-article" and r.request.method == "POST",
             timeout=budget.clamp_ms(45000),
         ) as submit_event:
-            await confirm.click()
+            try:
+                await humanizer.click(confirm)
+            except Exception as exc:
+                if maybe_dispatched(exc):
+                    # 确认发表可能已经发出：按结果未知上抛，禁止再次派发。
+                    raise budget.timeout_error(True) from exc
+                raise
             publish_clicked = True
         response = await submit_event.value
     except BrowserTimeoutError:
         raise budget.timeout_error(publish_clicked) from None
-    if not response.ok:
-        raise RuntimeError(f"发表结果未确认: HTTP {response.status}，请核查原作品")
-    submitted = (await response.json()).get("data", {})
-    if not submitted.get("content_id"):
-        raise RuntimeError("发表响应未返回 content_id，结果未知，请核查原作品")
+    # 确认发表已经派发：响应解析/字段校验的失败都不能退化成“确定未发布”，
+    # 否则 CLI 退出 1 会诱发调度器重试并产生重复作品。
+    try:
+        if not response.ok:
+            raise RuntimeError(f"发表结果未确认: HTTP {response.status}，请核查原作品")
+        payload = await response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        submitted = data if isinstance(data, dict) else {}
+        content_id = submitted.get("content_id")
+        if not content_id:
+            raise RuntimeError("发表响应未返回 content_id，结果未知，请核查原作品")
+    except PublishResultUnknownError:
+        raise
+    except Exception as error:
+        raise PublishResultUnknownError(
+            f"发表响应无法确认：{error}；帖子可能已经发布，请查原记录，勿重复提交"
+        ) from error
     # 最终发表响应返回本次作品 ID 即成功；审核和公开访问不属于发布命令的完成条件。
-    result.update(content_id=str(submitted["content_id"]), article_id=submitted.get("_id"))
+    result.update(content_id=str(content_id), article_id=submitted.get("_id"))
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if result.get("schedule"):
         # content_id 确认已提交，再从作品列表复核原作品及安排；草稿不能算定时提交成功。
-        target = target_from_result(result["schedule"])
-        record, saved_actual = await wait_dayu_publication(
-            page.context, content_id=result["content_id"],
-            origin_id=result["origin_id"], title=result.get("title"),
-            target=target)
-        apply_schedule_result(result, record, target, saved_actual)
-        result.update(success=True, platform_status=record["status"])
+        try:
+            target = target_from_result(result["schedule"])
+            record, saved_actual = await wait_dayu_publication(
+                page.context, content_id=result["content_id"],
+                origin_id=result["origin_id"], title=result.get("title"),
+                target=target)
+            apply_schedule_result(result, record, target, saved_actual)
+            result.update(success=True, platform_status=record["status"])
+        except (RuntimeError, TimeoutError) as error:
+            # 发表已被平台受理；回读失败只标记未核验，不能退出 1 诱发重复发表。
+            dayu_logger.warning(
+                f"大鱼号发表已确认，但定时回读未完成，保留成功结果: {error}"
+            )
+            result.update(success=True, status="scheduled", schedule_verified=False)
     else:
         result.update(success=True, status="submitted")
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

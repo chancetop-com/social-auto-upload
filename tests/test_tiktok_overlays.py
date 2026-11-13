@@ -93,5 +93,31 @@ class DismissOverlayTests(unittest.TestCase):
         joyride.first.click.assert_not_awaited()
 
 
+
+_HUMANIZE_BEFORE = None
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
+
 if __name__ == "__main__":
     unittest.main()

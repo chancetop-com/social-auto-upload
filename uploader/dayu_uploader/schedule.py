@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 from patchright.async_api import BrowserContext, Page, expect
 
+from uploader.dayu_uploader.interaction import unique
 from utils.browser_time import page_wall_clock
+from utils.humanize import Humanizer
 from utils.time_utils import (
     parse_aware_iso,
     require_minute_step,
@@ -129,8 +131,9 @@ def validate_dayu_schedule(value: datetime | None, now: datetime | None = None) 
     )
 
 
-async def fill_dayu_schedule(page: Page, value: datetime | None) -> None:
+async def fill_dayu_schedule(page: Page, value: datetime | None, humanizer: Humanizer | None = None) -> None:
     """使用页面实际提供的日、时、分选项；立即发布时也读回未启用状态。"""
+    humanizer = humanizer or Humanizer(page)
     target = validate_dayu_schedule(value)
     wall_clock = (
         await page_wall_clock(page, target) if target is not None else None
@@ -140,17 +143,19 @@ async def fill_dayu_schedule(page: Page, value: datetime | None) -> None:
     await expect(option).to_have_count(1)
     toggle = option.locator(":scope > .w-radio")
     if "w-radio_checked" in (await toggle.get_attribute("class") or ""):
-        await toggle.click()
+        await humanizer.click(await unique(toggle, "定时发布开关"))
     await expect(toggle).not_to_have_class(re.compile(r"\bw-radio_checked\b"))
     # 此输入只显示选中值，点击入口是其同组件的 mask；直接点击 input 会被 mask 拦截。
     widget = page.locator(".widgets-datepicker-m:visible")
     if target is None:
         await expect(widget).to_have_count(0)
         return
-    await toggle.click()
+    await humanizer.click(await unique(toggle, "定时发布开关"))
     await expect(toggle).to_have_class(re.compile(r"\bw-radio_checked\b"))
     await expect(widget).to_have_count(1)
-    await widget.locator(".widgets-datepicker-m_mask").click()
+    await humanizer.click(
+        await unique(widget.locator(".widgets-datepicker-m_mask"), "日期遮罩")
+    )
     # 两份布局各自创建日历实例；只操作打开的日历，视图类区分日期、小时和分钟。
     picker = page.locator(".datetimepicker:visible")
     await expect(picker).to_have_count(1)
@@ -159,17 +164,17 @@ async def fill_dayu_schedule(page: Page, value: datetime | None) -> None:
     desired_month = f"{DAYU_MONTH_NAMES[wall_clock.month - 1]} {wall_clock.year}"
     if (await heading.inner_text()).strip() != desired_month:
         # 七天范围最多跨到下个月，下一月按钮在此范围可用；不按未知月份循环点击。
-        await days.locator("th.next").click()
+        await humanizer.click(await unique(days.locator("th.next"), "下一月"))
     await expect(heading).to_have_text(desired_month)
     day = days.locator("td.day:not(.old):not(.new)").filter(has_text=re.compile(f"^{wall_clock.day}$"))
     await expect(day).not_to_have_class(re.compile(r"\bdisabled\b"))
-    await day.click()
+    await humanizer.click(await unique(day, "定时日期"))
     hour = picker.locator(".datetimepicker-hours .hour").filter(has_text=re.compile(f"^{wall_clock.hour}:00$"))
     await expect(hour).not_to_have_class(re.compile(r"\bdisabled\b"))
-    await hour.click()
+    await humanizer.click(await unique(hour, "定时小时"))
     # 原生日历的小时不补零（1:05），输入框则补零（01:05）；不能共用显示格式定位分钟。
     minute = picker.locator(".datetimepicker-minutes .minute").filter(has_text=re.compile(f"^{wall_clock.hour}:{wall_clock.minute:02d}$"))
     await expect(minute).not_to_have_class(re.compile(r"\bdisabled\b"))
-    await minute.click()
+    await humanizer.click(await unique(minute, "定时分钟"))
     await expect(picker).to_have_count(0)
     await expect(widget.locator("input")).to_have_value(wall_clock.strftime("%Y年%m月%d日 %H:%M"))

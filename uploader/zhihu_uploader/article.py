@@ -1,6 +1,7 @@
 """知乎文章发布：正文文本、正文图片、定时设置和提交结果记录。"""
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
@@ -17,6 +18,8 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
+from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from uploader.zhihu_uploader.constants import (
     ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL,
     ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS,
@@ -60,6 +63,29 @@ class ZhihuArticle:
         budget = getattr(self, "_publish_budget", None)
         return budget.clamp_ms(default_ms) if budget else default_ms
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """人类化停顿只吃剩余预算，不自己抛超时。"""
+        budget = getattr(self, "_publish_budget", None)
+        remaining = (
+            max(0.0, budget.remaining_seconds()) if budget is not None else seconds
+        )
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     def validate_upload_args(self, *, check_cookie: bool = True) -> None:
         """在启动浏览器前检查标题、正文、图片及定时时间。
 
@@ -91,6 +117,7 @@ class ZhihuArticle:
 
     async def fill_article_form(self, page: Page, *, multilogin: bool = False) -> None:
         """通过原生粘贴导入富文本；按原稿位置上传图片并核对交错顺序。"""
+        humanizer = self._humanizer(page)
         # 标题 placeholder 来自文章表单的实际 textarea，避免误填正文和搜索框。
         title = page.locator('textarea[placeholder="请输入标题（最多 100 个字）"]')
         await expect(title).to_have_count(1)
@@ -100,7 +127,9 @@ class ZhihuArticle:
         if ((await title.input_value()).strip() or (await body.inner_text()).strip()
                 or await body.locator("img").count()):
             raise RuntimeError("知乎文章编辑器已有草稿内容，拒绝覆盖；请先处理该草稿")
-        await title.fill(self.title)
+        # 清空形态为 none：平台已有“非空即拒绝”守卫，这里只聚焦后逐字输入，绝不清空。
+        await humanizer.click(title)
+        await humanizer.type_text(self.title)
         await expect(title).to_have_value(self.title)
         # 不改写 DraftJS innerHTML；原生 HTML 粘贴使编辑器自己更新内部模型。
         # 图片先替换成唯一标记，避免把本地路径粘贴为无法加载的远端图片。
@@ -116,9 +145,9 @@ class ZhihuArticle:
         await page.evaluate("""async html => navigator.clipboard.write([
             new ClipboardItem({'text/html': new Blob([html], {type: 'text/html'})})
         ])""", "".join(parts))
-        await body.click()
+        await humanizer.click(body)
         await body.press("Meta+V" if sys.platform == "darwin" else "Control+V")
-        await title.click()
+        await title.click()  # native-click: focus；失焦正文让 DraftJS 提交粘贴块，非内容交互
         for marker, _ in insertions:
             await expect(body).to_contain_text(marker)
         self.uploaded_images = []
@@ -165,13 +194,13 @@ class ZhihuArticle:
             if await inserted.evaluate("image => image.naturalWidth") <= 0:
                 raise RuntimeError(f"知乎文章第 {index} 张图片无法加载")
             self.uploaded_images.append(await inserted.get_attribute("src"))
-        await title.click()
+        await title.click()  # native-click: focus；提交图片前再次失焦正文，让编辑器落定图片块
         sources = await body.locator("img").evaluate_all("images => images.map(image => image.getAttribute('src'))")
         if sources != self.uploaded_images:
             raise RuntimeError("知乎文章图片被重排或替换，停止提交")
         await self.check_article_body(body)
 
-        await fill_zhihu_article_schedule(page, self.schedule)
+        await fill_zhihu_article_schedule(page, self.schedule, humanizer)
 
     async def check_article_body(self, body) -> None:
         """核对全部文字、段间图片位置和基本格式，平台过滤或重排时中止提交。"""
@@ -204,6 +233,17 @@ class ZhihuArticle:
         }""", self.document.content_html)
         if [[normalize(text), href] for text, href in actual["links"]] != [[normalize(text), href] for text, href in expected_links]:
             raise RuntimeError("知乎文章链接文字或目标与原稿不一致")
+
+    async def _submit(self, page: Page, publish) -> None:
+        """唯一提交点：人类化停顿后坐标点击；可能已派发按结果未知上抛。"""
+        humanizer = self._humanizer(page)
+        await humanizer.before_submit()
+        try:
+            await humanizer.click(publish)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                raise self._publish_budget.timeout_error(True) from exc
+            raise
 
     def results_dir(self) -> Path:
         """Result manifests sit next to the local account; MLX uses a temp dir."""
@@ -260,8 +300,11 @@ class ZhihuArticle:
         multilogin = session.managed
         page = None
         submitted = False
+        publish_clicked = False
         try:
             page = await session.context.new_page()
+            # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
+            self._humanizer(page)
             response = await page.goto(ZHIHU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:
                 raise RuntimeError(f"知乎文章编辑器访问失败，HTTP {response.status}")
@@ -288,7 +331,8 @@ class ZhihuArticle:
             submitted = True
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-            await publish.click()
+            await self._submit(page, publish)
+            publish_clicked = True
             # 草稿也有 /p/<id>/edit 地址；必须到正式详情页并读到作品标题才算发表。
             try:
                 await page.wait_for_url(
@@ -306,7 +350,7 @@ class ZhihuArticle:
             raise
         except Exception as exc:
             if multilogin and page is not None:
-                raise_if_login_required(page)
+                raise_if_login_required(page, publish_attempted=publish_clicked)
             result["error"] = str(exc)
             if submitted:
                 result["status"] = "submission_unknown"

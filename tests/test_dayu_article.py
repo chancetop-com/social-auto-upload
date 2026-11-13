@@ -15,6 +15,9 @@ from uploader.dayu_uploader.article_content import load_dayu_article
 from uploader.dayu_uploader.article_style import render_dayu_compatible_html
 from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.verification import check_dayu_article_content, verify_dayu_article
+from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 
 class DayuArticleFileTests(unittest.TestCase):
@@ -85,6 +88,284 @@ class DayuArticleFileTests(unittest.TestCase):
                                       account, source, source_url=link, cover_indices=indices)
                     with self.assertRaisesRegex(ValueError, message):
                         app.validate_upload_args()
+
+
+class _FakeLocator:
+    def __init__(self, name: str, *, count: int = 1) -> None:
+        self.name = name
+        self._count = count
+
+    async def count(self) -> int:
+        return self._count
+
+
+class _FakeResponse:
+    ok = True
+    status = 200
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    async def json(self) -> dict:
+        return self._payload
+
+
+class _UnparseableResponse(_FakeResponse):
+    """HTTP 200，但响应体损坏/截断：``json()`` 直接抛错。"""
+
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    async def json(self):
+        raise self._error
+
+
+class _FakeResponseContext:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    @property
+    def value(self):
+        async def _resolve() -> _FakeResponse:
+            return self._response
+
+        return _resolve()
+
+
+class _FakePage:
+    """Only the surface ``submit_dayu_publication`` touches before the click."""
+
+    def __init__(self) -> None:
+        self.context = None
+        self.buttons: list[_FakeLocator] = []
+        self.preview = _FakeResponse({"data": {"_id": "draft-1"}})
+        self.submit = _FakeResponse({"data": {"content_id": "cid-1", "_id": "draft-1"}})
+        self.responses = [self.preview, self.submit]
+
+    def get_by_role(self, role: str, name=None, exact: bool = False) -> _FakeLocator:
+        locator = _FakeLocator(name or role)
+        self.buttons.append(locator)
+        return locator
+
+    def expect_response(self, predicate, timeout=None) -> _FakeResponseContext:
+        return _FakeResponseContext(self.responses.pop(0))
+
+
+class _FailingHumanizer:
+    """Records submit pauses; raises the injected error on the confirm click."""
+
+    def __init__(self, error: BaseException, *, target: str = "确认发表") -> None:
+        self.error = error
+        self.target = target
+        self.clicks: list[str] = []
+
+    async def before_submit(self) -> None:
+        return None
+
+    async def click(self, locator) -> None:
+        self.clicks.append(locator.name)
+        if locator.name == self.target:
+            raise self.error
+
+
+class _RecordingHumanizer:
+    """人类化替身：只记录提交点击，避免真实指针依赖。"""
+
+    def __init__(self) -> None:
+        self.clicks: list[str] = []
+
+    async def before_submit(self) -> None:
+        return None
+
+    async def click(self, locator) -> None:
+        self.clicks.append(locator.name)
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name):
+        async def _record(*args, **kwargs) -> None:
+            self.calls.append(name)
+
+        return _record
+
+
+class DayuPublicationDispatchGuardTests(unittest.IsolatedAsyncioTestCase):
+    """确认发表可能已派发 → 结果未知退出，绝不二次派发。"""
+
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    async def _submit(self, humanizer) -> None:
+        page = _FakePage()
+        with tempfile.TemporaryDirectory() as folder:
+            with patch(
+                "uploader.dayu_uploader.publication.read_dayu_schedule",
+                new=AsyncMock(return_value={}),
+            ), patch(
+                "uploader.dayu_uploader.publication.expect",
+                lambda locator: _Recorder(),
+            ):
+                await submit_dayu_publication(
+                    page,
+                    {"manifest": {}, "style_check": {}},
+                    Path(folder) / "result.json",
+                    humanizer=humanizer,
+                )
+
+    async def test_confirm_after_mouse_down_maps_to_unknown(self):
+        humanizer = _FailingHumanizer(self._maybe_error())
+
+        with self.assertRaises(PublishResultUnknownError):
+            await self._submit(humanizer)
+
+        self.assertEqual(humanizer.clicks, ["发表", "确认发表"])
+
+    async def test_pre_dispatch_confirm_failure_propagates(self):
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+        humanizer = _FailingHumanizer(error)
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            await self._submit(humanizer)
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(humanizer.clicks, ["发表", "确认发表"])
+
+
+class DayuPublicationResponseTests(unittest.IsolatedAsyncioTestCase):
+    """确认发表之后的响应解析失败 → 结果未知（退出 9），绝不报“确定未发布”。"""
+
+    def _page(self, *, preview=None, submit=None) -> _FakePage:
+        page = _FakePage()
+        if preview is not None:
+            page.preview = preview
+        if submit is not None:
+            page.submit = submit
+        page.responses = [page.preview, page.submit]
+        return page
+
+    async def _submit(self, page: _FakePage, result: dict) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            with patch(
+                "uploader.dayu_uploader.publication.read_dayu_schedule",
+                new=AsyncMock(return_value={}),
+            ), patch(
+                "uploader.dayu_uploader.publication.expect",
+                lambda locator: _Recorder(),
+            ):
+                await submit_dayu_publication(
+                    page, result, Path(folder) / "result.json",
+                    humanizer=_RecordingHumanizer(),
+                )
+
+    async def test_unparseable_submit_response_is_result_unknown(self):
+        page = self._page(
+            submit=_UnparseableResponse(ValueError("Expecting value"))
+        )
+        result = {"manifest": {}, "style_check": {}}
+
+        with self.assertRaises(PublishResultUnknownError) as caught:
+            await self._submit(page, result)
+
+        self.assertIn("勿重复提交", str(caught.exception))
+        self.assertEqual(result["status"], "submission_unknown")
+        self.assertFalse(result.get("success", False))
+
+    async def test_non_dict_submit_payload_is_result_unknown(self):
+        page = self._page(submit=_FakeResponse(["not", "a", "dict"]))
+        result = {"manifest": {}, "style_check": {}}
+
+        with self.assertRaises(PublishResultUnknownError):
+            await self._submit(page, result)
+
+        self.assertEqual(result["status"], "submission_unknown")
+
+    async def test_non_dict_submit_data_is_result_unknown(self):
+        page = self._page(submit=_FakeResponse({"data": "boom"}))
+        result = {"manifest": {}, "style_check": {}}
+
+        with self.assertRaises(PublishResultUnknownError):
+            await self._submit(page, result)
+
+        self.assertEqual(result["status"], "submission_unknown")
+
+    async def test_missing_content_id_is_result_unknown(self):
+        # 确认发表已经派发；没有 content_id 只能结果未知，不能当成未发布。
+        page = self._page(submit=_FakeResponse({"data": {"_id": "draft-1"}}))
+        result = {"manifest": {}, "style_check": {}}
+
+        with self.assertRaises(PublishResultUnknownError) as caught:
+            await self._submit(page, result)
+
+        self.assertIn("content_id", str(caught.exception))
+        self.assertIn("勿重复提交", str(caught.exception))
+        self.assertEqual(result["status"], "submission_unknown")
+
+    async def test_valid_submit_response_still_returns_normally(self):
+        page = self._page(
+            submit=_FakeResponse({"data": {"content_id": "cid-1", "_id": "draft-1"}})
+        )
+        result = {"manifest": {}, "style_check": {}}
+
+        await self._submit(page, result)
+
+        self.assertEqual(result["content_id"], "cid-1")
+        self.assertEqual(result["status"], "submitted")
+        self.assertTrue(result["success"])
+
+    async def test_post_submit_readback_failure_keeps_successful_result(self):
+        # content_id 已确认；定时列表回读失败只能标记未核验，不能退出 1。
+        for error in (TimeoutError("查询超时"), RuntimeError("标题不一致")):
+            with self.subTest(error=type(error).__name__):
+                page = self._page(
+                    submit=_FakeResponse(
+                        {"data": {"content_id": "cid-1", "_id": "draft-1"}}
+                    )
+                )
+                result = {
+                    "manifest": {},
+                    "style_check": {},
+                    "schedule": "2027-01-01T10:30:00+08:00",
+                }
+
+                with patch(
+                    "uploader.dayu_uploader.publication.wait_dayu_publication",
+                    new=AsyncMock(side_effect=error),
+                ):
+                    await self._submit(page, result)
+
+                self.assertTrue(result["success"])
+                self.assertEqual(result["content_id"], "cid-1")
+                self.assertEqual(result["status"], "scheduled")
+                self.assertFalse(result["schedule_verified"])
+
+    async def test_pre_dispatch_preview_failure_still_propagates(self):
+        # 预览响应在不可逆的确认发表之前：普通失败仍然退出 1。
+        page = self._page(preview=_FakeResponse({"error": "rejected"}))
+        result = {"manifest": {}, "style_check": {}}
+
+        with self.assertRaises(RuntimeError) as caught:
+            await self._submit(page, result)
+
+        self.assertNotIsInstance(caught.exception, PublishResultUnknownError)
+        self.assertIn("未返回草稿 ID", str(caught.exception))
+        self.assertNotEqual(result.get("status"), "submission_unknown")
 
 
 class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
@@ -172,7 +453,7 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
                 json={"error": "submission rejected"}))
             await page.goto("https://mp.dayu.com/test-page")
             rejected = {"success": False}
-            with self.assertRaisesRegex(RuntimeError, "未返回 content_id"):
+            with self.assertRaisesRegex(PublishResultUnknownError, "未返回 content_id"):
                 await submit_dayu_publication(page, rejected, path)
             self.assertFalse(rejected["success"])
             self.assertEqual(rejected["status"], "submission_unknown")
@@ -192,16 +473,20 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
                         )
                         if scenario == "query_timeout":
                             query.side_effect = TimeoutError("查询超时")
-                        if scenario == "scheduled":
+                        if scenario in {"scheduled", "query_timeout"}:
                             await submit_dayu_publication(page, timed, path)
+                            self.assertTrue(timed["success"])
                             self.assertEqual(timed["status"], "scheduled")
-                            self.assertTrue(timed["schedule_verified"])
-                            self.assertEqual(
-                                query.call_args.kwargs["target"],
-                                datetime.fromisoformat(timed["schedule"]),
-                            )
+                            if scenario == "scheduled":
+                                self.assertTrue(timed["schedule_verified"])
+                                self.assertEqual(
+                                    query.call_args.kwargs["target"],
+                                    datetime.fromisoformat(timed["schedule"]),
+                                )
+                            else:
+                                self.assertFalse(timed["schedule_verified"])
                         else:
-                            with self.assertRaisesRegex((RuntimeError, TimeoutError), "不一致|查询超时"):
+                            with self.assertRaisesRegex(RuntimeError, "不一致"):
                                 await submit_dayu_publication(page, timed, path)
                             self.assertFalse(timed["success"])
                         count = "0" if scenario == "wrong_time" else "1"
@@ -210,7 +495,8 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(saved["origin_id"], "b" * 32)
                         if scenario == "query_timeout":
                             self.assertEqual(saved["content_id"], "123")
-                            self.assertEqual(saved["status"], "submission_unknown")
+                            self.assertEqual(saved["status"], "scheduled")
+                            self.assertFalse(saved["schedule_verified"])
 
     async def test_theme_conversion_preserves_all_theme_content_images_and_colors(self):
         page = await self.browser.new_page()

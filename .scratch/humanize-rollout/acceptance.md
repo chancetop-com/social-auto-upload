@@ -1,0 +1,127 @@
+# 人类化交互层 — 真机验收记录
+
+> **验证范围**：唯一验证过的模式是**本地模式**。托管模式（Multilogin X / AdsPower）
+> 未验证；本文件不记录、也不推断托管模式行为。
+
+验收口径（规格 §6.4）：
+
+- **只验本地模式**；托管模式（Multilogin X / AdsPower）一律「未验证」。
+- 一律 `--no-publish` 干跑：素材、配文/话题、封面、声明、定时、选项、读回全部照跑，
+  **停在发布按钮 / Share 就绪前，不点真实发布、不上真实帖子**。
+- 因此**发布点击本身不在本轮验收范围**（规格 §9-28）；发布按钮的 `Humanizer.click`、
+  `before_submit` 与提交后行为只由离线测试 + 小红书既有真机证据背书。
+- 就绪超时（退出 `1`）视为失败，必须记录目标与 reason。
+- 预算上限 15 分钟（900s）；下表墙钟为整条命令耗时。
+
+## 小红书（回归 · 参照实现）
+
+2026-11-12 · 账号 `180`（`cookies/xiaohongshu_180.json`）· 本地模式 · `--headed` · `--debug`
+
+| # | 发布类型 | 触碰字段（小红书既有链路；本平台是参照实现，不引规格 §3 行号） | HUMANIZE=1 墙钟 | HUMANIZE=0 墙钟 | 差值 | 预算消耗 | 停止点 / 就绪证据 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 视频 | 标题、正文、话题×2、封面（缩略图 + hover 入口）、内容类型「自主拍摄」、定时（C1/C2/C3）、ARM | 56s | 54s（run 4） | +2s | 56/900 ≈ 6% | `🧪 ARM 就绪，--no-publish 停在发布按钮前（未点击发布）`，exit 0 | pass（1 处非阻断降级，见下） |
+| 2 | 视频（复跑） | 同上（内容类型「自主拍摄」成功写入） | 72s | — | — | 72/900 ≈ 8% | 同上，exit 0 | pass |
+| 3 | 图文 | 图片×2、标题、正文、话题×2、定时（C1/C2/C3）、ARM | 31s | — | — | 31/900 ≈ 3% | 同上，exit 0 | pass |
+| 4 | 视频（H0 基线） | 同 run 1 | — | 54s | 基准 | 54/900 ≈ 6% | 同上，exit 0 | pass |
+
+观察项：
+
+1. **内容类型「自主拍摄」偶发 `point-drift`**（run 1，非阻断：声明步骤按既有契约 warning
+   降级，流程继续到 ARM；run 2 同一路径成功）。`point-drift` 来自 `Humanizer.click`
+   既有的 ±1px 容差，不是 ticket 01 的共享层修复引入；规格 §2.5.1 的处置是「接受，
+   真机出现就在**调用点**先 `Humanizer.hover()`」，属后续平台提交，不是回滚共享层。
+   另注：该路径在 ticket 01 之前（11:27 日志）也失败过，当时是 `ambiguous:3`（选择器问题）。
+2. **`--original` 目前不可用（账号/平台态，不是人类化回归）**：`div.original-wrapper
+   .d-switch` 在视频发布页持续报 `disabled`（2026-11-12 23:28 复核可复现）。
+   对照实验：`HUMANIZE=0` 走原生 `locator.click()` 同样等不到 enabled（30s 超时），
+   证明与人类化层无关。因此本轮视频验收不带 `--original`；原创声明链路的真机证据仍以
+   2026-11-12 01:01 的既有记录为准。
+3. 未出现 `covered-by:*`、`zero-box`、`no-bounding-box`；定时 C1/C2/C3 三段读回在 run 1/2/3/4
+   均命中（开关 + 日期输入解析）。
+4. 四支干跑均未出现验证码 / 滑块 / 限流提示；H1 与 H0 差值很小，是因为小红书字段短、
+   点击少（人类化成本主要由逐字输入与点击次数决定）。
+5. 图文与复跑没有单独跑 H0：§2.3 的「开启/关闭两条路径」由视频 run 1 vs run 4 覆盖，
+   两条路径都到达 ARM 就绪。
+4. 所有失败/成功日志留档：`.local/acceptance/humanize/xhs-*.log`（本机，未入库）。
+
+结论：ticket 01 的共享层修复（几何可见性谓词）在小红书正路上**无回归**；不触发回滚。
+
+## Instagram（W1）
+
+2026-11-13 · 账号 `luke`（`cookies/instagram_luke.json`）· 本地模式 · `--headed` · `--debug`
+
+| # | 发布类型 | 触碰字段 | 墙钟 | 预算消耗 | 停止点 / 就绪证据 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 视频（Reel） | 配文（标题+正文+话题）、封面、地点、关闭评论、AI 标识、Share 就绪 | 63s（H1） | 63/900 ≈ 7% | `Instagram 发布就绪，--no-publish 停在 Share 前（未点击发布）`，exit 0，`status=prepared` | pass |
+| 2 | 视频（Reel） | 同上（H0 基线） | 42s（H0） | 42/900 ≈ 5% | 同上 | pass |
+| 3 | 图文 carousel | 2 图、配文 1080 码点（>1000 bulk）、alt text ×2、地点、评论、AI、Share 就绪 | 64s（H1） | 64/900 ≈ 7% | 同上 | pass |
+| 4 | 图文 carousel | 同上（H0 基线） | 44s（H0） | 44/900 ≈ 5% | 同上 | pass |
+
+双基线：视频 H1 63s / H0 42s（+21s）；carousel H1 64s / H0 44s（+20s）。
+`--result` 状态均为 `prepared`，未写 `content_id` / `post_url`；未出现验证码 / 滑块 / 限流提示。
+
+真机暴露并已修复的四处（全部在 Instagram 平台层，未改共享层，未回滚 02）：
+
+1. 首页导航栏 hover 展开 → 导航点击 `point-drift`：`_click_nav` 先 `hover` 再 `click`（§2.5.1）。
+2. 逐字输入话题后 hashtag 联想浮层、地点联想浮层盖住右侧选项面板 → 选项点击 `covered-by:button._acmx`：
+   配文回读后与地点选中后各点一次弹窗标题栏（`role=heading`）关闭浮层。
+3. Lexical 把换行渲染成 `<br>`，`textContent` 读不到换行 → 配文回读改用 `innerText()`（有界轮询）。
+4. `role=switch` 原生 input 为 `opacity:0` → 改点其可见父容器（§2.6），回读仍在 input 上。
+
+以上四条均有离线回归测试；发布点击本身仍未验（§9-28）。
+
+## TikTok（W1）
+
+2026-11-13 · 账号 `lukechen`（`cookies/tiktok_lukechen.json`）· 本地模式 · `--headed` · `--debug`
+
+| # | 发布类型 | 触碰字段 | 墙钟 | 预算消耗 | 停止点 / 就绪证据 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 视频（`--schedule` + 封面 + 隐私 + 关闭评论 + AIGC） | 标题/话题、封面编辑/上传/保存、隐私 friends、关闭评论、AIGC 开关 + Turn on 弹窗、定时日期/时间、发布就绪 | 83s（H1） | 83/900 ≈ 9% | `TikTok 发布就绪，--no-publish 停在发布按钮前（未点击发布）`，exit 0 | pass |
+| 2 | 视频（同上，H0 基线） | 同上 | 100s（H0） | 100/900 ≈ 11% | 同上 | pass |
+| 3 | 图文（2 图，1000 码点正文逐字） | 标题/正文/话题、隐私、评论、AIGC、定时、发布就绪 | 234s（H1） | 234/900 ≈ 26% | 同上 | pass |
+| 4 | 图文（2 图，1100 码点正文 bulk） | 同上 | 67s（H1） | 67/900 ≈ 7% | 同上 | pass |
+| 5 | 图文（2 图，1100 码点正文 bulk，H0 基线） | 同上 | 99s（H0） | 99/900 ≈ 11% | 同上 | pass |
+
+双基线（同素材，墙钟受上传/转码波动影响）：
+
+- 视频：H1 83s / H0 100s。两次上传与转码耗时不同，差值不构成人类化成本结论。
+- 图文 1100 码点（bulk）：H1 67s / H0 99s；上传波动主导。
+- 图文 1000 码点（逐字）：H1 234s（≈136s 为逐字键入），H0 无同内容对照；按 1100 码点 bulk 的 H0 99s 作上界参考，逐字成本 ≈2.3 分钟。
+- 预算消耗最高 26%（1000 码点逐字），未触发裁剪 warning。
+
+选项状态与设置一致：隐私 `friends`、评论关闭、AIGC 开启（视频）、定时时间设置成功。
+`>1000` 码点一次 `insert_text`（日志 `type_text→bulk insert_text, chars=1100`），读回一致；
+未出现旧文案残留。未观察到验证码 / 滑块 / 限流提示。发布点击本身仍未验（§9-28）。
+
+真机暴露并已修复：
+
+1. 选项控件（隐私/AIGC 等）hover 变形 → `point-drift`：`_humanized_click` 先 hover 再 click。
+2. AIGC 首启 `Turn on` 弹窗按钮同样漂移 → 全模块 24 处 `humanizer.click` 统一收敛到
+   `_humanized_click`（hover → click），原生点击/2FA/hidden file 路径不变。
+3. 定时时间必须是 5 分钟整数倍；`only-me` 会禁用定时（改用 `friends`）——这两条是平台约束，
+   不是人类化缺陷，已写入本节供运营参考。
+
+## 未验证平台
+
+以下平台没有真机环境，只有离线测试（`tests/test_<platform>_humanize.py`）；一律按
+「未验证」处理，不得在报告或 Changelog 中写成「已支持」。
+
+| 平台 | 状态 | 离线测试文件 | 备注 |
+| --- | --- | --- | --- |
+| YouTube | 未验证（无真机环境） | `tests/test_youtube_humanize.py` | `ytcp-*` 是否 native shadow DOM、`#` 候选结构未在真机确认（§9-2 / §9-9） |
+| Facebook 个人主页 | 未验证（无真机环境） | `tests/test_facebook_humanize.py` | 正文 contenteditable 逐字；删除/管理点击保持原生 |
+| Facebook Page | 未验证（无真机环境） | `tests/test_facebook_page_humanize.py` | 发布按钮 hover 变形幅度未在真机确认（§9-5） |
+| 抖音 | 未验证（无真机环境） | `tests/test_douyin_humanize.py` | 53 个交互点；已删 `_native_click`；2FA 两处保留 `force`；自定义组件/日期控件未真机确认（§9-6 / §9-10 / §9-22） |
+| 微博 | 未验证（无真机环境） | `tests/test_weibo_humanize.py` | 首页 + popup 双 page 各一实例；空 `div` 覆盖与发布落点未真机确认（§9-8） |
+| 知乎 | 未验证（无真机环境） | `tests/test_zhihu_humanize.py` | 领域下拉虚拟滚动是否让 `count()==0` 未真机确认（§9-7） |
+| 大鱼号 | 未验证（无真机环境） | `tests/test_dayu_humanize.py` | 正文在 iframe 内；标题/正文预填未知（§9-17 / §9-18） |
+| 视频号 | 未验证（无真机环境） | `tests/test_tencent_humanize.py` | 描述预填与日期时间控件未真机确认（§9-19 / §9-22） |
+| 快手 | 未验证（无真机环境） | `tests/test_kuaishou_humanize.py` | antd 下拉、封面无文本 `div` 命中区、Joyride 引导层未真机确认（§9-7 / §9-24） |
+| 支付宝生活号 | 未验证（无真机环境） | `tests/test_alipay_humanize.py` | 合集下拉收窄后的合并坐标点击未真机确认 |
+| 百家号 | 未验证（无真机环境） | `tests/test_baijiahao_humanize.py` | `.cheetah-select` 候选文本能否全等未真机确认（§9-11） |
+| 虎扑 | 未验证（无真机环境） | `tests/test_hupu_humanize.py` | 专区四击、AI 声明下拉未真机确认 |
+| 雪球 | 未验证（无真机环境） | `tests/test_xueqiu_humanize.py` | 工具栏传图、封面裁剪确认未真机验证 |
+
+> 计数口径：本表 **13 行**，按「独立离线测试文件 + 独立 CLI 平台名」分行。规格 §6.4
+> 与 §9 的「12 个平台」把 Facebook 个人主页与 Facebook Page 计为一个 Facebook 家族；
+> 两者有各自的 Skill、CLI 平台名与测试文件，故在此分行列出，不合并。

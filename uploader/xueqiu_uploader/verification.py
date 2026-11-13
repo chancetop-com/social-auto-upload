@@ -56,7 +56,7 @@ async def query_xueqiu_article(page, identity, content_id, title=None, visibilit
     async with page.expect_response(lambda response: response.request.method == "GET"
                                     and urlsplit(response.url).path == "/xq/query/v1/search/long",
                                     timeout=30000) as listing:
-        await page.get_by_role("link", name="内容管理", exact=True).click()
+        await page.get_by_role("link", name="内容管理", exact=True).click()  # native-click: read；发布后只读核对入口，不改内容也不提交
     response = await listing.value
     payload = await response.json()
     # 实测列表有 page/maxPage/list；后续页沿用该请求的认证头，不输出任何认证值。

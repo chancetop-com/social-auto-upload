@@ -9,7 +9,7 @@ from datetime import datetime
 # ``main.py`` (Firefox) intentionally stays on upstream Playwright and is not
 # wired into the CLI.
 from patchright.async_api import Error as PlaywrightError
-from patchright.async_api import Playwright, async_playwright
+from patchright.async_api import Locator, Playwright, async_playwright
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 import os
 import asyncio
@@ -40,6 +40,10 @@ from utils.browser_session import BrowserSession
 from uploader.tk_uploader.schedule import prepare_schedule
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.files_times import get_absolute_path
+from utils.humanize import DEFAULT_PROFILE
+from utils.humanize import MAYBE_DISPATCHED
+from utils.humanize import MAYBE_DISPATCHED_VALUE
+from utils.humanize import Humanizer
 from utils.log import tiktok_logger
 
 # Multilogin deployment prerequisite: the Profile UI must already be English
@@ -70,6 +74,10 @@ TIKTOK_DRY_RUN_READY_MESSAGE = (
     "TikTok 发布就绪，--no-publish 停在发布按钮前（未点击发布）"
 )
 
+#: 发布点击循环的硬上限：预算之外的第二道闸。正常路径由 15 分钟预算终止；
+#: 结果轮询的硬上限：只在 sleep 被吞掉（测试替身）时兜底，避免全速空转。
+TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS = 2000
+
 # ---------------------------------------------------------------------------
 # Ordered selector candidates (spec §5.5)
 #
@@ -83,6 +91,13 @@ TIKTOK_DRY_RUN_READY_MESSAGE = (
 # fallback so it can never reach the main video upload input.
 COVER_EDITOR_SCOPE_SELECTOR = "xpath=ancestor::*[.//input[@type='file']][1]"
 _COVER_PREVIEW_TIMEOUT_MS = 10_000
+#: Short, read-only probe for an already-attached cover image input.  The tab
+#: click (and its consumed file chooser) is the fallback, never the first move.
+_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
+#: Bound for the tab click's file-chooser event, and the settle that lets the
+#: click reveal the input when no chooser arrives.
+_COVER_CHOOSER_TIMEOUT_MS = 10_000
+_COVER_TAB_SETTLE_MS = 1_500
 
 _COVER_EDIT_CANDIDATES = (
     ('get_by_text("Edit cover", exact=True)',
@@ -124,6 +139,57 @@ _AIGC_TURN_ON_CANDIDATES = (
      )),
 )
 _AIGC_DIALOG_TIMEOUT_MS = 5_000
+
+
+def _maybe_dispatched(exc: BaseException) -> bool:
+    """Whether a click may already have reached the page (spec §2.1)."""
+    return getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE
+
+
+def _offline_humanizer() -> Humanizer:
+    """Fast-path humanizer for controls built without a page (test seams).
+
+    Production always passes the page-backed instance; this branch exists only
+    so a control constructed directly in an offline test can still be
+    activated without emitting an unmarked native ``click``.
+
+    Disabling goes through the documented profile rule (a derived
+    ``DEFAULT_PROFILE``), never a post-construction ``enabled = False``:
+    ``Humanizer`` snapshots ``enabled`` in ``__init__``.
+    """
+    return Humanizer(None, profile=replace(DEFAULT_PROFILE, enabled=False))
+
+
+async def _humanized_click(humanizer: Humanizer | None, target) -> None:
+    """The module's only click entry: hover the target, then click it (§2.5.1).
+
+    TikTok Studio animates/hover-expands most controls (option rows, dialogs,
+    date pickers, the cover editor, tabs), so this is the platform-wide policy,
+    not just the option adapters.
+
+    Two 2026-11-13 real-device ``--no-publish`` runs failed inside
+    ``Humanizer.click`` with ``ElementUnusableError(reason="point-drift")``:
+    first on the first option applied (privacy), then on the AIGC first-run
+    dialog's ``Turn on`` button.  Hovering the call site's target first settles
+    the pointer before the click's own move/stillOn check.  The click primitive
+    keeps zero retries and its ±1px tolerance; the fast path still passes
+    ``hover`` through to ``locator.hover()``.
+    """
+    if humanizer is None:
+        humanizer = _offline_humanizer()
+    await humanizer.hover(target)
+    await humanizer.click(target)
+
+
+async def _label_body(target):
+    """Click the wrapping label (the real pointer target) when one exists."""
+    try:
+        query = target.locator("xpath=ancestor-or-self::label[1]")
+        if await query.count():
+            return query.first
+    except Exception:
+        pass
+    return target
 
 
 def _find_scheduled_row_marker(
@@ -211,6 +277,31 @@ async def _resolve_candidate(
     return locator
 
 
+async def _probe_cover_file_input(scope, candidates):
+    """Return the cover image input when it is already attached, else ``None``.
+
+    Read-only by design: it never clicks the upload tab, because that click
+    opens a real OS file chooser that then lingers while ``set_input_files``
+    injects the file (XHS precedent, bbc5361).  Candidates are tried in order,
+    so a later-scoped selector still proves the input is attached.
+    """
+    found = await _find_candidate(scope, candidates)
+    if found is None:
+        return None
+    locator, index, description = found
+    try:
+        await locator.wait_for(
+            state="attached", timeout=_COVER_INPUT_PROBE_TIMEOUT_MS
+        )
+    except Exception:
+        return None
+    tiktok_logger.info(
+        "[+] cover probe cover file: Upload cover file input candidate "
+        f"{index + 1}/{len(candidates)} matched ({description})"
+    )
+    return locator
+
+
 _PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "TikTok 发布结果未知：发布点击已发出，但未观察到成功页，"
     "也未命中登录/验证码跳转；帖子可能已经发布。\n"
@@ -256,6 +347,12 @@ def _confirmation_names(publish_date) -> tuple[str, ...]:
 
 _CONFIRMATION_DIALOG_SELECTORS = ('[role="dialog"]', '.TUXModal')
 _COVER_EDITOR_CLOSE_TIMEOUT_MS = 10_000
+
+# Appended to the login-required text only when the publish click was already
+# dispatched: retrying then can duplicate the post (mirror of XHS §4 wording).
+_TIKTOK_PUBLISH_ATTEMPTED_SUFFIX = (
+    "发布点击已发出：请先在作品列表核对是否已发布，再决定是否重试。"
+)
 
 # Video file chooser entry, in spec §5.2 step 2 order.
 _VIDEO_FILE_WAIT_MS = 30_000
@@ -368,9 +465,16 @@ class TiktokOptionControl:
 class _LocatorControl(TiktokOptionControl):
     """Checkbox/option adapter over a Patchright locator."""
 
-    def __init__(self, locator, *, candidates: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        locator,
+        *,
+        candidates: tuple[str, ...] = (),
+        humanizer: Humanizer | None = None,
+    ) -> None:
         self._locator = locator
         self.candidates = candidates
+        self._humanizer = humanizer
 
     async def _target(self):
         """Return the first visible element of a possibly-multi locator.
@@ -454,13 +558,11 @@ class _LocatorControl(TiktokOptionControl):
             return True
 
     async def click(self) -> None:
-        target = await self._target()
-        try:
-            # Don't wait the full 30s for a styled label whose icon intercepts
-            # the native input; force after a short attempt.
-            await target.click(timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS)
-        except Exception:
-            await target.click(force=True)
+        # Click the label body, never the often-invisible native checkbox.
+        # The old ``force=True`` retry is gone: a stillOn failure is a hard
+        # error, not a reason to dispatch a synthetic click.
+        target = await _label_body(await self._target())
+        await _humanized_click(self._humanizer, target)
 
     async def get_attribute(self, name: str) -> str | None:
         target = await self._target()
@@ -484,11 +586,13 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         *,
         candidates: tuple[str, ...] = (),
         fallback_scope=None,
+        humanizer: Humanizer | None = None,
     ) -> None:
         self._trigger = trigger
         self._option_scope = option_scope
         self._fallback_scope = fallback_scope
         self.candidates = candidates
+        self._humanizer = humanizer
 
     async def _target(self):
         """First visible trigger of a possibly-multi locator."""
@@ -537,8 +641,7 @@ class _LocatorPrivacyControl(TiktokOptionControl):
             return True
 
     async def click(self) -> None:
-        target = await self._target()
-        await target.click()
+        await _humanized_click(self._humanizer, await self._target())
 
     async def get_attribute(self, name: str) -> str | None:
         target = await self._target()
@@ -557,7 +660,10 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         if count == 0 and self._fallback_scope is not None:
             locator = self._fallback_scope.locator('[role="option"]')
             count = await locator.count()
-        return [_LocatorControl(locator.nth(i)) for i in range(count)]
+        return [
+            _LocatorControl(locator.nth(i), humanizer=self._humanizer)
+            for i in range(count)
+        ]
 
     async def count(self) -> int:
         return await self._trigger.count()
@@ -671,7 +777,7 @@ async def _set_toggle_option(
             control=control,
             url=url,
         )
-    await control.click()
+    await control.click()  # native-click: manage；控件底座内部走 Humanizer
     actual = await _guarded_state(
         _read_toggle_state,
         control,
@@ -719,7 +825,7 @@ async def _set_switch_option(
             control=control,
             url=url,
         )
-    await control.click()
+    await control.click()  # native-click: manage；控件底座内部走 Humanizer
     actual = await _guarded_state(
         _read_switch_state,
         control,
@@ -757,7 +863,7 @@ async def _set_privacy_option(
             url=url,
         )
 
-    await control.click()
+    await control.click()  # native-click: manage；控件底座内部走 Humanizer
     matched: TiktokOptionControl | None = None
     for option in await control.options():
         if normalize_privacy_label(await option.read_text()) == requested:
@@ -787,7 +893,7 @@ async def _set_privacy_option(
             url=url,
         )
 
-    await matched.click()
+    await matched.click()  # native-click: manage；控件底座内部走 Humanizer
     actual_label = await control.read_text()
     if normalize_privacy_label(actual_label) != requested:
         raise _option_error(
@@ -800,20 +906,28 @@ async def _set_privacy_option(
         )
 
 
-def _raise_if_login_required(page) -> None:
+def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this.  Local mode keeps its historical
-    retry-until-timeout behaviour.
+    Only the Multilogin branch calls this. Local mode keeps its historical
+    retry-until-timeout behaviour. ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched, so exit 10
+    never claims "not published" and the text never invites a blind retry.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
         return
     path = url.split("?", 1)[0]
     if any(marker in path for marker in _LOGIN_URL_MARKERS):
-        raise LoginRequiredError(
+        message = (
             "TikTok 上传过程中需要重新登录（登录页/验证码/二次验证）："
             "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+        if publish_attempted:
+            message += _TIKTOK_PUBLISH_ATTEMPTED_SUFFIX
+        raise LoginRequiredError(
+            message,
+            publish_attempted=publish_attempted,
         )
 
 
@@ -1133,6 +1247,35 @@ class TiktokBaseUploader(BaseVideoUploader):
             budget.deadline = deadline
         return budget
 
+    def _humanizer(self, page) -> Humanizer:
+        """One instance per page: pointer position and RNG stay continuous.
+
+        ``locator_base`` may be a ``frame_locator``; the humanizer always gets
+        the real ``page`` because pointer coordinates are page-level.
+        """
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """Clamp humanized pauses to the publish budget; never raise here."""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            tiktok_logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
+    def _option_humanizer(self) -> Humanizer | None:
+        """Humanizer for option controls; ``None`` on the offline test seam."""
+        page = getattr(self, "_option_page", None)
+        return self._humanizer(page) if page is not None else None
+
     def media_label(self) -> str:
         """Human label used by the upload log; the video text is unchanged."""
         return f"{self.title}.mp4"
@@ -1188,8 +1331,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 await self._upload_on_page(
                     page, multilogin=False, budget=budget
                 )
-                await context.storage_state(path=f"{self.account_file}")
-                tiktok_logger.info('  [-] update cookie！')
+                try:
+                    await context.storage_state(path=f"{self.account_file}")
+                    tiktok_logger.info('  [-] update cookie！')
+                except Exception as error:
+                    tiktok_logger.warning(
+                        f"[+] TikTok cookie 保存失败（发布已成功，不影响结果）: {error}"
+                    )
                 await asyncio.sleep(2)
             finally:
                 await context.close()
@@ -1217,11 +1365,11 @@ class TiktokBaseUploader(BaseVideoUploader):
             ):
                 return
 
-            await page.locator('[data-e2e="nav-more-menu"]').click()
-            await page.locator('[data-e2e="language-select"]').click()
+            await page.locator('[data-e2e="nav-more-menu"]').click()  # native-click: language；界面语言初始化不是用户内容
+            await page.locator('[data-e2e="language-select"]').click()  # native-click: language；界面语言初始化不是用户内容
             await page.locator(
                 '#creator-tools-selection-menu-header >> text=English (US)'
-            ).click()
+            ).click()  # native-click: language；界面语言初始化不是用户内容
         except Exception as exc:
             tiktok_logger.warning(
                 f"[+] TikTok language switch skipped: {exc}"
@@ -1236,6 +1384,8 @@ class TiktokBaseUploader(BaseVideoUploader):
     ) -> None:
         # 1. open the upload page and pick the locator base
         await self.open_upload_page(page, multilogin=multilogin)
+        # Snapshot HUMANIZE at page creation; never read the env mid-run.
+        self._humanizer(page)
         # 2. attach the media file(s)
         await self.attach_media(page)
         # 3. fill the caption/title fields
@@ -1261,9 +1411,19 @@ class TiktokBaseUploader(BaseVideoUploader):
             page, deadline=budget, multilogin=multilogin
         )
         if multilogin:
-            _raise_if_login_required(page)
+            # The click already happened; a late redirect must not claim the
+            # post was untouched.
+            _raise_if_login_required(page, publish_attempted=True)
         # 9. read back the published item
-        self.last_item_id = await self.read_result(page)
+        # The publish click already succeeded; a missing link is only a bookkeeping
+        # failure and must never turn a confirmed publish into exit 1.
+        try:
+            self.last_item_id = await self.read_result(page)
+        except RuntimeError as error:
+            self.last_item_id = None
+            tiktok_logger.warning(
+                f"[+] TikTok 发布已确认，但作品链接读取失败；保留发布结果: {error}"
+            )
         tiktok_logger.success(self.result_label(self.last_item_id))
 
     async def open_upload_page(self, page, *, multilogin: bool) -> None:
@@ -1438,7 +1598,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 control=control,
                 url=url,
             )
-        await control.click()
+        await control.click()  # native-click: manage；控件底座内部走 Humanizer
         if requested:
             await self._confirm_aigc_turn_on(page)
         actual = await _guarded_state(
@@ -1476,8 +1636,9 @@ class TiktokBaseUploader(BaseVideoUploader):
             f"[+] TikTok options: aigc dialog candidate #{index} "
             f"({description}) matched"
         )
+        humanizer = self._humanizer(page)
         try:
-            await button.click()
+            await _humanized_click(humanizer, button)
             await button.wait_for(
                 state="detached", timeout=_AIGC_DIALOG_TIMEOUT_MS
             )
@@ -1535,6 +1696,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         options = self.options
         your_brand = options.your_brand is True
         branded_content = options.branded_content is True
+        self._option_page = page
 
         self._require_option_control(
             controls.brand_switch, "brand_switch", True, url
@@ -1609,6 +1771,19 @@ class TiktokBaseUploader(BaseVideoUploader):
             "aigc": options.aigc,
         }[name]
 
+    def _control(self, locator) -> _LocatorControl:
+        return _LocatorControl(locator, humanizer=self._option_humanizer())
+
+    def _privacy_control(
+        self, trigger, scope, *, fallback_scope=None
+    ) -> _LocatorPrivacyControl:
+        return _LocatorPrivacyControl(
+            trigger,
+            scope,
+            fallback_scope=fallback_scope,
+            humanizer=self._option_humanizer(),
+        )
+
     def _option_candidate_factories(self, name: str):
         """Ordered candidates per spec §5.5: data-e2e, role, then text."""
         base = self.locator_base
@@ -1620,14 +1795,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                 scope = base.locator(
                     'div[data-e2e="video_visibility_container"]'
                 )
-                return _LocatorPrivacyControl(
+                return self._privacy_control(
                     scope.locator('button[role="combobox"]'),
                     scope,
                     fallback_scope=base,
                 )
 
             def from_role():
-                return _LocatorPrivacyControl(
+                return self._privacy_control(
                     base.get_by_role("combobox"), base
                 )
 
@@ -1636,7 +1811,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     'xpath=//div[contains(text(), "Who can see this post")]'
                     '/following::button[@role="combobox"][1]'
                 )
-                return _LocatorPrivacyControl(trigger, base)
+                return self._privacy_control(trigger, base)
 
             return (
                 ("data-e2e=video_visibility_container", from_container),
@@ -1649,7 +1824,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             return (
                 (
                     "data-e2e=user_perm_container+role=Allow comments",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.get_by_role(
                             "checkbox", name="Allow comments"
                         )
@@ -1657,13 +1832,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 ),
                 (
                     "data-e2e=user_perm_container+role=Comment",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.get_by_role("checkbox", name="Comment")
                     ),
                 ),
                 (
                     "data-e2e=user_perm_container+label=Allow comments",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.locator(
                             'label:has-text("Allow comments")'
                         )
@@ -1671,7 +1846,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 ),
                 (
                     "data-e2e=user_perm_container+label=Comment",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.locator(
                             'label:has-text("Comment")'
                         )
@@ -1685,7 +1860,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             return (
                 (
                     "data-e2e=user_perm_container+role=Reuse of content",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.get_by_role(
                             "checkbox", name="Reuse of content"
                         )
@@ -1693,7 +1868,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 ),
                 (
                     "data-e2e=user_perm_container+label=Reuse of content",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.locator(
                             'label:has-text("Reuse of content")'
                         )
@@ -1701,7 +1876,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 ),
                 (
                     "data-e2e=user_perm_container+role=Allow reuse of content",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.get_by_role(
                             "checkbox", name="Allow reuse of content"
                         )
@@ -1709,7 +1884,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 ),
                 (
                     "data-e2e=user_perm_container+label=Allow reuse of content",
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         perm.locator(
                             'label:has-text("Allow reuse of content")'
                         )
@@ -1724,13 +1899,13 @@ class TiktokBaseUploader(BaseVideoUploader):
             return (
                 (
                     'data-e2e=aigc_container+.Switch__content',
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         aigc_container.locator('.Switch__content')
                     ),
                 ),
                 (
                     'data-e2e=aigc_container+role=switch',
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         aigc_container.locator('[role="switch"]')
                     ),
                 ),
@@ -1743,13 +1918,13 @@ class TiktokBaseUploader(BaseVideoUploader):
             return (
                 (
                     'data-e2e=disclose_content_container+.Switch__content',
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         disclose.locator('.Switch__content')
                     ),
                 ),
                 (
                     'data-e2e=disclose_content_container+role=switch',
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         disclose.locator('[role="switch"]')
                     ),
                 ),
@@ -1777,13 +1952,13 @@ class TiktokBaseUploader(BaseVideoUploader):
             return (
                 (
                     f'title-line "{label}" -> label',
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         base.locator(xpath_title_line)
                     ),
                 ),
                 (
                     f'span "{label}" -> preceding label',
-                    lambda: _LocatorControl(
+                    lambda: self._control(
                         base.locator(xpath_sibling)
                     ),
                 ),
@@ -1839,6 +2014,7 @@ class TiktokBaseUploader(BaseVideoUploader):
     async def _expand_advanced_settings(self, page) -> None:
         if self.locator_base is None:
             return
+        humanizer = self._humanizer(page)
         # Idempotent: a second call must not toggle "Show more" back closed.
         for selector in (
             '[data-e2e="user_perm_container"]',
@@ -1865,7 +2041,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     "Show more", exact=True
                 )
                 if await show_more.count():
-                    await show_more.first.click()
+                    await _humanized_click(humanizer, show_more.first)
                     await self._wait_for_settings_surface(page)
                     tiktok_logger.info(
                         "[+] expanded photo settings via Show more"
@@ -1881,7 +2057,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             if await more_btn.count():
                 text = (await more_btn.first.inner_text()).strip().casefold()
                 if collapsed or "show more" in text:
-                    await more_btn.first.click()
+                    await _humanized_click(humanizer, more_btn.first)
                     await self._wait_for_settings_surface(page)
                     return
         except Exception:
@@ -1890,7 +2066,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         show_more = container.get_by_text("Show more", exact=True)
         try:
             if await show_more.count():
-                await show_more.first.click()
+                await _humanized_click(humanizer, show_more.first)
                 await self._wait_for_settings_surface(page)
         except Exception:
             pass
@@ -1903,6 +2079,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         """
         resolved: dict[str, TiktokOptionControl] = {}
         missing: list[str] = []
+        self._option_page = page
         for name in self._requested_option_names():
             control = await self._resolve_single_control(name)
             if control is None:
@@ -1958,6 +2135,7 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         publish_date = await prepare_schedule(page, self.publish_date)
         scope = self.locator_base if self.locator_base is not None else page
+        humanizer = self._humanizer(page)
 
         # only-me can disable scheduling on private accounts; fail clearly
         # instead of retrying a disabled radio for tens of seconds.
@@ -2001,9 +2179,10 @@ class TiktokBaseUploader(BaseVideoUploader):
             ):
                 for target in (scope, page):
                     try:
-                        await target.locator(selector).first.click(force=True)
-                    except Exception:
-                        pass
+                        await _humanized_click(humanizer, target.locator(selector).first)
+                    except Exception as exc:
+                        if _maybe_dispatched(exc):
+                            raise
 
             # The first schedule on an account opens an Allow permission
             # modal; wait for either the date picker or that button.
@@ -2030,14 +2209,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                 if date_visible:
                     break
                 if allow_visible:
-                    await allow.first.click()
+                    await _humanized_click(humanizer, allow.first)
                 await page.wait_for_timeout(500)
             if await date_cb.count() and await date_cb.first.is_visible():
                 break
         await date_cb.first.wait_for(state="visible", timeout=10000)
 
         # Date picker: navigate months, then click the exact day.
-        await date_cb.first.click()
+        await _humanized_click(humanizer, date_cb.first)
         await page.wait_for_timeout(500)
         target_month = publish_date.strftime("%B")
         target_year = str(publish_date.year)
@@ -2057,13 +2236,15 @@ class TiktokBaseUploader(BaseVideoUploader):
                 publish_date.year,
                 publish_date.month,
             ):
-                await page.get_by_role(
-                    "button", name="Next month"
-                ).first.click()
+                await _humanized_click(
+                    humanizer,
+                    page.get_by_role("button", name="Next month").first,
+                )
             else:
-                await page.get_by_role(
-                    "button", name="Previous month"
-                ).first.click()
+                await _humanized_click(
+                    humanizer,
+                    page.get_by_role("button", name="Previous month").first,
+                )
             await page.wait_for_timeout(250)
 
         day_pattern = re.compile(
@@ -2072,7 +2253,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         day_button = page.get_by_role("button", name=day_pattern)
         if await day_button.count():
-            await day_button.first.click()
+            await _humanized_click(humanizer, day_button.first)
         else:
             days = page.locator(
                 '.DatePicker__day[data-outside="false"]:not([disabled])'
@@ -2082,7 +2263,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 if (await days.nth(index).inner_text()).strip() == str(
                     publish_date.day
                 ):
-                    await days.nth(index).click()
+                    await _humanized_click(humanizer, days.nth(index))
                     clicked = True
                     break
             if not clicked:
@@ -2091,18 +2272,19 @@ class TiktokBaseUploader(BaseVideoUploader):
                     f"{target_month} {publish_date.day}, {target_year}。"
                 )
         await page.wait_for_timeout(300)
-        await page.keyboard.press("Escape")
+        await humanizer.press("Escape")
 
         # Time picker: 5-minute granularity, matching the Studio picker.
         hour_str = publish_date.strftime("%H")
         minute_str = f"{(publish_date.minute // 5) * 5:02d}"
-        await page.get_by_role(
-            "combobox", name="Select time"
-        ).first.click()
+        await _humanized_click(
+            humanizer,
+            page.get_by_role("combobox", name="Select time").first,
+        )
         await page.wait_for_timeout(500)
         hour_option = page.get_by_role("option", name=f"Hours {hour_str}")
         if await hour_option.count():
-            await hour_option.first.click()
+            await _humanized_click(humanizer, hour_option.first)
         else:
             raise RuntimeError(
                 f"TikTok 定时设置失败：时间选择器中没有 {hour_str} 时。"
@@ -2111,7 +2293,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             "option", name=f"Minutes {minute_str}"
         )
         if await minute_option.count():
-            await minute_option.first.click()
+            await _humanized_click(humanizer, minute_option.first)
         else:
             minutes = page.locator(
                 '[aria-label="Minutes"] [role="option"]'
@@ -2119,7 +2301,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             clicked = False
             for index in range(await minutes.count()):
                 if (await minutes.nth(index).inner_text()).strip() == minute_str:
-                    await minutes.nth(index).click()
+                    await _humanized_click(humanizer, minutes.nth(index))
                     clicked = True
                     break
             if not clicked:
@@ -2128,7 +2310,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     f"{minute_str} 分。"
                 )
         await page.wait_for_timeout(300)
-        await page.keyboard.press("Escape")
+        await humanizer.press("Escape")
 
         # Verify the picker values, not just the clicks.
         values = page.locator(
@@ -2254,7 +2436,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                     if await button.count():
                         await button.first.click(
                             timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
-                        )
+                        )  # native-click: chrome；首次运行的 automatic content checks 弹窗不是用户内容
                         try:
                             await dialog.wait_for(
                                 state="detached", timeout=5_000
@@ -2277,7 +2459,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 target = overlay if await overlay.count() else joyride
                 await target.first.click(
                     timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
-                )
+                )  # native-click: chrome；react-joyride 引导遮罩不是用户控件
                 try:
                     await joyride.wait_for(state="detached", timeout=5_000)
                 except Exception:
@@ -2288,15 +2470,17 @@ class TiktokBaseUploader(BaseVideoUploader):
 
     async def _click_editor(self, page, editor_locator) -> None:
         """Click the caption editor, clearing first-run overlays as they appear."""
+        humanizer = self._humanizer(page)
         last_exc = None
         for _ in range(8):
             await self.dismiss_blocking_overlays(page)
             try:
-                await editor_locator.click(
-                    timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
-                )
+                await _humanized_click(humanizer, editor_locator)
                 return
             except Exception as exc:
+                # ``mouse.down`` already happened: never dispatch a second time.
+                if _maybe_dispatched(exc):
+                    raise
                 last_exc = exc
                 await page.wait_for_timeout(1000)
         if last_exc is not None:
@@ -2319,7 +2503,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 return
             await page.wait_for_timeout(100)
 
-    async def _apply_hashtag(self, page, tag: str) -> bool:
+    async def _apply_hashtag(
+        self, page, tag: str, *, humanizer: Humanizer | None = None
+    ) -> bool:
         """Insert ``#tag`` as a real hashtag entity, like native selection.
 
         Typing ``#tag`` and pressing **Space** leaves plain text (no
@@ -2329,6 +2515,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         accepted: picking the first item blindly could replace the user's tag
         with a different one.
         """
+        humanizer = humanizer or self._humanizer(page)
         wanted = f"#{tag}".casefold()
         scopes = []
         if self.locator_base is not None:
@@ -2336,11 +2523,13 @@ class TiktokBaseUploader(BaseVideoUploader):
         if not any(scope is page for scope in scopes):
             scopes.append(page)
 
-        await page.keyboard.insert_text("#" + tag)
+        # Character by character: the dropdown reacts to real key events.
+        await humanizer.type_text("#" + tag)
         deadline = (
             time.monotonic() + TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS / 1000
         )
         settle_deadline = None
+        suggestion_failed = False
         while True:
             rendered = False
             for scope in scopes:
@@ -2377,26 +2566,31 @@ class TiktokBaseUploader(BaseVideoUploader):
                         if selected:
                             # The typed tag is already the focused suggestion;
                             # Enter accepts it without viewport/overlay issues.
-                            await page.keyboard.press("Enter")
+                            await humanizer.press("Enter")
                         else:
                             try:
-                                await option.click(
-                                    timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS
+                                await _humanized_click(humanizer, option)
+                            except Exception as exc:
+                                # Keep the plain text and fire the association
+                                # suggestion instead of aborting the publish.
+                                # A click that may have been dispatched is
+                                # never retried (the loop exits below).
+                                tiktok_logger.warning(
+                                    f"  [-] tag #{tag} suggestion click failed: {exc}"
                                 )
-                            except Exception:
-                                try:
-                                    await option.click(force=True)
-                                except Exception:
-                                    await option.evaluate(
-                                        "el => el.click()"
-                                    )
+                                suggestion_failed = True
+                                break
                         await page.wait_for_timeout(300)
                         tiktok_logger.info(
                             f"  [-] tag #{tag} inserted as hashtag entity"
                         )
                         await self._wait_for_no_options(scopes, page)
                         return True
+                if suggestion_failed:
+                    break
 
+            if suggestion_failed:
+                break
             now = time.monotonic()
             if rendered and settle_deadline is None:
                 # Let a partially rendered list settle before giving up, but
@@ -2410,13 +2604,12 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         # No exact suggestion: one Space is enough for a plain-text tag (the
         # old insert/space/backspace dance only produced the same result).
-        await page.keyboard.press("Space")
+        await humanizer.press("Space")
         await page.wait_for_timeout(300)
         tiktok_logger.info(
             f"  [-] tag #{tag} inserted as plain text (no exact suggestion)"
         )
         return False
-
 
     async def fill_caption(self, page, text, tags, *, editor=None) -> None:
 
@@ -2425,33 +2618,34 @@ class TiktokBaseUploader(BaseVideoUploader):
             if editor is not None
             else self.locator_base.locator('div.public-DraftEditor-content')
         )
+        humanizer = self._humanizer(page)
         await self._click_editor(page, editor_locator)
 
-        await page.keyboard.press("End")
+        await humanizer.press("End")
 
         # Playwright maps ControlOrMeta to Cmd on macOS and Ctrl elsewhere;
         # Control+A alone leaves the old caption on macOS.
-        await page.keyboard.press("ControlOrMeta+A")
+        await humanizer.press("ControlOrMeta+A")
 
-        await page.keyboard.press("Delete")
+        await humanizer.press("Delete")
 
-        await page.keyboard.press("End")
+        await humanizer.press("End")
 
         await page.wait_for_timeout(1000)  # 等待1秒
 
-        await page.keyboard.insert_text(text)
+        await humanizer.type_text(text)
         await page.wait_for_timeout(1000)  # 等待1秒
-        await page.keyboard.press("End")
+        await humanizer.press("End")
 
-        await page.keyboard.press("Enter")
+        await humanizer.press("Enter")
 
         # tag part
         for index, tag in enumerate(tags, start=1):
             tiktok_logger.info("Setting the %s tag" % index)
-            await page.keyboard.press("End")
+            await humanizer.press("End")
             await page.wait_for_timeout(300)
-            await self._apply_hashtag(page, tag)
-            await page.keyboard.press("End")
+            await self._apply_hashtag(page, tag, humanizer=humanizer)
+            await humanizer.press("End")
 
     async def wait_publish_ready(
         self,
@@ -2459,7 +2653,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         *,
         deadline: float | PublishTimeoutBudget | None = None,
         multilogin: bool = False,
-    ) -> None:
+    ) -> "Locator | None":
         """Wait until the publish button is present and enabled; never clicks.
 
         ``--no-publish`` uses this to stop at the publish-ready point.  The
@@ -2467,6 +2661,10 @@ class TiktokBaseUploader(BaseVideoUploader):
         ``--not-before``: the dry run skips that wait entirely.  On timeout the
         error is a plain ``RuntimeError`` (exit 1) because no click was sent,
         so the post was definitely not published.
+
+        Returns the locator the gate verified, so ``click_publish`` clicks
+        exactly the element that passed the visible + enabled + aria-disabled
+        check instead of resolving a third, unverified one.
         """
         budget = self._coerce_budget(deadline)
         window = max(0.0, min(
@@ -2480,8 +2678,11 @@ class TiktokBaseUploader(BaseVideoUploader):
                 raise budget.pre_click_error()
             if multilogin:
                 _raise_if_login_required(page)
-            if await self._publish_button_ready(page, multilogin=multilogin):
-                return
+            button = await self._publish_button_ready(
+                page, multilogin=multilogin
+            )
+            if button is not None:
+                return button
             remaining = min(
                 ready_deadline - time.monotonic(),
                 budget.remaining_seconds(),
@@ -2494,15 +2695,21 @@ class TiktokBaseUploader(BaseVideoUploader):
                 )
             await asyncio.sleep(min(poll, remaining))
 
-    async def _publish_button_ready(self, page, *, multilogin: bool) -> bool:
-        """Whether a visible publish button is enabled; never clicks it."""
+    async def _publish_button_ready(
+        self, page, *, multilogin: bool
+    ) -> "Locator | None":
+        """The first visible + enabled publish locator; never clicks it.
+
+        Returns ``None`` when no candidate is present or the match is
+        disabled / ``aria-disabled="true"``.
+        """
         if multilogin:
             _raise_if_login_required(page)
         found = await _find_candidate(
             self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True
         )
         if found is None:
-            return False
+            return None
         button, index, description = found
         try:
             enabled = await button.is_enabled()
@@ -2518,13 +2725,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                         enabled = False
                 except Exception:
                     pass
-        if enabled:
-            tiktok_logger.info(
-                "[+] TikTok publish ready: candidate "
-                f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} matched "
-                f"({description})"
-            )
-        return enabled
+        if not enabled:
+            return None
+        tiktok_logger.info(
+            "[+] TikTok publish ready: candidate "
+            f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} matched "
+            f"({description})"
+        )
+        return button
 
     async def click_publish(
         self,
@@ -2540,98 +2748,105 @@ class TiktokBaseUploader(BaseVideoUploader):
             label="TikTok 发布",
         )
         budget.check_pre_click()
-        # ``publish_clicked`` flips only after ``click()`` returns cleanly; a
-        # click that raises proves nothing was sent.  Once flipped, the button
-        # is never clicked again: a second click could duplicate the post.
+        humanizer = self._humanizer(page)
+        # ``publish_clicked`` means "a click may have reached the page".  It
+        # flips after a clean ``click()`` return and also on a ``maybe``
+        # dispatch (a raise after ``mouse.down``): spec §2.1 forbids
+        # re-dispatching either way, and a later login redirect must be
+        # reported as "possibly published".
         publish_clicked = False
+
+        # Phase 1 — readiness only (60s window, min(60s, remaining budget)).
+        # The gate returns the exact locator it verified: visible + enabled +
+        # no aria-disabled. A missing/disabled button fails here (exit 1)
+        # instead of being retried, and the click below never re-resolves.
+        publish_button = await self.wait_publish_ready(
+            page, deadline=budget, multilogin=multilogin
+        )
+        if publish_button is None:
+            raise RuntimeError(
+                "TikTok 发布按钮在就绪检查后消失：未点击发布，未发布任何内容。"
+            )
+
+        # Single dispatch. A failure before mouse.down is a hard failure (exit
+        # 1) — never re-click. A failure after mouse.down may already have
+        # published, so it is treated as sent and never re-dispatched.
+        await humanizer.before_submit()
+        budget.check_pre_click()
+        try:
+            await _humanized_click(humanizer, publish_button)
+        except Exception as e:
+            if multilogin:
+                _raise_if_login_required(
+                    page, publish_attempted=_maybe_dispatched(e)
+                )
+            if not _maybe_dispatched(e):
+                raise
+            publish_clicked = True
+            tiktok_logger.warning(
+                f"  [-] publish click raised after dispatch: {e}"
+            )
+        else:
+            publish_clicked = True
+            tiktok_logger.info("  [-] publish click sent")
+
+        # Phase 2 — result polling only. This loop never re-enters the click
+        # path, so a slow or missing success URL cannot publish twice.
         dialog_clicked = False
+        poll_iterations = 0
         while True:
+            poll_iterations += 1
+            if poll_iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
+                raise budget.timeout_error(True)
+            if multilogin:
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             try:
                 budget.check_pre_click()
             except RuntimeError:
-                if publish_clicked:
-                    # A login redirect still wins over "result unknown".
-                    if multilogin:
-                        _raise_if_login_required(page)
-                    raise budget.timeout_error(True) from None
-                raise budget.timeout_error(False) from None
-
-            if multilogin:
-                _raise_if_login_required(page)
-
-            if not publish_clicked:
-                try:
-                    found = await _find_candidate(
-                        self.locator_base,
-                        _PUBLISH_BUTTON_CANDIDATES,
-                        visible=True,
-                    )
-                    if found is not None:
-                        publish_button, index, description = found
-                        enabled = True
-                        try:
-                            enabled = await publish_button.is_enabled()
-                        except Exception:
-                            enabled = True
-                        if not enabled:
-                            tiktok_logger.info(
-                                "  [-] publish button not enabled yet"
-                            )
-                            await asyncio.sleep(0.5)
-                            continue
-                        tiktok_logger.info(
-                            "[+] TikTok publish: candidate "
-                            f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} "
-                            f"matched ({description})"
-                        )
-                        await publish_button.click()
-                        publish_clicked = True
-                        tiktok_logger.info("  [-] publish click sent")
-                except Exception as e:
-                    if multilogin:
-                        _raise_if_login_required(page)
-                    tiktok_logger.exception(f"  [-] Exception: {e}")
-                    tiktok_logger.info("  [-] video publishing")
-                    await asyncio.sleep(0.5)
-                    continue
-
+                raise budget.timeout_error(True) from None
             try:
                 await page.wait_for_url(
                     re.compile(r".*tiktokstudio/content.*"), timeout=3000
                 )
             except (PlaywrightTimeoutError, TimeoutError):
                 # Photo posts may show a "Post now" confirmation instead of
-                # navigating.  Attempt it at most once: mark the attempt before
-                # clicking so a failed click is never retried.  The failure is
-                # non-fatal; the success-URL wait still owns the outcome.
-                if publish_clicked and not dialog_clicked:
-                    dialog_clicked = True
-                    await self._click_post_now(page)
+                # navigating. The dialog can render a beat after the publish
+                # click, so only a click that actually landed latches: an
+                # absent (or failed) attempt is retried on the next timeout,
+                # while a landed click is never repeated.
+                if not dialog_clicked:
+                    try:
+                        outcome = await self._click_post_now(page)
+                        # None = no dialog/button yet: retry on a later beat.
+                        # True/False = a click was attempted; never retry it.
+                        if outcome is not None:
+                            dialog_clicked = True
+                    except Exception as exc:
+                        # The publish click was already dispatched: a dialog
+                        # failure is a result-unknown, never a pre-click error.
+                        raise budget.timeout_error(True) from exc
                 tiktok_logger.info("  [-] video publishing")
                 await asyncio.sleep(0.5)
                 continue
             except Exception as e:
                 if multilogin:
-                    _raise_if_login_required(page)
-                if publish_clicked:
-                    # Page/context closed, CDP dropped, or a form error after
-                    # the click: stop at once instead of spinning to deadline.
-                    raise budget.timeout_error(True) from e
-                tiktok_logger.exception(f"  [-] Exception: {e}")
-                tiktok_logger.info("  [-] video publishing")
-                await asyncio.sleep(0.5)
-                continue
+                    _raise_if_login_required(
+                        page, publish_attempted=publish_clicked
+                    )
+                raise budget.timeout_error(True) from e
 
             tiktok_logger.success("  [-] video published success")
             return
 
-    async def _click_post_now(self, page) -> bool:
+    async def _click_post_now(self, page) -> bool | None:
         """Click an exact confirmation button inside a visible dialog.
 
-        The click is deliberately dialog-only: a page-level fallback can match
-        the primary ``Schedule``/``Post`` button and click it a second time,
-        producing a duplicate post.  If no visible dialog exists, do nothing
-        and let the success-URL wait own the outcome.
+        Returns ``None`` when no dialog/button exists yet (safe to retry on a
+        later poll) — including a dialog that has rendered without its
+        exact-name button. ``True`` when a click landed, and ``False`` when a
+        click was attempted but raised. ``False`` must latch: a
+        humanized/native failure may already have dispatched, so it is never
+        retried.
         """
         dialogs = []
         for selector in _CONFIRMATION_DIALOG_SELECTORS:
@@ -2645,7 +2860,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             except Exception:
                 continue
         if not dialogs:
-            return False
+            return None
 
         names = _confirmation_names(self.publish_date)
         for dialog in reversed(dialogs):
@@ -2666,8 +2881,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 if found is None:
                     continue
                 button, _, _ = found
+                humanizer = self._humanizer(page)
                 try:
-                    await button.click()
+                    await _humanized_click(humanizer, button)
                 except Exception as exc:
                     # Do not turn a failed optional fallback into a different
                     # exit code; the success-URL wait still owns the outcome.
@@ -2681,7 +2897,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                     f"(dialog role=button[name=/{name}/])"
                 )
                 return True
-        return False
+        # A dialog exists but no exact-name button has rendered yet: returning
+        # None keeps the caller polling, so a later beat can still click it.
+        return None
 
     async def choose_base_locator(self, page):
         # await page.wait_for_selector('div.upload-container')
@@ -2790,7 +3008,7 @@ class TiktokVideo(TiktokBaseUploader):
             )
         select_file_button, _, _ = found
         async with page.expect_file_chooser() as fc_info:
-            await select_file_button.click()
+            await select_file_button.click()  # native-click: file；文件选择器只能由原生点击唤起
         file_chooser = await fc_info.value
         await file_chooser.set_files(self.file_path)
 
@@ -2819,7 +3037,7 @@ class TiktokVideo(TiktokBaseUploader):
             )
             try:
                 async with page.expect_file_chooser() as fc_info:
-                    await upload_button.click()
+                    await upload_button.click()  # native-click: file；文件选择器只能由原生点击唤起
                 file_chooser = await fc_info.value
                 await file_chooser.set_files(self.file_path)
             except Exception as exc:
@@ -2845,6 +3063,7 @@ class TiktokVideo(TiktokBaseUploader):
             return
         tiktok_logger.info(f'[+] Uploading thumbnail file {self.title}.png')
         base = self.locator_base
+        humanizer = self._humanizer(page)
 
         edit_cover = await _resolve_candidate(
             base,
@@ -2854,24 +3073,30 @@ class TiktokVideo(TiktokBaseUploader):
             page=page,
             visible=True,
         )
-        await edit_cover.click()
+        await _humanized_click(humanizer, edit_cover)
 
-        upload_tab = await _resolve_candidate(
-            base,
-            _COVER_UPLOAD_TAB_CANDIDATES,
-            control="Upload cover",
-            stage="select upload tab",
-            page=page,
-            visible=True,
+        # Resolve (never click) the upload tab: its nearest ancestor that holds a
+        # file input is the editor scope for the broad fallback selector.  The
+        # click itself is a fallback only — see the chooser branch below.
+        tab_match = await _find_candidate(
+            base, _COVER_UPLOAD_TAB_CANDIDATES, visible=True
         )
-        await upload_tab.click()
+        upload_tab = tab_match[0] if tab_match is not None else None
 
         # Scope the broad fallback input to the cover editor so it cannot hit
         # the main form's video input.  When the ancestor is not found the
         # aria-labelled candidate above is still tried against the base.
-        editor_query = upload_tab.locator(COVER_EDITOR_SCOPE_SELECTOR)
+        editor_query = (
+            upload_tab.locator(COVER_EDITOR_SCOPE_SELECTOR)
+            if upload_tab is not None
+            else None
+        )
         try:
-            editor = editor_query.first if await editor_query.count() else None
+            editor = (
+                editor_query.first
+                if editor_query is not None and await editor_query.count()
+                else None
+            )
         except Exception:
             editor = None
         control_scope = editor if editor is not None else base
@@ -2885,34 +3110,40 @@ class TiktokVideo(TiktokBaseUploader):
              lambda scope: (
                  scope.locator(_COVER_FILE_ACCEPT_SELECTOR)
                  if editor is not None
+                 # No tab ⇒ no editor scope either: ``None`` is swallowed as
+                 # "unmatched" by ``_find_candidate``.
                  else editor_query
              )),
         )
-        file_input = await _resolve_candidate(
-            control_scope,
-            file_candidates,
-            control="Upload cover file input",
-            stage="set cover file",
-            page=page,
+
+        # The editor already exposes the hidden image input.  Write it directly:
+        # clicking "Upload cover" first opens a real OS file chooser that then
+        # stays on screen while set_input_files injects the file (same defect as
+        # XHS, bbc5361).  The tab is a consumed fallback only.
+        file_input = await _probe_cover_file_input(
+            control_scope, file_candidates
         )
-        try:
-            # The input is hidden but ``set_input_files`` works on it directly.
-            await file_input.set_input_files(self.thumbnail_path)
-        except Exception as exc:
-            # Last resort: keep the legacy file-chooser pattern.
+        set_files_error = None
+        if file_input is not None:
             try:
-                async with page.expect_file_chooser() as fc_info:
-                    await file_input.click(force=True)
-                file_chooser = await fc_info.value
-                await file_chooser.set_files(self.thumbnail_path)
-            except Exception:
-                raise _cover_error(
-                    "Upload cover file input",
-                    "set cover file",
-                    file_candidates,
-                    page,
-                    detail=f"set_input_files failed: {exc}",
-                ) from exc
+                # The input is hidden but ``set_input_files`` works on it directly.
+                await file_input.set_input_files(self.thumbnail_path)
+            except Exception as exc:
+                set_files_error = exc
+                file_input = None
+        if file_input is None:
+            await self._set_cover_file_via_chooser(
+                page,
+                humanizer,
+                upload_tab,
+                control_scope,
+                file_candidates,
+                detail=(
+                    f"set_input_files failed: {set_files_error}"
+                    if set_files_error is not None
+                    else None
+                ),
+            )
 
         # The Save button is a page-level header button in the current Studio;
         # older editors kept it inside the editor scope.  Try all scopes.
@@ -2971,7 +3202,7 @@ class TiktokVideo(TiktokBaseUploader):
             )
 
         try:
-            await save_button.click()
+            await _humanized_click(humanizer, save_button)
         except Exception as exc:
             raise _cover_error(
                 "Save",
@@ -2993,7 +3224,7 @@ class TiktokVideo(TiktokBaseUploader):
                 editor_closed = True
             except Exception as exc:
                 close_error = exc
-        if not editor_closed:
+        if not editor_closed and upload_tab is not None:
             try:
                 await upload_tab.wait_for(
                     state="hidden", timeout=_COVER_EDITOR_CLOSE_TIMEOUT_MS
@@ -3012,6 +3243,76 @@ class TiktokVideo(TiktokBaseUploader):
             )
 
         await page.wait_for_timeout(3000)  # wait 3s, fix it later
+
+    async def _set_cover_file_via_chooser(
+        self,
+        page,
+        humanizer,
+        upload_tab,
+        control_scope,
+        file_candidates,
+        *,
+        detail=None,
+    ) -> None:
+        """Fallback: click "Upload cover" only because the input was absent.
+
+        The click must be consumed by ``expect_file_chooser`` so the OS chooser
+        never stays open.  When the event does not arrive, the click may still
+        have revealed the hidden input: resolve it and write it directly instead
+        of clicking a second time.
+        """
+        if upload_tab is None:
+            raise _cover_error(
+                "Upload cover",
+                "select upload tab",
+                _COVER_UPLOAD_TAB_CANDIDATES,
+                page,
+                detail=detail,
+            )
+        chooser = None
+        try:
+            async with page.expect_file_chooser(
+                timeout=_COVER_CHOOSER_TIMEOUT_MS
+            ) as fc_info:
+                await _humanized_click(humanizer, upload_tab)
+            chooser = await fc_info.value
+        except PlaywrightTimeoutError:
+            # Only "no chooser event" degrades to resolving the input.  A
+            # humanize/native click error must propagate (spec §4.1-7).
+            chooser = None
+        if chooser is not None:
+            try:
+                await chooser.set_files(self.thumbnail_path)
+            except Exception as exc:
+                raise _cover_error(
+                    "Upload cover file input",
+                    "set cover file",
+                    file_candidates,
+                    page,
+                    detail=f"chooser.set_files failed: {exc}",
+                ) from exc
+            return
+        await page.wait_for_timeout(_COVER_TAB_SETTLE_MS)
+        try:
+            file_input = await _resolve_candidate(
+                control_scope,
+                file_candidates,
+                control="Upload cover file input",
+                stage="set cover file",
+                page=page,
+            )
+            await file_input.set_input_files(self.thumbnail_path)
+        except Exception as exc:
+            raise _cover_error(
+                "Upload cover file input",
+                "set cover file",
+                file_candidates,
+                page,
+                detail=(
+                    f"no file chooser after the upload tab click: {exc}"
+                    + (f" | {detail}" if detail else "")
+                ),
+            ) from exc
 
     async def read_result(self, page):
         if self.publish_date != 0:
@@ -3178,13 +3479,15 @@ class TiktokNote(TiktokBaseUploader):
             return
 
         clicked = False
+        humanizer = self._humanizer(page)
         get_by_role = getattr(page, "get_by_role", None)
         if callable(get_by_role):
             for label in (self._PHOTOS_TAB, "照片"):
                 try:
                     tab = get_by_role("tab", name=label).first
                     if await tab.count() > 0:
-                        await tab.click()
+                        await _humanized_click(humanizer, tab)
+                        await humanizer.after_navigate()
                         clicked = True
                         break
                 except Exception:
@@ -3197,7 +3500,8 @@ class TiktokNote(TiktokBaseUploader):
                     try:
                         tab = get_by_text(label, exact=True).first
                         if await tab.count() > 0:
-                            await tab.click()
+                            await _humanized_click(humanizer, tab)
+                            await humanizer.after_navigate()
                             clicked = True
                             break
                     except Exception:
@@ -3232,6 +3536,7 @@ class TiktokNote(TiktokBaseUploader):
 
     async def _fill_title(self, page) -> None:
         scope = await self._resolve_photo_scope(page)
+        humanizer = self._humanizer(page)
         last_exc = None
         for _ in range(20):
             await self.dismiss_blocking_overlays(page)
@@ -3240,12 +3545,23 @@ class TiktokNote(TiktokBaseUploader):
                 try:
                     if await locator.count() == 0:
                         continue
-                    await locator.first.fill(
-                        self.title,
-                        timeout=TIKTOK_OVERLAY_CLICK_TIMEOUT_MS,
-                    )
+                    # ``sel`` clear: focus/click → select all → delete → type.
+                    await _humanized_click(humanizer, locator)
+                    await humanizer.press("ControlOrMeta+A")
+                    await humanizer.press("Delete")
+                    await humanizer.type_text(self.title)
                     return
                 except Exception as exc:
+                    # Ambiguous targets are structural errors: never loop on
+                    # them (the humanizer's stillOn gate already refused).
+                    # ``ElementUnusableError.reason`` is the machine-readable
+                    # form; never match substrings of the message.
+                    if str(getattr(exc, "reason", "") or "").startswith(
+                        "ambiguous:"
+                    ):
+                        raise
+                    if _maybe_dispatched(exc):
+                        raise
                     last_exc = exc
             await page.wait_for_timeout(1000)
         raise RuntimeError(

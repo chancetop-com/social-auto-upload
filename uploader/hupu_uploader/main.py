@@ -26,7 +26,10 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.browser_session import BrowserSession
+from utils.dom import ElementMissingError, ElementUnusableError
 from utils.errors import LoginRequiredError
+from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import hupu_logger
 
 
@@ -55,6 +58,41 @@ _LOGIN_URL_MARKERS = ("passport.hupu.com", "/login", "login?", "captcha", "verif
 
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
+
+
+def _normalise_text(text: str, *, multiline: bool) -> str:
+    """多行先 ``\\r\\n``→``\\n``；单行字段不得含换行/制表符（会变成 Enter/Tab）。"""
+    value = str(text).replace("\r\n", "\n").replace("\r", "\n").replace("\t", " ")
+    if multiline:
+        return value
+    return value.replace("\n", " ")
+
+
+async def _narrow_unique(
+    locator,
+    what: str,
+    *,
+    role: str = "attached",
+    required: bool = True,
+):
+    """把 ``locator`` 收窄到唯一匹配；多义硬错 ``ambiguous:N``，绝不 ``.first``。
+
+    ``required=False`` 时 0 匹配返回 ``None``（虎扑的简介框 / AI 声明下拉
+    允许缺席，调用方自己决定跳过）。多义在任何情况下都是硬错。
+    """
+    count = await locator.count()
+    if count > 1:
+        raise ElementUnusableError(
+            what,
+            role=role,
+            reason=f"ambiguous:{count}",
+            publish_clicked=False,
+        )
+    if count == 0:
+        if required:
+            raise ElementMissingError(what, role=role, publish_clicked=False)
+        return None
+    return locator
 
 
 def _build_login_result(success: bool, status: str, message: str, account_file: str, current_url: str = "") -> dict:
@@ -148,10 +186,12 @@ async def prepare_local_context(context: BrowserContext) -> BrowserContext:
     return prepared
 
 
-def _raise_if_login_required(page: Page | None) -> None:
+def _raise_if_login_required(page: Page | None, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; local retries stay untouched.
+    ``publish_attempted`` must be true when the redirect is observed after the
+    publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -159,7 +199,8 @@ def _raise_if_login_required(page: Page | None) -> None:
     if any(marker in url for marker in _LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "虎扑上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -237,7 +278,7 @@ async def hupu_cookie_gen(account_file, qrcode_callback=None, poll_interval: int
                 result = _build_login_result(False, "failed", "未找到 QQ 登录按钮", account_file, page.url)
                 return result
 
-            await qq_btn.click()
+            await qq_btn.click()  # native-click: login；QQ 扫码登录页保持原生点击
             await page.wait_for_timeout(5000)
             hupu_logger.info(_msg("🏃", "已跳转到 QQ 登录页"))
 
@@ -432,6 +473,27 @@ class HuPuVideo(BaseVideoUploader):
         self.max_title_length = 40
         self.min_title_length = 4
 
+    # -- 人类化交互层 -----------------------------------------------------
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """人类化停顿只吃剩余预算，耗尽时收缩到 0，不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            hupu_logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     async def validate_upload_args(self, *, check_cookie: bool = True):
         if check_cookie:
             if not self.account_file or not os.path.exists(self.account_file):
@@ -481,8 +543,10 @@ class HuPuVideo(BaseVideoUploader):
         multilogin = session.managed
         if page is None:
             page = await session.context.new_page()
+        humanizer = self._humanizer(page)
         # 直接跳转到视频发布页（绕过首页点击）
         await page.goto(HUPU_PUBLISH_URL, timeout=60000, wait_until="load")
+        await humanizer.after_navigate()
         if multilogin:
             _raise_if_login_required(page)
         await page.wait_for_timeout(5000)
@@ -517,7 +581,7 @@ class HuPuVideo(BaseVideoUploader):
 
         # 通过 file chooser 设置文件
         async with page.expect_file_chooser(timeout=10000) as fc_info:
-            await upload_btn.click()
+            await upload_btn.click()  # native-click: file；文件选择器必须由原生点击派发
         file_chooser = await fc_info.value
         await file_chooser.set_files(self.file_path)
         hupu_logger.info(_msg("🏃", f"已选择视频文件: {self.file_path}"))
@@ -530,30 +594,42 @@ class HuPuVideo(BaseVideoUploader):
         hupu_logger.info(_msg("🥳", "视频已就绪"))
 
     async def _fill_title(self, page: Page) -> None:
-        """填写标题（4-40字）。"""
+        """填写标题（4-40字）：全选覆盖后逐字输入（单行，不含换行）。"""
         title_field = page.get_by_placeholder("请输入标题（最少4个字，最多40个字）")
         await title_field.wait_for(state="visible", timeout=15000)
-        title = self.title[:self.max_title_length]
-        await title_field.click()
-        await title_field.fill(title)
+        title_field = await _narrow_unique(title_field, "标题输入框", role="editable")
+        title = _normalise_text(
+            str(self.title)[:self.max_title_length], multiline=False
+        )
+        humanizer = self._humanizer(page)
+        # 单行 input：click → 全选 → Delete → 逐字（sel 形态，一次交互会话）。
+        await humanizer.click(title_field)
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(title)
         hupu_logger.info(_msg("🏷️", f"标题已填写: {title}"))
 
     async def _fill_description(self, page: Page) -> None:
-        """填写简介。"""
+        """填写简介：全选覆盖后逐字写入正文 + ``#tag#``（多行）。"""
         desc_field = page.get_by_placeholder("请输入简介")
         if not await desc_field.count():
             hupu_logger.warning(_msg("⚠️", "未找到简介输入框"))
             return
 
         # 组装描述：正文 + 标签
-        content = self.desc
+        content = _normalise_text(self.desc, multiline=True)
         if self.tags:
             tag_str = " ".join(f"#{t}#" for t in self.tags)
             content = f"{content}\n{tag_str}" if content else tag_str
 
         if content:
-            await desc_field.click()
-            await desc_field.fill(content)
+            desc_field = await _narrow_unique(desc_field, "简介输入框", role="editable")
+            humanizer = self._humanizer(page)
+            # 多行编辑器：同一 sel 序列；>1000 码点由 type_text 整段 insert_text。
+            await humanizer.click(desc_field)
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.press("Delete")
+            await humanizer.type_text(content)
             hupu_logger.info(_msg("📝", f"简介已填写（{len(content)}字）"))
 
     async def _upload_thumbnail(self, page: Page) -> None:
@@ -564,7 +640,7 @@ class HuPuVideo(BaseVideoUploader):
 
             # 通过 file chooser 设置封面图片
             async with page.expect_file_chooser(timeout=10000) as fc_info:
-                await cover_span.click()
+                await cover_span.click()  # native-click: file；文件选择器必须由原生点击派发
             file_chooser = await fc_info.value
             await file_chooser.set_files(self.thumbnail_path)
             hupu_logger.info(_msg("🏃", f"已选择封面图片: {self.thumbnail_path}"))
@@ -575,27 +651,28 @@ class HuPuVideo(BaseVideoUploader):
 
     async def _select_zone(self, page: Page) -> None:
         """选择专区：步行街 → 步行街主干道。"""
+        humanizer = self._humanizer(page)
         try:
             # 录制脚本：page.get_by_label("发视频").get_by_text("添加专区").click()
             add_zone_btn = page.get_by_label("发视频").get_by_text("添加专区")
             await add_zone_btn.wait_for(state="visible", timeout=10000)
-            await add_zone_btn.click()
+            await humanizer.click(add_zone_btn)
             await page.wait_for_timeout(1500)
 
             # 选择「步行街」分类
             zone_dialog = page.get_by_label("添加专区")
             step_street = zone_dialog.locator("div").filter(has_text=re.compile(r"^步行街$"))
-            await step_street.click()
+            await humanizer.click(step_street)
             await page.wait_for_timeout(1000)
 
             # 选择「步行街主干道」子分类
             main_road = page.get_by_text("步行街主干道")
-            await main_road.click()
+            await humanizer.click(main_road)
             await page.wait_for_timeout(500)
 
             # 点击确定
             confirm_btn = page.get_by_role("button", name="确 定")
-            await confirm_btn.click()
+            await humanizer.click(confirm_btn)
             await page.wait_for_timeout(1000)
             hupu_logger.info(_msg("🏷️", "已选择专区：步行街主干道"))
         except Exception as exc:
@@ -603,34 +680,43 @@ class HuPuVideo(BaseVideoUploader):
 
     async def _check_declarations(self, page: Page) -> None:
         """选择原创/二创声明 + AI 声明。"""
+        humanizer = self._humanizer(page)
         try:
             # 1) 点击「原创/二创」按钮
             declaration_btn = page.get_by_role("button", name="原创/二创")
             if await declaration_btn.count():
-                await declaration_btn.click(timeout=5000)
+                await humanizer.click(declaration_btn)
                 await page.wait_for_timeout(1000)
                 hupu_logger.info(_msg("🏷️", "已点击「原创/二创」"))
         except Exception as exc:
             hupu_logger.warning(_msg("⚠️", f"点击原创/二创失败: {exc}"))
 
+        # 2) 选择「含AI生成内容」。裸 role 选择器先收窄到唯一：多义是硬错，
+        #    不静默取 .first，也不被下面的「失败继续」分支吞掉。
+        combobox = await _narrow_unique(
+            page.get_by_role("combobox"),
+            "AI声明下拉",
+            role="combobox",
+            required=False,
+        )
+        if combobox is None:
+            return
         try:
-            # 2) 选择「含AI生成内容」
-            combobox = page.get_by_role("combobox")
-            if await combobox.count():
-                await combobox.click(timeout=5000)
-                await page.wait_for_timeout(1000)
+            await humanizer.click(combobox)
+            await page.wait_for_timeout(1000)
 
-                ai_option = page.get_by_text("含AI生成内容")
-                if await ai_option.count():
-                    await ai_option.click(timeout=5000)
-                    await page.wait_for_timeout(500)
-                    hupu_logger.info(_msg("🏷️", "已选择「含AI生成内容」"))
+            ai_option = page.get_by_text("含AI生成内容")
+            if await ai_option.count():
+                await humanizer.click(ai_option)
+                await page.wait_for_timeout(500)
+                hupu_logger.info(_msg("🏷️", "已选择「含AI生成内容」"))
         except Exception as exc:
             hupu_logger.warning(_msg("⚠️", f"选择 AI 声明失败: {exc}"))
 
     async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         """点击「确定发布」并等待跳转到帖子页面。"""
         budget = self.publish_budget
+        humanizer = self._humanizer(page)
         # 录制脚本：page.get_by_label("发视频").get_by_text("确定发布").click()
         publish_btn = page.get_by_label("发视频").get_by_text("确定发布")
         await publish_btn.wait_for(
@@ -642,13 +728,21 @@ class HuPuVideo(BaseVideoUploader):
             label="虎扑发布",
         )
         budget.check_pre_click()
-        await publish_btn.click()
+        await humanizer.before_submit()
+        try:
+            await humanizer.click(publish_btn)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                raise budget.timeout_error(True) from exc
+            raise
         hupu_logger.info(_msg("🏃", "已点击「确定发布」"))
+        publish_clicked = True
 
         # 等待跳转到帖子详情页（URL 匹配 bbs.hupu.com/{数字}.html）
         while budget.remaining_seconds() > 0:
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             current_url = page.url
             if HUPU_POST_URL_PATTERN.search(current_url):
                 hupu_logger.success(_msg("🥳", f"视频发布成功: {current_url}"))

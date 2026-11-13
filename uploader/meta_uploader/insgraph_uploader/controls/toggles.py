@@ -14,6 +14,9 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from utils.dom import check
+from utils.humanize import Humanizer
+
 from ..options import (
     INELIGIBLE,
     MISSING,
@@ -52,6 +55,10 @@ _UP_CHEVRON_SELECTOR = (
 _READBACK_TIMEOUT_MS = 10_000
 _READBACK_INTERVAL_S = 0.1
 
+# 点击目标的祖先回溯层数：实测可见的自绘开关就是 input 的**直接**父容器，
+# 留 3 层余量兜住包装层变化；再多就会点到整行甚至弹窗。
+_CLICK_ANCESTOR_LEVELS = 4
+
 
 async def _switch_checked(switch: 'Locator') -> bool | None:
     """读取开关状态：``aria-checked`` 优先，原生 checkbox 回退 ``is_checked()``。"""
@@ -62,6 +69,47 @@ async def _switch_checked(switch: 'Locator') -> bool | None:
         return bool(await switch.is_checked())
     except Exception:
         return None
+
+
+async def _click_target(switch: 'Locator') -> 'Locator':
+    """返回开关的**可见**点击目标：开关本身，或它第一个可见的祖先。
+
+    实测（2026-11-13）Instagram 的开关是 ``input[type=checkbox][role=switch]``，
+    真正的轨道/滑块画在它的直接父容器里，input 自身被样式成 ``opacity: 0``。
+    spec §2.6：opacity:0 的捕获层必须点它**可见的父容器**（或溢出的子元素），
+    绝不能 JS 点击、绝不能 ``force``。回读（``aria-checked`` / ``is_checked``）
+    仍留在 input 上，所以只有点击目标会变。
+
+    开关自身通过共享 ``utils.dom.check(..., "visible")``（opacity ≥ 0.1）时
+    它就是点击目标——普通开关的点击坐标与行为完全不变。只有开关本身不可见
+    （真机的 opacity:0）才逐层向上最多 4 层，取第一个通过同一检查的祖先；
+    一个都没有时原样返回开关，让点击以原来的硬错失败（不加 force、不加 JS、
+    不加重试）。
+    """
+    if await _visible_target(switch):
+        return switch
+    candidate = switch
+    for _ in range(_CLICK_ANCESTOR_LEVELS):
+        try:
+            parent = candidate.locator("xpath=..")
+            if not await parent.count():
+                break
+            candidate = parent
+            visible = await _visible_target(candidate)
+        except Exception:
+            break
+        if visible:
+            return candidate
+    return switch
+
+
+async def _visible_target(node: 'Locator') -> bool:
+    """共享可见性判定；探测失败按“不可见”处理，交由调用方决定兜底。"""
+    try:
+        visible, _reason = await check(node, "visible")
+    except Exception:
+        return False
+    return bool(visible)
 
 
 class SwitchControl:
@@ -80,6 +128,7 @@ class SwitchControl:
         panel_labels: tuple[str, ...] | None = None,
         invert: bool = False,
         budget: 'PublishTimeoutBudget | None' = None,
+        humanizer: Humanizer | None = None,
     ) -> None:
         if not labels:
             raise ValueError("SwitchControl 至少需要一个文案回退")
@@ -88,7 +137,14 @@ class SwitchControl:
         self._panel_labels = tuple(panel_labels) if panel_labels else ()
         self._invert = invert
         self._budget = budget
+        self._humanizer = humanizer
         self._panel_open = False
+
+    def _behavior(self) -> Humanizer:
+        """发布链路共享的 Humanizer；独立使用时按 page 自建（仍全部人类化）。"""
+        if self._humanizer is None:
+            self._humanizer = Humanizer(self._page)
+        return self._humanizer
 
     def _dialog(self) -> 'Locator':
         return self._page.get_by_role("dialog")
@@ -177,7 +233,11 @@ class SwitchControl:
         if row is None:
             return
         await activate(
-            self._page, row, is_open=self._panel_open_in_dom, budget=self._budget
+            self._page,
+            row,
+            is_open=self._panel_open_in_dom,
+            humanizer=self._behavior(),
+            budget=self._budget,
         )
 
     async def _ensure(self) -> 'Locator | None':
@@ -223,7 +283,12 @@ class SwitchControl:
                 f"Instagram 开关入口缺失: {self._labels[0]}"
                 f"{_panel_hint(self._panel_labels)}"
             )
-        await click_control(self._page, switch, budget=self._budget)
+        await click_control(
+            self._page,
+            await _click_target(switch),
+            humanizer=self._behavior(),
+            budget=self._budget,
+        )
         await self._wait_readback(requested)
 
     async def _wait_readback(self, requested: bool) -> None:

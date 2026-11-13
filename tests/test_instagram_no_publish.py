@@ -230,7 +230,7 @@ class InstagramNoPublishFlowTests(unittest.TestCase):
             '<div role="button" id="share" aria-disabled="true" disabled',
         )
         with self.assertRaises(RuntimeError) as ctx:
-            self._run_publish(html=disabled_html, budget_seconds=0.6)
+            self._run_publish(html=disabled_html, budget_seconds=10)
         self.assertNotIsInstance(ctx.exception, PublishResultUnknownError)
         self.assertIn("发布就绪", str(ctx.exception))
 
@@ -250,7 +250,8 @@ class InstagramNoPublishFlowTests(unittest.TestCase):
                             result_file=Path(folder) / "result.json",
                         )
                         budget = app.start_publish_budget()
-                        budget.deadline = time.monotonic() + 1
+                        # 配文改为逐字输入：1 秒预算会在 Share 前被停顿时延耗尽。
+                        budget.deadline = time.monotonic() + 20
                         with self.assertRaises(PublishResultUnknownError):
                             await app._publish(
                                 page,

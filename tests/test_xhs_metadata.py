@@ -890,6 +890,52 @@ def _original_page(
     return RecordingPage(url=NOTE_URL, selectors=selectors)
 
 
+class OriginalSwitchPlatformDisabledTests(unittest.TestCase):
+    """小红书自身禁用原创开关时，给可操作的错误而不是无上下文的 ``disabled``。
+
+    判定走共享 ``utils.dom.check(switch, "interactive")``，平台不再手写
+    disabled / pointer-events 的 JS 探针。
+    """
+
+    def test_disabled_switch_is_a_clear_exit_1_without_a_click(self):
+        page = _original_page(checked=False)
+        switch = page.locator(xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector)
+        app = _video_app(original_declaration=True)
+        with patch.object(
+            xhs_main,
+            "check",
+            new=AsyncMock(return_value=(False, "disabled")),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                Decision11ReadbackOriginalTests._run(self, app, page)
+        self.assertIn("原创声明开关被平台禁用", str(ctx.exception))
+        self.assertEqual(switch.click_count, 0)
+
+    def test_normal_switch_path_is_unchanged(self):
+        page = _original_page(checked=False)
+        switch = page.locator(xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector)
+        app = _video_app(original_declaration=True)
+        with patch.object(
+            xhs_main,
+            "check",
+            new=AsyncMock(return_value=(True, None)),
+        ):
+            Decision11ReadbackOriginalTests._run(self, app, page)
+        self.assertEqual(switch.click_count, 1)
+
+    def test_other_reasons_fall_through_to_the_click_path(self):
+        page = _original_page(checked=False)
+        switch = page.locator(xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector)
+        app = _video_app(original_declaration=True)
+        with patch.object(
+            xhs_main,
+            "check",
+            new=AsyncMock(return_value=(False, "covered-by:div.mask")),
+        ):
+            Decision11ReadbackOriginalTests._run(self, app, page)
+        self.assertEqual(switch.click_count, 1)
+
+
 class Decision11ReadbackOriginalTests(unittest.TestCase):
     def _run(self, app, page):
         clock = FakeClock()

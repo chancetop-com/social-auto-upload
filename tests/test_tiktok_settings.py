@@ -556,6 +556,10 @@ class FakeDialogButton:
     async def count(self) -> int:
         return self._count
 
+    async def hover(self) -> None:
+        # The platform click entry hovers before clicking (spec §2.5.1).
+        return None
+
     async def click(self) -> None:
         self.click_calls += 1
         self._count = 0
@@ -1078,6 +1082,7 @@ class TiktokOptionStepTests(unittest.TestCase):
                 self.visible = visible
                 self.checked = checked
                 self.click_calls = 0
+                self.hover_calls = 0
 
             async def is_checked(self):
                 return self.checked
@@ -1093,6 +1098,9 @@ class TiktokOptionStepTests(unittest.TestCase):
 
             def locator(self, _selector):
                 return _MissingLocator()
+
+            async def hover(self, **_kwargs):
+                self.hover_calls += 1
 
             async def click(self, **_kwargs):
                 self.click_calls += 1
@@ -1119,7 +1127,9 @@ class TiktokOptionStepTests(unittest.TestCase):
         self.assertTrue(asyncio.run(control.is_checked()))
         asyncio.run(control.click())
         self.assertEqual(visible.click_calls, 1)
+        self.assertEqual(visible.hover_calls, 1)
         self.assertEqual(hidden.click_calls, 0)
+        self.assertEqual(hidden.hover_calls, 0)
 
     def test_find_candidate_skips_hidden_first_match(self):
         class _Node:
@@ -1885,6 +1895,9 @@ class HashtagEntityTests(unittest.TestCase):
                 return "true"
             return None
 
+        async def hover(self):
+            return None
+
         async def click(self, **_kwargs):
             self.page.clicked.append(self.text)
             if self in self.page.options:
@@ -1994,6 +2007,32 @@ class HashtagEntityTests(unittest.TestCase):
             )
         self.assertEqual(page.clicked, [])
 
+
+
+_HUMANIZE_BEFORE = None
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
 
 if __name__ == "__main__":
     unittest.main()

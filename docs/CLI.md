@@ -114,6 +114,49 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频/文章、Facebook
 个人主页、Facebook Page、Instagram、TikTok。
 
+## 人类化交互层（全平台）
+
+浏览器发布平台（Bilibili 的 `biliup` 单命令路径除外）默认走人类化交互层：文本输入逐字符
+键入，可见点击走「移动 → 停顿 → 落点复核 → 按下 → 抬起」。默认开启，不需要任何参数。
+
+- **唯一回滚开关是全局 `HUMANIZE=0`**（按 `strip()` 后比较）。它是语义开关而非限速开关：
+  文本退化为一次 `keyboard.insert_text`，点击退化为一次原生 `locator.click()`，所有停顿为零；
+  平台代码路径与选择器不变。开关在构造时快照，运行中不读环境变量；不提供
+  `HUMANIZE_EXCLUDE`，也不按平台/按字段设例外。关闭时原生 `locator.click()` 失败同样保守
+  视为「可能已派发」（浏览器不回报事件是否已触发），发布阶段失败退出 `9`；这是刻意语义。
+- **覆盖边界**：只有「文本输入」与「可见点击」被人类化。`set_input_files`、文件选择器弹窗、
+  `select_option`、`evaluate`、滚动与读回保持原生；按设计不做坐标点击的控件（隐藏
+  checkbox、需 JS 展开的行等）保留原生点击，并在代码内逐条标注原因。
+- **失败语义**：候选选择器一个都没出现 → 退出 `1`，属**选择器问题**，改代码而不是重试；
+  元素找到但不可用（`ambiguous:N`、`zero-box`、`no-bounding-box`、`point-drift`、
+  `covered-by:*`、`disabled`、`pointer-events-none`）→ 退出 `1`，属**页面问题**，只在调用方的
+  状态重试循环里按业务重试（`ambiguous:` 不重试）；鼠标按下之后才失败时异常带
+  `click_dispatched="maybe"`，**禁止再次派发**。没有运行时自动降级：失败不会悄悄退回
+  JS 点击或 `force`。
+- **与 15 分钟预算的关系**：人类化停顿不是额外预算，只消耗
+  [发布超时预算](#发布超时预算全平台) 的剩余额度，并按 `min(采样值, 剩余)` 收紧；预算耗尽后
+  停顿收缩到 `0`，暂停本身不抛超时。超时判据仍只在就绪锚点与发布点击。
+- **`force` 准入**：仅规格点名的 3 条残余允许 `force=True`（抖音 2FA 两处、快手引导层），
+  且必须在同一调用跨度内写
+  `# humanize-impossible: <失败模式>；<code|inferred|needs-live>；<已排除替代>`；`force`
+  不是回滚网。
+- **验收口径**：真机验收一律 `--no-publish`，停在发布按钮 / Share 就绪前，不点真实发布、
+  不上真实帖子；发布点击与提交后行为不在本轮真机验收范围（规格 §9-28）。
+- **托管模式未验证**：Multilogin X / AdsPower 下的人类化交互只做过离线验证，真机行为
+  **未验证**。
+- 完整契约（公开面、三种清空形态、长期限制、未验证清单）见
+  [`.scratch/humanize-rollout/spec.md`](../.scratch/humanize-rollout/spec.md) §2 与 §6.4；
+  本节只是对外投影，不存规格副本。
+
+## 日志
+
+日志默认只输出到控制台。需要落盘时设置环境变量 `SAU_LOG_TO_FILES=1`（也接受 `true` /
+`yes` / `on`），每个平台写入各自的 `logs/<platform>.log`（如 `logs/tiktok.log`）；单文件
+按 **10 MB** 轮转，保留 **10 天**。不设置该变量时不创建、不写入任何日志文件。
+
+该变量在**进程启动时**（`utils/log.py` 导入）读取一次：进程运行中再改环境变量不会切换输出，
+需要重启 `sau` 才生效。
+
 ## 托管浏览器模式（通用）
 
 设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用启动指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。

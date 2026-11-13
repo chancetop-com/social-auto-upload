@@ -416,6 +416,44 @@ class LocalGoldenTests(unittest.TestCase):
         self.assertEqual(context.storage_state_calls, [str(cookie)])
         self.assertTrue(browser.closed)
 
+    def test_facebook_page_cookie_save_failure_after_publish_is_log_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            cookie = Path(directory) / "page.json"
+            cookie.write_text("{}", encoding="utf-8")
+            result_file = Path(directory) / "result.json"
+            page = _PageStub()
+            context = _ContextStub(page)
+            context.storage_state = AsyncMock(side_effect=OSError("磁盘已满"))
+            browser = _LaunchBrowser(context, page)
+            app = MetaBusinessUploader(
+                "facebook-page",
+                cookie,
+                title="标题",
+                video_file=media,
+                result_file=result_file,
+            )
+            app._publish_on_page = AsyncMock()
+
+            with patch.object(
+                facebook_page_main,
+                "_open_business_page",
+                AsyncMock(return_value=(browser, context, page)),
+            ), patch.object(
+                facebook_page_main,
+                "_is_business_logged_out",
+                AsyncMock(return_value=False),
+            ), patch.object(
+                facebook_page_main.logger, "warning"
+            ) as warning:
+                result = asyncio.run(app.upload())
+
+            self.assertTrue(result_file.is_file())
+
+        self.assertEqual(result["platform"], "facebook-page")
+        self.assertTrue(browser.closed)
+        warning.assert_called_once()
+
     def test_instagram_local_launch_and_context_are_golden(self):
         page = _PageStub()
         chromium, context, browser = _local_launcher(page)
@@ -672,6 +710,144 @@ class MultiloginUploaderTests(unittest.TestCase):
 
         self.assertEqual(type(caught.exception).__name__, "LoginRequiredError")
         app._upload_steps.assert_not_awaited()
+
+
+class MetaLoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``（仅 Multilogin 路径）。"""
+
+    def _facebook(self, directory: str, *, publish) -> FacebookPost:
+        media = _write_media(directory)
+        app = FacebookPost("标题", media, "", [], None)
+        app._publish_on_page = AsyncMock(side_effect=publish)
+        return app
+
+    def test_facebook_pre_click_redirect_is_not_marked_as_dispatched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            page = _PageStub(final_url="https://www.facebook.com/login/?next=/")
+            app = FacebookPost("标题", media, "", [], None)
+            app._publish_on_page = AsyncMock()
+
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app.upload(None, session=_session(_ContextStub(page))))
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_facebook_post_click_redirect_is_marked_as_dispatched(self):
+        async def _publish(page) -> None:
+            page.url = "https://www.facebook.com/login/?next=/"
+
+        with tempfile.TemporaryDirectory() as directory:
+            page = _PageStub()
+            app = self._facebook(directory, publish=_publish)
+
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app.upload(None, session=_session(_ContextStub(page))))
+
+        self.assertTrue(caught.exception.publish_attempted)
+
+    def test_facebook_page_post_click_redirect_is_marked_as_dispatched(self):
+        async def _publish(page) -> None:
+            page.url = "https://business.facebook.com/login/"
+
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            page = _PageStub()
+            page.locators['a[href*="/latest/home"]'] = _LocatorStub(count=1)
+            app = MetaBusinessUploader(
+                "facebook-page",
+                None,
+                title="标题",
+                video_file=media,
+                result_file=Path(directory) / "result.json",
+            )
+            app._publish_on_page = AsyncMock(side_effect=_publish)
+
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app.upload(session=_session(_ContextStub(page))))
+
+        self.assertTrue(caught.exception.publish_attempted)
+
+    def test_facebook_page_pre_click_redirect_is_not_marked_as_dispatched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            page = _PageStub(final_url="https://business.facebook.com/login/")
+            app = MetaBusinessUploader(
+                "facebook-page",
+                None,
+                title="标题",
+                video_file=media,
+                result_file=Path(directory) / "result.json",
+            )
+            app._publish_on_page = AsyncMock()
+
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app.upload(session=_session(_ContextStub(page))))
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_instagram_pre_click_redirect_is_not_marked_as_dispatched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            page = _PageStub(
+                final_url="https://www.instagram.com/accounts/login/"
+            )
+            app = InstagramUploader(
+                None,
+                title="caption",
+                video_file=media,
+                result_file=Path(directory) / "result.json",
+            )
+            app._upload_steps = AsyncMock()
+
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app.upload(session=_session(_ContextStub(page))))
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_instagram_post_click_redirect_is_marked_as_dispatched(self):
+        holder = {}
+
+        async def _steps(page, identity, *, budget):
+            # ``_publish`` 在 Share 点击返回后把 publish_clicked 置为 True；
+            # status 只是结果记录，不能再用来推断“已派发”。
+            holder["app"].result["status"] = "submission_unknown"
+            holder["app"].publish_clicked = True
+            page.url = "https://www.instagram.com/accounts/login/"
+            raise RuntimeError("发布后跳到登录页")
+
+        with tempfile.TemporaryDirectory() as directory:
+            media = _write_media(directory)
+            page = _PageStub()
+            page.locators['a[href^="/direct/inbox/"]'] = _LocatorStub(count=1)
+            app = InstagramUploader(
+                None,
+                title="caption",
+                video_file=media,
+                result_file=Path(directory) / "result.json",
+            )
+            holder["app"] = app
+            app._upload_steps = AsyncMock(side_effect=_steps)
+
+            with patch.object(
+                instagram_main,
+                "expect",
+                MagicMock(
+                    return_value=SimpleNamespace(
+                        not_to_have_count=AsyncMock(return_value=None)
+                    )
+                ),
+            ), patch.object(
+                instagram_main,
+                "_multilogin_identity",
+                AsyncMock(return_value={"user_id": "42", "username": "me"}),
+            ):
+                with self.assertRaises(LoginRequiredError) as caught:
+                    asyncio.run(
+                        app.upload(session=_session(_ContextStub(page)))
+                    )
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 # ---------------------------------------------------------------------------

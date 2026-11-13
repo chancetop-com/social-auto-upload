@@ -47,6 +47,12 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 
 所有 `upload-video` / `upload-note` / `upload-article` 支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻）：先完成上传、填表、封面和声明，再等到绝对时刻不早于目标时间才点击发布。它和平台原生 `--schedule` 不同，可同时使用；同时使用时让 `--not-before` 早于 `--schedule`。`--no-publish` / `--prepare-only` / `--draft` 会跳过等待。Bilibili 因 `biliup` 一次性提交，等待发生在启动命令之前。
 
+## 人类化交互层
+
+发布流程默认开启人类化交互（逐字符输入、人类指针点击），不需要任何参数。
+设置 `HUMANIZE=0` 即整体退回原生输入与点击，这是唯一的运行时回滚开关。
+发布链路出问题时先设 `HUMANIZE=0` 复现并确认是否仍存在，再按 `docs/CLI.md` 的「人类化交互层（全平台）」上报。
+
 ## 工作流程
 
 1. 如已安装对应平台 Skill，先读取并遵循它；从仓库运行时读取 `skills/<skill-name>/SKILL.md`。

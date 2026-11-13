@@ -25,6 +25,9 @@ from patchright.async_api import (
 from uploader.meta_uploader.insgraph_uploader.controls import (
     resolve_instagram_option_controls,
 )
+from uploader.meta_uploader.insgraph_uploader.controls._rows import (
+    dismiss_suggestions,
+)
 from uploader.meta_uploader.insgraph_uploader.options import (
     APPLY_ORDER,
     DEFAULT_OFF,
@@ -46,7 +49,10 @@ from uploader.meta_uploader.insgraph_uploader.options import (
 )
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
+from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
+from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 
 INSTAGRAM_HOME_URL = "https://www.instagram.com/"
 # 未配置环境变量或 --proxy 时使用系统直连。
@@ -122,24 +128,40 @@ def instagram_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
     return {**INSTAGRAM_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
 
 
-def _raise_if_login_required(page: Page) -> None:
-    """Map a mid-upload login/challenge/2FA redirect to ``LoginRequiredError``."""
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
+    """Map a mid-upload login/challenge/2FA redirect to ``LoginRequiredError``.
+
+    ``publish_attempted`` must be true when the redirect is observed after the
+    publish click was dispatched.
+    """
     current_url = str(getattr(page, "url", "") or "").lower()
     if any(marker in current_url for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "Instagram 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
-async def _dismiss_optional_prompt(guide: Locator, dismiss_button: Locator) -> bool:
-    """仅关闭已识别的可选提示；缺席可继续，出现后的操作失败必须报错。"""
+async def _dismiss_optional_prompt(
+    guide: Locator,
+    dismiss_button: Locator,
+    *,
+    humanizer: Humanizer | None = None,
+) -> bool:
+    """仅关闭已识别的可选提示；缺席可继续，出现后的操作失败必须报错。
+
+    关闭动作是可见点击，走 ``Humanizer.click``。独立调用（测试）未传实例时按
+    按钮所属 page 自建一个，仍不退回原生点击。
+    """
     try:
         await guide.wait_for(state='visible', timeout=1500)
     except BrowserTimeoutError:
         return False
     await expect(dismiss_button).to_have_count(1)
-    await dismiss_button.click()
+    if humanizer is None:
+        humanizer = Humanizer(dismiss_button.page)
+    await humanizer.click(dismiss_button)
     await guide.wait_for(state='hidden')
     return True
 
@@ -181,6 +203,98 @@ async def _caption_editor(dialog: Locator) -> Locator:
         dialog.locator(INSTAGRAM_CAPTION_EDITOR),
         dialog.locator(INSTAGRAM_CAPTION_EDITOR_FALLBACK),
     )
+
+
+async def _require_unique(
+    locator: Locator, *, what: str, role: str = 'editable'
+) -> None:
+    """文本点先收窄到 ``count() == 1``；多义直接硬错，绝不自动取首个。"""
+    try:
+        count = await locator.count()
+    except Exception as error:
+        raise ElementUnusableError(
+            what=what, role=role, reason='probe-failed'
+        ) from error
+    if count != 1:
+        raise ElementUnusableError(what=what, role=role, reason=f'ambiguous:{count}')
+
+
+async def _type_caption(
+    editor: Locator, caption: str, humanizer: Humanizer
+) -> None:
+    """清空 Lexical 配文框后逐字写入；``after_type`` 只由 ``type_text`` 付一次。
+
+    清空用 ``sel`` 形态（聚焦 → 全选 → Delete），不 ``fill()``、不粘贴；多行
+    文本先把 ``\\r\\n`` 归一成 ``\\n``。>1000 码点由共享层整段 ``insert_text``。
+    """
+    await _require_unique(editor, what='Instagram 配文')
+    text = str(caption).replace('\r\n', '\n').replace('\r', '\n')
+    await editor.focus()
+    await humanizer.press('ControlOrMeta+A')
+    await humanizer.press('Delete')
+    await humanizer.type_text(text)
+
+
+# 配文回读：比较渲染文本（``innerText``）而非 ``textContent``。逐字输入把
+# ``\n`` 打成 Enter，Lexical 在段间插 ``<br><br>``：``textContent`` 把两行
+# 直接粘在一起，``innerText`` 才保留换行。轮询上限沿用原 ``to_have_text``。
+CAPTION_READBACK_TIMEOUT_MS = 30_000
+CAPTION_READBACK_POLL_MS = 200
+
+
+def _normalise_caption_text(text: str) -> str:
+    """比较前统一换行并去掉尾部空白；两侧走同一规则。"""
+    return str(text).replace('\r\n', '\n').replace('\r', '\n').rstrip()
+
+
+async def _read_back_caption(
+    editor: Locator,
+    caption: str,
+    *,
+    page: Page,
+    budget: PublishTimeoutBudget,
+) -> None:
+    """轮询编辑器的渲染文本，直到与键入的配文**全等**（逐字哨兵）。
+
+    真机 2026-11-13（ticket 05，``--no-publish`` 视频干跑）：键入本身正确，
+    旧的 ``to_have_text`` 读 ``textContent`` 丢了 ``<br><br>`` 的换行而误报。
+    只换读取形态，不放松比较：丢字、追加、换行丢失都照常失败
+    （``AssertionError``；stage ``publish``，退出 1，未发布任何内容）。
+    探测异常照常向上抛，绝不因探测失败而放行。
+    """
+    expected = _normalise_caption_text(caption)
+    timeout_ms = budget.clamp_ms(CAPTION_READBACK_TIMEOUT_MS)
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        actual = _normalise_caption_text(await editor.inner_text())
+        if actual == expected:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                'Instagram 配文回读不一致：'
+                f'期望 {expected!r}，实际 {actual!r}'
+            )
+        await page.wait_for_timeout(CAPTION_READBACK_POLL_MS)
+
+
+async def _click_nav(locator: Locator, humanizer: Humanizer) -> None:
+    """可见导航点击：先悬停让左栏展开落定，再坐标点击，付一次 ``after_navigate``。
+
+    真机 2026-11-13（ticket 05，``--no-publish`` 视频干跑）：Instagram 左侧导航
+    栏悬停即展开，目标包围盒在移动与 stillOn 复核之间位移 >1px，首个导航点击即
+    报 ``point-drift``。spec §2.5.1 的唯一处方是在调用点先 ``Humanizer.hover()``
+    再 ``click``（同小红书 ``.cover-edit-entry`` 模式）；``Humanizer.click`` 内部
+    零重试、零容差改动，hover 后仍遮挡则照常硬失败。
+    """
+    await humanizer.hover(locator)
+    await humanizer.click(locator)
+    await humanizer.after_navigate()
+
+
+async def _click_submit(locator: Locator, humanizer: Humanizer) -> None:
+    """提交点击：``before_submit`` 必须先于鼠标按下。"""
+    await humanizer.before_submit()
+    await humanizer.click(locator)
 
 
 async def _create_entry(page: Page, *, budget: PublishTimeoutBudget | None) -> Locator:
@@ -449,6 +563,9 @@ class InstagramUploader:
         self.options = options
         # 干跑：表单与选项全部完成后停在 Share 前，不点击、不观察结果。
         self.no_publish = bool(no_publish)
+        # 发布点击是否真的发出：登录跳转的 publish_attempted 只认这个标志，
+        # 不再由 status=submission_unknown 推断（提交前失败也会写那个状态）。
+        self.publish_clicked = False
         if not self.title:
             raise ValueError('标题不能为空')
         # 素材互斥 / 封面适用性 / 配文长度统一走共享纯函数（UsageError → 退出码 2）。
@@ -491,6 +608,29 @@ class InstagramUploader:
         )
         return self._publish_budget
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """一个 page 一个行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, '_humanizer_instance', None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """行为层时延只吃剩余预算：耗尽时收缩到 0，从不自己抛超时。"""
+        budget = getattr(self, '_publish_budget', None)
+        remaining = (
+            max(0.0, budget.remaining_seconds()) if budget is not None else seconds
+        )
+        if seconds > remaining and not getattr(self, '_pause_warned', False):
+            logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     def _notification_prompt(self, page: Page) -> Locator:
         """已知的通知提示：launcher 图标 + 对话框。
 
@@ -502,7 +642,9 @@ class InstagramUploader:
             has=page.locator('img[src*="launcher.png"]'))
 
     @staticmethod
-    async def _dismiss_prompt(prompt: Locator) -> bool:
+    async def _dismiss_prompt(
+        page: Page, prompt: Locator, *, humanizer: Humanizer | None = None
+    ) -> bool:
         """关闭已识别的可选提示。
 
         通知提示是 “Turn On / Not Now”，Reels 介绍是 “Learn more / OK”：
@@ -511,11 +653,14 @@ class InstagramUploader:
         """
         # 提示可能比调用点晚几百毫秒挂载：不要预先 count() 判缺席，
         # 交给 _dismiss_optional_prompt 的 visible 等待窗口。
+        humanizer = humanizer or Humanizer(page)
         labeled = prompt.get_by_role('button', name=PROMPT_DISMISS_TEXT)
         if await labeled.count() == 1:
-            return await _dismiss_optional_prompt(prompt, labeled)
+            return await _dismiss_optional_prompt(
+                prompt, labeled, humanizer=humanizer
+            )
         return await _dismiss_optional_prompt(
-            prompt, prompt.get_by_role('button').last
+            prompt, prompt.get_by_role('button').last, humanizer=humanizer
         )
 
     async def _register_notification_handler(self, page: Page) -> Locator:
@@ -528,13 +673,16 @@ class InstagramUploader:
         notifications = self._notification_prompt(page)
         await page.add_locator_handler(
             notifications,
-            lambda: self._dismiss_prompt(notifications),
+            lambda: self._dismiss_prompt(
+                page, notifications, humanizer=self._humanizer(page)
+            ),
         )
         return notifications
 
     async def _upload_files(self, page: Page, *, budget: PublishTimeoutBudget) -> None:
         """打开创建入口并等待裁剪阶段就绪，拒绝用上传后固定延时推断完成。"""
         budget.check_pre_click()
+        humanizer = self._humanizer(page)
         # handler 由 _upload_steps 注册并覆盖后续阶段；这里只复用同一个 locator
         # 主动轮询，不能在此移除 handler，否则编辑与配文阶段失去保护。
         notifications = self._notification_prompt(page)
@@ -543,13 +691,15 @@ class InstagramUploader:
         await expect(entry).to_have_count(
             1, timeout=budget.clamp_ms(30_000)
         )
-        await entry.click()
+        await _click_nav(entry, humanizer)
         # 创建弹窗可能被延迟出现的通知提示遮挡：轮询期间主动关闭已知提示，
         # 直到素材入口真的可操作；只有超时才报错，不添加固定等待。
         deadline = time.monotonic() + budget.clamp_ms(30_000) / 1000
         while True:
             if await notifications.count():
-                await self._dismiss_prompt(notifications)
+                await self._dismiss_prompt(
+                    page, notifications, humanizer=humanizer
+                )
             file_input = await _media_input(dialog)
             if await file_input.count():
                 break
@@ -565,13 +715,15 @@ class InstagramUploader:
             1, timeout=budget.clamp_ms(30_000)
         )
         paths = [self.video_file] if self.video_file else self.image_files
-        await file_input.set_input_files([str(p.resolve()) for p in paths])
+        await file_input.set_input_files(  # native-click: file；不可坐标化的 <input type=file>
+            [str(p.resolve()) for p in paths]
+        )
         if self.video_file:
             # 实际 Reels 介绍使用 reels_nux_icon；只按素材名片段识别，关闭动作复用
             # “对话框最后一个按钮”，不依赖语言、hash 类名或父子层级。
             reels_intro = page.get_by_role('dialog').filter(
                 has=page.locator('img[src*="reels_nux"]'))
-            await self._dismiss_prompt(reels_intro)
+            await self._dismiss_prompt(page, reels_intro, humanizer=humanizer)
         # 裁剪标题栏主动作实际出现，才可推进；上传失败或未知弹窗阻断会保留现场并报错。
         action = await _primary_action(dialog)
         await expect(action).to_have_count(
@@ -580,6 +732,7 @@ class InstagramUploader:
 
     async def _advance_media_editor(self, page: Page, *, budget: PublishTimeoutBudget) -> None:
         """裁剪、编辑两步各等待标题改变，最终以 Lexical 配文输入框确认。"""
+        humanizer = self._humanizer(page)
         # 同一个创建弹窗标题栏存在于三个阶段；局部主动作不含图标，排除返回和媒体工具按钮。
         dialog = page.get_by_role('dialog')
         heading = await _composer_heading(dialog)
@@ -598,7 +751,9 @@ class InstagramUploader:
                     1, timeout=budget.clamp_ms(30_000)
                 )
                 previous_style = await poster.get_attribute('style')
-                await cover.set_input_files(str(self.thumbnail.resolve()))
+                await cover.set_input_files(  # native-click: file；封面入口是 <input type=file>
+                    str(self.thumbnail.resolve())
+                )
                 await expect(poster).not_to_have_attribute(
                     'style', previous_style,
                     timeout=budget.clamp_ms(30_000),
@@ -628,7 +783,7 @@ class InstagramUploader:
             await expect(action).to_be_enabled(
                 timeout=budget.clamp_ms(30_000)
             )
-            await action.click()
+            await _click_nav(action, humanizer)
             await expect(heading).not_to_have_text(
                 previous, timeout=budget.clamp_ms(60_000)
             )
@@ -732,7 +887,10 @@ class InstagramUploader:
             return
         if controls is None:
             controls = resolve_instagram_option_controls(
-                page, image_count=len(self.image_files), budget=budget
+                page,
+                image_count=len(self.image_files),
+                budget=budget,
+                humanizer=self._humanizer(page),
             )
         details: list[str] = []
         for key in APPLY_ORDER:
@@ -792,14 +950,18 @@ class InstagramUploader:
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
     ) -> None:
         """先登记最终响应监听再分享，响应不明时记录 unknown 且不重发。"""
+        humanizer = self._humanizer(page)
         # 配文页独有 Lexical 编辑器；标题栏唯一主动作此时是分享。
         dialog = page.get_by_role('dialog')
         editor = await _caption_editor(dialog)
         caption = self._caption()
-        await editor.fill(caption)
-        await expect(editor).to_have_text(
-            caption, timeout=budget.clamp_ms(30_000)
-        )
+        # 清空后逐字写入（>1000 码点整段 insert_text），随后按渲染文本回读。
+        await _type_caption(editor, caption, humanizer)
+        await _read_back_caption(editor, caption, page=page, budget=budget)
+        # 真机 2026-11-13：逐字输入 #标签 弹出的 hashtag 联想浮层会盖住右侧
+        # 选项面板（后续点击报 covered-by）。点标题栏关闭浮层，不改写正文；
+        # 标题栏缺席时该 helper 静默跳过，不因此让发布失败。
+        await dismiss_suggestions(dialog, humanizer)
         # 选项必须在点击 Share 之前完成；失败时尚未发布，按普通失败处理。
         if self.options is not None:
             # 未请求时保持既有 stage（legacy 失败证据不变）。
@@ -829,6 +991,8 @@ class InstagramUploader:
             label="Instagram 发布",
         )
         budget.check_pre_click()
+        # status 只是结果记录；点击是否派发由独立的 publish_clicked 标记。
+        self.publish_clicked = False
         self.result.update(identity, status='submission_unknown')
         self._write_result()
         # Reel 首次返回 202，浏览器会继续请求同一创建接口，后续才返回正式 media。
@@ -839,7 +1003,15 @@ class InstagramUploader:
                 responses.put_nowait(response)
         page.on('response', on_response)
         try:
-            await action.click()
+            try:
+                await _click_submit(action, humanizer)
+            except Exception as exc:
+                if maybe_dispatched(exc):
+                    # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                    raise budget.timeout_error(True) from exc
+                raise
+            # 点击已经返回：从这里开始的任何失败都算「结果可能已提交」。
+            self.publish_clicked = True
             # 点击成功后只等最终创建响应；未拿到响应即超时，按结果未知处理，绝不重发。
             result_deadline = budget.deadline
             while True:
@@ -950,6 +1122,8 @@ class InstagramUploader:
             wait_until='domcontentloaded',
             timeout=budget.clamp_ms(120_000),
         )
+        # 一个 page 一个行为层实例：在页面打开后立刻构造并缓存。
+        self._humanizer(page)
         if session.managed:
             _raise_if_login_required(page)
             if await _is_instagram_logged_out(
@@ -972,6 +1146,13 @@ class InstagramUploader:
             await self._capture_failure_safely(page, error)
             raise
         except Exception as error:
+            if session.managed:
+                # 发布点击之后的登录跳转：结果可能已提交，必须带上 publish_attempted。
+                # 只认点击标志；提交前失败也会把 status 写成 submission_unknown。
+                _raise_if_login_required(
+                    page,
+                    publish_attempted=self.publish_clicked,
+                )
             raise await self._capture_failure(page, error) from error
 
     async def upload(self, *, session: BrowserSession | None = None) -> dict:
@@ -989,6 +1170,8 @@ class InstagramUploader:
                 headless=self.headless,
                 budget=budget,
             )
+            # 一个 page 一个行为层实例：在页面打开后立刻构造并缓存。
+            self._humanizer(page)
             try:
                 self.stage = 'identity'
                 identity = await instagram_identity(page, self.account_file)

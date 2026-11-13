@@ -40,6 +40,7 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_PHOTO_UPLOAD_URL,
     TIKTOK_UPLOAD_URL,
 )
+from utils.dom import ElementUnusableError
 
 TOKEN = "SENTINEL-MLX-TOKEN-ticket15"
 ITEM_ID = "7412345678901234567"
@@ -148,10 +149,18 @@ class _Locator:
         self.page.events.append(("probe", self.selector))
         return self._count
 
+    async def hover(self, **kwargs) -> None:
+        # 平台点击入口先 hover 再 click；这里保持事件流不变。
+        return None
+
     async def click(self, **kwargs) -> None:
         self.page.events.append(("click", self.selector))
         if "button-group" in self.selector:
             self.page.publish_clicked = True
+        if "catchy" in self.selector:
+            self.page.keyboard_target = "title"
+        elif "DraftEditor" in self.selector or "caption" in self.selector:
+            self.page.keyboard_target = "caption"
 
     async def inner_text(self) -> str:
         if 'item_id=' in self.selector:
@@ -191,7 +200,10 @@ class _Keyboard:
 
     async def insert_text(self, text: str) -> None:
         self.page.events.append(("insert_text", text))
-        self.page.caption_text += text
+        if self.page.keyboard_target == "title":
+            self.page.title_text += text
+        else:
+            self.page.caption_text += text
 
     async def press(self, key: str) -> None:
         self.page.events.append(("press", key))
@@ -207,6 +219,10 @@ class _TextTab:
 
     async def count(self) -> int:
         return 1 if self.page.photos_tab else 0
+
+    async def hover(self, **kwargs) -> None:
+        # 平台点击入口先 hover 再 click；这里保持事件流不变。
+        return None
 
     async def click(self, **kwargs) -> None:
         self.page.events.append(("photos_tab_click",))
@@ -239,6 +255,7 @@ class _StudioPage:
         self.publish_clicked = False
         self.title_text = ""
         self.caption_text = ""
+        self.keyboard_target = "caption"
         self.keyboard = _Keyboard(self)
 
     async def goto(self, url: str, **kwargs):
@@ -293,6 +310,9 @@ class _StudioPage:
         if "text=Post" in selector:
             return _Locator(self, selector, count=1)
         if selector == "div.button-group button":
+            return _Locator(self, selector, count=1)
+        if selector == '[data-e2e="post_video_button"]':
+            # 真实 Studio 的发布按钮锚点；单次派发要求 fake 也暴露它。
             return _Locator(self, selector, count=1)
         if selector == "div[data-tt=\"components_PostTable_Container\"]":
             return _Locator(self, selector, count=1)
@@ -1303,7 +1323,7 @@ class UploadNoteMetadataTests(unittest.TestCase):
         self.assertEqual(page.title_text, "My photo title")
         self.assertEqual(page.caption_text, "")
         self.assertFalse(
-            any(event[0] == "insert_text" for event in page.events)
+            any(event[0] == "fill" for event in page.events)
         )
 
     def test_absent_or_empty_title_never_overwrites_the_page(self):
@@ -1637,6 +1657,94 @@ class UploadNoteConstantsTests(unittest.TestCase):
             TIKTOK_PHOTO_UPLOAD_URL,
             "https://www.tiktok.com/tiktokstudio/upload?tab=photo",
         )
+
+
+
+class PhotoTitleStructuralErrorTests(unittest.TestCase):
+    """Only a real ``ElementUnusableError(reason="ambiguous:N")`` is structural."""
+
+    def _note(self, error) -> TiktokNote:
+        note = TiktokNote(
+            ["/tmp/cover.png"], "", [], 0, None, title="标题"
+        )
+        note.locator_base = _TitleScope(error)
+        return note
+
+    def test_ambiguous_reason_raises_before_the_retry_loop(self):
+        error = ElementUnusableError(
+            what="Title", role="interactive", reason="ambiguous:2"
+        )
+        note = self._note(error)
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+
+        with patch.object(note, "dismiss_blocking_overlays", AsyncMock()):
+            with self.assertRaises(ElementUnusableError) as ctx:
+                asyncio.run(note._fill_title(page))
+
+        self.assertEqual(ctx.exception.reason, "ambiguous:2")
+        page.wait_for_timeout.assert_not_awaited()
+
+    def test_a_message_that_merely_mentions_ambiguous_is_retried(self):
+        note = self._note(RuntimeError("selector note: ambiguous: not a reason"))
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+
+        with patch.object(note, "dismiss_blocking_overlays", AsyncMock()):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note._fill_title(page))
+
+        self.assertIn("未找到", str(ctx.exception))
+        self.assertEqual(page.wait_for_timeout.await_count, 20)
+
+
+class _TitleScope:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def locator(self, _selector: str) -> "_TitleField":
+        return _TitleField(self.error)
+
+
+class _TitleField:
+    """The title input; the humanized hover is where the structural error hits."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    @property
+    def first(self) -> "_TitleField":
+        return self
+
+    async def count(self) -> int:
+        return 1
+
+    async def hover(self) -> None:
+        raise self.error
+
+    async def click(self) -> None:  # pragma: no cover - hover fails first
+        raise AssertionError("click must not run after a failing hover")
+
+
+def setUpModule():
+    """Legacy TikTok fakes model the pre-humanize DOM seam.
+
+    ``HUMANIZE=0`` is the semantic switch for exactly this: one ``insert_text``
+    per text field and one ``locator.click`` per click.  The humanized
+    behaviour itself is covered by ``tests/test_tiktok_humanize.py``.
+    """
+    import os
+
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
+    os.environ["HUMANIZE"] = "0"
+
+
+def tearDownModule():
+    import os
+
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
 
 
 if __name__ == "__main__":

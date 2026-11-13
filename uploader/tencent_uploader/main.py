@@ -20,7 +20,13 @@ from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
+from utils.dom import ElementMissingError, ElementUnusableError
 from utils.errors import LoginRequiredError
+from utils.humanize import (
+    MAYBE_DISPATCHED,
+    MAYBE_DISPATCHED_VALUE,
+    Humanizer,
+)
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
@@ -33,6 +39,37 @@ TENCENT_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
+
+
+#: 收窄后的目标必须唯一：多义（count > 1）立即硬错 ``ambiguous:N``，绝不 .first。
+_UNIQUE_TIMEOUT_MS = 30_000
+_UNIQUE_POLL_SECONDS = 0.1
+
+
+async def _unique(
+    locator,
+    what: str,
+    *,
+    role: str = "interactive",
+    timeout_ms: int = _UNIQUE_TIMEOUT_MS,
+):
+    """把 ``locator`` 收窄到唯一匹配；多义硬错，不静默取 ``.first``。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_ms / 1000
+    while True:
+        count = await locator.count()
+        if count > 1:
+            raise ElementUnusableError(
+                what,
+                role=role,
+                reason=f"ambiguous:{count}",
+                publish_clicked=False,
+            )
+        if count == 1:
+            return locator
+        if loop.time() >= deadline:
+            raise ElementMissingError(what, role=role, publish_clicked=False)
+        await asyncio.sleep(_UNIQUE_POLL_SECONDS)
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -104,11 +141,12 @@ TENCENT_LOGIN_CHECK_SETTLE_MS = 3_000
 _TENCENT_LOGIN_HINTS = ("login", "captcha", "verify", "two-factor", "2fa")
 
 
-def _raise_if_login_required(page: Page) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour.
+    retry-until-timeout behaviour.  ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -116,7 +154,8 @@ def _raise_if_login_required(page: Page) -> None:
     if any(marker in url for marker in _TENCENT_LOGIN_HINTS):
         raise LoginRequiredError(
             "视频号上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -422,7 +461,7 @@ async def _refresh_tencent_qrcode(page: Page) -> None:
         try:
             if not await refresh_wrap.count() or not await refresh_wrap.is_visible():
                 continue
-            await refresh_wrap.click()
+            await refresh_wrap.click()  # native-click: login；二维码刷新链路登录期保持原生
             return
         except Exception:
             continue
@@ -440,16 +479,16 @@ async def _refresh_tencent_qrcode(page: Page) -> None:
                 continue
             refresh_wrap = tip.locator("xpath=ancestor::div[contains(@class, 'refresh-wrap')]").first
             if await refresh_wrap.count():
-                await refresh_wrap.click()
+                await refresh_wrap.click()  # native-click: login；二维码刷新链路登录期保持原生
             else:
-                await tip.click()
+                await tip.click()  # native-click: login；二维码刷新链路的文本兜底保持原生
             return
         except Exception:
             continue
 
     fallback_refresh = page.locator("div.login-qrcode-wrap div.refresh-wrap").first
     if await fallback_refresh.count():
-        await fallback_refresh.click()
+        await fallback_refresh.click()  # native-click: login；二维码刷新链路登录期保持原生
         return
 
     raise RuntimeError("未找到可点击的视频号二维码刷新区域")
@@ -639,6 +678,26 @@ class TencentBaseUploader(BaseVideoUploader):
         else:
             self.publish_date = 0
 
+    def _humanizer(self, page: Page) -> Humanizer:
+        """发布链路的唯一行为层实例：指针位置与随机流保持连续。"""
+        cached = getattr(self, "_humanizer_instance", None)
+        if cached is None or cached.page is not page:
+            cached = Humanizer(page, sleep=self._humanize_pause)
+            self._humanizer_instance = cached
+        return cached
+
+    async def _humanize_pause(self, seconds: float) -> None:
+        """人类化停顿只吃剩余预算，耗尽时收缩到 0，不自己抛超时。"""
+        remaining = max(0.0, self.publish_budget.remaining_seconds())
+        if seconds > remaining and not getattr(self, "_pause_warned", False):
+            tencent_logger.warning(
+                "人类化停顿被预算裁剪: {}s > {}s",
+                round(seconds, 2),
+                round(remaining, 2),
+            )
+            self._pause_warned = True
+        await asyncio.sleep(min(seconds, remaining))
+
     async def wait_for_realtime_verification(
         self,
         page: Page,
@@ -667,33 +726,51 @@ class TencentBaseUploader(BaseVideoUploader):
         return output_path
 
     async def set_schedule_time_tencent(self, page: Page, publish_date: datetime):
+        humanizer = self._humanizer(page)
         publish_date = await page_wall_clock(page, publish_date)
-        label_element = page.locator("label").filter(has_text="定时").nth(1)
-        await label_element.click()
-        await page.click('input[placeholder="请选择发表时间"]')
+        # 「定时」文案与开关同时命中两个 label：先收窄到唯一的第 2 个再点。
+        schedule_toggle = await _unique(
+            page.locator("label").filter(has_text="定时").nth(1), "定时开关"
+        )
+        await humanizer.click(schedule_toggle)
+        date_field = await _unique(
+            page.locator('input[placeholder="请选择发表时间"]'), "发表时间输入框"
+        )
+        await humanizer.click(date_field)
 
         current_month = publish_date.strftime("%m月")
         page_month = await page.inner_text('span.weui-desktop-picker__panel__label:has-text("月")')
         if page_month != current_month:
-            await page.click("button.weui-desktop-btn__icon__right")
+            next_month = await _unique(
+                page.locator("button.weui-desktop-btn__icon__right"), "下月按钮"
+            )
+            await humanizer.click(next_month)
 
-        elements = await page.query_selector_all("table.weui-desktop-picker__table a")
-        for element in elements:
-            if "weui-desktop-picker__disabled" in await element.evaluate("el => el.className"):
+        # 日期格是 ElementHandle 集合：改为 Locator 后逐个收窄再交给 Humanizer。
+        cells = page.locator("table.weui-desktop-picker__table a")
+        for index in range(await cells.count()):
+            cell = cells.nth(index)
+            classes = await cell.get_attribute("class") or ""
+            if "weui-desktop-picker__disabled" in classes:
                 continue
-            text = await element.inner_text()
+            text = await cell.inner_text()
             if text.strip() == str(publish_date.day):
-                await element.click()
+                await humanizer.click(cell)
                 break
 
-        await page.click('input[placeholder="请选择时间"]')
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.type(publish_date.strftime("%H"))
-        await page.keyboard.press("Enter")  # 确认小时并关闭时间下拉
+        time_field = await _unique(
+            page.locator('input[placeholder="请选择时间"]'), "时间输入框"
+        )
+        await humanizer.click(time_field)
+        # picker 打开时自带当前值：先全选覆盖（sel），再逐字输入小时。
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(publish_date.strftime("%H"))
+        await humanizer.press("Enter")  # 确认小时并关闭时间下拉
         await page.wait_for_timeout(500)
         # 收起时间选择浮层：直接点描述区可能被 weui-desktop-dialog 遮挡，做容错
         try:
-            await page.locator("div.input-editor").click(timeout=5000)
+            await page.locator("div.input-editor").click(timeout=5000)  # native-click: focus；点描述区只为夺焦收起时间浮层，失败已有 Escape 兜底
         except Exception:
             await page.keyboard.press("Escape")
 
@@ -735,19 +812,23 @@ class TencentBaseUploader(BaseVideoUploader):
             pass
         # 注意：get_by_text("发表视频") 会命中一个隐藏的说明 <p>（不可点）；
         # 首页真正可点的入口是 button.weui-desktop-btn。
+        humanizer = self._humanizer(page)
         publish_entry = page.locator("button.weui-desktop-btn", has_text="发表视频").first
         try:
             await publish_entry.wait_for(
                 state="visible", timeout=budget.clamp_ms(30000)
             )
-            await publish_entry.click()
         except Exception:
-            # 兜底：按钮没点到时退回老逻辑直接跳转（可能仍是空壳，但保持向后兼容）
+            # 兜底仅覆盖「入口按钮没出现」：退回老逻辑直接跳转（可能仍是空壳，
+            # 但保持向后兼容）。人类化点击失败不降级，按 ElementUnusable 上抛。
             await page.goto(
                 TENCENT_UPLOAD_URL,
                 timeout=budget.clamp_ms(120000),
                 wait_until="domcontentloaded",
             )
+        else:
+            await humanizer.click(await _unique(publish_entry, "首页发表视频入口"))
+            await humanizer.after_navigate()
         try:
             await page.wait_for_url(
                 "**/platform/post/create", timeout=budget.clamp_ms(120000)
@@ -793,7 +874,8 @@ class TencentBaseUploader(BaseVideoUploader):
                     except Exception:
                         continue
                     if "发表视频" in button_text and is_visible:
-                        await candidate.click(force=True)
+                        # 候选来自 get_by_role().all()，每个都是单元素 Locator。
+                        await self._humanizer(page).click(candidate)
                         clicked_publish = True
                         break
             fi = await find_file_input()
@@ -819,8 +901,9 @@ class TencentBaseUploader(BaseVideoUploader):
         # 视频号「短标题」即界面上要求填写的“标题”（那个大编辑区其实是“视频描述”）。
         # 走 format_str_for_short_title 保证长度落在 7~15，避免发布时被校验拦下。
         value = format_str_for_short_title(short_title or title)
+        humanizer = self._humanizer(page)
         # 优先用 placeholder 定位（已 dump 验证更稳），兜底旧的“短标题”相邻 input。
-        field = page.locator('input[placeholder="填写短标题有机会获得更多流量"]').first
+        field = page.locator('input[placeholder="填写短标题有机会获得更多流量"]')
         if not await field.count():
             field = (
                 page.get_by_text("短标题", exact=True)
@@ -828,21 +911,50 @@ class TencentBaseUploader(BaseVideoUploader):
                 .locator("xpath=following-sibling::div")
                 .locator('span input[type="text"]')
             )
-        if await field.count():
-            await field.fill(value)
-            tencent_logger.info(_msg("🏷️", f"短标题已填写（{len(value)}字）：{value}"))
-        else:
+        if not await field.count():
             tencent_logger.info(_msg("🧾", "未找到短标题输入框，跳过短标题"))
+            return
+        field = await _unique(field, "短标题输入框", role="editable")
+        await humanizer.click(field)
+        # 短标题是独立单行 input：全选覆盖（sel），不碰描述编辑器。
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
+        await humanizer.type_text(value)
+        tencent_logger.info(_msg("🏷️", f"短标题已填写（{len(value)}字）：{value}"))
+
+    async def _guard_description(
+        self, editor, humanizer: Humanizer, *, expected: str = ""
+    ) -> None:
+        """视频描述默认值未知（spec §9 #19）：先读，再决定是否清空。
+
+        ``expected`` 是本会话已写入的内容；当前内容以它开头时直接追加（话题 /
+        正文），否则视为平台预填或编辑器被重置，先全选覆盖。
+        """
+        try:
+            current = await editor.inner_text()
+        except Exception:
+            current = ""
+        current = str(current or "").replace("\r\n", "\n")
+        if expected:
+            if current.strip().startswith(expected.strip()):
+                return
+        elif not current.strip():
+            return
+        await humanizer.press("ControlOrMeta+A")
+        await humanizer.press("Delete")
 
     async def _dismiss_switch_account_dialog(self, page: Page) -> None:
         # 视频号上传后偶发弹出「切换视频号」对话框(.changeAccount-dialog / .common-dialog)遮挡发布表单。
         # 它带「取消」按钮、非强制，点「取消」/ 右上角 × / Esc 跳过即可，用当前账号继续发布。
+        humanizer = self._humanizer(page)
         cancel = page.locator('.changeAccount-dialog button:has-text("取消")').first
         closeb = page.locator('.changeAccount-dialog .weui-desktop-dialog__close-btn').first
         for cand in (cancel, closeb):
             try:
                 if await cand.count() and await cand.is_visible():
-                    await cand.click(timeout=2000)
+                    # 坐标点击没有 actionability timeout；保留 2s 可见性等待后直接点。
+                    await cand.wait_for(state="visible", timeout=2000)
+                    await humanizer.click(cand)
                     await page.wait_for_timeout(600)
                     return
             except Exception:
@@ -854,26 +966,48 @@ class TencentBaseUploader(BaseVideoUploader):
             pass
 
     async def fill_title_and_tags(self, page: Page) -> None:
+        humanizer = self._humanizer(page)
         # 上传后偶发「切换视频号」弹窗遮挡描述框，点不动就关弹窗重试（以能点中描述框为成功标志）。
+        editor = await _unique(
+            page.locator("div.input-editor"), "视频描述编辑区", role="editable"
+        )
         for _ in range(4):
             try:
-                await page.locator("div.input-editor").click(timeout=5000)
+                await humanizer.click(editor)
                 break
             except Exception:
                 await self._dismiss_switch_account_dialog(page)
                 await page.wait_for_timeout(500)
         else:
-            await page.locator("div.input-editor").click(timeout=8000)
-        await page.keyboard.type(self.title)
-        await page.keyboard.press("Enter")
+            await humanizer.click(editor)
+        # 描述默认值未知：先读一次，有预填就整体覆盖。
+        await self._guard_description(editor, humanizer)
+        await humanizer.type_text(self.title)
+        await humanizer.press("Enter")
+        written = self.title + "\n"
         for tag in self.tags:
-            await page.keyboard.type("#" + tag)
-            await page.keyboard.press("Space")
+            # 话题写入同一编辑器：先确认前面写的标题还在，串场才覆盖。
+            await self._guard_description(editor, humanizer, expected=written)
+            await humanizer.type_text("#" + tag)
+            separator = "" if written.endswith("\n") else " "
+            written += f"{separator}#{tag}"
+            await humanizer.press("Space")
+        self._description_written = written
         tencent_logger.info(_msg("🏷️", f"成功添加 hashtag: {len(self.tags)}"))
 
     async def fill_description(self, page: Page) -> None:
-        await page.keyboard.press("Enter")
-        await page.keyboard.type(self.desc)
+        humanizer = self._humanizer(page)
+        editor = await _unique(
+            page.locator("div.input-editor"), "视频描述编辑区", role="editable"
+        )
+        # 追加正文前走同一个 guard：内容仍是我们写下的标题/话题才追加。
+        await self._guard_description(
+            editor, humanizer, expected=getattr(self, "_description_written", "")
+        )
+        await humanizer.press("Enter")
+        await humanizer.type_text(
+            str(self.desc).replace("\r\n", "\n").replace("\r", "\n")
+        )
         tencent_logger.info(_msg("🏷️", f"成功添加 desc: {len(self.desc)}"))
 
     async def apply_collection(self, page: Page) -> None:
@@ -884,13 +1018,16 @@ class TencentBaseUploader(BaseVideoUploader):
         """
         if not self.collection_name:
             return
+        humanizer = self._humanizer(page)
         try:
             trigger = page.get_by_text("添加到合集").first
             if await trigger.count() == 0:
                 tencent_logger.info(_msg("🧾", "当前页面未发现「添加到合集」入口，跳过归集"))
                 return
-            dropdown = trigger.locator("xpath=following-sibling::div").first
-            await dropdown.click(timeout=8000)
+            dropdown = await _unique(
+                trigger.locator("xpath=following-sibling::div"), "合集下拉框"
+            )
+            await humanizer.click(dropdown)
             await page.wait_for_timeout(800)
 
             option = dropdown.locator(".option-list-wrap .option-item").filter(
@@ -904,22 +1041,10 @@ class TencentBaseUploader(BaseVideoUploader):
                 await page.wait_for_timeout(300)
                 return
 
-            # headless 下 option 常报 "element is not visible"：下拉列表开在视口外/
-            # 在 .option-list-wrap 滚动容器内，headful（大窗口）时在视野里能直接点中，
-            # headless 默认视口小就点不中。先把目标 option 滚进视野再点；普通 click
-            # 仍被判不可见时 → force 点击（跳过可见性 actionability）→ 派发原生 click 兜底。
-            target = option.first
-            try:
-                await target.scroll_into_view_if_needed(timeout=3000)
-            except Exception:
-                pass
-            try:
-                await target.click(timeout=4000)
-            except Exception:
-                try:
-                    await target.click(force=True, timeout=4000)
-                except Exception:
-                    await target.dispatch_event("click")
+            # 精确 `.name` 命中后按唯一 Locator 坐标点击；视口/容器裁剪由共享层
+            # ensure_in_viewport 解决（ticket 01），不再 force、不再 dispatch_event。
+            target = await _unique(option, f"合集项「{self.collection_name}」")
+            await humanizer.click(target)
             await page.wait_for_timeout(500)
             tencent_logger.success(_msg("🥳", f"已选择合集：{self.collection_name}"))
         except Exception as exc:
@@ -934,16 +1059,17 @@ class TencentBaseUploader(BaseVideoUploader):
         # 依平台合规要求如实选「含AI生成内容」（与「内容为转载」等并列，选定即可、无需填写来源）。
         # 注意：这与上方独立的「声明原创」复选框是两个不同字段，本项目走 AI 标注、不勾原创声明。
         label_text = getattr(self, "content_label", None) or "含AI生成内容"
+        humanizer = self._humanizer(page)
         try:
             entry = page.get_by_text("选择视频标注", exact=True).first
             if not await entry.count():
                 tencent_logger.info(_msg("🧾", "当前页面未发现「视频标注」入口，跳过标注继续发布"))
                 return
-            await entry.click()
+            await humanizer.click(await _unique(entry, "视频标注入口"))
             await page.wait_for_timeout(800)
             option = page.get_by_text(label_text, exact=True).first
             await option.wait_for(state="visible", timeout=5000)
-            await option.click()
+            await humanizer.click(await _unique(option, f"视频标注「{label_text}」"))
             await page.wait_for_timeout(500)
             tencent_logger.success(_msg("🏷️", f"视频标注已选择：{label_text}"))
         except Exception as exc:
@@ -1034,6 +1160,7 @@ class TencentBaseUploader(BaseVideoUploader):
 
     async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         budget = self.publish_budget
+        humanizer = self._humanizer(page)
         is_draft = getattr(self, "is_draft", False)
         # 先等待并清理遮罩/弹窗,再等发表按钮出现
         for wait_round in range(60):
@@ -1063,19 +1190,33 @@ class TencentBaseUploader(BaseVideoUploader):
             budget.check_pre_click()
         # 点发表/草稿
         publish_clicked = False
+        maybe_dispatched = False
         for attempt in range(20):
             if budget.remaining_seconds() <= 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             try:
-                if not publish_clicked and await publish_btn.count():
+                if (
+                    not publish_clicked
+                    and not maybe_dispatched
+                    and await publish_btn.count()
+                ):
+                    # 只在确定未派发时才再次点击：mouse.down 之后的失败可能已发出。
+                    await humanizer.before_submit()
                     try:
-                        await publish_btn.click(timeout=4000)
-                    except Exception:
-                        await publish_btn.evaluate("el => el.click()")
+                        await humanizer.click(publish_btn)
+                    except Exception as exc:
+                        if (
+                            str(getattr(exc, MAYBE_DISPATCHED, ""))
+                            == MAYBE_DISPATCHED_VALUE
+                        ):
+                            maybe_dispatched = True
+                            if not is_draft:
+                                publish_clicked = True
+                        raise
                     if not is_draft:
                         publish_clicked = True
                 if is_draft:
@@ -1161,8 +1302,8 @@ class TencentVideo(TencentBaseUploader):
 
     async def handle_upload_error(self, page: Page) -> None:
         tencent_logger.info(_msg("😵", "视频出错了，重新上传中"))
-        await page.locator('div.media-status-content div.tag-inner:has-text("删除")').click()
-        await page.get_by_role("button", name="删除", exact=True).click()
+        await page.locator('div.media-status-content div.tag-inner:has-text("删除")').click()  # native-click: manage；失败素材删除属错误重传管理路径
+        await page.get_by_role("button", name="删除", exact=True).click()  # native-click: manage；失败素材删除属错误重传管理路径
         await self.upload_video_file(page, self.file_path)
 
     async def open_thumbnail_dialog(self, page: Page, selectors: list[str], dialog_titles: list[str]):
@@ -1172,7 +1313,9 @@ class TencentVideo(TencentBaseUploader):
                 if not await cover_entry.count():
                     continue
                 await cover_entry.wait_for(state="visible", timeout=3000)
-                await cover_entry.click()
+                await self._humanizer(page).click(
+                    await _unique(cover_entry, "封面编辑入口")
+                )
                 await page.wait_for_timeout(500)
                 break
             except Exception:
@@ -1196,7 +1339,9 @@ class TencentVideo(TencentBaseUploader):
             ).first
             if await crop_confirm_button.count():
                 await crop_confirm_button.wait_for(state="visible", timeout=5000)
-                await crop_confirm_button.click()
+                await self._humanizer(page).click(
+                    await _unique(crop_confirm_button, "裁剪封面确认按钮")
+                )
                 await page.wait_for_timeout(1000)
         except Exception as exc:
             tencent_logger.warning(_msg("😵", f"封面裁剪确认时出错，小人继续尝试保存主弹窗: {exc}"))
@@ -1212,7 +1357,9 @@ class TencentVideo(TencentBaseUploader):
             'div.weui-desktop-dialog__ft button.weui-desktop-btn_primary:has-text("确认")'
         ).first
         await confirm_button.wait_for(state="visible", timeout=10000)
-        await confirm_button.click()
+        await self._humanizer(page).click(
+            await _unique(confirm_button, "封面确认按钮")
+        )
 
     async def set_single_thumbnail(
         self,
@@ -1311,6 +1458,8 @@ class TencentVideo(TencentBaseUploader):
         self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
+        # 每个 page 一个行为层实例；缓存按 page 身份失效（spec §2.2）。
+        self._humanizer(page)
         await self.open_upload_page(page, multilogin=multilogin)
         if multilogin:
             _raise_if_login_required(page)
@@ -1445,6 +1594,8 @@ class TencentNote(TencentBaseUploader):
         self.start_publish_budget()
         multilogin = session.managed
         page = await session.context.new_page()
+        # 每个 page 一个行为层实例；缓存按 page 身份失效（spec §2.2）。
+        self._humanizer(page)
         await self.open_upload_page(page, multilogin=multilogin)
         if multilogin:
             _raise_if_login_required(page)

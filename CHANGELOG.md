@@ -4,6 +4,83 @@
 
 ## [Unreleased]
 
+### 封面上传不再拉起系统文件选择器
+
+封面弹窗里本来就有隐藏的图片 `input[type=file]`：先点「上传封面 / 上传」tab 再
+`set_input_files` 会让那一下真的打开系统文件选择器，并把选择器留在屏幕上。四个平台
+按小红书先例（`bbc5361`）改成「先直接写 input；只有 input 缺失才在
+`expect_file_chooser` 里点 tab 兜底」：
+
+- TikTok 视频封面（`uploader/tk_uploader/main_chrome.py`）：`apply_cover` 不再先点
+  `Upload cover`；该 tab 只在 input 缺失时被点击，且必须由 `expect_file_chooser` 消费。
+- 快手视频封面（`uploader/ks_uploader/main.py`）：`set_thumbnail` 不再先点「上传封面」；
+  弹窗里的 `input[type="file"]` 直接写。
+- 支付宝生活号视频封面（`uploader/alipay_uploader/main.py`）：`upload_thumbnail` 先写
+  弹窗里的图片 input，不再无条件点「上传封面」+「上传图片」。
+- 百家号视频封面（`uploader/baijiahao_uploader/main.py`）：`_upload_thumbnail` 先写
+  封面 input，不再无条件点「上传」tab/按钮。
+
+chooser 事件没到时不再重复点击，而是重新解析 input 后直接写；封面裁剪、确认、保存
+以及「失败降级为警告」的语义不变。
+
+### 日志与发布重试
+
+- 日志默认只输出到控制台，不再写入 `logs/`；需要文件日志时设置 `SAU_LOG_TO_FILES=1`（仍按 `logs/<platform>.log` 写入，10MB 轮转、保留 10 天）。避免长跑或测试把磁盘写满。
+- 小红书 `--original`：平台把原创开关渲染成 `disabled`（`pointer-events:none`、内部 input disabled）时，直接给出「当前账号或这条视频不支持开启原创，请去掉 `--original`」并退出 `1`，不再让坐标点击报无上下文的 `disabled`。
+- TikTok 发布改为「就绪等待（最多 60 秒）→ 单次派发 → 结果轮询」：点击前失败立即退出 `1`、不再重试；`mouse.down` 之后失败只等结果（超时退出 `9`），绝不二次派发。日志只保留首条完整堆栈，避免重复失败刷出 MB 级文件。
+
+### 人类化交互层（15 平台）
+
+浏览器发布平台默认接入人类化交互层：文本逐字符键入、可见点击按人类指针轨迹落地；
+`set_input_files`、文件选择器、`select_option`、`evaluate` 与读回保持原生。
+
+各波次（W1–W5）小节中的「交互点」数量按实现清单统计，与规格 §7.1 表格在合并行时可能不同；
+总数以 `.scratch/humanize-rollout/spec.md` §7.1 为准。
+
+- 默认开启，不需要参数；**唯一运行时回滚开关是全局 `HUMANIZE=0`**：文本退化为一次
+  `insert_text`、点击退化为一次原生 `locator.click()`、所有停顿为零，平台路径与选择器不变。
+  回滚单位是平台提交（revert 该平台），不存在运行时自动降级。
+- 真机验收（本地模式，一律 `--no-publish` 停在就绪点，**未点击真实发布**）：
+  小红书回归 pass（视频 56s / 72s、图文 31s，预算消耗 3–8%）；Instagram 视频 63s（H1）/
+  42s（H0）、carousel 64s / 44s，`status=prepared`；TikTok 视频 83s / 100s、图文
+  234s / 67s / 99s，全部到达发布就绪。证据与失败观察见
+  `.scratch/humanize-rollout/acceptance.md`。
+- 其余 12 个平台（YouTube、Facebook / Facebook Page、抖音、微博、知乎、大鱼号、视频号、
+  快手、支付宝、百家号、虎扑、雪球）没有真机设备，全部标「未验证（无真机环境）」；
+  托管模式（Multilogin X / AdsPower）与发布点击/提交后行为同样未验证。
+- 单一来源见 `.scratch/humanize-rollout/spec.md` §7–§9；对外契约见
+  `docs/CLI.md` 的「人类化交互层（全平台）」。
+
+#### 人类化交互层（W1 真机探针）
+
+- TikTok：30 个交互点接入人类化，配文/话题逐字输入，选项控件集中在公共底座（`uploader/tk_uploader/main_chrome.py`）。
+- Instagram：§3.9 的 16 个交互点全部处置——文本与可见点击接入人类化，2 处 `set_input_files` 与作品管理路径按规格保留原生（`uploader/meta_uploader/insgraph_uploader/`）。
+
+#### 人类化交互层（W2 国外）
+
+- Facebook 个人主页：3 个交互点接入人类化（正文输入 + 正文聚焦 / 发布点击），删除/管理点击与文件选择保持原生并逐条标记（`uploader/meta_uploader/facebook_uploader/`）。
+- YouTube：标题/简介逐字输入（含 `#` 逐段等待候选并按文本全等点选、失败降级纯文本继续）、播放列表名与标签改为全选覆盖后逐字、12 处可见点击（含 `_click_if_present`）统一走人类化指针（uploader/youtube_uploader）。
+- Facebook Page：14 个交互点接入人类化（`uploader/meta_uploader/facebook_page_uploader/`）。
+
+#### 人类化交互层（W3 国内冲突）
+
+- 抖音：53 个交互点接入人类化（视频/图文发布，删除 `_native_click` 及其合成事件重放；`uploader/douyin_uploader/`）。
+- 微博：23 个交互点接入人类化（首页入口与 popup 发布页各一实例、跨页不复用；发布按钮比例落点 `(0.65,0.5)` → 失败且未派发时 `(0.35,0.5)` 再试一次；封面「完成」只点一次；`uploader/weibo_uploader/`）。
+
+#### 人类化交互层（W4 国内主体）
+
+- 大鱼号：36 个交互点接入人类化（`uploader/dayu_uploader/`）。
+- 知乎：30 个交互点接入人类化（视频表单标题/介绍、领域与标记下拉、原创勾选、文章标题与正文聚焦、定时表单 17 处、两个发布点），失焦点击与发布后详情跳转保持原生并逐条标记（`uploader/zhihu_uploader/`）。
+- 视频号：34 个交互点接入人类化（`uploader/tencent_uploader/`）。
+- 快手：13 个交互点接入人类化（描述/正文清空序列与话题逐字、描述聚焦、发布确认弹窗、定时开关与日期 picker、合集下拉与选项、封面入口/上传 tab/确认、视频与图文发布），登录二维码、文件入口、「我知道了」提示条和 Joyride 引导层保持原生并逐条标记（`uploader/ks_uploader/`）。
+
+#### 人类化交互层（W5 长尾）
+
+- 支付宝生活号：11 个交互点接入人类化（标题与 `#话题` 全选覆盖后逐字、作品描述 `\r\n` 归一后逐字、封面弹窗入口/上传 tab/「完 成」、合集下拉收窄后与选项合并为一次坐标点击（删除 force 首选）、质量提示「继续发布」、发布与 AIGC 后二次发布各带 `before_submit`），扫码 tab 与文件入口保持原生并逐条标记（`uploader/alipay_uploader/`）。
+- 百家号：14 个交互点接入人类化（标题 `contenteditable` 保留「点标题 → Ctrl+A → Backspace」清空序列后逐字、合集搜索逐字并用有界等待替换固定等待、候选项按合集名全等点选、创作声明改点组件本体并删除 `force`、发布遮挡只清浮层不加 `force`），百度 passport 登录与封面弹窗「上传」tab 保持原生并逐条标记（`uploader/baijiahao_uploader/`）。
+- 虎扑：12 个交互点接入人类化（标题/简介逐字、专区四击、原创/二创、AI 声明下拉收窄后点选、发布前 `before_submit`；QQ 登录与两个 file chooser 入口保持原生并标记，`uploader/hupu_uploader/`）。
+- 雪球：13 个交互点接入人类化（标题 `none` 守卫不清空、正文坐标聚焦、工具栏传图、封面裁剪确认、分享范围/创作声明先读状态、预览与遮罩关闭、发布 `before_submit`），失焦与发布后只读核对保持原生并逐条标记（`uploader/xueqiu_uploader/`）。
+
 ### 移除历史 Web 与旧示例脚本
 
 - 删除已停止维护的 Web 版本：`sau_backend.py`、`sau_backend/`、`sau_frontend/`、`myUtils/`、`db/`、`Dockerfile`、`.dockerignore`、`start-win.bat`、`requirements.txt`，以及 `pyproject.toml` 中的 `web` extra。

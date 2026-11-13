@@ -3,8 +3,12 @@
 实测结构（real-dom-2026-11-10）：折叠入口是 ``div[role="button"]``，里面只有
 一个文案 span 和一个 chevron svg，**没有** ``aria-expanded``；展开与否靠内容
 出现或 ``svg[aria-label="Up chevron icon"]`` 判断。配文列在视口边缘还有一层
-覆盖 div 会拦截鼠标点击，但键盘激活始终可用，因此点击一律按“键盘优先、鼠标
-兜底”的顺序执行。这里只依赖结构属性与可见文案，不使用任何哈希类名。
+覆盖 div 会拦截鼠标点击，但键盘激活始终可用，因此 ``activate`` 保留“键盘优先”
+的顺序：``focus`` + Enter 先试，只有键盘没生效才用一次坐标点击。``click_control``
+不保留任何原生点击：开关等控件直接走 ``Humanizer.click``。
+
+这里**没有** JS 点击兜底：``el.click()`` 会绕过真实指针语义，规格 §4.2 要求
+全仓零处。点击失败即硬错（异常原样上抛），不再降级。
 """
 from __future__ import annotations
 
@@ -19,10 +23,11 @@ if TYPE_CHECKING:  # 运行时只依赖 options，纯逻辑测试不构造浏览
     from patchright.async_api import Locator, Page
 
     from uploader.publish_timeout import PublishTimeoutBudget
+    from utils.humanize import Humanizer
 
 # 键盘激活后的验证窗口；真实页面响应在数百毫秒内。
 _ACTIVATE_TIMEOUT_MS = 3_000
-# 鼠标 / JS 兜底的点击与验证窗口。
+# 坐标点击兜底的验证窗口。
 _FALLBACK_TIMEOUT_MS = 2_000
 _POLL_SECONDS = 0.1
 
@@ -87,12 +92,15 @@ async def activate(
     row: 'Locator',
     *,
     is_open: Callable[[], Awaitable[bool]],
+    humanizer: 'Humanizer',
     budget: 'PublishTimeoutBudget | None' = None,
 ) -> bool:
     """展开折叠行并返回是否真的展开。
 
-    顺序固定：``scroll_into_view_if_needed`` → ``focus`` + Enter → 点击兜底 →
-    ``el.click()`` 兜底；每步都用 ``is_open`` 轮询验证，避免“点了但没展开”。
+    顺序固定：``scroll_into_view_if_needed`` → ``focus`` + Enter → 一次
+    ``Humanizer.click``。每步都用 ``is_open`` 轮询验证，避免“点了但没展开”。
+    点击失败是硬错（异常上抛）；点击成功但状态没变则返回 ``False``，由调用方
+    按入口不可用归类。这里不再有 ``el.click()`` 兜底。
     """
     try:
         if await is_open():
@@ -102,29 +110,45 @@ async def activate(
     await press_enter(page, row)
     if await _wait_until(is_open, clamp_wait(budget, _ACTIVATE_TIMEOUT_MS)):
         return True
-    with contextlib.suppress(Exception):
-        await row.click(timeout=clamp_wait(budget, _FALLBACK_TIMEOUT_MS))
-    if await _wait_until(is_open, clamp_wait(budget, _FALLBACK_TIMEOUT_MS)):
-        return True
-    with contextlib.suppress(Exception):
-        await row.evaluate("el => el.click()")
+    await humanizer.click(row)
     return await _wait_until(is_open, clamp_wait(budget, _FALLBACK_TIMEOUT_MS))
 
 
 async def click_control(
-    page: 'Page', locator: 'Locator', *, budget: 'PublishTimeoutBudget | None' = None
+    page: 'Page',
+    locator: 'Locator',
+    *,
+    humanizer: 'Humanizer',
+    budget: 'PublishTimeoutBudget | None' = None,
 ) -> None:
-    """点击开关等控件：滚动可见后点击，失败依次回退到键盘与 ``el.click()``。"""
+    """点击开关等控件：先滚入视口，再走唯一的坐标点击通道。
+
+    ``page`` / ``budget`` 保留给调用点对称性；点击本身不再接受超时参数，也
+    没有键盘或 JS 的第二次尝试（规格 §3.9 ``_rows.py:121``：``H`` 优先）。
+    """
     with contextlib.suppress(Exception):
         await locator.scroll_into_view_if_needed()
+    await humanizer.click(locator)
+
+
+async def dismiss_suggestions(
+    dialog: 'Locator', humanizer: 'Humanizer'
+) -> bool:
+    """点击创建弹窗标题栏，关闭 hashtag / 地点联想浮层。
+
+    真机 2026-11-13（ticket 05 ``--no-publish`` 干跑）：逐字输入 ``#话题`` 会
+    弹出 hashtag 联想，输入地点会弹出地点联想；两者都是 portal，选中后仍挂在
+    DOM 上盖住右侧选项面板，下一次点击报 ``covered-by:button._acmx``（地点控件
+    还会误以为已选）。实测唯一稳定的关闭方式是用真实指针点击弹窗的
+    ``role="heading"`` 标题栏（“New reel” / “Create new post”）。标题栏缺席
+    （联想本就没出现）时直接返回 ``False``，绝不让“没有标题”变成发布失败。
+    没有 ``force``、没有 JS 点击、没有重试。
+    """
+    heading = dialog.get_by_role('heading', level=1).first
     try:
-        await locator.click(timeout=clamp_wait(budget, _FALLBACK_TIMEOUT_MS))
-        return
+        if await heading.count() != 1:
+            return False
     except Exception:
-        pass
-    with contextlib.suppress(Exception):
-        await locator.focus()
-        await page.keyboard.press("Space")
-        return
-    with contextlib.suppress(Exception):
-        await locator.evaluate("el => el.click()")
+        return False
+    await humanizer.click(heading)
+    return True
