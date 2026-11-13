@@ -1,5 +1,8 @@
 # 人类化交互层 — 真机验收记录
 
+> **验证范围**：唯一验证过的模式是**本地模式**。托管模式（Multilogin X / AdsPower）
+> 未验证；本文件不记录、也不推断托管模式行为。
+
 验收口径（规格 §6.4）：
 
 - **只验本地模式**；托管模式（Multilogin X / AdsPower）一律「未验证」。
@@ -95,4 +98,25 @@
 
 ## 未验证平台
 
-见 ticket 20 落地的平台表（12 个平台 × 「未验证（无真机环境）」× 离线测试文件）。
+以下平台没有真机环境，只有离线测试（`tests/test_<platform>_humanize.py`）；一律按
+「未验证」处理，不得在报告或 Changelog 中写成「已支持」。
+
+| 平台 | 状态 | 离线测试文件 | 备注 |
+| --- | --- | --- | --- |
+| YouTube | 未验证（无真机环境） | `tests/test_youtube_humanize.py` | `ytcp-*` 是否 native shadow DOM、`#` 候选结构未在真机确认（§9-2 / §9-9） |
+| Facebook 个人主页 | 未验证（无真机环境） | `tests/test_facebook_humanize.py` | 正文 contenteditable 逐字；删除/管理点击保持原生 |
+| Facebook Page | 未验证（无真机环境） | `tests/test_facebook_page_humanize.py` | 发布按钮 hover 变形幅度未在真机确认（§9-5） |
+| 抖音 | 未验证（无真机环境） | `tests/test_douyin_humanize.py` | 53 个交互点；已删 `_native_click`；2FA 两处保留 `force`；自定义组件/日期控件未真机确认（§9-6 / §9-10 / §9-22） |
+| 微博 | 未验证（无真机环境） | `tests/test_weibo_humanize.py` | 首页 + popup 双 page 各一实例；空 `div` 覆盖与发布落点未真机确认（§9-8） |
+| 知乎 | 未验证（无真机环境） | `tests/test_zhihu_humanize.py` | 领域下拉虚拟滚动是否让 `count()==0` 未真机确认（§9-7） |
+| 大鱼号 | 未验证（无真机环境） | `tests/test_dayu_humanize.py` | 正文在 iframe 内；标题/正文预填未知（§9-17 / §9-18） |
+| 视频号 | 未验证（无真机环境） | `tests/test_tencent_humanize.py` | 描述预填与日期时间控件未真机确认（§9-19 / §9-22） |
+| 快手 | 未验证（无真机环境） | `tests/test_kuaishou_humanize.py` | antd 下拉、封面无文本 `div` 命中区、Joyride 引导层未真机确认（§9-7 / §9-24） |
+| 支付宝生活号 | 未验证（无真机环境） | `tests/test_alipay_humanize.py` | 合集下拉收窄后的合并坐标点击未真机确认 |
+| 百家号 | 未验证（无真机环境） | `tests/test_baijiahao_humanize.py` | `.cheetah-select` 候选文本能否全等未真机确认（§9-11） |
+| 虎扑 | 未验证（无真机环境） | `tests/test_hupu_humanize.py` | 专区四击、AI 声明下拉未真机确认 |
+| 雪球 | 未验证（无真机环境） | `tests/test_xueqiu_humanize.py` | 工具栏传图、封面裁剪确认未真机验证 |
+
+> 计数口径：本表 **13 行**，按「独立离线测试文件 + 独立 CLI 平台名」分行。规格 §6.4
+> 与 §9 的「12 个平台」把 Facebook 个人主页与 Facebook Page 计为一个 Facebook 家族；
+> 两者有各自的 Skill、CLI 平台名与测试文件，故在此分行列出，不合并。
