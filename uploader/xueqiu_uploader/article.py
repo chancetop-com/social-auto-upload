@@ -372,19 +372,30 @@ class XueqiuArticle:
                 response = await submitted.value
             except BrowserTimeoutError:
                 raise budget.timeout_error(publish_clicked) from None
-            payload = await response.json()
-            content_id = payload.get("id")
-            if not response.ok or not isinstance(content_id, int) or isinstance(content_id, bool) or content_id <= 0:
-                raise RuntimeError(f"雪球未确认受理: HTTP {response.status}，{payload.get('error_description', payload.get('error_code', '缺少作品 ID'))}")
+            # 发布点击已经派发：响应解析与字段校验的失败都只能是“结果未知”，
+            # 否则 CLI 退出 1 会诱发调度器重试并产生重复作品。
+            try:
+                payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise RuntimeError("雪球发表响应不是 JSON 对象")
+                content_id = payload.get("id")
+                if not response.ok or not isinstance(content_id, int) or isinstance(content_id, bool) or content_id <= 0:
+                    raise RuntimeError(f"雪球未确认受理: HTTP {response.status}，{payload.get('error_description', payload.get('error_code', '缺少作品 ID'))}")
+                if payload.get("title") != self.title:
+                    raise RuntimeError("雪球受理作品的标题不符，请核查原作品")
+                if not multilogin and str(payload.get("user_id")) != self.identity["uid"]:
+                    raise RuntimeError("雪球受理作品的主体与本地绑定账号不符，请核查原作品")
+                if payload.get("is_private") is not (self.visibility == "私人"):
+                    raise RuntimeError("雪球受理作品的分享范围不符，请核查原作品")
+            except PublishResultUnknownError:
+                raise
+            except Exception as error:
+                raise PublishResultUnknownError(
+                    f"雪球发表响应无法确认：{error}；帖子可能已经发布，请查原记录，勿重复提交"
+                ) from error
             # 先持久化已返回的 ID，即使后续内容核对异常也只能查询原作品，禁止重发。
             result["content_id"] = str(content_id)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-            if payload.get("title") != self.title:
-                raise RuntimeError("雪球受理作品的标题不符，请核查原作品")
-            if not multilogin and str(payload.get("user_id")) != self.identity["uid"]:
-                raise RuntimeError("雪球受理作品的主体与本地绑定账号不符，请核查原作品")
-            if payload.get("is_private") is not (self.visibility == "私人"):
-                raise RuntimeError("雪球受理作品的分享范围不符，请核查原作品")
             # 用平台返回的已发表正文创建独立页面核对，不改写编辑器模型，也不追加真实发表动作。
             check_page = await session.context.new_page()
             await check_page.set_content(payload.get("text") or "")

@@ -645,12 +645,13 @@ class MetaBusinessUploader(BaseVideoUploader):
             except (BrowserTimeoutError, AssertionError):
                 raise budget.timeout_error(True) from None
             # 完成框两个动作均是关闭/完成；按可访问名称收窄，不再取 .last。
-            close_button = await _unique(
-                completion.get_by_role('button', name=_COMPLETION_CLOSE_NAMES),
-                "Reel 完成框关闭",
-            )
             # 关闭按钮只是界面收尾，创建响应已经确认受理：绝不因它把发布变成失败，也不重试。
+            # 收窄本身（缺失/多义）也必须在同一 try 内只记录日志。
             try:
+                close_button = await _unique(
+                    completion.get_by_role('button', name=_COMPLETION_CLOSE_NAMES),
+                    "Reel 完成框关闭",
+                )
                 await humanizer.click(close_button)
                 await expect(completion).to_have_count(0)
             except Exception as error:

@@ -47,7 +47,7 @@ from uploader.zhihu_uploader.constants import (
 )
 from uploader.zhihu_uploader.video import ZhihuVideo
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 
 TOKEN = "SENTINEL-MLX-TOKEN-ticket24"
 
@@ -671,6 +671,179 @@ class PublishLoginRedirectTests(unittest.TestCase):
                     asyncio.run(app.upload_in(session))
 
         self.assertTrue(caught.exception.publish_attempted)
+
+
+# ---------------------------------------------------------------------------
+# 发表响应：点击已派发 → 解析/校验失败一律结果未知（退出 9）
+# ---------------------------------------------------------------------------
+
+
+class _DispatchResponse:
+    """雪球最终发表响应替身：可注入损坏 JSON 或异常 HTTP 状态。"""
+
+    url = "https://mp.xueqiu.com/xq/statuses/update.json"
+
+    def __init__(
+        self,
+        payload=None,
+        *,
+        status: int = 200,
+        json_error: BaseException | None = None,
+    ) -> None:
+        self.status = status
+        self.request = SimpleNamespace(method="POST")
+        self._payload = payload
+        self._json_error = json_error
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status < 300
+
+    async def json(self):
+        if self._json_error is not None:
+            raise self._json_error
+        return self._payload
+
+
+class _DispatchContext:
+    """``page.expect_response`` 的异步上下文替身。"""
+
+    def __init__(self, response: _DispatchResponse) -> None:
+        self._response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    @property
+    def value(self):
+        async def _resolve() -> _DispatchResponse:
+            return self._response
+
+        return _resolve()
+
+
+class _PublishPage(_RecordingPage):
+    """只补齐发表链路需要的 page 表面。"""
+
+    def __init__(
+        self,
+        *,
+        response: _DispatchResponse | None = None,
+        goto_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            final_url="https://mp.xueqiu.com/writeV2/", goto_error=goto_error
+        )
+        self.expect_response = MagicMock(return_value=_DispatchContext(response))
+        self.get_by_role = MagicMock(return_value=MagicMock())
+        self.locator = MagicMock(return_value=MagicMock())
+        self.set_content_calls: list[str] = []
+
+    async def set_content(self, html: str, **kwargs) -> None:
+        self.set_content_calls.append(html)
+
+
+class XueqiuPostDispatchResponseTests(unittest.TestCase):
+    """确认发布之后响应无法解析/校验 → ``PublishResultUnknownError``（退出 9）。"""
+
+    def _expect(self, *args, **kwargs):
+        return SimpleNamespace(
+            to_have_count=AsyncMock(return_value=None),
+            to_be_visible=AsyncMock(return_value=None),
+            to_be_enabled=AsyncMock(return_value=None),
+            not_to_have_class=AsyncMock(return_value=None),
+        )
+
+    def _run(self, page: _PublishPage) -> dict:
+        with tempfile.TemporaryDirectory() as folder:
+            app, _ = _make_xueqiu_article(
+                folder, account_file=None, prepare_only=False
+            )
+            app.fill_article_form = AsyncMock()
+            app._close_preview = AsyncMock()
+            app._submit = AsyncMock()
+            session, _context = _mlx_session(page)
+            with patch.object(xueqiu_article, "expect", self._expect), patch.object(
+                xueqiu_article, "check_xueqiu_article_content", AsyncMock()
+            ):
+                return asyncio.run(app.upload_in(session))
+
+    def test_unparseable_submit_response_is_result_unknown(self):
+        page = _PublishPage(
+            response=_DispatchResponse(json_error=ValueError("Expecting value"))
+        )
+
+        with self.assertRaises(PublishResultUnknownError) as caught:
+            self._run(page)
+
+        self.assertIn("勿重复提交", str(caught.exception))
+
+    def test_non_dict_submit_payload_is_result_unknown(self):
+        page = _PublishPage(response=_DispatchResponse(["not", "a", "dict"]))
+
+        with self.assertRaises(PublishResultUnknownError):
+            self._run(page)
+
+    def test_missing_content_id_is_result_unknown(self):
+        page = _PublishPage(
+            response=_DispatchResponse(
+                {"title": "雪球标题", "user_id": 123, "is_private": False}
+            )
+        )
+
+        with self.assertRaises(PublishResultUnknownError) as caught:
+            self._run(page)
+
+        self.assertIn("缺少作品 ID", str(caught.exception))
+        self.assertIn("勿重复提交", str(caught.exception))
+
+    def test_title_mismatch_is_result_unknown(self):
+        page = _PublishPage(
+            response=_DispatchResponse(
+                {
+                    "id": 789,
+                    "title": "别的标题",
+                    "user_id": 123,
+                    "is_private": False,
+                }
+            )
+        )
+
+        with self.assertRaises(PublishResultUnknownError) as caught:
+            self._run(page)
+
+        self.assertIn("标题不符", str(caught.exception))
+        self.assertIn("勿重复提交", str(caught.exception))
+
+    def test_pre_dispatch_failure_still_exits_1(self):
+        page = _PublishPage(goto_error=RuntimeError("connection reset"))
+
+        with self.assertRaises(RuntimeError) as caught:
+            self._run(page)
+
+        self.assertNotIsInstance(caught.exception, PublishResultUnknownError)
+
+    def test_valid_submit_response_still_returns_normally(self):
+        page = _PublishPage(
+            response=_DispatchResponse(
+                {
+                    "id": 789,
+                    "title": "雪球标题",
+                    "user_id": 123,
+                    "is_private": False,
+                    "text": "<p>正文</p>",
+                }
+            )
+        )
+
+        result = self._run(page)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "published")
+        self.assertEqual(result["content_id"], "789")
 
 
 # ---------------------------------------------------------------------------

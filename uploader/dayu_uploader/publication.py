@@ -15,6 +15,7 @@ from uploader.dayu_uploader.schedule import (
 )
 from uploader.dayu_uploader.interaction import unique
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from utils.log import dayu_logger
@@ -130,13 +131,25 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         response = await submit_event.value
     except BrowserTimeoutError:
         raise budget.timeout_error(publish_clicked) from None
-    if not response.ok:
-        raise RuntimeError(f"发表结果未确认: HTTP {response.status}，请核查原作品")
-    submitted = (await response.json()).get("data", {})
-    if not submitted.get("content_id"):
-        raise RuntimeError("发表响应未返回 content_id，结果未知，请核查原作品")
+    # 确认发表已经派发：响应解析/字段校验的失败都不能退化成“确定未发布”，
+    # 否则 CLI 退出 1 会诱发调度器重试并产生重复作品。
+    try:
+        if not response.ok:
+            raise RuntimeError(f"发表结果未确认: HTTP {response.status}，请核查原作品")
+        payload = await response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        submitted = data if isinstance(data, dict) else {}
+        content_id = submitted.get("content_id")
+        if not content_id:
+            raise RuntimeError("发表响应未返回 content_id，结果未知，请核查原作品")
+    except PublishResultUnknownError:
+        raise
+    except Exception as error:
+        raise PublishResultUnknownError(
+            f"发表响应无法确认：{error}；帖子可能已经发布，请查原记录，勿重复提交"
+        ) from error
     # 最终发表响应返回本次作品 ID 即成功；审核和公开访问不属于发布命令的完成条件。
-    result.update(content_id=str(submitted["content_id"]), article_id=submitted.get("_id"))
+    result.update(content_id=str(content_id), article_id=submitted.get("_id"))
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if result.get("schedule"):
         # content_id 确认已提交，再从作品列表复核原作品及安排；草稿不能算定时提交成功。
