@@ -119,6 +119,10 @@ ALIPAY_FAIL_TOAST_SELECTOR = (
 # click must be consumed by ``expect_file_chooser`` (XHS precedent bbc5361).
 ALIPAY_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
 ALIPAY_COVER_CHOOSER_TIMEOUT_MS = 10_000
+ALIPAY_COVER_IMAGE_INPUT_SELECTOR = (
+    'input[type="file"][accept*="jpg"], '
+    'input[type="file"][accept*="png"]'
+)
 
 
 async def _cover_input_attached(locator) -> bool:
@@ -570,44 +574,13 @@ class AlipayVideo(BaseVideoUploader):
             #    「上传封面」/「上传图片」——那一下会真的拉起系统文件选择器，随后
             #    set_input_files 把文件塞进去，选择器会留在屏幕上（先例：小红书
             #    bbc5361，2026-11-12 TikTok 复现）。
-            img_input = page.locator(
-                'input[type="file"][accept*="jpg"], '
-                'input[type="file"][accept*="png"]'
-            ).first
+            img_input = page.locator(ALIPAY_COVER_IMAGE_INPUT_SELECTOR).first
             if await _cover_input_attached(img_input):
                 await img_input.set_input_files(self.thumbnail_path)
             else:
                 # 3) 兜底：先展开上传区，再点「上传图片」；这一下必须被
                 #    expect_file_chooser 消费，绝不允许裸点击。
-                inner = modal_body.get_by_text("上传封面", exact=True).first
-                if await inner.count():
-                    await humanizer.click(inner)
-                    await page.wait_for_timeout(1500)
-
-                upload_img_btn = modal_body.get_by_role(
-                    "button", name="上传图片"
-                ).first
-                await upload_img_btn.wait_for(state="visible", timeout=10000)
-                chooser = None
-                try:
-                    async with page.expect_file_chooser(
-                        timeout=ALIPAY_COVER_CHOOSER_TIMEOUT_MS
-                    ) as chooser_info:
-                        await upload_img_btn.click()  # native-click: file；文件选择器只能由原生点击唤起，且必须被 expect_file_chooser 消费
-                    chooser = await chooser_info.value
-                except Exception:
-                    chooser = None
-                if chooser is not None:
-                    await chooser.set_files(self.thumbnail_path)
-                else:
-                    # chooser 事件没到：点击可能已经渲染出 input，改为直接写。
-                    await page.wait_for_timeout(1500)
-                    img_input = page.locator(
-                        'input[type="file"][accept*="jpg"], '
-                        'input[type="file"][accept*="png"]'
-                    ).first
-                    await img_input.wait_for(state="attached", timeout=10000)
-                    await img_input.set_input_files(self.thumbnail_path)
+                await self._set_cover_via_chooser(page, humanizer, modal_body)
             await page.wait_for_timeout(3000)
 
             # 4) 裁剪弹窗里点"完 成"
@@ -620,6 +593,42 @@ class AlipayVideo(BaseVideoUploader):
             alipay_logger.success(_msg("🖼️", "封面已上传"))
         except Exception as exc:
             alipay_logger.warning(_msg("😵", f"封面上传失败，跳过继续: {exc}"))
+
+    async def _set_cover_via_chooser(
+        self, page: Page, humanizer: Humanizer, modal_body
+    ) -> None:
+        """兜底：input 缺失时才点「上传图片」，点击必须被 chooser 消费。
+
+        chooser 事件没到也不能裸点第二次：点击可能已经渲染出 input，这里改为
+        重新解析封面 input 再直接写。只有「选择器事件没到」（超时）才降级；
+        人类化 / 原生点击错误必须上抛（spec §4.1-7）。
+        """
+        inner = modal_body.get_by_text("上传封面", exact=True).first
+        if await inner.count():
+            await humanizer.click(inner)
+            await page.wait_for_timeout(1500)
+
+        upload_img_btn = modal_body.get_by_role(
+            "button", name="上传图片"
+        ).first
+        await upload_img_btn.wait_for(state="visible", timeout=10000)
+        chooser = None
+        try:
+            async with page.expect_file_chooser(
+                timeout=ALIPAY_COVER_CHOOSER_TIMEOUT_MS
+            ) as chooser_info:
+                await upload_img_btn.click()  # native-click: file；文件选择器只能由原生点击唤起，且必须被 expect_file_chooser 消费
+            chooser = await chooser_info.value
+        except PWTimeoutError:
+            chooser = None
+        if chooser is not None:
+            await chooser.set_files(self.thumbnail_path)
+            return
+        # chooser 事件没到：点击可能已经渲染出 input，改为直接写。
+        await page.wait_for_timeout(1500)
+        img_input = page.locator(ALIPAY_COVER_IMAGE_INPUT_SELECTOR).first
+        await img_input.wait_for(state="attached", timeout=10000)
+        await img_input.set_input_files(self.thumbnail_path)
 
     async def apply_collection(self, page: Page) -> None:
         if not self.collection_name:

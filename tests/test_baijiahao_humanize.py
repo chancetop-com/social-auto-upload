@@ -30,6 +30,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import uploader.baijiahao_uploader.main as baijiahao_main
+from patchright.async_api import TimeoutError as PWTimeoutError
 from tests.fakes_xhs_dom import (
     FakeLocator,
     RecordingKeyboard,
@@ -57,6 +58,7 @@ from uploader.baijiahao_uploader.main import (
     BaiJiaHaoVideo,
 )
 from utils.browser_session import BrowserSession
+from utils.dom import ElementUnusableError
 from utils.humanize import HumanizeProfile, Humanizer, LogNormal
 
 PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "baijiahao_uploader"
@@ -455,7 +457,6 @@ class BaijiahaoEventSequenceTests(unittest.TestCase):
                 COVER_UPLOAD_BUTTON_SELECTOR: upload_tab,
                 COVER_IMAGE_INPUT_SELECTOR: image_input,
                 COVER_CONFIRM_SELECTOR: confirm,
-                'input[type="file"]': FakeLocator("generic-file", count=0),
             },
             log=log,
         )
@@ -487,12 +488,11 @@ class BaijiahaoEventSequenceTests(unittest.TestCase):
                 COVER_UPLOAD_BUTTON_SELECTOR: upload_tab,
                 COVER_IMAGE_INPUT_SELECTOR: image_input,
                 COVER_CONFIRM_SELECTOR: confirm,
-                'input[type="file"]': FakeLocator("generic-file", count=0),
             },
             log=log,
         )
         upload_tab._page = page
-        page.fail_file_chooser = TimeoutError("no file chooser")
+        page.fail_file_chooser = PWTimeoutError("no file chooser")
         upload_tab.on_click_effect = lambda: setattr(image_input, "_count", 1)
 
         with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
@@ -611,6 +611,93 @@ class BaijiahaoEventSequenceTests(unittest.TestCase):
         )
         for call in publish_btn.click_calls:
             self.assertNotIn("force", call)
+
+
+# ---------------------------------------------------------------------------
+# 1b. 封面兜底：chooser 超时才降级，人类化点击失败必须上抛
+# ---------------------------------------------------------------------------
+
+
+class BaijiahaoCoverChooserFallbackTests(unittest.TestCase):
+    def _cover_page(
+        self,
+        *,
+        image_count: int = 1,
+        generic_count: int = 0,
+        upload_click_error: BaseException | None = None,
+    ):
+        log: list = []
+        cover_entry = _Clickable("cover-entry", log=log)
+        upload_tab = _ChooserDepthClickable(
+            "cover-upload-tab", log=log, click_error=upload_click_error
+        )
+        image_input = FakeLocator("cover-image-input", count=image_count)
+        confirm = _Clickable("cover-confirm", log=log)
+        page = _page(
+            {
+                COVER_ENTRY_SELECTOR: cover_entry,
+                COVER_UPLOAD_BUTTON_SELECTOR: upload_tab,
+                COVER_IMAGE_INPUT_SELECTOR: image_input,
+                COVER_CONFIRM_SELECTOR: confirm,
+                'input[type="file"]': FakeLocator(
+                    "generic-file", count=generic_count
+                ),
+            },
+            log=log,
+        )
+        upload_tab._page = page
+        return page, upload_tab, image_input, confirm
+
+    def test_cover_entry_never_binds_the_page_wide_file_input(self):
+        # A page-scope ``input[type=file]`` exists and is the page's video
+        # input: the cover step must never bind it.
+        page, upload_tab, image_input, _confirm = self._cover_page(
+            image_count=0, generic_count=1
+        )
+        generic = page.locator('input[type="file"]')
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            humanizer = app._humanizer(page)
+            asyncio.run(app._upload_thumbnail(page, humanizer))
+
+        self.assertEqual(generic.actions, [])
+        self.assertEqual(image_input.actions, [])
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(upload_tab.click_depths, [1])
+
+    def test_missing_cover_input_after_a_chooser_timeout_raises(self):
+        page, _upload_tab, image_input, _confirm = self._cover_page(
+            image_count=0
+        )
+        page.fail_file_chooser = PWTimeoutError("no file chooser event")
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            humanizer = app._humanizer(page)
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(app._upload_cover_via_chooser(page, humanizer))
+
+        self.assertIn("封面图片 input", str(ctx.exception))
+        self.assertEqual(image_input.actions, [])
+        self.assertEqual(page.file_chooser_files(), [])
+
+    def test_humanize_failure_during_the_tab_click_propagates(self):
+        unusable = ElementUnusableError(
+            what="上传", role="interactive", reason="covered-by:div.mask"
+        )
+        page, _upload_tab, image_input, _confirm = self._cover_page(
+            upload_click_error=unusable
+        )
+
+        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
+            app = _video()
+            humanizer = app._humanizer(page)
+            with self.assertRaises(ElementUnusableError):
+                asyncio.run(app._upload_cover_via_chooser(page, humanizer))
+
+        self.assertEqual(image_input.actions, [])
+        self.assertEqual(page.file_chooser_files(), [])
 
 
 # ---------------------------------------------------------------------------

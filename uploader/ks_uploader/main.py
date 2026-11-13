@@ -11,6 +11,7 @@ from pathlib import Path
 from patchright.async_api import BrowserContext
 from patchright.async_api import Page
 from patchright.async_api import Playwright
+from patchright.async_api import TimeoutError as PWTimeoutError
 from patchright.async_api import async_playwright
 
 from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
@@ -809,7 +810,9 @@ class KSVideo(KSBaseUploader):
             ) as chooser_info:
                 await humanizer.click(upload_cover_tab)
             chooser = await chooser_info.value
-        except Exception:
+        except PWTimeoutError:
+            # 只有「选择器事件没到」才降级；人类化点击错误必须上抛
+            # （spec §4.1-7：人类化失败不得自动降级）。
             chooser = None
         if chooser is not None:
             await chooser.set_files(self.thumbnail_path)

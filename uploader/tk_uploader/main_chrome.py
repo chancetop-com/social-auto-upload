@@ -40,6 +40,7 @@ from utils.browser_session import BrowserSession
 from uploader.tk_uploader.schedule import prepare_schedule
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.files_times import get_absolute_path
+from utils.humanize import DEFAULT_PROFILE
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.humanize import Humanizer
@@ -152,10 +153,12 @@ def _offline_humanizer() -> Humanizer:
     Production always passes the page-backed instance; this branch exists only
     so a control constructed directly in an offline test can still be
     activated without emitting an unmarked native ``click``.
+
+    Disabling goes through the documented profile rule (a derived
+    ``DEFAULT_PROFILE``), never a post-construction ``enabled = False``:
+    ``Humanizer`` snapshots ``enabled`` in ``__init__``.
     """
-    humanizer = Humanizer(None)
-    humanizer.enabled = False
-    return humanizer
+    return Humanizer(None, profile=replace(DEFAULT_PROFILE, enabled=False))
 
 
 async def _humanized_click(humanizer: Humanizer | None, target) -> None:
@@ -3264,7 +3267,9 @@ class TiktokVideo(TiktokBaseUploader):
             ) as fc_info:
                 await _humanized_click(humanizer, upload_tab)
             chooser = await fc_info.value
-        except Exception:
+        except PlaywrightTimeoutError:
+            # Only "no chooser event" degrades to resolving the input.  A
+            # humanize/native click error must propagate (spec §4.1-7).
             chooser = None
         if chooser is not None:
             try:

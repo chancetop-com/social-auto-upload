@@ -30,6 +30,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import uploader.ks_uploader.main as ks_main
+from patchright.async_api import TimeoutError as PWTimeoutError
 from tests.fakes_xhs_dom import (
     FakeLocator,
     RecordingKeyboard,
@@ -751,7 +752,7 @@ class HumanizeEventSequenceTests(unittest.TestCase):
                 },
                 log=log,
             )
-            page.fail_file_chooser = TimeoutError("no file chooser")
+            page.fail_file_chooser = PWTimeoutError("no file chooser")
             upload_tab.on_hit = lambda: setattr(cover_file, "_count", 1)
             app = _video_app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
             humanizer = _QuietHumanizer(page, log=log)
@@ -763,6 +764,49 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             self.assertEqual(page.file_chooser_files(), [])
             self.assertEqual(cover_file.files, [Path(tmp) / "cover.jpg"])
             self.assertEqual(page.mouse.down_count, 3)
+
+    def test_humanize_failure_during_the_cover_tab_click_propagates(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            cover_entry = _Clickable("cover-entry", log=log)
+            container = FakeLocator(
+                "cover-container", children={"div:visible": cover_entry}
+            )
+            cover_label = FakeLocator(
+                "cover-label",
+                children={"xpath=../following-sibling::div[1]": container},
+            )
+            upload_tab = _ChooserProbeClickable("cover-tab", log=log, box={})
+            confirm = _Clickable("cover-confirm", log=log)
+            cover_file = FakeLocator("cover-file", count=0)
+            modal = _Clickable(
+                "cover-modal",
+                log=log,
+                children={
+                    "text:上传封面:exact": upload_tab,
+                    'input[type="file"]': cover_file,
+                    "role:button:确认": confirm,
+                },
+            )
+            page = _page(
+                {
+                    "span": cover_label,
+                    'div[role="document"].ant-modal': modal,
+                },
+                log=log,
+            )
+            upload_tab.page = page
+
+            app = _video_app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            humanizer = _QuietHumanizer(page, log=log)
+
+            with _fast_clock():
+                with self.assertRaises(ElementUnusableError):
+                    asyncio.run(app.set_thumbnail(page, humanizer))
+
+            # 人类化失败必须上抛，不能被吞成「chooser 没到 → 直接写 input」。
+            self.assertEqual(page.file_chooser_files(), [])
+            self.assertNotIn("set_input_files", [a[0] for a in cover_file.actions])
 
 
 # ---------------------------------------------------------------------------

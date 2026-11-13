@@ -12,10 +12,12 @@ from __future__ import annotations
 import asyncio
 import unittest
 
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from uploader.tk_uploader.main_chrome import (
     COVER_EDITOR_SCOPE_SELECTOR,
     TiktokVideo,
 )
+from utils.dom import ElementUnusableError
 
 THUMBNAIL = "/tmp/cover.png"
 PAGE_URL = "https://www.tiktok.com/tiktokstudio/upload?lang=en"
@@ -205,7 +207,9 @@ class _ChooserInfo:
     def value(self):
         async def _resolve() -> FakeChooser:
             if self.page.fail_chooser:
-                raise TimeoutError("no file chooser event")
+                raise self.page.fail_chooser_error or TimeoutError(
+                    "no file chooser event"
+                )
             return self.page.chooser
 
         return _resolve()
@@ -221,6 +225,7 @@ class FakePage:
         self.expect_file_chooser_calls = 0
         self.expect_file_chooser_timeouts: list = []
         self.fail_chooser = False
+        self.fail_chooser_error: BaseException | None = None
         #: Off by default so an early (buggy) chooser cannot pass silently:
         #: the call is still counted, then the harness refuses it.
         self.allow_file_chooser = False
@@ -356,6 +361,7 @@ class ApplyCoverCandidateTests(unittest.TestCase):
         page = FakePage()
         page.allow_file_chooser = True
         page.fail_chooser = True
+        page.fail_chooser_error = PlaywrightTimeoutError("no file chooser event")
         tree.upload_tab.on_click = lambda: setattr(
             tree.file_input, "count_value", 1
         )
@@ -369,6 +375,33 @@ class ApplyCoverCandidateTests(unittest.TestCase):
         self.assertIn(("click", "upload-tab"), tree.recorder)
         self.assertIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
         self.assertIn(("click", "cover-save"), tree.recorder)
+
+    def test_click_failure_during_the_tab_click_propagates(self):
+        tree = CoverTree()
+        tree.file_input.count_value = 0
+        page = FakePage()
+        page.allow_file_chooser = True
+
+        def _unusable() -> None:
+            raise ElementUnusableError(
+                what="Upload cover",
+                role="interactive",
+                reason="point-drift",
+            )
+
+        tree.upload_tab.on_click = _unusable
+        video = _video()
+        video.locator_base = tree.base
+
+        with self.assertRaises(ElementUnusableError):
+            asyncio.run(video.apply_cover(page))
+
+        # A humanize/native click error is not "no chooser arrived": it must
+        # not be downgraded into writing the input directly.
+        self.assertEqual(page.chooser.files, [])
+        self.assertNotIn(
+            ("set_input_files", "cover-file", THUMBNAIL), tree.recorder
+        )
 
     def test_file_input_falls_back_to_editor_scoped_selector(self):
         tree = CoverTree()
