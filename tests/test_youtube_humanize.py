@@ -381,6 +381,65 @@ class YouTubeEventSequenceTests(unittest.TestCase):
         self.assertEqual(inserts, [("insert_text", text)])
         self.assertEqual(timeline.count("after_type"), 1)
 
+    def test_over_the_horizon_with_hashtags_is_not_segmented(self):
+        # spec §2.4 rule 4: past the horizon the whole text goes through one
+        # bulk ``insert_text`` — the platform must not split at ``#`` first
+        # (that would be a second threshold / a segmented long text).
+        timeline = Timeline()
+        keyboard = BufferKeyboard(timeline)
+        desc_box = ClickableLocator("description", timeline=timeline)
+        candidate = ClickableLocator("candidate", timeline=timeline)
+        page = _hashtag_page(
+            timeline,
+            keyboard,
+            text_locator=desc_box,
+            candidates={"text:#Shorts:exact": candidate},
+        )
+        humanizer = NamedHumanizer(page, timeline)
+        text = "#Shorts " + "长" * 1000
+        self.assertGreater(len(text), 1000)
+
+        asyncio.run(
+            youtube_main._fill_editable(
+                page, DESC_INPUT, text, humanizer, multiline=True
+            )
+        )
+
+        inserts = [action for action in keyboard.actions if action[0] == "insert_text"]
+        self.assertEqual(inserts, [("insert_text", text)])
+        self.assertEqual(keyboard.finish(), [text])
+        # No candidate flow: only the focus click reached the pointer.
+        self.assertEqual(candidate.click_count, 0)
+        self.assertEqual(page.mouse.down_count, 1)
+        self.assertEqual(timeline.count("after_type"), 1)
+
+    def test_at_the_horizon_with_hashtags_still_picks_the_candidate(self):
+        timeline = Timeline()
+        keyboard = BufferKeyboard(timeline)
+        desc_box = ClickableLocator("description", timeline=timeline)
+        candidate = ClickableLocator("candidate", timeline=timeline)
+        page = _hashtag_page(
+            timeline,
+            keyboard,
+            text_locator=desc_box,
+            candidates={"text:#Shorts:exact": candidate},
+        )
+        humanizer = NamedHumanizer(page, timeline)
+        text = "#Shorts " + "长" * 992  # exactly 1000 code points
+        self.assertEqual(len(text), 1000)
+
+        asyncio.run(
+            youtube_main._fill_editable(
+                page, DESC_INPUT, text, humanizer, multiline=True
+            )
+        )
+
+        self.assertEqual(keyboard.finish(), [text])
+        # Focus + candidate: the ≤1000 candidate flow is untouched.
+        self.assertEqual(page.mouse.down_count, 2)
+        self.assertEqual(candidate.click_count, 0)
+        self.assertEqual(timeline.count("after_type"), 2)
+
     def test_click_if_present_clicks_through_the_humanizer_when_present(self):
         timeline = Timeline()
         target = ClickableLocator("save", timeline=timeline)

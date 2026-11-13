@@ -14,8 +14,9 @@ tests pin the contract without a browser:
    failed ``stillOn`` never reaches ``mouse.down``;
 5. the same seed reproduces the same delays, and ``HUMANIZE=0`` (or
    ``profile.enabled=False``) is a zero-delay fast path;
-6. the XHS package contains no ``fill(`` / ``el.click()`` / ``force=True`` /
-   bare ``locator.click(`` / ``Control+KeyA``.
+6. gates A–E hold for the XHS reference package and for all 15 wired platform
+   entry points (spec §4.2), including no ``fill(`` / ``el.click()`` /
+   ``force=True`` / bare ``locator.click(`` / ``Control+KeyA``.
 
 The fakes come from ``tests/fakes_xhs_dom.py``; no network, no browser.
 """
@@ -39,7 +40,11 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     preview_tiles,
 )
-from tests.humanize_gates import assert_clean, gate_violations
+from tests.humanize_gates import (
+    assert_clean,
+    gate_violations,
+    mentions_horizon_definition,
+)
 from utils import humanize
 from utils.dom import ElementUnusableError
 
@@ -656,7 +661,8 @@ class FastPathTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 
-def _uploader_sources() -> dict[str, str]:
+def _xhs_sources() -> dict[str, str]:
+    """The XHS package's direct ``.py`` files (the reference implementation)."""
     return {
         path.name: path.read_text(encoding="utf-8")
         for path in sorted(UPLOADER_DIR.glob("*.py"))
@@ -686,7 +692,11 @@ class SharedLayerBoundaryTests(unittest.TestCase):
             for path in sorted((root / folder).rglob("*.py")):
                 if path == HUMANIZE_FILE:
                     continue
-                if "type_horizon_chars" in path.read_text(encoding="utf-8"):
+                source = path.read_text(encoding="utf-8")
+                if any(
+                    mentions_horizon_definition(line)
+                    for line in source.splitlines()
+                ):
                     offenders.append(str(path.relative_to(root)))
         self.assertEqual(offenders, [])
 
@@ -804,6 +814,16 @@ class HumanizeGateTests(unittest.TestCase):
         self._write("THRESHOLD = 1000\n")
         self.assertEqual(self._violations(), [])
 
+    def test_gate_e_accepts_an_attribute_read_of_the_single_definition(self):
+        # Reusing ``DEFAULT_PROFILE.type_horizon_chars`` is not a second
+        # definition; only a copied literal/assignment is.
+        self._write(
+            "from utils.humanize import DEFAULT_PROFILE\n"
+            "if len(text) > DEFAULT_PROFILE.type_horizon_chars:\n"
+            "    pass\n"
+        )
+        self.assertEqual(self._violations(), [])
+
 
 class XhsStaticGateTests(unittest.TestCase):
     def test_xhs_package_passes_humanize_gates_a_to_e(self):
@@ -811,7 +831,7 @@ class XhsStaticGateTests(unittest.TestCase):
 
     def test_no_fill_el_click_or_forced_clicks_remain(self):
         offenders: list[str] = []
-        for name, source in _uploader_sources().items():
+        for name, source in _xhs_sources().items():
             for needle in ("fill(", "el.click()", "force=True", "_js_click_by_text"):
                 if needle in source:
                     offenders.append(f"{name}: {needle}")
@@ -821,16 +841,84 @@ class XhsStaticGateTests(unittest.TestCase):
         offenders: list[str] = []
         # `.click(` is allowed only when the receiver is the humanizer.
         pattern = re.compile(r"(?<!humanizer)\.click\(")
-        for name, source in _uploader_sources().items():
+        for name, source in _xhs_sources().items():
             for number, line in enumerate(source.splitlines(), start=1):
                 if pattern.search(line):
                     offenders.append(f"{name}:{number}: {line.strip()}")
         self.assertEqual(offenders, [])
 
     def test_select_all_uses_the_macos_compatible_shortcut(self):
-        sources = "\n".join(_uploader_sources().values())
+        sources = "\n".join(_xhs_sources().values())
         self.assertNotIn("Control+KeyA", sources)
         self.assertIn("ControlOrMeta+A", sources)
+
+
+#: The 15 wired platform entry points of spec §4.2.  TikTok is entry-point
+#: scoped because ``uploader/tk_uploader/`` also ships the legacy, unwired
+#: ``main.py``; spec §3.12 only covers ``main_chrome.py``.
+WIRED_PLATFORM_PACKAGES = (
+    "alipay_uploader",
+    "baijiahao_uploader",
+    "dayu_uploader",
+    "douyin_uploader",
+    "hupu_uploader",
+    "ks_uploader",
+    "tencent_uploader",
+    "weibo_uploader",
+    "xueqiu_uploader",
+    "youtube_uploader",
+    "zhihu_uploader",
+    "xiaohongshu_uploader",
+)
+WIRED_META_PACKAGES = (
+    "facebook_uploader",
+    "facebook_page_uploader",
+    "insgraph_uploader",
+)
+
+
+class PlatformWideGateTests(unittest.TestCase):
+    """Gates A–E across all 15 wired entry points (spec §4.2), not per package only.
+
+    TikTok is checked file-scoped at ``uploader/tk_uploader/main_chrome.py``:
+    the sibling legacy ``uploader/tk_uploader/main.py`` is unwired and out of
+    spec §3.12's target, so scanning the whole package would flag dead code.
+    """
+
+    def _assert_all_clean(self, packages) -> None:
+        failures: list[str] = []
+        for label, path in packages:
+            try:
+                assert_clean(path)
+            except AssertionError as exc:
+                failures.append(f"[{label}]\n{exc}")
+        self.assertEqual(failures, [])
+
+    def test_every_uploader_package_passes_gates_a_to_e(self):
+        root = Path(__file__).resolve().parent.parent / "uploader"
+        packages = [(name, root / name) for name in WIRED_PLATFORM_PACKAGES]
+        packages += [
+            (f"meta_uploader/{name}", root / "meta_uploader" / name)
+            for name in WIRED_META_PACKAGES
+        ]
+        packages.append(
+            ("tk_uploader/main_chrome.py", root / "tk_uploader" / "main_chrome.py")
+        )
+        self._assert_all_clean(packages)
+
+    def test_the_wired_platform_list_covers_fifteen_entry_points(self):
+        # 12 front-door packages + 3 meta packages = the spec's 15 platforms;
+        # TikTok is one of the twelve, scanned as ``main_chrome.py``.
+        self.assertEqual(
+            len(WIRED_PLATFORM_PACKAGES) + len(WIRED_META_PACKAGES), 15
+        )
+        root = Path(__file__).resolve().parent.parent / "uploader"
+        for name in WIRED_PLATFORM_PACKAGES:
+            self.assertTrue((root / name).is_dir(), f"missing wired package: {name}")
+        for name in WIRED_META_PACKAGES:
+            path = root / "meta_uploader" / name
+            self.assertTrue(path.is_dir(), f"missing wired package: {path}")
+        self.assertTrue((root / "tk_uploader" / "main_chrome.py").is_file())
 
 
 # ---------------------------------------------------------------------------
