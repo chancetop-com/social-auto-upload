@@ -406,6 +406,24 @@ def _page(
     return page
 
 
+def _fail_first_file_chooser(page: AlipayPage, error: BaseException) -> None:
+    """Make only the inner 「上传封面」 chooser expectation time out.
+
+    The page fake has one page-level ``fail_file_chooser`` switch; the cover
+    fallback now opens two expectations (inner entry, then 「上传图片」), so this
+    wrapper fails the first one only.
+    """
+    original = page.expect_file_chooser
+    state = {"calls": 0}
+
+    def _expect(*, timeout: float | int | None = None):
+        state["calls"] += 1
+        page.fail_file_chooser = error if state["calls"] == 1 else None
+        return original(timeout=timeout)
+
+    page.expect_file_chooser = _expect
+
+
 def _app(tmp: str, **overrides) -> alipay_main.AlipayVideo:
     values = {
         "title": "标题甲",
@@ -552,6 +570,7 @@ class HumanizeEventSequenceTests(unittest.TestCase):
         timeline = _Timeline()
         cover = Element("cover-entry", timeline=timeline)
         inner = Element("cover-tab", timeline=timeline)
+        inner_depths: list[int] = []
         upload_image = _ChooserDepthElement("cover-chooser", timeline=timeline)
         done = Element("cover-done", timeline=timeline)
         img_input = FakeLocator("cover-file", count=0)
@@ -572,19 +591,72 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             },
             timeline=timeline,
         )
+        inner.on_human_click = lambda: inner_depths.append(page.chooser_depth)
+        upload_image.page = page
+        _fail_first_file_chooser(page, PWTimeoutError("no file chooser"))
+        with _TempDir() as tmp:
+            app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            with _humanized():
+                asyncio.run(app.upload_thumbnail(page))
+
+        # input 缺失才展开上传区；两次 chooser 断言：内层「上传封面」一次（短
+        # 超时，防它拉起系统选择器）、「上传图片」一次（深度 1，不是裸点击）。
+        self.assertEqual(inner_depths, [1])
+        self.assertEqual(page.expect_file_chooser_calls, 2)
+        self.assertEqual(
+            page.timeouts("expect_file_chooser"),
+            [
+                alipay_main.ALIPAY_COVER_INNER_CHOOSER_TIMEOUT_MS,
+                alipay_main.ALIPAY_COVER_CHOOSER_TIMEOUT_MS,
+            ],
+        )
+        self.assertEqual(upload_image.click_depths, [1])
+        self.assertIsNone(upload_image.click_calls[0].get("force"))
+        self.assertEqual(page.file_chooser_files(), [Path(tmp) / "cover.jpg"])
+        self.assertNotIn("set_input_files", [a[0] for a in img_input.actions])
+        self.assertEqual(page.chooser_depth, 0)
+
+    def test_inner_cover_entry_that_opens_a_chooser_is_consumed(self):
+        """No bare click on the inner entry: a chooser it opens is consumed."""
+        timeline = _Timeline()
+        cover = Element("cover-entry", timeline=timeline)
+        inner = Element("cover-tab", timeline=timeline)
+        inner_depths: list[int] = []
+        upload_image = _ChooserDepthElement("cover-chooser", timeline=timeline)
+        done = Element("cover-done", timeline=timeline)
+        img_input = FakeLocator("cover-file", count=0)
+        modal = Element(
+            "cover-modal",
+            timeline=timeline,
+            children={
+                COVER_TEXT: inner,
+                COVER_UPLOAD_IMAGE: upload_image,
+            },
+        )
+        page = _page(
+            {
+                COVER_TEXT: cover,
+                COVER_MODAL: modal,
+                COVER_DONE: done,
+                COVER_FILE_INPUT: img_input,
+            },
+            timeline=timeline,
+        )
+        inner.on_human_click = lambda: inner_depths.append(page.chooser_depth)
         upload_image.page = page
         with _TempDir() as tmp:
             app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
             with _humanized():
                 asyncio.run(app.upload_thumbnail(page))
 
-        # input 缺失才展开上传区；「上传图片」这一下必须被 expect_file_chooser
-        # 消费（深度 1），不是裸点击（深度 0）。
-        self.assertEqual(inner.click_count, 0)  # humanizer click, not native
-        self.assertEqual(page.expect_file_chooser_calls, 1)
-        self.assertEqual(upload_image.click_depths, [1])
-        self.assertIsNone(upload_image.click_calls[0].get("force"))
+        self.assertEqual(inner_depths, [1])
+        self.assertEqual(
+            page.timeouts("expect_file_chooser"),
+            [alipay_main.ALIPAY_COVER_INNER_CHOOSER_TIMEOUT_MS],
+        )
         self.assertEqual(page.file_chooser_files(), [Path(tmp) / "cover.jpg"])
+        # The inner entry already produced the file: never click 「上传图片」.
+        self.assertEqual(upload_image.click_count, 0)
         self.assertNotIn("set_input_files", [a[0] for a in img_input.actions])
         self.assertEqual(page.chooser_depth, 0)
 
@@ -619,10 +691,53 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             with _humanized():
                 asyncio.run(app.upload_thumbnail(page))
 
-        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.expect_file_chooser_calls, 2)
         self.assertEqual(page.file_chooser_files(), [])
         self.assertEqual(img_input.files, [Path(tmp) / "cover.jpg"])
         self.assertEqual(done.click_count, 0)
+
+    def test_inner_cover_click_error_is_never_swallowed_by_the_chooser_guard(self):
+        timeline = _Timeline()
+        inner = Element("cover-tab", timeline=timeline)
+        unusable = ElementUnusableError(
+            what="上传封面", role="interactive", reason="covered-by:div.mask"
+        )
+
+        def _raise() -> None:
+            raise unusable
+
+        inner.on_human_click = _raise
+        upload_image = _ChooserDepthElement("cover-chooser", timeline=timeline)
+        img_input = FakeLocator("cover-file", count=0)
+        modal = Element(
+            "cover-modal",
+            timeline=timeline,
+            children={
+                COVER_TEXT: inner,
+                COVER_UPLOAD_IMAGE: upload_image,
+            },
+        )
+        page = _page(
+            {
+                COVER_MODAL: modal,
+                COVER_FILE_INPUT: img_input,
+            },
+            timeline=timeline,
+        )
+        with _TempDir() as tmp:
+            app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            with _humanized():
+                humanizer = app._humanizer(page)
+                with self.assertRaises(ElementUnusableError):
+                    asyncio.run(
+                        app._set_cover_via_chooser(
+                            page, humanizer, page.locator(COVER_MODAL)
+                        )
+                    )
+
+        # A click error is not "the chooser never arrived": no fallback click.
+        self.assertEqual(upload_image.click_count, 0)
+        self.assertEqual(page.file_chooser_files(), [])
 
     def test_cover_click_failure_propagates_instead_of_writing_the_input(self):
         timeline = _Timeline()
@@ -649,6 +764,7 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             },
             timeline=timeline,
         )
+        _fail_first_file_chooser(page, PWTimeoutError("no file chooser"))
         with _TempDir() as tmp:
             app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
             with _humanized():

@@ -348,6 +348,12 @@ def _confirmation_names(publish_date) -> tuple[str, ...]:
 _CONFIRMATION_DIALOG_SELECTORS = ('[role="dialog"]', '.TUXModal')
 _COVER_EDITOR_CLOSE_TIMEOUT_MS = 10_000
 
+# Appended to the login-required text only when the publish click was already
+# dispatched: retrying then can duplicate the post (mirror of XHS §4 wording).
+_TIKTOK_PUBLISH_ATTEMPTED_SUFFIX = (
+    "发布点击已发出：请先在作品列表核对是否已发布，再决定是否重试。"
+)
+
 # Video file chooser entry, in spec §5.2 step 2 order.
 _VIDEO_FILE_WAIT_MS = 30_000
 _VIDEO_FILE_CANDIDATES = (
@@ -906,16 +912,21 @@ def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     Only the Multilogin branch calls this. Local mode keeps its historical
     retry-until-timeout behaviour. ``publish_attempted`` must be true when the
     redirect is observed after the publish click was dispatched, so exit 10
-    never claims "not published".
+    never claims "not published" and the text never invites a blind retry.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
         return
     path = url.split("?", 1)[0]
     if any(marker in path for marker in _LOGIN_URL_MARKERS):
-        raise LoginRequiredError(
+        message = (
             "TikTok 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。",
+            "请在 Multilogin 应用中登录 Profile 后重试。"
+        )
+        if publish_attempted:
+            message += _TIKTOK_PUBLISH_ATTEMPTED_SUFFIX
+        raise LoginRequiredError(
+            message,
             publish_attempted=publish_attempted,
         )
 
@@ -2629,7 +2640,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         *,
         deadline: float | PublishTimeoutBudget | None = None,
         multilogin: bool = False,
-    ) -> None:
+    ):
         """Wait until the publish button is present and enabled; never clicks.
 
         ``--no-publish`` uses this to stop at the publish-ready point.  The
@@ -2637,6 +2648,10 @@ class TiktokBaseUploader(BaseVideoUploader):
         ``--not-before``: the dry run skips that wait entirely.  On timeout the
         error is a plain ``RuntimeError`` (exit 1) because no click was sent,
         so the post was definitely not published.
+
+        Returns the locator the gate verified, so ``click_publish`` clicks
+        exactly the element that passed the visible + enabled + aria-disabled
+        check instead of resolving a third, unverified one.
         """
         budget = self._coerce_budget(deadline)
         window = max(0.0, min(
@@ -2650,8 +2665,11 @@ class TiktokBaseUploader(BaseVideoUploader):
                 raise budget.pre_click_error()
             if multilogin:
                 _raise_if_login_required(page)
-            if await self._publish_button_ready(page, multilogin=multilogin):
-                return
+            button = await self._publish_button_ready(
+                page, multilogin=multilogin
+            )
+            if button is not None:
+                return button
             remaining = min(
                 ready_deadline - time.monotonic(),
                 budget.remaining_seconds(),
@@ -2664,15 +2682,19 @@ class TiktokBaseUploader(BaseVideoUploader):
                 )
             await asyncio.sleep(min(poll, remaining))
 
-    async def _publish_button_ready(self, page, *, multilogin: bool) -> bool:
-        """Whether a visible publish button is enabled; never clicks it."""
+    async def _publish_button_ready(self, page, *, multilogin: bool):
+        """The first visible + enabled publish locator; never clicks it.
+
+        Returns ``None`` when no candidate is present or the match is
+        disabled / ``aria-disabled="true"``.
+        """
         if multilogin:
             _raise_if_login_required(page)
         found = await _find_candidate(
             self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True
         )
         if found is None:
-            return False
+            return None
         button, index, description = found
         try:
             enabled = await button.is_enabled()
@@ -2688,13 +2710,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                         enabled = False
                 except Exception:
                     pass
-        if enabled:
-            tiktok_logger.info(
-                "[+] TikTok publish ready: candidate "
-                f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} matched "
-                f"({description})"
-            )
-        return enabled
+        if not enabled:
+            return None
+        tiktok_logger.info(
+            "[+] TikTok publish ready: candidate "
+            f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} matched "
+            f"({description})"
+        )
+        return button
 
     async def click_publish(
         self,
@@ -2711,28 +2734,24 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         budget.check_pre_click()
         humanizer = self._humanizer(page)
-        # ``publish_clicked`` flips only after ``click()`` returns cleanly; a
-        # click that raises before ``mouse.down`` proves nothing was sent.
-        # Once flipped, the button is never clicked again: a second click could
-        # duplicate the post.  A ``maybe`` dispatch also flips it (spec §2.1):
-        # a raise after ``mouse.down`` must never be re-dispatched.
+        # ``publish_clicked`` means "a click may have reached the page".  It
+        # flips after a clean ``click()`` return and also on a ``maybe``
+        # dispatch (a raise after ``mouse.down``): spec §2.1 forbids
+        # re-dispatching either way, and a later login redirect must be
+        # reported as "possibly published".
         publish_clicked = False
 
         # Phase 1 — readiness only (60s window, min(60s, remaining budget)).
-        # Reuses the same predicate as the --no-publish gate: visible + enabled
-        # + no aria-disabled. A missing/disabled button fails here (exit 1)
-        # instead of being retried.
-        await self.wait_publish_ready(
+        # The gate returns the exact locator it verified: visible + enabled +
+        # no aria-disabled. A missing/disabled button fails here (exit 1)
+        # instead of being retried, and the click below never re-resolves.
+        publish_button = await self.wait_publish_ready(
             page, deadline=budget, multilogin=multilogin
         )
-        found = await _find_candidate(
-            self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True
-        )
-        if found is None:
+        if publish_button is None:
             raise RuntimeError(
                 "TikTok 发布按钮在就绪检查后消失：未点击发布，未发布任何内容。"
             )
-        publish_button, _index, _description = found
 
         # Single dispatch. A failure before mouse.down is a hard failure (exit
         # 1) — never re-click. A failure after mouse.down may already have
@@ -2776,12 +2795,14 @@ class TiktokBaseUploader(BaseVideoUploader):
                 )
             except (PlaywrightTimeoutError, TimeoutError):
                 # Photo posts may show a "Post now" confirmation instead of
-                # navigating. Attempt it at most once; a failed click is never
-                # retried, and the success-URL wait still owns the outcome.
+                # navigating. The dialog can render a beat after the publish
+                # click, so only a click that actually landed latches: an
+                # absent (or failed) attempt is retried on the next timeout,
+                # while a landed click is never repeated.
                 if not dialog_clicked:
-                    dialog_clicked = True
                     try:
-                        await self._click_post_now(page)
+                        if await self._click_post_now(page):
+                            dialog_clicked = True
                     except Exception as exc:
                         # The publish click was already dispatched: a dialog
                         # failure is a result-unknown, never a pre-click error.
@@ -3511,7 +3532,11 @@ class TiktokNote(TiktokBaseUploader):
                 except Exception as exc:
                     # Ambiguous targets are structural errors: never loop on
                     # them (the humanizer's stillOn gate already refused).
-                    if "ambiguous:" in str(exc):
+                    # ``ElementUnusableError.reason`` is the machine-readable
+                    # form; never match substrings of the message.
+                    if str(getattr(exc, "reason", "") or "").startswith(
+                        "ambiguous:"
+                    ):
                         raise
                     if _maybe_dispatched(exc):
                         raise

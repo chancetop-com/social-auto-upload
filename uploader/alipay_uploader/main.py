@@ -119,6 +119,10 @@ ALIPAY_FAIL_TOAST_SELECTOR = (
 # click must be consumed by ``expect_file_chooser`` (XHS precedent bbc5361).
 ALIPAY_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
 ALIPAY_COVER_CHOOSER_TIMEOUT_MS = 10_000
+#: The inner 「上传封面」 entry normally only expands the crop dialog, but some
+#: accounts open a file chooser from it.  Short window so the fallback is not
+#: delayed, and a chooser that does arrive is consumed instead of lingering.
+ALIPAY_COVER_INNER_CHOOSER_TIMEOUT_MS = 3_000
 ALIPAY_COVER_IMAGE_INPUT_SELECTOR = (
     'input[type="file"][accept*="jpg"], '
     'input[type="file"][accept*="png"]'
@@ -599,13 +603,26 @@ class AlipayVideo(BaseVideoUploader):
     ) -> None:
         """兜底：input 缺失时才点「上传图片」，点击必须被 chooser 消费。
 
-        chooser 事件没到也不能裸点第二次：点击可能已经渲染出 input，这里改为
-        重新解析封面 input 再直接写。只有「选择器事件没到」（超时）才降级；
-        人类化 / 原生点击错误必须上抛（spec §4.1-7）。
+        内层「上传封面」入口同样可能拉起系统选择器（视账号而定），所以那一下
+        也包在 ``expect_file_chooser`` 里：chooser 到了就直接写文件返回；没到
+        （超时）才继续走「上传图片」。只有「选择器事件没到」才降级；人类化 /
+        原生点击错误必须上抛（spec §4.1-7），绝不吞掉。
         """
         inner = modal_body.get_by_text("上传封面", exact=True).first
         if await inner.count():
-            await humanizer.click(inner)
+            async with page.expect_file_chooser(
+                timeout=ALIPAY_COVER_INNER_CHOOSER_TIMEOUT_MS
+            ) as inner_info:
+                # A click error (humanizer or native) is outside the ``try``:
+                # only the chooser timeout may be swallowed here.
+                await humanizer.click(inner)
+            try:
+                inner_chooser = await inner_info.value
+            except PWTimeoutError:
+                inner_chooser = None
+            if inner_chooser is not None:
+                await inner_chooser.set_files(self.thumbnail_path)
+                return
             await page.wait_for_timeout(1500)
 
         upload_img_btn = modal_body.get_by_role(

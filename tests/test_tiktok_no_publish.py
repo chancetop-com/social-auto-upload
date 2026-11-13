@@ -406,6 +406,21 @@ class PublishReadyWaitTests(unittest.TestCase):
         # A dedicated type would map to exit 9; this must be a plain failure.
         self.assertIs(type(ctx.exception), RuntimeError)
 
+    def test_ready_gate_returns_the_locator_it_verified(self):
+        video = _video(no_publish=True)
+        button = _Button()
+        video.locator_base = _ButtonBase(button)
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            ready = asyncio.run(
+                video.wait_publish_ready(
+                    object(), deadline=None, multilogin=False
+                )
+            )
+
+        self.assertIs(ready, button)
+        self.assertEqual(button.click_calls, 0)
+
     def test_window_is_clamped_by_the_remaining_budget(self):
         video = _video(no_publish=True)
         video.locator_base = _ButtonBase(_Button(count=0))

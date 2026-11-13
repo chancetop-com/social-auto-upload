@@ -153,6 +153,9 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 `yes` / `on`），每个平台写入各自的 `logs/<platform>.log`（如 `logs/tiktok.log`）；单文件
 按 **10 MB** 轮转，保留 **10 天**。不设置该变量时不创建、不写入任何日志文件。
 
+该变量在**进程启动时**（`utils/log.py` 导入）读取一次：进程运行中再改环境变量不会切换输出，
+需要重启 `sau` 才生效。
+
 ## 托管浏览器模式（通用）
 
 设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用启动指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。

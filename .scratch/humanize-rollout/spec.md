@@ -29,7 +29,7 @@
 两条禁令：
 
 - **禁止 `el.click()` / `evaluate("el => el.click()")`**（JS 合成点击绕过一切真实指针语义）。全仓 15 个平台目标 **0 处**，见 §4.2。
-- **坐标点击不接受 `force=True`**。`force` 只保留在 4 条「不走」的原生路径上（2FA ×2、引导层、hidden file input），且每处必须带三字段标记，见 §4.3/§4.4。
+- **坐标点击不接受 `force=True`**。`force` 只保留在 3 条「不走」的原生路径上（2FA ×2、引导层），且每处必须带三字段标记，见 §4.3/§4.4。
 
 ### 1.2 明确不做（附理由）
 
@@ -582,7 +582,7 @@ async def _humanize_pause(self, seconds: float) -> None:
 | :2669 | `H` | 发布后确认（可选兜底，失败不改退出码） |
 | :2792/:2821 | `N/file` | 首次 / 重试视频上传 |
 | :2856/:2866/:2973 | `H` | 封面编辑 / Upload cover / 保存 |
-| :2904 | `N/file` + force | hidden file input 兜底（保留 force + 标记） |
+| :2904 | `N/file` | ~~hidden file input 兜底（force + 标记）~~ **已于 2026-11-13 移除**：封面改为直写隐藏 input / 消费 file chooser，不再需要 `force`（见 §4.4） |
 | :3186/:3199 | `H+nav` | 切 Photos tab（两套选择器） |
 | :2899/:3225 | `N/file` | `set_input_files`，不改 |
 
@@ -737,6 +737,7 @@ AST：Call(func=Attribute(attr=="fill")) → 必须有 `# native-fill: <原因>`
 
 ### 5.2 日志
 
+- 默认只输出到控制台；设置 `SAU_LOG_TO_FILES=1` 才写入 `logs/<platform>.log`，该变量在进程启动（`utils/log.py` 导入）时读取一次，运行中改环境变量不生效。
 - `type_text` 越阈值：一条 `info`：`type_text→bulk insert_text, chars=NNN`（已有）。
 - 预算裁剪首次发生：一条 `warning`（§2.2 模板），每流程一次。
 - 其它：调用点自己打（进入哪个字段、哪一步），`Humanizer` 不打平台文案。
@@ -770,7 +771,9 @@ AST：Call(func=Attribute(attr=="fill")) → 必须有 `# native-fill: <原因>`
 2. **字段值读回**：fake locator 持有键入缓冲，断言最终值等于预期（专抓「序列全对、值却错」：大鱼 `#author` 被抹、百家号标题自动填文件名、清空不净导致追加）。
 3. **平台静态门**：该平台包内 §4.2–4.5 四道门全过。
 
-Fake 约定（扩 `tests/fakes.py`）：
+Fake 约定（共享 fake 在 `tests/fakes_xhs_dom.py`，各平台另有本地 double，如
+`tests/test_alipay_humanize.py` 的 `Element` / `RecordingPage` 子类；`tests/fakes.py`
+只放浏览器/托管 provider 的进程级 fake）：
 
 - `FakeKeyboard`：记录 `press(key)` / `insert_text(text)` 顺序与次数。
 - `FakeMouse`：记录 `move/down/up` 与坐标。

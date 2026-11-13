@@ -40,6 +40,7 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_PHOTO_UPLOAD_URL,
     TIKTOK_UPLOAD_URL,
 )
+from utils.dom import ElementUnusableError
 
 TOKEN = "SENTINEL-MLX-TOKEN-ticket15"
 ITEM_ID = "7412345678901234567"
@@ -1659,6 +1660,70 @@ class UploadNoteConstantsTests(unittest.TestCase):
 
 
 
+class PhotoTitleStructuralErrorTests(unittest.TestCase):
+    """Only a real ``ElementUnusableError(reason="ambiguous:N")`` is structural."""
+
+    def _note(self, error) -> TiktokNote:
+        note = TiktokNote(
+            ["/tmp/cover.png"], "", [], 0, None, title="标题"
+        )
+        note.locator_base = _TitleScope(error)
+        return note
+
+    def test_ambiguous_reason_raises_before_the_retry_loop(self):
+        error = ElementUnusableError(
+            what="Title", role="interactive", reason="ambiguous:2"
+        )
+        note = self._note(error)
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+
+        with patch.object(note, "dismiss_blocking_overlays", AsyncMock()):
+            with self.assertRaises(ElementUnusableError) as ctx:
+                asyncio.run(note._fill_title(page))
+
+        self.assertEqual(ctx.exception.reason, "ambiguous:2")
+        page.wait_for_timeout.assert_not_awaited()
+
+    def test_a_message_that_merely_mentions_ambiguous_is_retried(self):
+        note = self._note(RuntimeError("selector note: ambiguous: not a reason"))
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+
+        with patch.object(note, "dismiss_blocking_overlays", AsyncMock()):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note._fill_title(page))
+
+        self.assertIn("未找到", str(ctx.exception))
+        self.assertEqual(page.wait_for_timeout.await_count, 20)
+
+
+class _TitleScope:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def locator(self, _selector: str) -> "_TitleField":
+        return _TitleField(self.error)
+
+
+class _TitleField:
+    """The title input; the humanized hover is where the structural error hits."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    @property
+    def first(self) -> "_TitleField":
+        return self
+
+    async def count(self) -> int:
+        return 1
+
+    async def hover(self) -> None:
+        raise self.error
+
+    async def click(self) -> None:  # pragma: no cover - hover fails first
+        raise AssertionError("click must not run after a failing hover")
+
+
 def setUpModule():
     """Legacy TikTok fakes model the pre-humanize DOM seam.
 
@@ -1668,13 +1733,19 @@ def setUpModule():
     """
     import os
 
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
     os.environ["HUMANIZE"] = "0"
 
 
 def tearDownModule():
     import os
 
-    os.environ.pop("HUMANIZE", None)
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
+
 
 if __name__ == "__main__":
     unittest.main()
