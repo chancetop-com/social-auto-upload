@@ -9,7 +9,7 @@ from datetime import datetime
 # ``main.py`` (Firefox) intentionally stays on upstream Playwright and is not
 # wired into the CLI.
 from patchright.async_api import Error as PlaywrightError
-from patchright.async_api import Playwright, async_playwright
+from patchright.async_api import Locator, Playwright, async_playwright
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 import os
 import asyncio
@@ -2640,7 +2640,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         *,
         deadline: float | PublishTimeoutBudget | None = None,
         multilogin: bool = False,
-    ):
+    ) -> "Locator | None":
         """Wait until the publish button is present and enabled; never clicks.
 
         ``--no-publish`` uses this to stop at the publish-ready point.  The
@@ -2682,7 +2682,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 )
             await asyncio.sleep(min(poll, remaining))
 
-    async def _publish_button_ready(self, page, *, multilogin: bool):
+    async def _publish_button_ready(
+        self, page, *, multilogin: bool
+    ) -> "Locator | None":
         """The first visible + enabled publish locator; never clicks it.
 
         Returns ``None`` when no candidate is present or the match is
@@ -2801,7 +2803,10 @@ class TiktokBaseUploader(BaseVideoUploader):
                 # while a landed click is never repeated.
                 if not dialog_clicked:
                     try:
-                        if await self._click_post_now(page):
+                        outcome = await self._click_post_now(page)
+                        # None = no dialog/button yet: retry on a later beat.
+                        # True/False = a click was attempted; never retry it.
+                        if outcome is not None:
                             dialog_clicked = True
                     except Exception as exc:
                         # The publish click was already dispatched: a dialog
@@ -2820,13 +2825,13 @@ class TiktokBaseUploader(BaseVideoUploader):
             tiktok_logger.success("  [-] video published success")
             return
 
-    async def _click_post_now(self, page) -> bool:
+    async def _click_post_now(self, page) -> bool | None:
         """Click an exact confirmation button inside a visible dialog.
 
-        The click is deliberately dialog-only: a page-level fallback can match
-        the primary ``Schedule``/``Post`` button and click it a second time,
-        producing a duplicate post.  If no visible dialog exists, do nothing
-        and let the success-URL wait own the outcome.
+        Returns ``None`` when no dialog/button exists yet (safe to retry on a
+        later poll), ``True`` when a click landed, and ``False`` when a click
+        was attempted but raised. ``False`` must latch: a humanized/native
+        failure may already have dispatched, so it is never retried.
         """
         dialogs = []
         for selector in _CONFIRMATION_DIALOG_SELECTORS:
@@ -2840,7 +2845,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             except Exception:
                 continue
         if not dialogs:
-            return False
+            return None
 
         names = _confirmation_names(self.publish_date)
         for dialog in reversed(dialogs):

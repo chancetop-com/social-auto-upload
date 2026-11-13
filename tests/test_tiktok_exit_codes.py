@@ -595,15 +595,19 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(dialog.click_calls, 1)
 
-    def test_failed_post_now_click_is_retried_but_a_landed_click_is_not(self):
+    def test_failed_post_now_click_is_not_retried(self):
+        """A confirmation click that raised may have dispatched: latch it.
+
+        The first Post-now click fails (pre- or post-dispatch is unknowable),
+        so the loop must not click the confirmation again; it only waits for
+        the success URL and ends as result-unknown.
+        """
         button = _CandidateLocator()
         base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
-        dialog = _FlakyDialogLocator(failures=2)
+        dialog = _FlakyDialogLocator(failures=1)
         page = _PostNowPage(
             dialog,
-            # No dialog click has landed yet, so each 3s timeout retries the
-            # confirmation; a landed click latches and is never repeated.
-            wait_outcomes=[("timeout", None)] * 4 + [CONTENT_URL],
+            wait_outcomes=[("timeout", None)] * 3 + [CONTENT_URL],
         )
         video = _video()
         video.locator_base = base
@@ -612,7 +616,7 @@ class ClickPublishTests(unittest.TestCase):
             asyncio.run(video.click_publish(page, multilogin=True))
 
         self.assertEqual(button.click_calls, 1)
-        self.assertEqual(dialog.click_calls, 3)
+        self.assertEqual(dialog.click_calls, 1)
 
     def test_post_now_dialog_that_appears_late_is_still_clicked(self):
         button = _CandidateLocator()
