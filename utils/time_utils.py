@@ -1,18 +1,36 @@
 """时区感知时间的共用校验。"""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 
-def parse_aware_iso(
-    text: str, *, label: str = "时间", require_t: bool = True
-) -> datetime:
-    """解析带时区偏移的 ISO 8601 绝对时刻；``Z`` 视为 UTC。"""
+#: 只接受扩展格式，避免 Python 3.10 与 3.11 对紧凑/周日期语法的差异。
+_ISO_AWARE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}"
+    r"(?::\d{2}(?:\.\d{1,6})?)?"
+    r"(?:[Zz]|[+-]\d{2}:?\d{2}|[+-]\d{2})$"
+)
+
+
+def parse_aware_iso(text: str, *, label: str = "时间") -> datetime:
+    """解析带时区偏移的扩展格式 ISO 8601 绝对时刻；``Z`` 视为 UTC。"""
     value = text.strip()
-    if require_t and "T" not in value.upper():
-        raise ValueError("ISO 8601 时间必须使用 T 分隔日期和时间")
+    if not _ISO_AWARE_RE.fullmatch(value):
+        raise ValueError(
+            "ISO 8601 时间必须使用 YYYY-MM-DDTHH:MM[:SS][.ffffff] 加偏移后缀"
+        )
     if value.endswith(("Z", "z")):
         value = value[:-1] + "+00:00"
+    # Python 3.10 的 fromisoformat 不接受 ±HHMM / ±HH 偏移。
+    value = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value)
+    value = re.sub(r"([+-]\d{2})$", r"\1:00", value)
+    # Python 3.10 只接受 3 或 6 位小数秒；统一补到 6 位。
+    value = re.sub(
+        r"\.(\d{1,6})(?=[+-]|$)",
+        lambda match: "." + (match.group(1) + "000000")[:6],
+        value,
+    )
     return require_aware(datetime.fromisoformat(value), label=label)
 
 

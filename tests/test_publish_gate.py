@@ -104,19 +104,17 @@ class PublishGateTests(unittest.TestCase):
 
 
 class NotBeforeArgumentTests(unittest.TestCase):
-    def test_parses_timezone_aware_iso(self):
+    def test_parses_utc_iso_with_seconds(self):
+        parsed = arguments.not_before_value("2026-12-01T00:30:45Z")
+        self.assertIsNotNone(parsed.tzinfo)
         self.assertEqual(
-            arguments.not_before_value("2026-12-01T08:30:00+08:00"),
-            datetime(2026, 12, 1, 8, 30, tzinfo=timezone(timedelta(hours=8))),
+            parsed,
+            datetime(2026, 12, 1, 0, 30, 45, tzinfo=timezone.utc),
         )
-        # 同一绝对时刻：本地时区化后仍与 UTC 表示相等。
-        self.assertEqual(
-            arguments.not_before_value("2026-12-01T00:30:00Z"),
-            datetime(2026, 12, 1, 0, 30, tzinfo=timezone.utc),
-        )
-        self.assertIsNotNone(
-            arguments.not_before_value("2026-12-01T00:30:00Z").tzinfo
-        )
+
+    def test_rejects_non_utc_offset(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            arguments.not_before_value("2026-12-01T08:30:00+08:00")
 
     def test_rejects_naive_and_bad_format(self):
         for raw in ("2026/12/01 08:30", "2026-12-01 08:30"):
@@ -127,7 +125,30 @@ class NotBeforeArgumentTests(unittest.TestCase):
 
     def test_past_times_are_allowed(self):
         value = datetime(2000, 1, 1, 0, 0, tzinfo=timezone.utc)
-        self.assertEqual(arguments.not_before_value(value.isoformat()), value)
+        self.assertEqual(
+            arguments.not_before_value("2000-01-01T00:00:00Z"), value
+        )
+
+    def test_rejects_fractional_seconds(self):
+        for raw in (
+            "2000-01-01T00:00:00.500Z",
+            "2000-01-01T00:00:00.000Z",
+            "2000-01-01T00:00:00.0Z",
+        ):
+            with self.subTest(raw=raw), self.assertRaises(
+                argparse.ArgumentTypeError
+            ):
+                arguments.not_before_value(raw)
+
+    def test_accepts_zero_offset_forms(self):
+        expected = datetime(2000, 1, 1, 0, 0, tzinfo=timezone.utc)
+        for raw in (
+            "2000-01-01T00:00:00+00:00",
+            "2000-01-01T00:00:00+0000",
+            "2000-01-01T00:00:00z",
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(arguments.not_before_value(raw), expected)
 
     def test_every_upload_command_exposes_the_flag(self):
         parser = sau_cli.build_parser()
@@ -159,12 +180,12 @@ class NotBeforeArgumentTests(unittest.TestCase):
                     "--title",
                     "hello",
                     "--not-before",
-                    "2026-12-01T08:30:00+08:00",
+                    "2026-12-01T00:30:00Z",
                 ]
             )
         self.assertEqual(
             args.not_before,
-            datetime(2026, 12, 1, 8, 30, tzinfo=timezone(timedelta(hours=8))),
+            datetime(2026, 12, 1, 0, 30, tzinfo=timezone.utc),
         )
 
     def test_request_value_reaches_uploader(self):

@@ -6,12 +6,12 @@
 
 ### 客户端发布闸门
 
-- 所有发布命令（`upload-video` / `upload-note` / `upload-article`）新增 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区的绝对时刻）：先完成上传、填表、封面、声明、合集等全部准备，解析后换算到运行机器本地时区，到达目标时刻才点击发布；不传时立即发布，目标时间已过也立即发布。
-- 与平台原生 `--schedule` 互不替代，可同时使用：`--schedule` 传 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`）并由平台在目标时间发布；`--not-before` 传带时区的绝对时刻（例如 `YYYY-MM-DDTHH:MM:SS+08:00`），负责本地提交时刻。
+- 所有发布命令（`upload-video` / `upload-note` / `upload-article`）新增 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，保留秒级精度）：先完成上传、填表、封面、声明、合集等全部准备，解析后换算到运行机器本地时区，到达目标时刻才点击发布；不传时立即发布，目标时间已过也立即发布。
+- 与平台原生 `--schedule` 互不替代，可同时使用：`--schedule` 传 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`）并由平台在目标时间发布；`--not-before` 传 UTC 绝对时刻（例如 `YYYY-MM-DDTHH:MM:SSZ`），负责本地提交时刻。
 - 使用 `--no-publish` / `--prepare-only` / `--draft` 时跳过等待；Bilibili 因 `biliup` 单命令提交，等待发生在启动命令之前。
 - 新增 `uploader/publish_gate.py` 与 `BaseVideoUploader.publish_not_before`；等待期间分段睡眠并定期输出剩余时间。
-- **破坏性变更（CLI）**：`--schedule` 不再接受 `YYYY-MM-DD HH:MM`，改为 UTC ISO 8601（`YYYY-MM-DDTHH:MM:00Z`）；`--not-before` 同样改为带时区偏移的绝对时刻。旧格式会退出 `2`。
-- **破坏性变更（Python API）**：`BaseVideoUploader.validate_publish_date`、`validate_dayu_schedule`、`validate_zhihu_schedule` 现在拒绝无时区的 `datetime`；直接调用上传器 API 时也必须传带偏移的绝对时刻。
+- **破坏性变更（CLI）**：`--schedule` 不再接受 `YYYY-MM-DD HH:MM`，改为 UTC ISO 8601（`YYYY-MM-DDTHH:MM:00Z`）；`--not-before` 同样改为 UTC ISO 8601（零偏移，`Z`/`+00:00` 等写法均可；必须用 `T` 分隔，保留秒级精度）。旧格式、非零偏移、空格分隔、小数秒、紧凑日期、周日期与小写 `t` 会退出 `2`；例如 `…T20:00:00+08:00` 需要改成 `…T12:00:00Z`。
+- **破坏性变更（Python API）**：`BaseVideoUploader.validate_publish_date`、`validate_dayu_schedule`、`validate_zhihu_schedule` 现在拒绝无时区的 `datetime`；直接调用上传器 API 时也必须传带偏移的绝对时刻。UTC-only 限制只作用于 CLI 的 `--not-before`，Python API 的 `publish_not_before` 仍接受任意 aware 时刻。
 - YouTube 的 `--schedule` 明确标记为尚未实现，传入退出 `2`；Facebook Page 结果 JSON 不再写 `timezone` 字段。
 
 ### 托管浏览器（AdsPower）

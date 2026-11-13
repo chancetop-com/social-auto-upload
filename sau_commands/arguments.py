@@ -12,8 +12,8 @@ from utils.time_utils import parse_aware_iso
 SCHEDULE_EXAMPLE = "YYYY-MM-DDTHH:MM:00Z"
 SCHEDULE_HELP = f"Schedule time in {SCHEDULE_EXAMPLE} (UTC)"
 SCHEDULE_HELP_ZH = f"定时发布时间，格式 {SCHEDULE_EXAMPLE}（UTC）"
-#: ``--not-before`` 也接受任意偏移，示例使用东八区。
-NOT_BEFORE_EXAMPLE = "YYYY-MM-DDTHH:MM:SS+08:00"
+#: ``--not-before`` 同样使用 UTC 绝对时刻，但保留秒级精度。
+NOT_BEFORE_EXAMPLE = "YYYY-MM-DDTHH:MM:SSZ"
 
 def has_interactive_terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
@@ -41,15 +41,26 @@ def parse_image_files(raw_files: Iterable[Path]) -> list[Path]:
     return [Path(file) for file in raw_files]
 
 
+def parse_utc_instant(
+    value: str, *, label: str, require_minute: bool
+) -> datetime:
+    """解析零偏移的 UTC 绝对时刻；可按平台要求限制到分钟。"""
+    if "." in value.strip():
+        raise ValueError(f"{label} 不接受小数秒")
+    parsed = parse_aware_iso(value, label=label)
+    if parsed.utcoffset() != timedelta(0):
+        raise ValueError(f"{label} 必须是 UTC 绝对时刻（零偏移）")
+    if require_minute and parsed.second:
+        raise ValueError(f"{label} 精确到分钟，不接受秒")
+    return parsed
+
+
 def parse_schedule(raw_schedule: str | None) -> datetime | int:
     if raw_schedule is None:
         return 0
-    parsed = parse_aware_iso(raw_schedule, label="--schedule")
-    if parsed.utcoffset() != timedelta(0):
-        raise ValueError("--schedule 必须是 UTC 绝对时刻（使用 Z 或 +00:00）")
-    if parsed.second or parsed.microsecond:
-        raise ValueError("--schedule 精确到分钟，不接受秒或微秒")
-    return parsed
+    return parse_utc_instant(
+        raw_schedule, label="--schedule", require_minute=True
+    )
 
 
 def existing_file_path(value: str) -> Path:
@@ -62,22 +73,29 @@ def existing_file_path(value: str) -> Path:
 def schedule_value(value: str):
     try:
         return parse_schedule(value)
-    except ValueError as exc:
+    except (ValueError, OverflowError, OSError) as exc:
         raise argparse.ArgumentTypeError(
-            f"Invalid schedule '{value}'. Expected UTC ISO 8601: {SCHEDULE_EXAMPLE}"
+            f"Invalid schedule '{value}': {exc}. "
+            f"Expected UTC ISO 8601: {SCHEDULE_EXAMPLE}"
         ) from exc
 
 
 def not_before_value(value: str) -> datetime:
-    """解析 ``--not-before``：接受带偏移的绝对时刻，并换算到本地时区。"""
+    """解析 ``--not-before``：UTC 绝对时刻，并换算到运行机器本地时区。"""
     try:
-        return parse_aware_iso(
-            value, label="--not-before", require_t=False
-        ).astimezone()
-    except ValueError as exc:
+        parsed = parse_utc_instant(
+            value, label="--not-before", require_minute=False
+        )
+    except (ValueError, OverflowError, OSError) as exc:
         raise argparse.ArgumentTypeError(
-            f"Invalid --not-before '{value}'. Expected timezone-aware ISO 8601: {NOT_BEFORE_EXAMPLE}"
+            f"Invalid --not-before '{value}': {exc}. "
+            f"Expected UTC ISO 8601: {NOT_BEFORE_EXAMPLE}"
         ) from exc
+    try:
+        return parsed.astimezone()
+    except (OverflowError, OSError):
+        # 极端年份在部分时区无法本地化；等待仍按绝对时刻比较，保留 UTC。
+        return parsed
 
 
 def add_not_before_flag(parser: argparse.ArgumentParser) -> None:
@@ -89,7 +107,7 @@ def add_not_before_flag(parser: argparse.ArgumentParser) -> None:
         metavar="TIME",
         help=(
             "All content is prepared first; click publish only at or after "
-            f"the absolute instant TIME (format {NOT_BEFORE_EXAMPLE}). "
+            f"the UTC absolute instant TIME (format {NOT_BEFORE_EXAMPLE}). "
             "Omit to publish immediately."
         ),
     )

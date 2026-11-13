@@ -169,11 +169,11 @@ sau douyin check --account creator
 
 #### 指定发布时刻（可选）
 
-所有发布命令都支持 `--not-before "YYYY-MM-DDTHH:MM:SS+08:00"`（带时区偏移的绝对时刻）：先完成素材上传、标题/正文、封面、声明等全部准备，再等待到绝对时刻不早于目标时间后才点击发布。它和平台原生 `--schedule` 是两套机制，可以同时使用。
+所有发布命令都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，解析后换算到运行机器本地时区）：先完成素材上传、标题/正文、封面、声明等全部准备，再等待到绝对时刻不早于目标时间后才点击发布。它和平台原生 `--schedule` 是两套机制，可以同时使用。
 
 ```bash
 sau xiaohongshu upload-video --account creator --file demo.mp4 --title "新视频" \
-  --not-before "2026-12-01T20:00:00+08:00"
+  --not-before "2026-12-01T12:00:00Z"
 ```
 
 详见 [CLI 使用说明的客户端发布闸门](./docs/CLI.md#客户端发布闸门--not-before)。
