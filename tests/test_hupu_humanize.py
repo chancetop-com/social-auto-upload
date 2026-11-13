@@ -39,7 +39,9 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "hupu_uploader"
 
@@ -402,6 +404,70 @@ class HupuEventSequenceTests(unittest.TestCase):
             [event for event in log if event == ("pause", BEFORE_SUBMIT)],
             [("pause", BEFORE_SUBMIT)],
         )
+
+
+# ---------------------------------------------------------------------------
+# 1b. 发布点击：可能已派发 → 结果未知，绝不二次派发
+# ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(_QuietHumanizer):
+    """真实点击后按 locator 名注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, *, error: BaseException, target: str = "publish") -> None:
+        super().__init__(page)
+        self.error = error
+        self.target = target
+        self.dispatches: list[str] = []
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        name = getattr(locator, "name", "")
+        if name == self.target:
+            self.dispatches.append(name)
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _submit(self, page, humanizer):
+        app = _app()
+        with patch.object(hupu_main, "Humanizer", lambda page, **kwargs: humanizer):
+            app._humanizer_instance = humanizer
+            asyncio.run(app._submit_publish(page))
+
+    def test_publish_after_mouse_down_maps_to_unknown(self):
+        log: list = []
+        page, targets = _publish_page(log)
+        humanizer = _PublishFailingHumanizer(page, error=self._maybe_error())
+
+        with self.assertRaises(PublishResultUnknownError):
+            self._submit(page, humanizer)
+
+        self.assertEqual(humanizer.dispatches, ["publish"])
+        self.assertEqual(targets["publish"].click_count, 0)
+
+    def test_pre_dispatch_publish_failure_propagates(self):
+        log: list = []
+        page, targets = _publish_page(log)
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+        humanizer = _PublishFailingHumanizer(page, error=error)
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            self._submit(page, humanizer)
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(targets["publish"].click_count, 0)
 
 
 # ---------------------------------------------------------------------------

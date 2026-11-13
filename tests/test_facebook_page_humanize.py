@@ -38,7 +38,9 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 AFTER_TYPE = 5.0
 BEFORE_SUBMIT = 7.0
@@ -686,6 +688,95 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             )
             self.assertEqual(app.result["status"], "published")
             self.assertEqual(app.result["content_id"], "456")
+
+
+# ---------------------------------------------------------------------------
+# 1b. 发布点击：可能已派发 → 结果未知，绝不二次派发
+# ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(_QuietHumanizer):
+    """真实点击后注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, *, error: BaseException, **kwargs) -> None:
+        super().__init__(page, **kwargs)
+        self.error = error
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        if getattr(locator, "name", "") == "publish":
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _page(self):
+        log: list = []
+        publish = _Clickable("publish", log=log)
+        footer = _RegexLocator(
+            "post-footer",
+            log=log,
+            children={
+                '[role="button"]': FakeLocator("footer-actions", count=3),
+                "role:button:Publish": publish,
+            },
+        )
+        return _page({POST_FOOTER: footer}, log=log), publish
+
+    def _publish(self, page, error) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _app(tmp, image_files=[Path(tmp) / "a.png"])
+            app.page_name = "Page"
+            app.result["page_id"] = "123"
+            app.publish_not_before = None
+            app._publish_budget = app.start_publish_budget()
+            app._publish_budget.wait_until_allowed = AsyncMock(return_value=None)
+            page.expect_response = lambda predicate, timeout=None: _ResponseContext(
+                _Response(
+                    {
+                        "data": {
+                            "xfamily_content_create": {
+                                "items": [{"pending_publish_content_id": None}]
+                            }
+                        }
+                    }
+                )
+            )
+            humanizer = _PublishFailingHumanizer(page, error=error)
+            with (
+                patch.object(fb_main, "Humanizer", lambda p, **kw: humanizer),
+                patch.object(fb_main, "expect", _expect),
+            ):
+                asyncio.run(app._publish(page))
+
+    def test_publish_after_mouse_down_maps_to_unknown(self):
+        page, publish = self._page()
+
+        with self.assertRaises(PublishResultUnknownError):
+            self._publish(page, self._maybe_error())
+
+        self.assertEqual(page.mouse.down_count, 1)
+        self.assertEqual(publish.click_count, 0)
+
+    def test_pre_dispatch_publish_failure_propagates(self):
+        page, publish = self._page()
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            self._publish(page, error)
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(publish.click_count, 0)
 
 
 # ---------------------------------------------------------------------------

@@ -48,25 +48,35 @@ DOUYIN_INIT_SCRIPT = True
 _LOGIN_URL_MARKERS = ("login", "captcha", "verify", "two-factor", "2fa")
 
 
-def _raise_if_login_required(page) -> None:
+#: Appended to the login-required text only when the publish click was already
+#: dispatched: retrying then can duplicate the post (mirror of XHS/TikTok wording).
+_DOUYIN_PUBLISH_ATTEMPTED_SUFFIX = (
+    "发布点击已发出：请先在作品列表核对是否已发布，再决定是否重试。"
+)
+
+
+def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this.  The local branch keeps its historical
-    behaviour (retry until timeout) untouched.
+    behaviour (retry until timeout) untouched.  ``publish_attempted`` must be
+    true when the redirect is observed after the publish click was dispatched,
+    so exit 10 never claims "not published" and the text never invites a blind
+    retry.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
         return
+    message = (
+        "抖音上传过程中需要重新登录（登录页/验证码/二次验证）："
+        "请在 Multilogin 应用中登录 Profile 后重试。"
+    )
+    if publish_attempted:
+        message += _DOUYIN_PUBLISH_ATTEMPTED_SUFFIX
     if "creator.douyin.com" in url and "creator-micro" not in url:
-        raise LoginRequiredError(
-            "抖音上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
-        )
+        raise LoginRequiredError(message, publish_attempted=publish_attempted)
     if any(marker in url for marker in _LOGIN_URL_MARKERS):
-        raise LoginRequiredError(
-            "抖音上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
-        )
+        raise LoginRequiredError(message, publish_attempted=publish_attempted)
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -1274,7 +1284,7 @@ class DouYinVideo(DouYinBaseUploader):
         while True:
             if budget.remaining_seconds() <= 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             try:
                 # 移除会拦截发布按钮点击的新手引导/话题下拉浮层
@@ -1319,7 +1329,7 @@ class DouYinVideo(DouYinBaseUploader):
                 break
             except Exception:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 await self.handle_auto_video_cover(page)
                 douyin_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
                 if self.debug:
@@ -1442,7 +1452,7 @@ class DouYinNote(DouYinBaseUploader):
         while True:
             if budget.remaining_seconds() <= 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             try:
                 publish_button = page.get_by_role("button", name="发布", exact=True)

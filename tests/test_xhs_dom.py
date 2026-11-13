@@ -15,11 +15,14 @@ so nothing here touches a browser or the wall clock.
 from __future__ import annotations
 
 import ast
+import asyncio
 import pathlib
 import unittest
 
 from tests.fakes_clock import FakeClock
 from tests.fakes_xhs_dom import FakeLocator, RecordingPage
+
+from patchright.async_api import async_playwright
 
 from utils import controls, dom
 from utils.dom import (
@@ -506,13 +509,13 @@ class QuietPage(RecordingPage):
             if self._install_error is not None:
                 raise self._install_error
             return True
+        if "observer.disconnect" in text:
+            self.disconnect_calls += 1
+            return True
         if "__sauDomQuietState" in text:
             self.read_calls += 1
             value = self._since_values.pop(0) if self._since_values else 0
             return {"since": value, "count": self.read_calls}
-        if "observer.disconnect" in text:
-            self.disconnect_calls += 1
-            return True
         raise AssertionError(f"un-scripted page.evaluate({text!r})")
 
 
@@ -589,6 +592,37 @@ class Decision06ReadinessQuietTests(unittest.IsolatedAsyncioTestCase):
         with clock.patch(dom):
             quiet = await wait_dom_quiet(page)
         self.assertFalse(quiet)
+
+    async def test_disconnect_clears_the_state_so_reinstall_gets_a_fresh_window(self):
+        """install → disconnect → install must not resume a stale ``since``.
+
+        The gate is a one-shot probe: leaving ``__sauDomQuietState`` behind
+        makes the second ``_INSTALL_QUIET_JS`` early-return, so the first read
+        returns a large ``since`` and the gate passes immediately.
+        """
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=True, channel="chrome"
+            )
+            try:
+                page = await browser.new_page()
+                await page.set_content("<div id='root'>quiet</div>")
+                await page.evaluate(dom._INSTALL_QUIET_JS)
+                # Age the first observation window past any quiet threshold.
+                await asyncio.sleep((dom.DEFAULT_QUIET_MS + 150) / 1000.0)
+                await page.evaluate(dom._DISCONNECT_QUIET_JS)
+                self.assertIsNone(
+                    await page.evaluate(
+                        "() => window.__sauDomQuietState ?? null"
+                    )
+                )
+                await page.evaluate(dom._INSTALL_QUIET_JS)
+                state = await page.evaluate(dom._READ_QUIET_JS)
+            finally:
+                await browser.close()
+
+        self.assertIsInstance(state, dict)
+        self.assertLess(state["since"], dom.DEFAULT_QUIET_MS)
 
 
 # ---------------------------------------------------------------------------

@@ -30,7 +30,10 @@ from unittest.mock import patch
 from tests.fakes_xhs_dom import FakeLocator, RecordingKeyboard, RecordingMouse, RecordingPage
 from tests.humanize_gates import assert_clean
 from uploader.meta_uploader.facebook_uploader import main as facebook_main
+from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 PACKAGE = (
     Path(__file__).resolve().parent.parent
@@ -435,6 +438,67 @@ class FacebookComposerReadbackTests(unittest.TestCase):
         )
         humanizer = app._humanizer_instance
         self.assertEqual(humanizer.pause_count(humanizer.profile.after_type), 1)
+
+
+class _PublishFailingHumanizer(_RecordingHumanizer):
+    """真实点击后注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, *, error: BaseException, **kwargs) -> None:
+        super().__init__(page, **kwargs)
+        self.error = error
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        if getattr(locator, "name", "") == "publish":
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _error(self) -> BaseException:
+        return ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+
+    def _paper_with(self, error):
+        page, editor, publish, app = _paper()
+        humanizer = _PublishFailingHumanizer(page, error=error)
+        return page, publish, app, humanizer
+
+    def test_publish_after_mouse_down_maps_to_unknown(self):
+        page, publish, app, humanizer = self._paper_with(self._maybe_error())
+
+        with (
+            patch.object(facebook_main, "Humanizer", lambda p, **kw: humanizer),
+            patch.object(facebook_main, "expect", _Expect),
+        ):
+            with self.assertRaises(PublishResultUnknownError):
+                asyncio.run(app._publish_on_page(page))
+
+        # 正文聚焦 + 发布：发布只派发一次，绝不二次点击。
+        self.assertEqual(page.mouse.down_count, 2)
+        self.assertEqual(publish.click_count, 0)
+
+    def test_pre_dispatch_publish_failure_propagates(self):
+        page, publish, app, humanizer = self._paper_with(self._error())
+
+        with (
+            patch.object(facebook_main, "Humanizer", lambda p, **kw: humanizer),
+            patch.object(facebook_main, "expect", _Expect),
+        ):
+            with self.assertRaises(ElementUnusableError) as caught:
+                asyncio.run(app._publish_on_page(page))
+
+        self.assertIs(caught.exception, humanizer.error)
+        self.assertEqual(publish.click_count, 0)
 
 
 class FacebookHumanizeDisabledTests(unittest.TestCase):

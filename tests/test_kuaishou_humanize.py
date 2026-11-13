@@ -41,7 +41,9 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 AFTER_TYPE = 5.0
 BEFORE_SUBMIT = 7.0
@@ -807,6 +809,97 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             # 人类化失败必须上抛，不能被吞成「chooser 没到 → 直接写 input」。
             self.assertEqual(page.file_chooser_files(), [])
             self.assertNotIn("set_input_files", [a[0] for a in cover_file.actions])
+
+
+# ---------------------------------------------------------------------------
+# 1b. 发布点击：可能已派发 → 结果未知，绝不二次派发
+# ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(_QuietHumanizer):
+    """真实点击后按 locator 名注入异常，模拟 ``mouse.down`` 之后的失败。"""
+
+    def __init__(self, page, *, log=None, target: str, error: BaseException, **kwargs):
+        super().__init__(page, log=log, **kwargs)
+        self.target = target
+        self.error = error
+        self.dispatches: list[str] = []
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        name = getattr(locator, "name", "")
+        if name == self.target:
+            self.dispatches.append(name)
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def test_video_publish_after_mouse_down_maps_to_unknown_without_retry(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            editor = _TypingLocator("desc-editor", log=log)
+            page = _page(_video_selectors(log, editor), log=log)
+            app = _video_app(tmp, desc="描述")
+            humanizer = _PublishFailingHumanizer(
+                page, log=log, target="publish", error=self._maybe_error()
+            )
+            app._humanizer_instance = humanizer
+
+            with _fast_clock():
+                with self.assertRaises(PublishResultUnknownError):
+                    asyncio.run(app._upload_video_on_page(page))
+
+            self.assertEqual(humanizer.dispatches, ["publish"])
+            self.assertEqual(page.locator(PUBLISH).click_count, 0)
+
+    def test_note_confirm_after_mouse_down_maps_to_unknown_without_retry(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            editor = _TypingLocator("note-editor", log=log)
+            page = _page(_note_selectors(log, editor), log=log)
+            app = _note_app(tmp, note="图文正文")
+            humanizer = _PublishFailingHumanizer(
+                page, log=log, target="confirm", error=self._maybe_error()
+            )
+            app._humanizer_instance = humanizer
+
+            with _fast_clock():
+                with self.assertRaises(PublishResultUnknownError):
+                    asyncio.run(app.upload_note_content(page))
+
+            self.assertEqual(humanizer.dispatches, ["confirm"])
+
+    def test_pre_dispatch_publish_failure_still_retries(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            editor = _TypingLocator("desc-editor", log=log)
+            page = _page(_video_selectors(log, editor), log=log)
+            app = _video_app(tmp, desc="描述")
+            humanizer = _PublishFailingHumanizer(
+                page,
+                log=log,
+                target="publish",
+                error=ElementUnusableError(
+                    what="点击目标",
+                    role="interactive",
+                    selector="",
+                    reason="covered-by:mask",
+                    publish_clicked=False,
+                ),
+            )
+            app._humanizer_instance = humanizer
+
+            with _fast_clock():
+                with self.assertRaises(RuntimeError) as ctx:
+                    asyncio.run(app._upload_video_on_page(page))
+
+            self.assertNotIsInstance(ctx.exception, PublishResultUnknownError)
+            self.assertEqual(humanizer.dispatches, ["publish"] * ks_main.KUAISHOU_PUBLISH_ATTEMPTS)
 
 
 # ---------------------------------------------------------------------------

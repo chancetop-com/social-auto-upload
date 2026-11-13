@@ -27,6 +27,7 @@ from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError
 from utils.errors import LoginRequiredError
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 
 
 META_BUSINESS_URL = "https://business.facebook.com/latest/composer/"
@@ -570,7 +571,13 @@ class MetaBusinessUploader(BaseVideoUploader):
                     parse_qs(response.request.post_data or '').get('fb_api_req_friendly_name') == ['BusinessComposerStoryCreationMutation'],
                     timeout=budget.clamp_ms(90000)) as response_info:
                 await humanizer.before_submit()
-                await humanizer.click(button)
+                try:
+                    await humanizer.click(button)
+                except Exception as exc:
+                    if maybe_dispatched(exc):
+                        # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                        raise budget.timeout_error(True) from exc
+                    raise
                 publish_clicked = True
             response = await response_info.value
         except BrowserTimeoutError:

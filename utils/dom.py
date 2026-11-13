@@ -870,6 +870,9 @@ _DISCONNECT_QUIET_JS = """
   const observer = window.__sauDomQuietObserver;
   if (observer) { observer.disconnect(); }
   window.__sauDomQuietObserver = null;
+  // Drop the state too: the next install must start a fresh observation
+  // window instead of early-returning with a stale ``since``.
+  delete window.__sauDomQuietState;
   return true;
 }
 """

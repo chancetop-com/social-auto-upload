@@ -157,6 +157,15 @@ def _mark_maybe_dispatched(exc: BaseException) -> None:
         pass
 
 
+def maybe_dispatched(exc: BaseException) -> bool:
+    """异常是否可能已在页面上派发过点击（``mouse.down`` 之后失败）。
+
+    调用方据此禁止二次派发：可能已点过的点击必须按「结果未知」上抛，
+    不能落回重试分支。
+    """
+    return getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE
+
+
 class Humanizer:
     """一个页面一个实例：随机流、指针位置与停顿都保持连续。"""
 
@@ -403,4 +412,5 @@ __all__ = [
     "LogNormal",
     "MAYBE_DISPATCHED",
     "MAYBE_DISPATCHED_VALUE",
+    "maybe_dispatched",
 ]

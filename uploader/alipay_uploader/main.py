@@ -22,8 +22,9 @@ from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import alipay_logger
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -831,46 +832,53 @@ class AlipayVideo(BaseVideoUploader):
             except Exception:
                 pass
 
-        page.on("response", _on_response)
-        page.on("request", _on_request)
-        async def _dismiss_quality_modal() -> bool:
-            """点"确认发布"后支付宝可能弹「发现N个优化项」质量提示弹窗（封面断字/
-            标题断字等），拦截真正提交导致 90s 超时。弹窗里「继续发布」才是放行，
-            「返回更换」虽是主按钮样式却会退回修改，必须按文案点「继续发布」。
-            返回是否点了「继续发布」。"""
-            try:
-                btn = page.locator(
-                    ALIPAY_QUALITY_MODAL_BUTTON_SELECTOR
-                ).first
-                if await btn.count() and await btn.is_visible():
-                    await humanizer.click(btn)
-                    alipay_logger.info(_msg("✅", "已点击优化项弹窗「继续发布」放行提交"))
-                    await page.wait_for_timeout(500)
-                    return True
-            except Exception as exc:
-                alipay_logger.warning(_msg("😵", f"点击「继续发布」失败: {exc}"))
-            return False
-
-        await budget.wait_until_allowed(
-            getattr(self, "publish_not_before", None),
-            logger=alipay_logger,
-            label="支付宝发布",
-        )
-        budget.check_pre_click()
-        await _collect_click_diag("点击前")
-        await humanizer.before_submit()
-        await humanizer.click(publish_btn)
-        publish_clicked = True
-        await page.wait_for_timeout(600)
-        await _collect_click_diag("首次点击后")
-        # 首次点击后可能立即弹出优化项拦截弹窗，先放行一次
-        await _dismiss_quality_modal()
-
-        success_toast = page.locator(ALIPAY_SUCCESS_TOAST_SELECTOR).first
-        fail_toast = page.locator(ALIPAY_FAIL_TOAST_SELECTOR).first
-
         retried_after_aigc = False
         try:
+            page.on("response", _on_response)
+            page.on("request", _on_request)
+
+            async def _dismiss_quality_modal() -> bool:
+                """点"确认发布"后支付宝可能弹「发现N个优化项」质量提示弹窗（封面断字/
+                标题断字等），拦截真正提交导致 90s 超时。弹窗里「继续发布」才是放行，
+                「返回更换」虽是主按钮样式却会退回修改，必须按文案点「继续发布」。
+                返回是否点了「继续发布」。"""
+                try:
+                    btn = page.locator(
+                        ALIPAY_QUALITY_MODAL_BUTTON_SELECTOR
+                    ).first
+                    if await btn.count() and await btn.is_visible():
+                        await humanizer.click(btn)
+                        alipay_logger.info(_msg("✅", "已点击优化项弹窗「继续发布」放行提交"))
+                        await page.wait_for_timeout(500)
+                        return True
+                except Exception as exc:
+                    alipay_logger.warning(_msg("😵", f"点击「继续发布」失败: {exc}"))
+                return False
+
+            await budget.wait_until_allowed(
+                getattr(self, "publish_not_before", None),
+                logger=alipay_logger,
+                label="支付宝发布",
+            )
+            budget.check_pre_click()
+            await _collect_click_diag("点击前")
+            await humanizer.before_submit()
+            try:
+                await humanizer.click(publish_btn)
+            except Exception as exc:
+                if maybe_dispatched(exc):
+                    # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                    raise budget.timeout_error(True) from exc
+                raise
+            publish_clicked = True
+            await page.wait_for_timeout(600)
+            await _collect_click_diag("首次点击后")
+            # 首次点击后可能立即弹出优化项拦截弹窗，先放行一次
+            await _dismiss_quality_modal()
+
+            success_toast = page.locator(ALIPAY_SUCCESS_TOAST_SELECTOR).first
+            fail_toast = page.locator(ALIPAY_FAIL_TOAST_SELECTOR).first
+
             while budget.remaining_seconds() > 0:
                 if multilogin:
                     _raise_if_login_required(page)
@@ -896,11 +904,20 @@ class AlipayVideo(BaseVideoUploader):
                     if saw_aigc_done and not retried_after_aigc and no_submit_signal:
                         if await publish_btn.count() and not await publish_btn.is_disabled():
                             await humanizer.before_submit()
-                            await humanizer.click(publish_btn)
+                            try:
+                                await humanizer.click(publish_btn)
+                            except Exception as exc:
+                                if maybe_dispatched(exc):
+                                    # 二次点击可能已发出：结果未知，禁止重试。
+                                    retried_after_aigc = True
+                                    raise budget.timeout_error(True) from exc
+                                raise
                             retried_after_aigc = True
                             alipay_logger.info(_msg("🔁", "检测到 AIGC 预处理完成，已二次点击确认发布"))
                             await page.wait_for_timeout(500)
                             await _collect_click_diag("AIGC后二次点击后")
+                except PublishResultUnknownError:
+                    raise
                 except Exception:
                     pass
                 try:

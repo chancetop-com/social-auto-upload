@@ -38,7 +38,14 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
-from utils.humanize import HumanizeProfile, Humanizer, LogNormal
+from utils.errors import PublishResultUnknownError
+from utils.humanize import (
+    HumanizeProfile,
+    Humanizer,
+    LogNormal,
+    MAYBE_DISPATCHED,
+    MAYBE_DISPATCHED_VALUE,
+)
 
 TITLE_PLACEHOLDER = "一个好的标题，能获得更多人的喜欢哦"
 DESC_PLACEHOLDER = "填写作品描述，让你的作品更容易被看到"
@@ -894,6 +901,129 @@ class HumanizeEventSequenceTests(unittest.TestCase):
         self.assertEqual(page.mouse.down_count, 2)
         # 第一次提交点击 + AIGC 后二次点击，各自一次 before_submit。
         self.assertEqual(humanizer.pause_count("before_submit"), 2)
+
+
+# ---------------------------------------------------------------------------
+# 1b. 发布点击：可能已派发 → 结果未知；监听器必须清理
+# ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(QuietHumanizer):
+    """真实点击后按 locator 名注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, *, error: BaseException, target: str = "publish") -> None:
+        super().__init__(page)
+        self.error = error
+        self.target = target
+        self.dispatches: list[str] = []
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        name = getattr(locator, "name", "")
+        if name == self.target:
+            self.dispatches.append(name)
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _submit(self, page, humanizer):
+        with patch.object(
+            alipay_main, "Humanizer", lambda page, **kwargs: humanizer
+        ):
+            with _TempDir() as tmp:
+                app = _app(tmp)
+                app._humanizer_instance = humanizer
+                asyncio.run(app.submit_publish(page))
+
+    def test_publish_after_mouse_down_maps_to_unknown_and_removes_listeners(self):
+        timeline = _Timeline()
+        page = _page(_publish_selectors(timeline, quality_count=0), timeline=timeline)
+        page.url = PUBLISH_URL
+        publish = page.locator(PUBLISH_ROLE)
+        humanizer = _PublishFailingHumanizer(page, error=self._maybe_error())
+
+        with self.assertRaises(PublishResultUnknownError):
+            self._submit(page, humanizer)
+
+        self.assertEqual(humanizer.dispatches, ["publish"])
+        self.assertEqual(publish.click_count, 0)
+        self.assertEqual(page.mouse.down_count, 1)
+        self.assertEqual(page.listeners.get("response", []), [])
+        self.assertEqual(page.listeners.get("request", []), [])
+
+    def test_aigc_second_click_after_mouse_down_maps_to_unknown(self):
+        timeline = _Timeline()
+        page = _page(_publish_selectors(timeline, quality_count=0), timeline=timeline)
+        page.url = PUBLISH_URL
+        publish = page.locator(PUBLISH_ROLE)
+
+        class _AigcResponse:
+            status = 200
+            headers = {"content-type": "application/json"}
+            url = "https://c.alipay.com/api/publish/queryLoopTask"
+
+            class request:
+                method = "GET"
+                post_data = ""
+
+            async def text(self):
+                return '{"done":true}'
+
+        response = _AigcResponse()
+        original_on = page.on
+
+        def _on(event: str, handler) -> None:
+            original_on(event, handler)
+            if event == "response":
+                handler(response)
+
+        page.on = _on
+
+        class _SecondClickFailing(_PublishFailingHumanizer):
+            def __init__(self, page, *, error) -> None:
+                super().__init__(page, error=error)
+                self.publish_dispatches = 0
+
+            async def click(self, locator, *, point=None) -> None:
+                await Humanizer.click(self, locator, point=point)
+                if getattr(locator, "name", "") == "publish":
+                    self.publish_dispatches += 1
+                    if self.publish_dispatches == 2:
+                        raise self.error
+
+        humanizer = _SecondClickFailing(page, error=self._maybe_error())
+
+        with self.assertRaises(PublishResultUnknownError):
+            self._submit(page, humanizer)
+
+        # 首次提交 + AIGC 后二次点击各派发一次，绝不出现第三次。
+        self.assertEqual(humanizer.publish_dispatches, 2)
+        self.assertEqual(publish.click_count, 0)
+
+    def test_pre_dispatch_publish_failure_propagates_and_removes_listeners(self):
+        timeline = _Timeline()
+        page = _page(_publish_selectors(timeline, quality_count=0), timeline=timeline)
+        page.url = PUBLISH_URL
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+        humanizer = _PublishFailingHumanizer(page, error=error)
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            self._submit(page, humanizer)
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(page.listeners.get("response", []), [])
+        self.assertEqual(page.listeners.get("request", []), [])
 
 
 # ---------------------------------------------------------------------------

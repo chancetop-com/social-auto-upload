@@ -52,6 +52,7 @@ from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 
 INSTAGRAM_HOME_URL = "https://www.instagram.com/"
 # 未配置环境变量或 --proxy 时使用系统直连。
@@ -992,7 +993,13 @@ class InstagramUploader:
                 responses.put_nowait(response)
         page.on('response', on_response)
         try:
-            await _click_submit(action, humanizer)
+            try:
+                await _click_submit(action, humanizer)
+            except Exception as exc:
+                if maybe_dispatched(exc):
+                    # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                    raise budget.timeout_error(True) from exc
+                raise
             # 点击成功后只等最终创建响应；未拿到响应即超时，按结果未知处理，绝不重发。
             result_deadline = budget.deadline
             while True:

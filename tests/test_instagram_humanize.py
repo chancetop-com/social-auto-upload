@@ -68,7 +68,9 @@ from uploader.meta_uploader.insgraph_uploader.options import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 PACKAGE = (
     Path(__file__).resolve().parent.parent
@@ -736,6 +738,98 @@ class InstagramHumanizeEventSequenceTests(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 # 2. Field-value readback
 # ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(RecordingHumanizer):
+    """真实点击后注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, timeline, *, error: BaseException) -> None:
+        super().__init__(page, timeline)
+        self.error = error
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        if getattr(locator, "name", "") == "share":
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.IsolatedAsyncioTestCase):
+    """A ``Share`` click that may have landed is result-unknown, never retried."""
+
+    class _Expectation:
+        async def to_have_count(self, count: int, timeout=None) -> None:
+            return None
+
+        async def to_be_enabled(self, timeout=None) -> None:
+            return None
+
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    async def _publish(self, page, share, error) -> None:
+        humanizer = _PublishFailingHumanizer(page, page.timeline, error=error)
+        with tempfile.TemporaryDirectory() as folder:
+            app = InstagramUploader(
+                "unused.json",
+                title="人类化回归 Reel",
+                description="人类化交互层回归干跑。",
+                tags=[],
+                image_files=["image.png"],
+                result_file=Path(folder) / "result.json",
+                no_publish=False,
+            )
+            app._humanizer_instance = humanizer
+            with patch.object(
+                instagram_main, "_caption_editor", AsyncMock(return_value=share)
+            ), patch.object(
+                instagram_main, "_type_caption", AsyncMock()
+            ), patch.object(
+                instagram_main, "_read_back_caption", AsyncMock()
+            ), patch.object(
+                instagram_main, "dismiss_suggestions", AsyncMock()
+            ), patch.object(
+                instagram_main, "_primary_action", AsyncMock(return_value=share)
+            ), patch(
+                "uploader.meta_uploader.insgraph_uploader.main.expect",
+                lambda locator: self._Expectation(),
+            ):
+                await app._publish(
+                    page,
+                    {"user_id": "42", "username": "creator"},
+                    budget=app.start_publish_budget(),
+                )
+
+    def _scene(self):
+        page = _page()
+        share = page.add("share", Field("share", page=page))
+        page.add("role:dialog", Field("dialog", page=page))
+        return page, share
+
+    async def test_share_after_mouse_down_maps_to_unknown(self):
+        page, share = self._scene()
+
+        with self.assertRaises(PublishResultUnknownError):
+            await self._publish(page, share, self._maybe_error())
+
+        self.assertEqual(page.timeline.kinds().count("down"), 1)
+        self.assertEqual(share.click_count, 0)
+
+    async def test_pre_dispatch_share_failure_propagates(self):
+        page, share = self._scene()
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            await self._publish(page, share, error)
+
+        self.assertIs(caught.exception, error)
 
 
 class InstagramHumanizeFieldReadbackTests(unittest.IsolatedAsyncioTestCase):

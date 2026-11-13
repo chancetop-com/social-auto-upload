@@ -23,6 +23,7 @@ from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError
 from utils.files_times import get_absolute_path
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
 from utils.login_qrcode import print_terminal_qrcode
@@ -976,6 +977,10 @@ class KSVideo(KSBaseUploader):
                 kuaishou_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                 break
             except Exception as exc:
+                if maybe_dispatched(exc):
+                    # The publish/confirm click may already have landed:
+                    # re-dispatching could publish twice.
+                    raise budget.timeout_error(True) from exc
                 if multilogin:
                     _raise_if_login_required(page)
                 last_publish_error = exc
@@ -1143,6 +1148,9 @@ class KSNote(KSBaseUploader):
                 kuaishou_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                 break
             except Exception as exc:
+                if maybe_dispatched(exc):
+                    # 图文发布/确认发布可能已经点出去：绝不二次派发。
+                    raise budget.timeout_error(True) from exc
                 if multilogin:
                     _raise_if_login_required(page)
                 kuaishou_logger.info(_msg("🏃", f"小人正在冲刺发布图文: {exc}"))

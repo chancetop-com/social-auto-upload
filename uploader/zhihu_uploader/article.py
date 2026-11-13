@@ -19,6 +19,7 @@ from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from uploader.zhihu_uploader.constants import (
     ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL,
     ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS,
@@ -234,10 +235,15 @@ class ZhihuArticle:
             raise RuntimeError("知乎文章链接文字或目标与原稿不一致")
 
     async def _submit(self, page: Page, publish) -> None:
-        """唯一提交点：人类化停顿后坐标点击，异常原样上抛。"""
+        """唯一提交点：人类化停顿后坐标点击；可能已派发按结果未知上抛。"""
         humanizer = self._humanizer(page)
         await humanizer.before_submit()
-        await humanizer.click(publish)
+        try:
+            await humanizer.click(publish)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                raise self._publish_budget.timeout_error(True) from exc
+            raise
 
     def results_dir(self) -> Path:
         """Result manifests sit next to the local account; MLX uses a temp dir."""

@@ -59,7 +59,9 @@ from uploader.baijiahao_uploader.main import (
 )
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import HumanizeProfile, Humanizer, LogNormal
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "baijiahao_uploader"
 
@@ -611,6 +613,79 @@ class BaijiahaoEventSequenceTests(unittest.TestCase):
         )
         for call in publish_btn.click_calls:
             self.assertNotIn("force", call)
+
+
+# ---------------------------------------------------------------------------
+# 1b. 发布点击：可能已派发 → 结果未知，绝不二次派发
+# ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(_RecordingHumanizer):
+    """真实点击后按 locator 名注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, *, error: BaseException, target: str = "publish-button") -> None:
+        super().__init__(page)
+        self.error = error
+        self.target = target
+        self.dispatches: list[str] = []
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        name = getattr(locator, "name", "")
+        if name == self.target:
+            self.dispatches.append(name)
+            raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _page(self):
+        log: list = []
+        publish_btn = _Clickable("publish-button", log=log)
+        page = _page(
+            {
+                PUBLISH_BUTTON_SELECTOR: publish_btn,
+                DECLARATION_MODAL_SELECTOR: FakeLocator("modal", count=0),
+            },
+            log=log,
+        )
+        page.url = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2"
+        return page, publish_btn
+
+    def test_publish_after_mouse_down_maps_to_unknown(self):
+        page, publish_btn = self._page()
+        app = _video()
+        app.start_publish_budget()
+        humanizer = _PublishFailingHumanizer(page, error=self._maybe_error())
+
+        with self.assertRaises(PublishResultUnknownError):
+            asyncio.run(app._submit_publish(page, humanizer=humanizer))
+
+        self.assertEqual(humanizer.dispatches, ["publish-button"])
+        self.assertEqual(publish_btn.click_count, 0)
+
+    def test_pre_dispatch_publish_failure_propagates(self):
+        page, publish_btn = self._page()
+        app = _video()
+        app.start_publish_budget()
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+        humanizer = _PublishFailingHumanizer(page, error=error)
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            asyncio.run(app._submit_publish(page, humanizer=humanizer))
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(publish_btn.click_count, 0)
 
 
 # ---------------------------------------------------------------------------
