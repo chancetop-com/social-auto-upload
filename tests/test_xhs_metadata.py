@@ -890,6 +890,36 @@ def _original_page(
     return RecordingPage(url=NOTE_URL, selectors=selectors)
 
 
+class OriginalSwitchDisabledProbeTests(unittest.IsolatedAsyncioTestCase):
+    """小红书自身禁用原创开关时，给可操作的错误而不是无上下文的 ``disabled``。"""
+
+    async def test_disabled_switch_is_detected(self):
+        switch = FakeLocator("switch", evaluate_result=True)
+        self.assertTrue(await xhs_main._switch_platform_disabled(switch))
+
+    async def test_enabled_switch_is_not_disabled(self):
+        switch = FakeLocator("switch", evaluate_result=False)
+        self.assertFalse(await xhs_main._switch_platform_disabled(switch))
+
+    async def test_probe_failure_is_not_treated_as_disabled(self):
+        switch = FakeLocator("switch")  # un-scripted evaluate raises
+        self.assertFalse(await xhs_main._switch_platform_disabled(switch))
+
+    def test_true_on_a_disabled_switch_is_a_clear_exit_1(self):
+        page = _original_page(checked=False)
+        switch = page.locator(xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector)
+        app = _video_app(original_declaration=True)
+        with patch.object(
+            xhs_main,
+            "_switch_platform_disabled",
+            new=AsyncMock(return_value=True),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                Decision11ReadbackOriginalTests._run(self, app, page)
+        self.assertIn("原创声明开关被平台禁用", str(ctx.exception))
+        self.assertEqual(switch.click_count, 0)
+
+
 class Decision11ReadbackOriginalTests(unittest.TestCase):
     def _run(self, app, page):
         clock = FakeClock()
