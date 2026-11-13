@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 视频与文章标题按 §3.15 的守卫形态处理（清零 = none，依赖非空即拒绝）
 - [x] 原创 checkbox 先读状态再点（幂等）；领域/标记下拉按精确文本选

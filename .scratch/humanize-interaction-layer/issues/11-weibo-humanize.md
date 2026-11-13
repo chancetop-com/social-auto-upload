@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 两个实例的构造点正确；跨 page 不复用；popup 之后重建
 - [x] `el.click()` 三处清零，`force` 两处删除（改点装饰层 / 文字 span）

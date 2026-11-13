@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 先改公共底座 `activate` / `click_control`：零 `el.click()`，保留原键盘优先顺序
 - [x] 每个文本点先收窄到 `count()==1`；清空按 §3.9 的形态手写；每次输入恰一次 `after_type`

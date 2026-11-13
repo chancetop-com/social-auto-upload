@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 标题/简介逐字；简介 >1000 码点一次 bulk
 - [x] `combobox` 收窄到 1；多义即硬错

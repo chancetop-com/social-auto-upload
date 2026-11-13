@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 描述/正文清空序列逐键保留；话题逐字
 - [x] 描述聚焦 4 级回退中，正常路径走 Humanizer；回退分支删 force 并让零尺寸直接失败

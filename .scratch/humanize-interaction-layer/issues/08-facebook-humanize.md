@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 正文：聚焦 → 全选清空 → 逐字 → 恰一次 `after_type`；读回与输入一致
 - [x] 发布点 `before_submit`；发布后读回校验保留

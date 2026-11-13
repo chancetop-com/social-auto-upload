@@ -6,7 +6,7 @@
 
 Blocked by: 04, 05, 06
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] `docs/CLI.md` 新节落位并链接 `.scratch/humanize-rollout/spec.md`（不在 docs 存副本）
 - [x] `GLOSSARY.md` 四词条只写「是什么」：人类化交互层 / 交互真实度 / 清空策略 / stillOn

@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 正文与 Reel 独立标题逐字；>1000 码点一次 bulk
 - [x] 序号定位全部改为文本/aria 收窄；收窄后仍多义即硬错

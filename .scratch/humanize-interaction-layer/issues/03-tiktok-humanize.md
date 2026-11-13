@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 公共选项/开关控件先改，覆盖多个调用点；不改单个选项的既有状态校验
 - [x] 配文与话题清空保留平台手写序列；每次输入恰一次 `after_type`

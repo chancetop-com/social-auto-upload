@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 标题守卫保持有效（非空输入就拒绝），不清空
 - [x] 预览遮罩关闭用坐标点击（不删遮罩、不强点）

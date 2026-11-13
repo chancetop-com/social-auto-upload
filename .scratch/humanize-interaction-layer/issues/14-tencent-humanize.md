@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 三处 `page.click(selector)` 与日期格的 `ElementHandle` 全部 Locator 化
 - [x] 短标题与描述分开处理；描述预填未知时先读空

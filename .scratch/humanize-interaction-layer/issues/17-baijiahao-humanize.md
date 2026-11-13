@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 标题清空序列保留；自动填的文件名被完全替换
 - [x] 搜索候选按全等命中；命中不到时沿用现有跳过策略，不中止发布

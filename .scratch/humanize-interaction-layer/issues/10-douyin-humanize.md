@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] `_native_click` 函数与全部调用点删除；无合成事件重放
 - [x] 带 `MAYBE_DISPATCHED` 的异常不再二次派发

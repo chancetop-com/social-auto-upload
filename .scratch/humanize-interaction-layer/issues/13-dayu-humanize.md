@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] iframe 内目标用 frame 内 `Locator`；不把 `frame_locator` 当 page 传给 `Humanizer`
 - [x] `#author` 不被清空；显式传值时覆盖

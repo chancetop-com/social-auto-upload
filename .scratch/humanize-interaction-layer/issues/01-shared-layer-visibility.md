@@ -6,7 +6,7 @@
 
 Blocked by: None — can start immediately.
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 谓词在元素所在 frame 内执行；同 frame 视口 + 祖先 `overflow` 裁剪都判
 - [x] 子 frame 目标额外做父 frame 投影判断（`elementFromPoint` 非空）

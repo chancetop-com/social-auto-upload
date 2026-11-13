@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 合集选择合并为一次 `Humanizer.click`，force 首选删除
 - [x] 合集下拉先收窄两个候选分支到唯一 Locator

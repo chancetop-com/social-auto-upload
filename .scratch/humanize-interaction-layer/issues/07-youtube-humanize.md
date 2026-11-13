@@ -6,7 +6,7 @@
 
 Blocked by: 01
 
-Status: ready-for-agent
+Status: resolved
 
 - [x] 标题/简介清空后逐字；>1000 码点仍走一次 bulk
 - [x] `#` 候选按文本全等点选；失败降级纯文本 + 关闭浮层，不中止发布
