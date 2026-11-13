@@ -73,6 +73,11 @@ TIKTOK_DRY_RUN_READY_MESSAGE = (
     "TikTok 发布就绪，--no-publish 停在发布按钮前（未点击发布）"
 )
 
+#: 发布点击循环的硬上限：预算之外的第二道闸。正常路径由 15 分钟预算终止；
+#: 这两条只在「按钮一直点不中」或「sleep 被吞掉」时兜底，避免全速空转。
+TIKTOK_PUBLISH_MAX_CLICK_ATTEMPTS = 10
+TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS = 2000
+
 # ---------------------------------------------------------------------------
 # Ordered selector candidates (spec §5.5)
 #
@@ -2674,7 +2679,20 @@ class TiktokBaseUploader(BaseVideoUploader):
         # a raise after ``mouse.down`` must never be re-dispatched.
         publish_clicked = False
         dialog_clicked = False
+        click_attempts = 0
+        iterations = 0
         while True:
+            iterations += 1
+            if iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
+                # 只可能在 sleep 被吞掉（测试替身）或页面持续立即失败时触发：
+                # 宁可退出 1/9，也不让进程全速空转到预算耗尽。
+                if publish_clicked:
+                    raise budget.timeout_error(True)
+                raise RuntimeError(
+                    "TikTok 发布循环超过 "
+                    f"{TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS} 轮仍未结束；"
+                    "已停止，未重复派发发布点击。"
+                )
             try:
                 budget.check_pre_click()
             except RuntimeError:
@@ -2728,7 +2746,23 @@ class TiktokBaseUploader(BaseVideoUploader):
                         )
                         await asyncio.sleep(0.5)
                         continue
-                    tiktok_logger.exception(f"  [-] Exception: {e}")
+                    click_attempts += 1
+                    if click_attempts == 1:
+                        # 只留一份 traceback；后续失败按一行 warning 记录，
+                        # 避免在重试循环里反复写 MB 级堆栈。
+                        tiktok_logger.exception(f"  [-] Exception: {e}")
+                    else:
+                        tiktok_logger.warning(
+                            "  [-] publish click failed "
+                            f"({click_attempts}/"
+                            f"{TIKTOK_PUBLISH_MAX_CLICK_ATTEMPTS}): {e}"
+                        )
+                    if click_attempts >= TIKTOK_PUBLISH_MAX_CLICK_ATTEMPTS:
+                        raise RuntimeError(
+                            "TikTok 发布按钮连续 "
+                            f"{click_attempts} 次点击失败（尚未派发发布点击）："
+                            f"{e}"
+                        ) from e
                     tiktok_logger.info("  [-] video publishing")
                     await asyncio.sleep(0.5)
                     continue
@@ -2755,7 +2789,8 @@ class TiktokBaseUploader(BaseVideoUploader):
                     # Page/context closed, CDP dropped, or a form error after
                     # the click: stop at once instead of spinning to deadline.
                     raise budget.timeout_error(True) from e
-                tiktok_logger.exception(f"  [-] Exception: {e}")
+                # 每轮都打 traceback 会让重试循环写出 MB 级日志；这里只留一行。
+                tiktok_logger.warning(f"  [-] publish wait failed: {e}")
                 tiktok_logger.info("  [-] video publishing")
                 await asyncio.sleep(0.5)
                 continue
