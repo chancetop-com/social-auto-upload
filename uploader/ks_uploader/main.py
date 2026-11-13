@@ -46,6 +46,12 @@ KUAISHOU_LOGIN_CHECK_SETTLE_MS = 2_000
 KUAISHOU_LOGIN_BUTTON_TIMEOUT_MS = 8_000
 KUAISHOU_LOGIN_INVALID_TIMEOUT_MS = 3_000
 
+# Cover: the modal already holds the hidden image input.  Probe it briefly and
+# write it directly; only a missing input falls back to the 「上传封面」 tab, and
+# that click must be consumed by ``expect_file_chooser`` (XHS precedent bbc5361).
+KUAISHOU_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
+KUAISHOU_COVER_CHOOSER_TIMEOUT_MS = 10_000
+
 # Golden local-mode browser options.  ``sau_commands/kuaishou.py`` passes the
 # same values to ``browser_session`` in Multilogin mode, so the two paths cannot
 # drift.  A Multilogin Profile decides the browser; the local executable/channel
@@ -90,7 +96,26 @@ async def _dump_page_debug(page, tag: str) -> str:
     return str(base.resolve())
 
 
+async def _cover_input_attached(locator) -> bool:
+    """Short, read-only probe: is the hidden cover image input already there?
+
+    Never clicks the 「上传封面」 tab to find out: that click opens a real OS file
+    chooser which then lingers while ``set_input_files`` injects the file (same
+    defect as XHS, bbc5361).
+    """
+    try:
+        if not await locator.count():
+            return False
+        await locator.wait_for(
+            state="attached", timeout=KUAISHOU_COVER_INPUT_PROBE_TIMEOUT_MS
+        )
+        return True
+    except Exception:
+        return False
+
+
 async def _focus_desc_editor(page, humanizer: Humanizer) -> None:
+
     """定位并聚焦快手发布页的『描述』编辑区。
 
     快手创作者中心 DOM 时有改版，旧的
@@ -750,13 +775,15 @@ class KSVideo(KSBaseUploader):
         modal = page.locator('div[role="document"].ant-modal')
         await modal.wait_for(state="visible", timeout=30000)
 
-        upload_cover_tab = modal.get_by_text("上传封面", exact=True)
-        await upload_cover_tab.wait_for(state="visible", timeout=10000)
-        await humanizer.click(upload_cover_tab)
-
+        # 封面图片 input 在弹窗里已经存在：优先直接写 input。禁止先点「上传封面」
+        # tab——那一下会真的拉起系统文件选择器，随后 set_input_files 把文件塞进
+        # 去，选择器会留在屏幕上（2026-11-12 TikTok 复现；先例小红书 bbc5361）。
+        # tab 只在 input 缺失时兜底，且那一下必须由 expect_file_chooser 消费。
         file_input = modal.locator('input[type="file"]')
-        await file_input.wait_for(state="attached", timeout=30000)
-        await file_input.set_input_files(self.thumbnail_path)
+        if await _cover_input_attached(file_input):
+            await file_input.set_input_files(self.thumbnail_path)
+        else:
+            await self._set_thumbnail_via_chooser(page, humanizer, modal)
         await asyncio.sleep(1)
 
         confirm_button = modal.get_by_role("button", name="确认", exact=True)
@@ -765,6 +792,32 @@ class KSVideo(KSBaseUploader):
 
         await modal.wait_for(state="hidden", timeout=30000)
         kuaishou_logger.success(_msg("🥳", "封面已经设置完成"))
+
+    async def _set_thumbnail_via_chooser(
+        self, page: Page, humanizer: Humanizer, modal
+    ) -> None:
+        """兜底：input 缺失时才点「上传封面」，点击必须被 chooser 消费。
+
+        chooser 事件没到也不能裸点第二次：点击可能已经把 input 渲染出来，
+        这里改为重新解析 input 再直接写。
+        """
+        upload_cover_tab = modal.get_by_text("上传封面", exact=True)
+        await upload_cover_tab.wait_for(state="visible", timeout=10000)
+        chooser = None
+        try:
+            async with page.expect_file_chooser(
+                timeout=KUAISHOU_COVER_CHOOSER_TIMEOUT_MS
+            ) as chooser_info:
+                await humanizer.click(upload_cover_tab)
+            chooser = await chooser_info.value
+        except Exception:
+            chooser = None
+        if chooser is not None:
+            await chooser.set_files(self.thumbnail_path)
+            return
+        file_input = modal.locator('input[type="file"]')
+        await file_input.wait_for(state="attached", timeout=30000)
+        await file_input.set_input_files(self.thumbnail_path)
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:

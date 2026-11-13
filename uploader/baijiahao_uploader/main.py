@@ -57,6 +57,10 @@ COVER_ENTRY_SELECTOR = '[data-testid="select-cover"]'
 COVER_UPLOAD_BUTTON_SELECTOR = 'button:has-text("上传"), div:has-text("上传"):not(:has(*)):visible'
 COVER_IMAGE_INPUT_SELECTOR = 'input[type="file"][accept*="image"], input[type="file"][accept*="jpg"], input[type="file"][accept*="png"]'
 COVER_CONFIRM_SELECTOR = 'button:has-text("确定"), button:has-text("完成"), button:has-text("确认")'
+# 封面弹窗里已有隐藏图片 input。先短探测直接写；只有 input 缺失才点「上传」
+# tab，且那一下必须由 expect_file_chooser 消费（先例：小红书 bbc5361）。
+COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
+COVER_CHOOSER_TIMEOUT_MS = 10_000
 
 # 发布
 PUBLISH_BUTTON_SELECTOR = '[data-testid="publish-btn"]'
@@ -90,6 +94,24 @@ _BAIJIAHAO_LOGIN_HINTS = (
     "two-factor",
     "2fa",
 )
+
+
+async def _cover_input_attached(locator) -> bool:
+    """Short, read-only probe: is the hidden cover image input already there?
+
+    Never clicks the 「上传」 tab/button to find out: that click opens a real OS
+    file chooser which then lingers while ``set_input_files`` injects the file
+    (same defect as XHS, bbc5361).
+    """
+    try:
+        if not await locator.count():
+            return False
+        await locator.wait_for(
+            state="attached", timeout=COVER_INPUT_PROBE_TIMEOUT_MS
+        )
+        return True
+    except Exception:
+        return False
 
 
 def _raise_if_login_required(page: Page) -> None:
@@ -685,21 +707,18 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             baijiahao_logger.info(_msg("🏃", "已点击「选择封面」"))
             await page.wait_for_timeout(2000)
 
-            # 2) 弹窗中找「上传」按钮并点击（随后 set_input_files，属文件选择路径）
-            # 百家号封面弹窗通常有「上传」tab/按钮
-            upload_btn = page.locator(COVER_UPLOAD_BUTTON_SELECTOR).first
-            if not await upload_btn.count():
-                upload_btn = page.get_by_text("上传", exact=True).first
-            await upload_btn.click(timeout=8000)  # native-click: file；封面弹窗「上传」tab 与紧随的 set_input_files 成对，文件选择不可坐标化
-            await page.wait_for_timeout(1500)
-
-            # 3) 设置图片文件到 file input
-            # 弹窗中会出现 input[type=file]
+            # 2) 封面图片 input 在弹窗里已经存在：优先直接写 input。禁止先点
+            #    「上传」tab/按钮——那一下会真的拉起系统文件选择器，随后
+            #    set_input_files 把文件塞进去，选择器会留在屏幕上（先例：小红书
+            #    bbc5361，2026-11-12 TikTok 复现）。
             img_input = page.locator(COVER_IMAGE_INPUT_SELECTOR).first
             if not await img_input.count():
                 # 通用 fallback：弹窗内最新出现的 file input
                 img_input = page.locator('input[type="file"]').last
-            await img_input.set_input_files(self.thumbnail_path)
+            if await _cover_input_attached(img_input):
+                await img_input.set_input_files(self.thumbnail_path)
+            else:
+                await self._upload_cover_via_chooser(page, humanizer)
             baijiahao_logger.info(_msg("🏃", f"已选择封面图片: {self.thumbnail_path}"))
 
             # 4) 等待并点击确认/完成按钮（如有裁剪弹窗）。
@@ -820,6 +839,35 @@ class BaiJiaHaoVideo(BaseVideoUploader):
                 await humanizer.press("Escape")
         except Exception as exc:
             baijiahao_logger.warning(_msg("⚠️", f"选择合集失败，跳过: {exc}"))
+
+    async def _upload_cover_via_chooser(
+        self, page: Page, humanizer: Humanizer
+    ) -> None:
+        """兜底：只有 input 缺失时才点「上传」tab，点击必须被 chooser 消费。
+
+        chooser 事件没到也不能裸点第二次：点击可能已经把 input 渲染出来，
+        这里改为重新解析 input 再直接写。
+        """
+        upload_btn = page.locator(COVER_UPLOAD_BUTTON_SELECTOR).first
+        if not await upload_btn.count():
+            upload_btn = page.get_by_text("上传", exact=True).first
+        chooser = None
+        try:
+            async with page.expect_file_chooser(
+                timeout=COVER_CHOOSER_TIMEOUT_MS
+            ) as chooser_info:
+                await upload_btn.click(timeout=8000)  # native-click: file；封面弹窗「上传」tab 只能由原生点击唤起文件选择器，且必须被 expect_file_chooser 消费
+            chooser = await chooser_info.value
+        except Exception:
+            chooser = None
+        if chooser is not None:
+            await chooser.set_files(self.thumbnail_path)
+            return
+        await page.wait_for_timeout(1500)
+        img_input = page.locator(COVER_IMAGE_INPUT_SELECTOR).first
+        if not await img_input.count():
+            img_input = page.locator('input[type="file"]').last
+        await img_input.set_input_files(self.thumbnail_path)
 
     async def _wait_cover_ready(self, page: Page, timeout: int = 120) -> None:
         """等待百家号自动生成封面图。"""

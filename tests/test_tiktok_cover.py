@@ -179,18 +179,64 @@ class FakeNode:
             raise TimeoutError(f"{self.name} never became visible")
 
 
+class FakeChooser:
+    """Records every ``set_files`` payload handed to the chooser double."""
+
+    def __init__(self) -> None:
+        self.files: list = []
+
+    async def set_files(self, files, **kwargs) -> None:
+        self.files.append(files)
+
+
+class _ChooserInfo:
+    def __init__(self, page: "FakePage") -> None:
+        self.page = page
+
+    async def __aenter__(self) -> "_ChooserInfo":
+        self.page.chooser_depth += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        self.page.chooser_depth -= 1
+        return False
+
+    @property
+    def value(self):
+        async def _resolve() -> FakeChooser:
+            if self.page.fail_chooser:
+                raise TimeoutError("no file chooser event")
+            return self.page.chooser
+
+        return _resolve()
+
+
 class FakePage:
     def __init__(self, url: str = PAGE_URL) -> None:
         self.url = url
         self.events: list = []
         self.wait_timeouts: list[int] = []
+        self.chooser = FakeChooser()
+        self.chooser_depth = 0
+        self.expect_file_chooser_calls = 0
+        self.expect_file_chooser_timeouts: list = []
+        self.fail_chooser = False
+        #: Off by default so an early (buggy) chooser cannot pass silently:
+        #: the call is still counted, then the harness refuses it.
+        self.allow_file_chooser = False
 
     async def wait_for_timeout(self, ms: int) -> None:
         self.wait_timeouts.append(ms)
         self.events.append(("wait_for_timeout", ms))
 
-    def expect_file_chooser(self):
-        raise AssertionError("cover must prefer set_input_files over a file chooser")
+    def expect_file_chooser(self, *, timeout=None):
+        self.expect_file_chooser_calls += 1
+        self.expect_file_chooser_timeouts.append(timeout)
+        if not self.allow_file_chooser:
+            raise AssertionError(
+                "cover must prefer set_input_files over a file chooser"
+            )
+        return _ChooserInfo(self)
 
 
 def _video(thumbnail: str | None = THUMBNAIL) -> TiktokVideo:
@@ -259,6 +305,67 @@ class ApplyCoverCandidateTests(unittest.TestCase):
 
         self.assertIn(("click", "edit-cover-role"), tree.recorder)
         self.assertNotIn(("click", "edit-cover-text"), tree.recorder)
+        # The editor already exposes the hidden input: no tab click at all.
+        self.assertNotIn(("click", "upload-tab"), tree.recorder)
+        self.assertIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
+        self.assertIn(("click", "cover-save"), tree.recorder)
+        self.assertEqual(page.expect_file_chooser_calls, 0)
+
+    def test_attached_input_never_opens_a_file_chooser(self):
+        tree = CoverTree()
+        page = FakePage()
+        video = _video()
+        video.locator_base = tree.base
+
+        asyncio.run(video.apply_cover(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 0)
+        self.assertEqual(page.chooser.files, [])
+        self.assertEqual(page.chooser_depth, 0)
+        self.assertEqual(
+            [event for event in tree.recorder if event[0] == "click"],
+            [("click", "edit-cover-role"), ("click", "cover-save")],
+        )
+
+    def test_missing_input_clicks_the_tab_inside_the_file_chooser(self):
+        tree = CoverTree()
+        # Neither the aria-labelled input nor the editor-scoped fallback exists.
+        tree.file_input.count_value = 0
+        page = FakePage()
+        page.allow_file_chooser = True
+        depths: list[int] = []
+        tree.upload_tab.on_click = lambda: depths.append(page.chooser_depth)
+        video = _video()
+        video.locator_base = tree.base
+
+        asyncio.run(video.apply_cover(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.chooser.files, [THUMBNAIL])
+        self.assertEqual(page.chooser_depth, 0)
+        # The tab click was consumed by the expectation instead of opening the
+        # OS chooser behind the harness' back.
+        self.assertEqual(depths, [1])
+        self.assertNotIn(
+            ("set_input_files", "cover-file", THUMBNAIL), tree.recorder
+        )
+
+    def test_chooser_timeout_falls_back_to_set_input_files_after_the_click(self):
+        tree = CoverTree()
+        tree.file_input.count_value = 0
+        page = FakePage()
+        page.allow_file_chooser = True
+        page.fail_chooser = True
+        tree.upload_tab.on_click = lambda: setattr(
+            tree.file_input, "count_value", 1
+        )
+        video = _video()
+        video.locator_base = tree.base
+
+        asyncio.run(video.apply_cover(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.chooser.files, [])
         self.assertIn(("click", "upload-tab"), tree.recorder)
         self.assertIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
         self.assertIn(("click", "cover-save"), tree.recorder)
@@ -275,6 +382,10 @@ class ApplyCoverCandidateTests(unittest.TestCase):
 
         self.assertIn(("set_input_files", "cover-file-fallback", THUMBNAIL), tree.recorder)
         self.assertNotIn(("set_input_files", "cover-file", THUMBNAIL), tree.recorder)
+        # A later candidate being present still means the input is attached:
+        # the tab remains untouched and no chooser is opened.
+        self.assertNotIn(("click", "upload-tab"), tree.recorder)
+        self.assertEqual(page.expect_file_chooser_calls, 0)
 
     def test_all_candidates_absent_reports_control_stage_candidates_and_url(self):
         recorder: list = []

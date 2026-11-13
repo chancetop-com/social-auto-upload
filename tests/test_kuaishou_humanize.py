@@ -149,6 +149,29 @@ class _Clickable(RecordingLocator):
         return super().get_by_role(role, name)
 
 
+class _ChooserProbeClickable(_Clickable):
+    """封面 tab fake：记录命中测试时的 ``chooser_depth``，可在命中时改 DOM。
+
+    命中测试就是真实鼠标点击的前一步，所以 ``depths`` 正好回答「这一下是不
+    是被 ``expect_file_chooser`` 消费了」：深度 1 = 被消费，0 = 裸点击。
+    """
+
+    def __init__(self, name: str, *, log: list, **kwargs) -> None:
+        super().__init__(name, log=log, **kwargs)
+        self.page = None
+        self.depths: list[int] = []
+        self.on_hit = None
+
+    async def evaluate(self, expression, arg=None):
+        result = await super().evaluate(expression, arg)
+        if _expr_kind(expression) == "hit-test":
+            if self.page is not None:
+                self.depths.append(self.page.chooser_depth)
+            if self.on_hit is not None:
+                self.on_hit()
+        return result
+
+
 class _TypingLocator(_Clickable):
     """持有键入缓冲的 locator；命中测试（=真实点击）把焦点交给它。"""
 
@@ -645,9 +668,101 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             self.assertEqual(cover_entry.click_count, 0)
             self.assertEqual(upload_tab.click_count, 0)
             self.assertEqual(confirm.click_count, 0)
-            self.assertEqual(page.mouse.down_count, 3)
+            self.assertEqual(page.mouse.down_count, 2)
             cover_file = modal.locator('input[type="file"]')
             self.assertEqual(cover_file.files, [Path(tmp) / "cover.jpg"])
+            # 弹窗里已有隐藏 input：直接写，不点「上传封面」tab，所以也从不
+            # 拉起系统文件选择器（先例：小红书 bbc5361）。
+            self.assertEqual(page.expect_file_chooser_calls, 0)
+
+    def test_cover_tab_is_clicked_only_inside_the_file_chooser(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            cover_entry = _Clickable("cover-entry", log=log)
+            container = FakeLocator(
+                "cover-container", children={"div:visible": cover_entry}
+            )
+            cover_label = FakeLocator(
+                "cover-label",
+                children={"xpath=../following-sibling::div[1]": container},
+            )
+            upload_tab = _ChooserProbeClickable("cover-tab", log=log)
+            confirm = _Clickable("cover-confirm", log=log)
+            cover_file = FakeLocator("cover-file", count=0)
+            modal = _Clickable(
+                "cover-modal",
+                log=log,
+                children={
+                    "text:上传封面:exact": upload_tab,
+                    'input[type="file"]': cover_file,
+                    "role:button:确认": confirm,
+                },
+            )
+            page = _page(
+                {
+                    "span": cover_label,
+                    'div[role="document"].ant-modal': modal,
+                },
+                log=log,
+            )
+            upload_tab.page = page
+            app = _video_app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            humanizer = _QuietHumanizer(page, log=log)
+
+            with _fast_clock():
+                asyncio.run(app.set_thumbnail(page, humanizer))
+
+            # 只有 input 缺失时才点 tab，且这一下必须被 expect_file_chooser
+            # 消费：命中测试看到的 chooser 深度是 1，不是 0（裸点击）。
+            self.assertEqual(page.expect_file_chooser_calls, 1)
+            self.assertEqual(upload_tab.depths, [1])
+            self.assertEqual(page.chooser_depth, 0)
+            self.assertEqual(page.file_chooser_files(), [Path(tmp) / "cover.jpg"])
+            self.assertEqual(page.mouse.down_count, 3)
+            self.assertNotIn("set_input_files", [a[0] for a in cover_file.actions])
+
+    def test_cover_input_is_written_when_no_file_chooser_arrives(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            cover_entry = _Clickable("cover-entry", log=log)
+            container = FakeLocator(
+                "cover-container", children={"div:visible": cover_entry}
+            )
+            cover_label = FakeLocator(
+                "cover-label",
+                children={"xpath=../following-sibling::div[1]": container},
+            )
+            upload_tab = _ChooserProbeClickable("cover-tab", log=log)
+            confirm = _Clickable("cover-confirm", log=log)
+            cover_file = FakeLocator("cover-file", count=0)
+            modal = _Clickable(
+                "cover-modal",
+                log=log,
+                children={
+                    "text:上传封面:exact": upload_tab,
+                    'input[type="file"]': cover_file,
+                    "role:button:确认": confirm,
+                },
+            )
+            page = _page(
+                {
+                    "span": cover_label,
+                    'div[role="document"].ant-modal': modal,
+                },
+                log=log,
+            )
+            page.fail_file_chooser = TimeoutError("no file chooser")
+            upload_tab.on_hit = lambda: setattr(cover_file, "_count", 1)
+            app = _video_app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            humanizer = _QuietHumanizer(page, log=log)
+
+            with _fast_clock():
+                asyncio.run(app.set_thumbnail(page, humanizer))
+
+            self.assertEqual(page.expect_file_chooser_calls, 1)
+            self.assertEqual(page.file_chooser_files(), [])
+            self.assertEqual(cover_file.files, [Path(tmp) / "cover.jpg"])
+            self.assertEqual(page.mouse.down_count, 3)
 
 
 # ---------------------------------------------------------------------------

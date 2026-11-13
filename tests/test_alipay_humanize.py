@@ -186,6 +186,27 @@ class Element(RecordingLocator):
         self.scroll_calls += 1
 
 
+class _ChooserDepthElement(Element):
+    """「上传图片」入口 fake：记录点击时的 ``chooser_depth``，可模拟点击后 DOM。
+
+    深度 1 = 这一下被 ``expect_file_chooser`` 消费；0 = 裸点击、系统选择器
+    会留在屏幕上。
+    """
+
+    def __init__(self, name: str, *, timeline: _Timeline | None = None, **kwargs) -> None:
+        super().__init__(name, timeline=timeline, **kwargs)
+        self.page = None
+        self.click_depths: list[int] = []
+        self.on_click_effect = None
+
+    async def click(self, **kwargs) -> None:
+        if self.page is not None:
+            self.click_depths.append(self.page.chooser_depth)
+        await super().click(**kwargs)
+        if self.on_click_effect is not None:
+            self.on_click_effect()
+
+
 class TypingElement(Element):
     """持有键入缓冲的输入框；点击 / 命中测试把焦点交给它。"""
 
@@ -513,16 +534,93 @@ class HumanizeEventSequenceTests(unittest.TestCase):
 
         for target in (cover, inner, done):
             self.assertEqual(target.click_count, 0, target.name)
-        # 「上传图片」是文件选择入口：保持原生、无 force。
-        self.assertEqual(upload_image.click_count, 1)
-        self.assertIsNone(upload_image.click_calls[0].get("force"))
+        # 弹窗里已有隐藏 input：直接写，既不点内层「上传封面」，也不点「上传
+        # 图片」，所以从不拉起系统文件选择器（先例：小红书 bbc5361）。
+        self.assertEqual(upload_image.click_count, 0)
+        self.assertEqual(page.expect_file_chooser_calls, 0)
         self.assertEqual(img_input.files, [Path(tmp) / "cover.jpg"])
-        self.assertEqual(page.mouse.down_count, 3)
+        self.assertEqual(page.mouse.down_count, 2)
         hits = timeline.of_kind("evaluate", "hit-test")
         downs = timeline.indexes(("down",))
-        self.assertEqual(len(downs), 3)
+        self.assertEqual(len(downs), 2)
         for hit, down in zip(hits, downs):
             self.assertLess(hit, down)
+
+    def test_cover_upload_button_is_clicked_inside_the_file_chooser(self):
+        timeline = _Timeline()
+        cover = Element("cover-entry", timeline=timeline)
+        inner = Element("cover-tab", timeline=timeline)
+        upload_image = _ChooserDepthElement("cover-chooser", timeline=timeline)
+        done = Element("cover-done", timeline=timeline)
+        img_input = FakeLocator("cover-file", count=0)
+        modal = Element(
+            "cover-modal",
+            timeline=timeline,
+            children={
+                COVER_TEXT: inner,
+                COVER_UPLOAD_IMAGE: upload_image,
+            },
+        )
+        page = _page(
+            {
+                COVER_TEXT: cover,
+                COVER_MODAL: modal,
+                COVER_DONE: done,
+                COVER_FILE_INPUT: img_input,
+            },
+            timeline=timeline,
+        )
+        upload_image.page = page
+        with _TempDir() as tmp:
+            app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            with _humanized():
+                asyncio.run(app.upload_thumbnail(page))
+
+        # input 缺失才展开上传区；「上传图片」这一下必须被 expect_file_chooser
+        # 消费（深度 1），不是裸点击（深度 0）。
+        self.assertEqual(inner.click_count, 0)  # humanizer click, not native
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(upload_image.click_depths, [1])
+        self.assertIsNone(upload_image.click_calls[0].get("force"))
+        self.assertEqual(page.file_chooser_files(), [Path(tmp) / "cover.jpg"])
+        self.assertNotIn("set_input_files", [a[0] for a in img_input.actions])
+        self.assertEqual(page.chooser_depth, 0)
+
+    def test_cover_input_is_written_when_no_file_chooser_arrives(self):
+        timeline = _Timeline()
+        cover = Element("cover-entry", timeline=timeline)
+        inner = Element("cover-tab", timeline=timeline)
+        upload_image = _ChooserDepthElement("cover-chooser", timeline=timeline)
+        done = Element("cover-done", timeline=timeline)
+        img_input = FakeLocator("cover-file", count=0)
+        modal = Element(
+            "cover-modal",
+            timeline=timeline,
+            children={
+                COVER_TEXT: inner,
+                COVER_UPLOAD_IMAGE: upload_image,
+            },
+        )
+        page = _page(
+            {
+                COVER_TEXT: cover,
+                COVER_MODAL: modal,
+                COVER_DONE: done,
+                COVER_FILE_INPUT: img_input,
+            },
+            timeline=timeline,
+        )
+        page.fail_file_chooser = TimeoutError("no file chooser")
+        upload_image.on_click_effect = lambda: setattr(img_input, "_count", 1)
+        with _TempDir() as tmp:
+            app = _app(tmp, thumbnail_path=Path(tmp) / "cover.jpg")
+            with _humanized():
+                asyncio.run(app.upload_thumbnail(page))
+
+        self.assertEqual(page.expect_file_chooser_calls, 1)
+        self.assertEqual(page.file_chooser_files(), [])
+        self.assertEqual(img_input.files, [Path(tmp) / "cover.jpg"])
+        self.assertEqual(done.click_count, 0)
 
     def test_collection_dropdown_narrowed_and_option_clicked_once_without_force(self):
         for branch in ("ancestor", "placeholder"):

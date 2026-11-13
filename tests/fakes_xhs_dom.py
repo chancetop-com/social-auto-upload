@@ -417,9 +417,16 @@ class _FileChooserInfo:
         self._page = page
 
     async def __aenter__(self) -> "_FileChooserInfo":
+        # Depth (not a bool) so nesting is still observable; a click recorded
+        # while depth >= 1 was consumed by the chooser expectation, a click at
+        # depth 0 opened the OS chooser behind the harness' back.
+        self._page.chooser_depth += 1
+        self._page.events.append(("expect_file_chooser_enter",))
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
+        self._page.chooser_depth -= 1
+        self._page.events.append(("expect_file_chooser_exit",))
         return False
 
     @property
@@ -467,6 +474,9 @@ class RecordingPage:
         self.file_chooser = file_chooser or FakeFileChooser()
         self.fail_file_chooser: BaseException | None = None
         self.expect_file_chooser_calls = 0
+        #: >0 while an ``expect_file_chooser`` context is open.  Tests assert a
+        #: cover tab click happened at depth 1 (consumed) rather than at 0.
+        self.chooser_depth = 0
 
         self.goto_calls: list[tuple[str, dict[str, Any]]] = []
         self.evaluate_calls: list[tuple[Any, Any]] = []
