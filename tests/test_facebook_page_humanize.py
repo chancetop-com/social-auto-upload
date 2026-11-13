@@ -975,6 +975,62 @@ class PostResponseFailureTests(unittest.TestCase):
         self.assertEqual(close.click_count, 0)
         self.assertEqual(app.result["status"], "processing")
 
+    def _run_with_fast_close_resolution(self, tmp, **kwargs):
+        """完成框收窄不等待真实 30s：仍走真实 ``_unique``，只把超时压到 0。"""
+        real_unique = fb_main._unique
+
+        async def fast_unique(locator, what, **options):
+            return await real_unique(locator, what, timeout_ms=0)
+
+        with patch.object(fb_main, "_unique", fast_unique):
+            return self._run(tmp, **kwargs)
+
+    def test_unmatched_completion_close_label_does_not_fail_a_published_reel(self):
+        # 完成框没有匹配的关闭名称：收窄失败只是界面收尾，创建响应已受理。
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            close = _Clickable("completion-close", log=log, count=0)
+            page = self._footer_page(log, close_button=close, video=True)
+
+            app = self._run_with_fast_close_resolution(
+                tmp,
+                payload={
+                    "data": {
+                        "xfamily_content_create": {
+                            "items": [{"pending_publish_content_id": None}]
+                        }
+                    }
+                },
+                page=page,
+                video=True,
+            )
+
+        self.assertEqual(close.click_count, 0)
+        self.assertEqual(app.result["status"], "processing")
+
+    def test_ambiguous_completion_close_buttons_do_not_fail_a_published_reel(self):
+        # 关闭名称命中多个按钮：不猜、不点，也不把已受理的发布变成失败。
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            close = _Clickable("completion-close", log=log, count=2)
+            page = self._footer_page(log, close_button=close, video=True)
+
+            app = self._run_with_fast_close_resolution(
+                tmp,
+                payload={
+                    "data": {
+                        "xfamily_content_create": {
+                            "items": [{"pending_publish_content_id": None}]
+                        }
+                    }
+                },
+                page=page,
+                video=True,
+            )
+
+        self.assertEqual(close.click_count, 0)
+        self.assertEqual(app.result["status"], "processing")
+
     def test_open_meta_post_failure_after_the_create_response_is_result_unknown(self):
         with tempfile.TemporaryDirectory() as tmp:
             log: list = []
