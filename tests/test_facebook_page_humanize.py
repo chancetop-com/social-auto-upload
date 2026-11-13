@@ -382,6 +382,16 @@ class _Response:
         return self._payload
 
 
+class _UnparseableResponse(_Response):
+    """HTTP 200，但响应体损坏/截断：``json()`` 直接抛错。"""
+
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    async def json(self):
+        raise self._error
+
+
 class _ResponseContext:
     def __init__(self, response: _Response) -> None:
         self._response = response
@@ -801,7 +811,9 @@ class _CloseFailingHumanizer(_QuietHumanizer):
 
 
 class PostResponseFailureTests(unittest.TestCase):
-    def _run(self, tmp, *, payload, page, video=False, humanizer=None, post=None):
+    def _run(
+        self, tmp, *, payload=None, page, video=False, humanizer=None, post=None, response=None
+    ):
         app = _app(
             tmp,
             image_files=None if video else [Path(tmp) / "a.png"],
@@ -813,7 +825,7 @@ class PostResponseFailureTests(unittest.TestCase):
         app._publish_budget = app.start_publish_budget()
         app._publish_budget.wait_until_allowed = AsyncMock(return_value=None)
         page.expect_response = lambda predicate, timeout=None: _ResponseContext(
-            _Response(payload)
+            response if response is not None else _Response(payload)
         )
         if humanizer is None:
             humanizer = _QuietHumanizer(page)
@@ -871,6 +883,67 @@ class PostResponseFailureTests(unittest.TestCase):
 
             with self.assertRaises(PublishResultUnknownError):
                 self._run(tmp, payload={"data": {"xfamily_content_create": {}}}, page=page)
+
+    def test_unparseable_create_response_is_result_unknown(self):
+        # HTTP 200 但 JSON 损坏：创建工作可能已发生，绝不能报“确定未发布”。
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(
+                    tmp,
+                    page=page,
+                    response=_UnparseableResponse(ValueError("Expecting value")),
+                )
+
+    def test_non_dict_create_response_is_result_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(tmp, payload=[], page=page)
+
+    def test_null_data_create_response_is_result_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(tmp, payload={"data": None}, page=page)
+
+    def test_non_dict_item_in_create_response_is_result_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run(
+                    tmp,
+                    payload={"data": {"xfamily_content_create": {"items": ["123"]}}},
+                    page=page,
+                )
+
+    def test_valid_create_response_still_returns_the_normal_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            page = self._footer_page(log)
+
+            app = self._run(
+                tmp,
+                payload={
+                    "data": {
+                        "xfamily_content_create": {
+                            "items": [{"pending_publish_content_id": "789"}]
+                        }
+                    }
+                },
+                page=page,
+            )
+
+        self.assertEqual(app.result["status"], "published")
+        self.assertEqual(app.result["content_id"], "456")
 
     def test_completion_close_click_failure_does_not_fail_a_published_reel(self):
         with tempfile.TemporaryDirectory() as tmp:

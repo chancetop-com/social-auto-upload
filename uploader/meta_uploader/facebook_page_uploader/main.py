@@ -587,28 +587,50 @@ class MetaBusinessUploader(BaseVideoUploader):
             response = await response_info.value
         except BrowserTimeoutError:
             raise budget.timeout_error(publish_clicked) from None
-        payload = await response.json()
-        # 创建响应已经返回：作品可能已存在，之后任何无法确认的失败都是结果未知。
-        if payload.get('errors'):
+        try:
+            payload = await response.json()
+            # 创建响应已经返回：作品可能已存在，之后任何无法确认的失败都是结果未知。
+            # 响应体非 JSON 对象（截断/非 JSON 页面）在此归一，交给下方统一转成结果未知。
+            if not isinstance(payload, dict):
+                raise ValueError('创建响应不是 JSON 对象')
+            if payload.get('errors'):
+                raise PublishResultUnknownError(
+                    '平台创建作品响应包含错误；帖子可能已经发布，请查原记录，勿重复提交'
+                )
+            data = payload.get('data')
+            creation = data.get('xfamily_content_create') if isinstance(data, dict) else None
+            if not isinstance(creation, dict):
+                creation = {}
+            creation_errors = creation.get('errors')
+            if creation_errors and (
+                not isinstance(creation_errors, dict) or any(creation_errors.values())
+            ):
+                raise PublishResultUnknownError(
+                    '平台返回作品创建错误；帖子可能已经发布，请查原记录，勿重复提交'
+                )
+            items = creation.get('items')
+            if isinstance(items, dict):
+                items = [items]
+            if (
+                not isinstance(items, list)
+                or len(items) != 1
+                or not isinstance(items[0], dict)
+            ):
+                raise PublishResultUnknownError(
+                    '已提交但未取得唯一内容编号；结果待查询，勿重复提交'
+                )
+            # 实测 Reels 响应的 pending_publish_content_id 为空，需在成功确认后查原作品详情。
+            pending_id = items[0].get('pending_publish_content_id')
+            if pending_id:
+                self.result['content_id'] = str(pending_id)
+        except PublishResultUnknownError:
+            # 结果未知已经明确：原样上抛，不再二次包装。
+            raise
+        except Exception as error:
+            # 创建响应已返回，任何无法解析的异常都不能退化成“确定未发布”。
             raise PublishResultUnknownError(
-                '平台创建作品响应包含错误；帖子可能已经发布，请查原记录，勿重复提交'
-            )
-        creation = payload.get('data', {}).get('xfamily_content_create', {})
-        if any(creation.get('errors', {}).values()):
-            raise PublishResultUnknownError(
-                '平台返回作品创建错误；帖子可能已经发布，请查原记录，勿重复提交'
-            )
-        items = creation.get('items')
-        if isinstance(items, dict):
-            items = [items]
-        if not isinstance(items, list) or len(items) != 1:
-            raise PublishResultUnknownError(
-                '已提交但未取得唯一内容编号；结果待查询，勿重复提交'
-            )
-        # 实测 Reels 响应的 pending_publish_content_id 为空，需在成功确认后查原作品详情。
-        pending_id = items[0].get('pending_publish_content_id')
-        if pending_id:
-            self.result['content_id'] = str(pending_id)
+                '平台创建响应无法解析；帖子可能已经发布，请查原记录，勿重复提交'
+            ) from error
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
         if self.video_file:
             # 创建响应后页面仍执行后续发布步骤，不能立即导航走；实测完成框带本次标题、
