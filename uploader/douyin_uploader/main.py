@@ -452,7 +452,7 @@ class DouYinBaseUploader(BaseVideoUploader):
         picker = page.locator('.semi-input[placeholder="日期和时间"]')
         await humanizer.click(picker)
         # picker 打开时自带当前值：必须先全选再逐字覆盖。
-        await humanizer.press("Control+KeyA")
+        await humanizer.press("ControlOrMeta+A")
         await humanizer.type_text(str(publish_date_hour))
         await humanizer.press("Enter")
         await asyncio.sleep(1)
@@ -478,7 +478,7 @@ class DouYinBaseUploader(BaseVideoUploader):
         description_editor = await _require_unique(description_locator, "作品描述")
         # 保留真机验证过的 seq 清空序列，只把键换成人类化按键。
         await humanizer.click(description_editor)
-        await humanizer.press("Control+KeyA")
+        await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
 
         # 先填正文描述，再填 #话题（此前 description 参数未被写入，导致抖音只有标签没有正文）

@@ -29,7 +29,9 @@ Gate D
     span.
 
 Gate E
-    ``type_horizon_chars`` appears only in ``utils/humanize.py``.
+    ``type_horizon_chars`` is only defined in ``utils/humanize.py``: any other
+    mention fails unless it is an attribute read (``X.type_horizon_chars``),
+    which reuses the single definition instead of copying it.
 """
 
 from __future__ import annotations
@@ -51,6 +53,16 @@ _NATIVE_FILL_RE = re.compile(r"#\s*native-fill:\s*[^#\n]+")
 
 _JS_CLICK_ATTRS = frozenset({"evaluate", "eval_on_selector"})
 _HORIZON = "type_horizon_chars"
+#: ``X.type_horizon_chars`` reads the single definition; only bare mentions
+#: (assignments, literals, comments) count as a second definition.
+_HORIZON_ATTRIBUTE_RE = re.compile(r"\.\s*" + _HORIZON + r"\b")
+
+
+def mentions_horizon_definition(line: str) -> bool:
+    """True when ``line`` mentions ``type_horizon_chars`` other than as an attribute read."""
+    if _HORIZON not in line:
+        return False
+    return _HORIZON in _HORIZON_ATTRIBUTE_RE.sub("", line)
 
 
 def _discover_root(package: Path) -> Path:
@@ -200,7 +212,7 @@ def _scan_gate_e(root: Path) -> list[str]:
             except OSError:
                 continue
             for number, line in enumerate(lines, start=1):
-                if _HORIZON in line:
+                if mentions_horizon_definition(line):
                     found.append(
                         f"{_relative(path, root)}:{number}: "
                         f"gate E: {_HORIZON} outside utils/humanize.py"
@@ -248,4 +260,9 @@ def assert_clean(package: Path, *, root: Path | None = None) -> None:
         raise AssertionError("\n".join(violations))
 
 
-__all__ = ["NATIVE_CLICK_CLASSES", "assert_clean", "gate_violations"]
+__all__ = [
+    "NATIVE_CLICK_CLASSES",
+    "assert_clean",
+    "gate_violations",
+    "mentions_horizon_definition",
+]

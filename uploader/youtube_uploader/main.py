@@ -22,7 +22,12 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
-from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
+from utils.humanize import (
+    DEFAULT_PROFILE,
+    MAYBE_DISPATCHED,
+    MAYBE_DISPATCHED_VALUE,
+    Humanizer,
+)
 from utils.log import youtube_logger
 
 try:
@@ -293,7 +298,16 @@ async def _select_hashtag_candidate(
 
 
 async def _type_with_hashtags(page: Page, humanizer: Humanizer, text: str) -> None:
-    """逐段逐字输入；每段 `#tag` 后点选全等候选，匹配失败降级为纯文本。"""
+    """超打字视野整段一次 ``insert_text``；否则逐段逐字 + 点选候选。
+
+    阈值先按**整段总长度**判定（spec §2.4 规则 4 / §3.14）：越过共享层视野
+    （1000 码点）时由共享层一次性 bulk ``insert_text``，平台不按 ``#`` 切段、
+    不设第二个阈值，也不挑 hashtag 候选。视野内时逐段逐字，每段 ``#tag`` 后点选
+    全等候选，匹配失败降级为纯文本继续。
+    """
+    if len(text) > DEFAULT_PROFILE.type_horizon_chars:
+        await humanizer.type_text(text)
+        return
     cursor = 0
     for match in _HASHTAG_RE.finditer(text):
         if match.start() > cursor:
@@ -304,7 +318,7 @@ async def _type_with_hashtags(page: Page, humanizer: Humanizer, text: str) -> No
             await _dismiss_autocomplete(page, humanizer, blur=False)
         cursor = match.end()
     if cursor == 0:
-        # 没有 `#`：一次 type_text，>1000 码点由共享层整段 bulk。
+        # 没有 `#`：一次 type_text。
         await humanizer.type_text(text)
     elif cursor < len(text):
         await humanizer.type_text(text[cursor:])

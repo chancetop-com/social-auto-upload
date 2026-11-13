@@ -342,7 +342,8 @@ class HumanizeEventSequenceTests(unittest.TestCase):
                 )
 
             humanizer = app._humanizer_instance
-            # 标题：sel（全选 + Delete）后逐字；描述：seq 保留 Control+KeyA。
+            # 标题：sel（全选 + Delete）后逐字；描述：seq 键序不变，全选键
+            # 必须是 macOS 也生效的 ControlOrMeta+A。
             self.assertEqual(
                 page.keyboard.actions[:8],
                 [
@@ -350,7 +351,7 @@ class HumanizeEventSequenceTests(unittest.TestCase):
                     ("press", "Delete"),
                     ("insert_text", "标"),
                     ("insert_text", "题"),
-                    ("press", "Control+KeyA"),
+                    ("press", "ControlOrMeta+A"),
                     ("press", "Delete"),
                     ("insert_text", "正"),
                     ("insert_text", "文"),
@@ -402,7 +403,7 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             self.assertEqual(
                 page.keyboard.actions,
                 [
-                    ("press", "Control+KeyA"),
+                    ("press", "ControlOrMeta+A"),
                     ("press", "2"),
                     ("press", "0"),
                     ("press", "2"),
@@ -750,6 +751,26 @@ class HumanizeGateTests(unittest.TestCase):
             / "douyin_uploader"
         )
         assert_clean(package)
+
+    def test_select_all_never_uses_the_windows_only_shortcut(self):
+        # spec §2.4：``Control+KeyA`` 在 macOS 上不清空预填字段（仓库
+        # ``tk_uploader/main_chrome.py`` 已记录该坑）。抖音的 ``sel``（定时
+        # picker）与 ``seq``（描述编辑器）都必须用 ``ControlOrMeta+A``。
+        package = (
+            Path(__file__).resolve().parent.parent
+            / "uploader"
+            / "douyin_uploader"
+        )
+        offenders: list[str] = []
+        for path in sorted(package.rglob("*.py")):
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if "Control+KeyA" in line:
+                    offenders.append(
+                        f"{path.relative_to(package)}:{number}: {line.strip()}"
+                    )
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":
