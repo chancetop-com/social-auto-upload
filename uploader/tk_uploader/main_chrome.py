@@ -76,7 +76,6 @@ TIKTOK_DRY_RUN_READY_MESSAGE = (
 
 #: 发布点击循环的硬上限：预算之外的第二道闸。正常路径由 15 分钟预算终止；
 #: 这两条只在「按钮一直点不中」或「sleep 被吞掉」时兜底，避免全速空转。
-TIKTOK_PUBLISH_MAX_CLICK_ATTEMPTS = 10
 TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS = 2000
 
 # ---------------------------------------------------------------------------
@@ -2713,104 +2712,87 @@ class TiktokBaseUploader(BaseVideoUploader):
         # duplicate the post.  A ``maybe`` dispatch also flips it (spec §2.1):
         # a raise after ``mouse.down`` must never be re-dispatched.
         publish_clicked = False
-        dialog_clicked = False
-        click_attempts = 0
-        iterations = 0
+
+        # Phase 1 — readiness only. Poll for a visible, enabled publish button;
+        # no click is dispatched here. A missing/disabled button is a wait, not
+        # a retry: the click below happens exactly once.
+        readiness_iterations = 0
         while True:
-            iterations += 1
-            if iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
-                # 只可能在 sleep 被吞掉（测试替身）或页面持续立即失败时触发：
-                # 宁可退出 1/9，也不让进程全速空转到预算耗尽。
-                if publish_clicked:
-                    raise budget.timeout_error(True)
-                raise RuntimeError(
-                    "TikTok 发布循环超过 "
-                    f"{TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS} 轮仍未结束；"
-                    "已停止，未重复派发发布点击。"
-                )
+            readiness_iterations += 1
+            if readiness_iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
+                raise budget.timeout_error(False)
             try:
                 budget.check_pre_click()
             except RuntimeError:
-                if publish_clicked:
-                    # A login redirect still wins over "result unknown".
-                    if multilogin:
-                        _raise_if_login_required(page)
-                    raise budget.timeout_error(True) from None
                 raise budget.timeout_error(False) from None
-
             if multilogin:
                 _raise_if_login_required(page)
-
-            if not publish_clicked:
+            found = await _find_candidate(
+                self.locator_base,
+                _PUBLISH_BUTTON_CANDIDATES,
+                visible=True,
+            )
+            if found is not None:
+                publish_button, index, description = found
+                enabled = True
                 try:
-                    found = await _find_candidate(
-                        self.locator_base,
-                        _PUBLISH_BUTTON_CANDIDATES,
-                        visible=True,
+                    enabled = await publish_button.is_enabled()
+                except Exception:
+                    enabled = True
+                if enabled:
+                    tiktok_logger.info(
+                        "[+] TikTok publish: candidate "
+                        f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} "
+                        f"matched ({description})"
                     )
-                    if found is not None:
-                        publish_button, index, description = found
-                        enabled = True
-                        try:
-                            enabled = await publish_button.is_enabled()
-                        except Exception:
-                            enabled = True
-                        if not enabled:
-                            tiktok_logger.info(
-                                "  [-] publish button not enabled yet"
-                            )
-                            await asyncio.sleep(0.5)
-                            continue
-                        tiktok_logger.info(
-                            "[+] TikTok publish: candidate "
-                            f"#{index + 1}/{len(_PUBLISH_BUTTON_CANDIDATES)} "
-                            f"matched ({description})"
-                        )
-                        await humanizer.before_submit()
-                        await _humanized_click(humanizer, publish_button)
-                        publish_clicked = True
-                        tiktok_logger.info("  [-] publish click sent")
-                except Exception as e:
-                    if multilogin:
-                        _raise_if_login_required(page)
-                    if _maybe_dispatched(e):
-                        # The click may have reached the page: never re-dispatch.
-                        publish_clicked = True
-                        tiktok_logger.warning(
-                            f"  [-] publish click raised after dispatch: {e}"
-                        )
-                        await asyncio.sleep(0.5)
-                        continue
-                    click_attempts += 1
-                    if click_attempts == 1:
-                        # 只留一份 traceback；后续失败按一行 warning 记录，
-                        # 避免在重试循环里反复写 MB 级堆栈。
-                        tiktok_logger.exception(f"  [-] Exception: {e}")
-                    else:
-                        tiktok_logger.warning(
-                            "  [-] publish click failed "
-                            f"({click_attempts}/"
-                            f"{TIKTOK_PUBLISH_MAX_CLICK_ATTEMPTS}): {e}"
-                        )
-                    if click_attempts >= TIKTOK_PUBLISH_MAX_CLICK_ATTEMPTS:
-                        raise RuntimeError(
-                            "TikTok 发布按钮连续 "
-                            f"{click_attempts} 次点击失败（尚未派发发布点击）："
-                            f"{e}"
-                        ) from e
-                    tiktok_logger.info("  [-] video publishing")
-                    await asyncio.sleep(0.5)
-                    continue
+                    break
+            tiktok_logger.info("  [-] publish button not ready yet")
+            await asyncio.sleep(0.5)
 
+        # Single dispatch. A failure before mouse.down is a hard failure (exit
+        # 1) — never re-click. A failure after mouse.down may already have
+        # published, so it is treated as sent and never re-dispatched.
+        budget.check_pre_click()
+        await humanizer.before_submit()
+        try:
+            await _humanized_click(humanizer, publish_button)
+        except Exception as e:
+            if multilogin:
+                _raise_if_login_required(page)
+            if not _maybe_dispatched(e):
+                raise
+            publish_clicked = True
+            tiktok_logger.warning(
+                f"  [-] publish click raised after dispatch: {e}"
+            )
+        else:
+            publish_clicked = True
+            tiktok_logger.info("  [-] publish click sent")
+
+        # Phase 2 — result polling only. This loop never re-enters the click
+        # path, so a slow or missing success URL cannot publish twice.
+        dialog_clicked = False
+        poll_iterations = 0
+        while True:
+            poll_iterations += 1
+            if poll_iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
+                raise budget.timeout_error(True)
+            try:
+                budget.check_pre_click()
+            except RuntimeError:
+                if multilogin:
+                    _raise_if_login_required(page)
+                raise budget.timeout_error(True) from None
+            if multilogin:
+                _raise_if_login_required(page)
             try:
                 await page.wait_for_url(
                     re.compile(r".*tiktokstudio/content.*"), timeout=3000
                 )
             except (PlaywrightTimeoutError, TimeoutError):
                 # Photo posts may show a "Post now" confirmation instead of
-                # navigating.  Attempt it at most once: mark the attempt before
-                # clicking so a failed click is never retried.  The failure is
-                # non-fatal; the success-URL wait still owns the outcome.
+                # navigating. Attempt it at most once; a failed click is never
+                # retried, and the success-URL wait still owns the outcome.
                 if publish_clicked and not dialog_clicked:
                     dialog_clicked = True
                     await self._click_post_now(page)
@@ -2820,15 +2802,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             except Exception as e:
                 if multilogin:
                     _raise_if_login_required(page)
-                if publish_clicked:
-                    # Page/context closed, CDP dropped, or a form error after
-                    # the click: stop at once instead of spinning to deadline.
-                    raise budget.timeout_error(True) from e
-                # 每轮都打 traceback 会让重试循环写出 MB 级日志；这里只留一行。
-                tiktok_logger.warning(f"  [-] publish wait failed: {e}")
-                tiktok_logger.info("  [-] video publishing")
-                await asyncio.sleep(0.5)
-                continue
+                raise budget.timeout_error(True) from e
 
             tiktok_logger.success("  [-] video published success")
             return

@@ -334,12 +334,12 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(page.url, CONTENT_URL)
         sleep.assert_not_awaited()
 
-    def test_click_failure_stops_after_bounded_attempts(self):
-        """A click that never succeeds must not spin until the 15-minute budget.
+    def test_click_failure_is_reported_immediately_without_retry(self):
+        """A failure before the click is dispatched is a hard failure.
 
-        Regression: with ``asyncio.sleep`` patched, the old loop retried at
-        full speed and logged a full traceback per iteration (2 GB of rotated
-        logs in minutes).
+        Publishing is a single dispatch: a humanized click that raises before
+        ``mouse.down`` must surface as the original error (exit 1), never be
+        retried in a loop.
         """
         video = _video()
         button = _FakeLocator(hover_error=RuntimeError("boom"))
@@ -351,15 +351,11 @@ class ClickPublishTests(unittest.TestCase):
                 asyncio.run(video.click_publish(page, multilogin=True))
 
         self.assertEqual(button.click_calls, 0)
-        self.assertIn("连续", str(ctx.exception))
-        self.assertIn("尚未派发发布点击", str(ctx.exception))
+        self.assertEqual(page.wait_calls, 0)
+        self.assertIn("boom", str(ctx.exception))
 
-    def test_maybe_dispatched_failure_stops_at_the_iteration_cap(self):
-        """``HUMANIZE=0`` marks a click raise as maybe-dispatched: never redispatch.
-
-        The loop may only wait for the success URL, and the iteration cap ends
-        it even when ``asyncio.sleep`` is patched to a no-op.
-        """
+    def test_maybe_dispatched_failure_is_not_reclicked(self):
+        """``HUMANIZE=0`` marks a click raise as maybe-dispatched: wait only."""
         video = _video()
         button = _FakeLocator(click_error=RuntimeError("boom"))
         video.locator_base = _FakeLocatorBase(button)

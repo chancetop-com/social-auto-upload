@@ -310,6 +310,9 @@ class _StudioPage:
             return _Locator(self, selector, count=1)
         if selector == "div.button-group button":
             return _Locator(self, selector, count=1)
+        if selector == '[data-e2e="post_video_button"]':
+            # 真实 Studio 的发布按钮锚点；单次派发要求 fake 也暴露它。
+            return _Locator(self, selector, count=1)
         if selector == "div[data-tt=\"components_PostTable_Container\"]":
             return _Locator(self, selector, count=1)
         if 'item_id=' in selector:
