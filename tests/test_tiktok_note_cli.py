@@ -148,6 +148,10 @@ class _Locator:
         self.page.events.append(("probe", self.selector))
         return self._count
 
+    async def hover(self, **kwargs) -> None:
+        # 平台点击入口先 hover 再 click；这里保持事件流不变。
+        return None
+
     async def click(self, **kwargs) -> None:
         self.page.events.append(("click", self.selector))
         if "button-group" in self.selector:
@@ -214,6 +218,10 @@ class _TextTab:
 
     async def count(self) -> int:
         return 1 if self.page.photos_tab else 0
+
+    async def hover(self, **kwargs) -> None:
+        # 平台点击入口先 hover 再 click；这里保持事件流不变。
+        return None
 
     async def click(self, **kwargs) -> None:
         self.page.events.append(("photos_tab_click",))
