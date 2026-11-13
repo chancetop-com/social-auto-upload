@@ -2009,6 +2009,9 @@ class HashtagEntityTests(unittest.TestCase):
 
 
 
+_HUMANIZE_BEFORE = None
+
+
 def setUpModule():
     """Legacy TikTok fakes model the pre-humanize DOM seam.
 
@@ -2018,13 +2021,18 @@ def setUpModule():
     """
     import os
 
+    global _HUMANIZE_BEFORE
+    _HUMANIZE_BEFORE = os.environ.get("HUMANIZE")
     os.environ["HUMANIZE"] = "0"
 
 
 def tearDownModule():
     import os
 
-    os.environ.pop("HUMANIZE", None)
+    if _HUMANIZE_BEFORE is None:
+        os.environ.pop("HUMANIZE", None)
+    else:
+        os.environ["HUMANIZE"] = _HUMANIZE_BEFORE
 
 if __name__ == "__main__":
     unittest.main()
