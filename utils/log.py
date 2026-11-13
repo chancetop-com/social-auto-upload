@@ -1,8 +1,17 @@
+import os
 import sys
 from pathlib import Path
 from loguru import logger
 
 from conf import BASE_DIR
+
+#: 默认只输出到控制台；需要落盘文件时设置 ``SAU_LOG_TO_FILES=1``。
+_LOG_TO_FILES = os.environ.get("SAU_LOG_TO_FILES", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -38,6 +47,11 @@ def create_logger(log_name: str, file_path: str):
     """
     def filter_record(record):
         return record["extra"].get("business_name") == log_name
+
+    if not _LOG_TO_FILES:
+        # 默认不落盘：只保留控制台输出。需要文件日志时显式
+        # ``SAU_LOG_TO_FILES=1``，避免长跑/测试无限轮转写满磁盘。
+        return logger.bind(business_name=log_name)
 
     Path(BASE_DIR / file_path).parent.mkdir(exist_ok=True)
     logger.add(Path(BASE_DIR / file_path), filter=filter_record, level="INFO", rotation="10 MB", retention="10 days", backtrace=True, diagnose=True)

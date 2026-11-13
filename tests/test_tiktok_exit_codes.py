@@ -27,8 +27,14 @@ LOGIN_URL = "https://www.tiktok.com/login?lang=en"
 class _FakeLocator:
     """The publish button; ``nth`` keeps pointing at the same fake button."""
 
-    def __init__(self, *, click_error: BaseException | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        click_error: BaseException | None = None,
+        hover_error: BaseException | None = None,
+    ) -> None:
         self.click_error = click_error
+        self.hover_error = hover_error
         self.click_calls = 0
 
     @property
@@ -40,6 +46,11 @@ class _FakeLocator:
 
     async def count(self) -> int:
         return 1
+
+    async def hover(self) -> None:
+        """Platform click entry hovers before clicking (spec §2.5.1)."""
+        if self.hover_error is not None:
+            raise self.hover_error
 
     async def click(self) -> None:
         self.click_calls += 1
@@ -89,6 +100,10 @@ class _CandidateLocator:
 
     async def is_enabled(self) -> bool:
         return True
+
+    async def hover(self) -> None:
+        """Platform click entry hovers before clicking (spec §2.5.1)."""
+        return None
 
     async def click(self) -> None:
         self.click_calls += 1
@@ -318,6 +333,46 @@ class ClickPublishTests(unittest.TestCase):
         self.assertEqual(page.wait_calls, 1)
         self.assertEqual(page.url, CONTENT_URL)
         sleep.assert_not_awaited()
+
+    def test_click_failure_stops_after_bounded_attempts(self):
+        """A click that never succeeds must not spin until the 15-minute budget.
+
+        Regression: with ``asyncio.sleep`` patched, the old loop retried at
+        full speed and logged a full traceback per iteration (2 GB of rotated
+        logs in minutes).
+        """
+        video = _video()
+        button = _FakeLocator(hover_error=RuntimeError("boom"))
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage()
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 0)
+        self.assertIn("连续", str(ctx.exception))
+        self.assertIn("尚未派发发布点击", str(ctx.exception))
+
+    def test_maybe_dispatched_failure_stops_at_the_iteration_cap(self):
+        """``HUMANIZE=0`` marks a click raise as maybe-dispatched: never redispatch.
+
+        The loop may only wait for the success URL, and the iteration cap ends
+        it even when ``asyncio.sleep`` is patched to a no-op.
+        """
+        video = _video()
+        button = _FakeLocator(click_error=RuntimeError("boom"))
+        video.locator_base = _FakeLocatorBase(button)
+        page = _FakePage()
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            with self.assertRaises(PublishResultUnknownError):
+                asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertLessEqual(
+            page.wait_calls, tk_main.TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS + 1
+        )
 
     def test_never_clicked_deadline_is_exit_1_not_9(self):
         video = _video()
