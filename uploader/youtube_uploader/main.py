@@ -27,6 +27,7 @@ from utils.humanize import (
     MAYBE_DISPATCHED,
     MAYBE_DISPATCHED_VALUE,
     Humanizer,
+    maybe_dispatched,
 )
 from utils.log import youtube_logger
 
@@ -656,7 +657,16 @@ class YouTubeVideo(BaseVideoUploader):
         budget.check_pre_click()
         await page.wait_for_timeout(1200)
         await humanizer.before_submit()
-        if not await _click_if_present(page, "#done-button", budget.clamp_ms(15000), humanizer=humanizer):
+        try:
+            published = await _click_if_present(
+                page, "#done-button", budget.clamp_ms(15000), humanizer=humanizer
+            )
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                raise budget.timeout_error(True) from exc
+            raise
+        if not published:
             raise RuntimeError("未找到 YouTube 发布按钮，未提交发布")
         else:
             await page.wait_for_timeout(4000)

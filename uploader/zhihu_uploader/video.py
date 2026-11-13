@@ -308,6 +308,7 @@ class ZhihuVideo:
         multilogin = session.managed
         page = None
         submitted = False
+        publish_clicked = False
         try:
             page = await session.context.new_page()
             # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
@@ -359,6 +360,7 @@ class ZhihuVideo:
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             await self._submit(page, publish)
+            publish_clicked = True
             try:
                 await expect(page.get_by_text("发布成功", exact=True)).to_be_visible(
                     timeout=budget.post_click_timeout_ms(60000)
@@ -377,7 +379,7 @@ class ZhihuVideo:
             raise
         except Exception as exc:
             if multilogin and page is not None:
-                raise_if_login_required(page)
+                raise_if_login_required(page, publish_attempted=publish_clicked)
             result["error"] = str(exc)
             if result["status"] != "published":
                 result["status"] = "submission_unknown" if submitted else "failed_before_submit"

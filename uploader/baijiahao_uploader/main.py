@@ -115,11 +115,13 @@ async def _cover_input_attached(locator) -> bool:
         return False
 
 
-def _raise_if_login_required(page: Page) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour.
+    retry-until-timeout behaviour.  ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched, so exit 10
+    never claims "not published".
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -127,7 +129,8 @@ def _raise_if_login_required(page: Page) -> None:
     if any(marker in url for marker in _BAIJIAHAO_LOGIN_HINTS):
         raise LoginRequiredError(
             "百家号上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -938,7 +941,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         # 发布后共享整条流程的 15 分钟 deadline。
         while budget.remaining_seconds() > 0:
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             url = page.url
             # 发布成功跳转
             if BAIJIAHAO_SUCCESS_URL_PREFIX in url or "/rc/content" in url or "/rc/home" in url:

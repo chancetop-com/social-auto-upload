@@ -27,6 +27,7 @@ import os
 import random
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import uploader.baijiahao_uploader.main as baijiahao_main
@@ -59,7 +60,7 @@ from uploader.baijiahao_uploader.main import (
 )
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
-from utils.errors import PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import HumanizeProfile, Humanizer, LogNormal
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
@@ -686,6 +687,46 @@ class PublishDispatchGuardTests(unittest.TestCase):
 
         self.assertIs(caught.exception, error)
         self.assertEqual(publish_btn.click_count, 0)
+
+
+class LoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``（退出 10 不撒谎）。"""
+
+    def test_pre_click_redirect_is_not_marked_as_dispatched(self):
+        page = SimpleNamespace(url="https://passport.baidu.com/v2/?login")
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            baijiahao_main._raise_if_login_required(page)
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_post_click_poll_marks_the_redirect_as_dispatched(self):
+        log: list = []
+        publish_btn = _Clickable("publish-button", log=log)
+        page = _page(
+            {
+                PUBLISH_BUTTON_SELECTOR: publish_btn,
+                DECLARATION_MODAL_SELECTOR: FakeLocator("modal", count=0),
+            },
+            log=log,
+        )
+        page.url = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2"
+
+        class _Redirecting(_RecordingHumanizer):
+            async def click(self, locator, *, point=None) -> None:
+                await super().click(locator, point=point)
+                page.url = "https://passport.baidu.com/v2/?login"
+
+        with patch.object(baijiahao_main, "Humanizer", _Redirecting):
+            app = _video()
+            app.start_publish_budget()
+            humanizer = app._humanizer(page)
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(
+                    app._submit_publish(page, multilogin=True, humanizer=humanizer)
+                )
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 # ---------------------------------------------------------------------------

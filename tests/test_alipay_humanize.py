@@ -24,6 +24,7 @@ import os
 import random
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import uploader.alipay_uploader.main as alipay_main
@@ -38,7 +39,7 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
-from utils.errors import PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import (
     HumanizeProfile,
     Humanizer,
@@ -1029,6 +1030,35 @@ class PublishDispatchGuardTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # 2. 字段值读回
 # ---------------------------------------------------------------------------
+
+
+class LoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``。"""
+
+    def test_pre_click_redirect_is_not_marked_as_dispatched(self):
+        page = SimpleNamespace(url="https://auth.alipay.com/login/index.htm")
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            alipay_main._raise_if_login_required(page)
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_post_click_poll_marks_the_redirect_as_dispatched(self):
+        timeline = _Timeline()
+        page = _page(_publish_selectors(timeline, quality_count=0), timeline=timeline)
+        page.url = PUBLISH_URL
+        page.locator(PUBLISH_ROLE).on_human_click = lambda: setattr(
+            page, "url", "https://auth.alipay.com/login/index.htm"
+        )
+
+        with _TempDir() as tmp:
+            app = _app(tmp)
+            with _humanized():
+                humanizer = app._humanizer(page)
+                with self.assertRaises(LoginRequiredError) as caught:
+                    asyncio.run(app.submit_publish(page, multilogin=True))
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 class HumanizeReadbackTests(unittest.TestCase):

@@ -186,10 +186,12 @@ async def prepare_local_context(context: BrowserContext) -> BrowserContext:
     return prepared
 
 
-def _raise_if_login_required(page: Page | None) -> None:
+def _raise_if_login_required(page: Page | None, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; local retries stay untouched.
+    ``publish_attempted`` must be true when the redirect is observed after the
+    publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -197,7 +199,8 @@ def _raise_if_login_required(page: Page | None) -> None:
     if any(marker in url for marker in _LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "虎扑上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -734,11 +737,12 @@ class HuPuVideo(BaseVideoUploader):
                 raise budget.timeout_error(True) from exc
             raise
         hupu_logger.info(_msg("🏃", "已点击「确定发布」"))
+        publish_clicked = True
 
         # 等待跳转到帖子详情页（URL 匹配 bbs.hupu.com/{数字}.html）
         while budget.remaining_seconds() > 0:
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             current_url = page.url
             if HUPU_POST_URL_PATTERN.search(current_url):
                 hupu_logger.success(_msg("🥳", f"视频发布成功: {current_url}"))

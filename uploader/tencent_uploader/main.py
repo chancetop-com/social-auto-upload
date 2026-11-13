@@ -141,11 +141,12 @@ TENCENT_LOGIN_CHECK_SETTLE_MS = 3_000
 _TENCENT_LOGIN_HINTS = ("login", "captcha", "verify", "two-factor", "2fa")
 
 
-def _raise_if_login_required(page: Page) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour.
+    retry-until-timeout behaviour.  ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -153,7 +154,8 @@ def _raise_if_login_required(page: Page) -> None:
     if any(marker in url for marker in _TENCENT_LOGIN_HINTS):
         raise LoginRequiredError(
             "视频号上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -1192,10 +1194,10 @@ class TencentBaseUploader(BaseVideoUploader):
         for attempt in range(20):
             if budget.remaining_seconds() <= 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             try:
                 if (
                     not publish_clicked

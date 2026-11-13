@@ -220,11 +220,12 @@ async def _is_ks_cookie_invalid(page: Page, timeout: int = 5000) -> bool:
         return False
 
 
-def _raise_if_login_required(page: Page) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour untouched.
+    retry-until-timeout behaviour untouched.  ``publish_attempted`` must be true
+    when the redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -232,7 +233,8 @@ def _raise_if_login_required(page: Page) -> None:
     if any(marker in url for marker in _LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "快手上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -958,7 +960,7 @@ class KSVideo(KSBaseUploader):
         for attempt in range(1, KUAISHOU_PUBLISH_ATTEMPTS + 1):
             if budget.remaining_seconds() <= 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             try:
                 if not publish_clicked:
@@ -982,7 +984,7 @@ class KSVideo(KSBaseUploader):
                     # re-dispatching could publish twice.
                     raise budget.timeout_error(True) from exc
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 last_publish_error = exc
                 kuaishou_logger.info(_msg(
                     "🏃", f"小人正在冲刺发布视频（{attempt}/{KUAISHOU_PUBLISH_ATTEMPTS}）: {exc}"
@@ -1129,7 +1131,7 @@ class KSNote(KSBaseUploader):
         while True:
             if budget.remaining_seconds() <= 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             try:
                 if not publish_clicked:
@@ -1152,7 +1154,7 @@ class KSNote(KSBaseUploader):
                     # 图文发布/确认发布可能已经点出去：绝不二次派发。
                     raise budget.timeout_error(True) from exc
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 kuaishou_logger.info(_msg("🏃", f"小人正在冲刺发布图文: {exc}"))
                 if self.debug:
                     await page.screenshot(full_page=True)

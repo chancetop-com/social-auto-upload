@@ -16,7 +16,7 @@ from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, asyn
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
-from utils.humanize import Humanizer
+from utils.humanize import Humanizer, maybe_dispatched
 from uploader.xueqiu_uploader.constants import (
     XUEQIU_ARTICLE_URL, XUEQIU_CONTEXT_KWARGS, XUEQIU_DECLARATIONS,
     XUEQIU_IMAGE_SUFFIXES, XUEQIU_LAUNCH_KWARGS, XUEQIU_VISIBILITY,
@@ -261,10 +261,16 @@ class XueqiuArticle:
         await expect(page.locator('div[class*="index_preview-content_"]')).to_be_hidden()
 
     async def _submit(self, page: Page, publish) -> None:
-        """唯一提交点：人类化停顿后坐标点击，异常原样上抛。"""
+        """唯一提交点：人类化停顿后坐标点击；可能已派发按结果未知上抛。"""
         humanizer = self._humanizer(page)
         await humanizer.before_submit()
-        await humanizer.click(publish)
+        try:
+            await humanizer.click(publish)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                # ``mouse.down`` 之后失败：可能已经提交，禁止再次派发。
+                raise self._publish_budget.timeout_error(True) from exc
+            raise
 
     def results_dir(self) -> Path:
         """Result manifests sit next to the local account; MLX uses a temp dir."""
@@ -314,6 +320,7 @@ class XueqiuArticle:
                   "result_file": str(result_file), "remote_draft_possible": False}
         multilogin = session.managed
         page = None
+        publish_clicked = False
         try:
             page = await session.context.new_page()
             # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
@@ -403,7 +410,7 @@ class XueqiuArticle:
             raise
         except Exception as exc:
             if multilogin and page is not None:
-                raise_if_login_required(page)
+                raise_if_login_required(page, publish_attempted=publish_clicked)
             result["error"] = str(exc)
             if result["status"] == "preparing":
                 result["status"] = "failed"

@@ -101,13 +101,18 @@ def facebook_page_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
     return {**FACEBOOK_PAGE_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
 
 
-def _raise_if_login_required(page: Page) -> None:
-    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``."""
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
+    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
+
+    ``publish_attempted`` must be true when the redirect is observed after the
+    publish click was dispatched.
+    """
     current_url = str(getattr(page, "url", "") or "").lower()
     if any(marker in current_url for marker in _META_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "Facebook Page 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -673,7 +678,8 @@ class MetaBusinessUploader(BaseVideoUploader):
         try:
             await self._publish_on_page(page)
             if session.managed:
-                _raise_if_login_required(page)
+                # 发布点击已成功走完（``_publish`` 只在确认创建后才返回）。
+                _raise_if_login_required(page, publish_attempted=True)
             return self.result
         finally:
             self._write_result()
