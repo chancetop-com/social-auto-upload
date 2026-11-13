@@ -563,6 +563,9 @@ class InstagramUploader:
         self.options = options
         # 干跑：表单与选项全部完成后停在 Share 前，不点击、不观察结果。
         self.no_publish = bool(no_publish)
+        # 发布点击是否真的发出：登录跳转的 publish_attempted 只认这个标志，
+        # 不再由 status=submission_unknown 推断（提交前失败也会写那个状态）。
+        self.publish_clicked = False
         if not self.title:
             raise ValueError('标题不能为空')
         # 素材互斥 / 封面适用性 / 配文长度统一走共享纯函数（UsageError → 退出码 2）。
@@ -988,6 +991,8 @@ class InstagramUploader:
             label="Instagram 发布",
         )
         budget.check_pre_click()
+        # status 只是结果记录；点击是否派发由独立的 publish_clicked 标记。
+        self.publish_clicked = False
         self.result.update(identity, status='submission_unknown')
         self._write_result()
         # Reel 首次返回 202，浏览器会继续请求同一创建接口，后续才返回正式 media。
@@ -1005,6 +1010,8 @@ class InstagramUploader:
                     # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
                     raise budget.timeout_error(True) from exc
                 raise
+            # 点击已经返回：从这里开始的任何失败都算「结果可能已提交」。
+            self.publish_clicked = True
             # 点击成功后只等最终创建响应；未拿到响应即超时，按结果未知处理，绝不重发。
             result_deadline = budget.deadline
             while True:
@@ -1141,9 +1148,10 @@ class InstagramUploader:
         except Exception as error:
             if session.managed:
                 # 发布点击之后的登录跳转：结果可能已提交，必须带上 publish_attempted。
+                # 只认点击标志；提交前失败也会把 status 写成 submission_unknown。
                 _raise_if_login_required(
                     page,
-                    publish_attempted=self.result.get('status') == 'submission_unknown',
+                    publish_attempted=self.publish_clicked,
                 )
             raise await self._capture_failure(page, error) from error
 

@@ -771,8 +771,10 @@ class MetaLoginRedirectPublishAttemptTests(unittest.TestCase):
         holder = {}
 
         async def _steps(page, identity, *, budget):
-            # ``_publish`` 在点击 Share 之前把 status 置为 submission_unknown。
+            # ``_publish`` 在 Share 点击返回后把 publish_clicked 置为 True；
+            # status 只是结果记录，不能再用来推断“已派发”。
             holder["app"].result["status"] = "submission_unknown"
+            holder["app"].publish_clicked = True
             page.url = "https://www.instagram.com/accounts/login/"
             raise RuntimeError("发布后跳到登录页")
 

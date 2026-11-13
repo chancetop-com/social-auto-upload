@@ -677,8 +677,14 @@ class YouTubeVideo(BaseVideoUploader):
                     video_url = await link.get_attribute("href") or ""
             except Exception:
                 pass
-            await _click_if_present(page, "ytcp-button:has-text('Close'), ytcp-button:has-text('关闭'), #close-button", 8000,
-                                    humanizer=humanizer)
+            try:
+                await _click_if_present(page, "ytcp-button:has-text('Close'), ytcp-button:has-text('关闭'), #close-button", 8000,
+                                        humanizer=humanizer)
+            except Exception as exc:
+                # 视频已经发布：关闭按钮只是界面收尾，失败只能记日志，绝不改变发布结果。
+                youtube_logger.warning(
+                    _msg("⚠️", f"发布完成后的关闭按钮点击失败（不影响发布结果）: {exc}")
+                )
             youtube_logger.success(_msg("🥳", f"发布完成（{self.visibility}）{(' ' + video_url) if video_url else ''}"))
 
     async def main(self, *, session: BrowserSession | None = None):

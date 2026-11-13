@@ -378,7 +378,8 @@ class ZhihuVideo:
         except PublishResultUnknownError:
             raise
         except Exception as exc:
-            if multilogin and page is not None:
+            # 已经发表成功：后续「查看详情」的登录跳转不能把成功改写成退出 10。
+            if multilogin and page is not None and result["status"] != "published":
                 raise_if_login_required(page, publish_attempted=publish_clicked)
             result["error"] = str(exc)
             if result["status"] != "published":
