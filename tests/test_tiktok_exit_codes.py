@@ -266,6 +266,19 @@ class _FlakyDialogLocator(_CandidateLocator):
             raise RuntimeError("dialog click failed")
 
 
+class _LateButtonLocator(_CandidateLocator):
+    """Dialog that is visible at once; its exact-name button renders later."""
+
+    def __init__(self, *, absent_count_calls: int) -> None:
+        super().__init__()
+        self._absent_count_calls = absent_count_calls
+        self.count_calls = 0
+
+    async def count(self) -> int:
+        self.count_calls += 1
+        return 0 if self.count_calls <= self._absent_count_calls else 1
+
+
 class _PostNowPage(_FakePage):
     """Publish page whose success URL arrives after a ``Post now`` dialog."""
 
@@ -276,6 +289,37 @@ class _PostNowPage(_FakePage):
     def locator(self, selector: str):
         if selector == '[role="dialog"]':
             return _DialogScope(self.dialog)
+        return _CandidateLocator(count=0)
+
+    def get_by_role(self, _role: str, name=None):
+        return _CandidateLocator(count=0)
+
+
+class _LateButtonDialogNode(_DialogNode):
+    """A dialog that is visible immediately while its button appears later."""
+
+    def __init__(self, dialog: _CandidateLocator, button: _CandidateLocator) -> None:
+        super().__init__(dialog)
+        self.button = button
+
+    def get_by_role(self, role: str, name=None):
+        if role == "button":
+            return self.button
+        return _CandidateLocator(count=0)
+
+
+class _LateButtonPage(_FakePage):
+    """Publish page whose ``Post now`` button renders a beat after its dialog."""
+
+    def __init__(
+        self, dialog: _CandidateLocator, button: _CandidateLocator, **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
+        self._node = _LateButtonDialogNode(dialog, button)
+
+    def locator(self, selector: str):
+        if selector == '[role="dialog"]':
+            return _DialogList([self._node])
         return _CandidateLocator(count=0)
 
     def get_by_role(self, _role: str, name=None):
@@ -636,6 +680,31 @@ class ClickPublishTests(unittest.TestCase):
 
         self.assertEqual(button.click_calls, 1)
         self.assertEqual(dialog.click_calls, 1)
+
+    def test_post_now_dialog_with_a_late_button_is_clicked_once(self):
+        """A rendered dialog without its button must not latch.
+
+        The dialog exists on the first poll but its exact-name ``Post now``
+        button has not rendered yet.  ``_click_post_now`` returns ``None`` so
+        the loop polls again; ``False`` stays reserved for a raised click.
+        """
+        button = _CandidateLocator()
+        base = _CandidateBase({"[data-e2e=\"post_video_button\"]": button})
+        dialog = _CandidateLocator()
+        late_button = _LateButtonLocator(absent_count_calls=1)
+        page = _LateButtonPage(
+            dialog,
+            late_button,
+            wait_outcomes=[("timeout", None), ("timeout", None), CONTENT_URL],
+        )
+        video = _video()
+        video.locator_base = base
+
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+            asyncio.run(video.click_publish(page, multilogin=True))
+
+        self.assertEqual(button.click_calls, 1)
+        self.assertEqual(late_button.click_calls, 1)
 
     def test_confirmation_without_visible_dialog_clicks_nothing(self):
         button = _CandidateLocator()

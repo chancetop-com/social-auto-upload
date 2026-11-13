@@ -42,7 +42,11 @@ from tests.fakes_xhs_dom import (
     UnscriptedSelectorError,
 )
 from tests.humanize_gates import assert_clean
+from uploader.publish_timeout import PublishTimeoutBudget
+from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 AFTER_TYPE = 5.0
 BEFORE_SUBMIT = 7.0
@@ -767,6 +771,100 @@ class HumanizeEventSequenceTests(unittest.TestCase):
         ):
             self.assertEqual(locator.click_count, 0)
 
+
+
+# ---------------------------------------------------------------------------
+# 1b. 发布点击：可能已派发 → 结果未知，绝不二次派发
+# ---------------------------------------------------------------------------
+
+
+class _PublishFailingHumanizer(_QuietHumanizer):
+    """真实点击后注入异常（模拟 ``mouse.down`` 之后的失败）。"""
+
+    def __init__(self, page, *, error: BaseException) -> None:
+        super().__init__(page)
+        self.error = error
+        self.dispatches: list[str] = []
+
+    async def click(self, locator, *, point=None) -> None:
+        await super().click(locator, point=point)
+        self.dispatches.append(getattr(locator, "name", "?"))
+        raise self.error
+
+
+class PublishDispatchGuardTests(unittest.TestCase):
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _pre_dispatch_error(self) -> ElementUnusableError:
+        return ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+
+    def _run_submit(self, module, app, page, publish, error) -> None:
+        humanizer = _PublishFailingHumanizer(page, error=error)
+        app._publish_budget = PublishTimeoutBudget("知乎")
+        with patch.object(module, "Humanizer", lambda p, **kw: humanizer):
+            asyncio.run(app._submit(page, publish))
+
+    def test_video_publish_after_mouse_down_maps_to_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            publish = _Clickable("video-publish", log=log)
+            page = _page({"role:button:发布视频": publish}, log=log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run_submit(
+                    zhihu_video, _video(tmp), page, publish, self._maybe_error()
+                )
+
+            # 只派发一次；原生 click 零次。
+            self.assertEqual(page.mouse.down_count, 1)
+            self.assertEqual(publish.click_count, 0)
+
+    def test_video_pre_dispatch_failure_propagates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            publish = _Clickable("video-publish", log=[])
+            page = _page({}, log=[])
+            error = self._pre_dispatch_error()
+
+            with self.assertRaises(ElementUnusableError) as caught:
+                self._run_submit(zhihu_video, _video(tmp), page, publish, error)
+
+            self.assertIs(caught.exception, error)
+
+    def test_article_publish_after_mouse_down_maps_to_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log: list = []
+            publish = _Clickable("article-publish", log=log)
+            page = _page({"role:button:发布": publish}, log=log)
+
+            with self.assertRaises(PublishResultUnknownError):
+                self._run_submit(
+                    zhihu_article, _article(tmp), page, publish, self._maybe_error()
+                )
+
+            self.assertEqual(page.mouse.down_count, 1)
+            self.assertEqual(publish.click_count, 0)
+
+    def test_article_pre_dispatch_failure_propagates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            publish = _Clickable("article-publish", log=[])
+            page = _page({}, log=[])
+            error = self._pre_dispatch_error()
+
+            with self.assertRaises(ElementUnusableError) as caught:
+                self._run_submit(
+                    zhihu_article, _article(tmp), page, publish, error
+                )
+
+            self.assertIs(caught.exception, error)
 
 
 # ---------------------------------------------------------------------------

@@ -2829,9 +2829,11 @@ class TiktokBaseUploader(BaseVideoUploader):
         """Click an exact confirmation button inside a visible dialog.
 
         Returns ``None`` when no dialog/button exists yet (safe to retry on a
-        later poll), ``True`` when a click landed, and ``False`` when a click
-        was attempted but raised. ``False`` must latch: a humanized/native
-        failure may already have dispatched, so it is never retried.
+        later poll) — including a dialog that has rendered without its
+        exact-name button. ``True`` when a click landed, and ``False`` when a
+        click was attempted but raised. ``False`` must latch: a
+        humanized/native failure may already have dispatched, so it is never
+        retried.
         """
         dialogs = []
         for selector in _CONFIRMATION_DIALOG_SELECTORS:
@@ -2882,7 +2884,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                     f"(dialog role=button[name=/{name}/])"
                 )
                 return True
-        return False
+        # A dialog exists but no exact-name button has rendered yet: returning
+        # None keeps the caller polling, so a later beat can still click it.
+        return None
 
     async def choose_base_locator(self, page):
         # await page.wait_for_selector('div.upload-container')

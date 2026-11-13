@@ -29,6 +29,7 @@ from utils.browser_session import BrowserSession
 from utils.dom import ElementMissingError, ElementUnusableError
 from utils.errors import LoginRequiredError
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import hupu_logger
 
 
@@ -725,7 +726,13 @@ class HuPuVideo(BaseVideoUploader):
         )
         budget.check_pre_click()
         await humanizer.before_submit()
-        await humanizer.click(publish_btn)
+        try:
+            await humanizer.click(publish_btn)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                raise budget.timeout_error(True) from exc
+            raise
         hupu_logger.info(_msg("🏃", "已点击「确定发布」"))
 
         # 等待跳转到帖子详情页（URL 匹配 bbs.hupu.com/{数字}.html）

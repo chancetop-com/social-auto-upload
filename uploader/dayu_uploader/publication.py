@@ -16,6 +16,7 @@ from uploader.dayu_uploader.schedule import (
 from uploader.dayu_uploader.interaction import unique
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import dayu_logger
 
 
@@ -118,7 +119,13 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
             lambda r: urlsplit(r.url).path == "/dashboard/submit-article" and r.request.method == "POST",
             timeout=budget.clamp_ms(45000),
         ) as submit_event:
-            await humanizer.click(confirm)
+            try:
+                await humanizer.click(confirm)
+            except Exception as exc:
+                if maybe_dispatched(exc):
+                    # 确认发表可能已经发出：按结果未知上抛，禁止再次派发。
+                    raise budget.timeout_error(True) from exc
+                raise
             publish_clicked = True
         response = await submit_event.value
     except BrowserTimeoutError:

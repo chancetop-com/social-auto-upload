@@ -17,6 +17,7 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.humanize import Humanizer
+from utils.humanize import maybe_dispatched
 from utils.log import facebook_logger
 
 
@@ -351,7 +352,13 @@ class FacebookPost:
         await humanizer.before_submit()
         # 停顿可能吃掉最后的预算：派发前再确认一次（未发布，退出 1）。
         budget.check_pre_click()
-        await humanizer.click(publish_button)
+        try:
+            await humanizer.click(publish_button)
+        except Exception as exc:
+            if maybe_dispatched(exc):
+                # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                raise budget.timeout_error(True) from exc
+            raise
         while budget.remaining_seconds() > 0:
             # 只接受状态提示或成功文案；弹窗消失本身不足以证明服务端已受理。
             success_text = page.get_by_text(success_pattern)

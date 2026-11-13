@@ -890,8 +890,7 @@ class PlatformWideClickHoverTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "click"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "humanizer"
+            and "humanizer" in ast.unparse(node.func.value).lower()
             and node.lineno not in within_helper
         ]
         self.assertEqual(bare, [])

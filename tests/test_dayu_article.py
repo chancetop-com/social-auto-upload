@@ -15,6 +15,9 @@ from uploader.dayu_uploader.article_content import load_dayu_article
 from uploader.dayu_uploader.article_style import render_dayu_compatible_html
 from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.verification import check_dayu_article_content, verify_dayu_article
+from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
 
 class DayuArticleFileTests(unittest.TestCase):
@@ -85,6 +88,141 @@ class DayuArticleFileTests(unittest.TestCase):
                                       account, source, source_url=link, cover_indices=indices)
                     with self.assertRaisesRegex(ValueError, message):
                         app.validate_upload_args()
+
+
+class _FakeLocator:
+    def __init__(self, name: str, *, count: int = 1) -> None:
+        self.name = name
+        self._count = count
+
+    async def count(self) -> int:
+        return self._count
+
+
+class _FakeResponse:
+    ok = True
+    status = 200
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    async def json(self) -> dict:
+        return self._payload
+
+
+class _FakeResponseContext:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    @property
+    def value(self):
+        async def _resolve() -> _FakeResponse:
+            return self._response
+
+        return _resolve()
+
+
+class _FakePage:
+    """Only the surface ``submit_dayu_publication`` touches before the click."""
+
+    def __init__(self) -> None:
+        self.context = None
+        self.buttons: list[_FakeLocator] = []
+        self.preview = _FakeResponse({"data": {"_id": "draft-1"}})
+        self.submit = _FakeResponse({"data": {"content_id": "cid-1", "_id": "draft-1"}})
+        self.responses = [self.preview, self.submit]
+
+    def get_by_role(self, role: str, name=None, exact: bool = False) -> _FakeLocator:
+        locator = _FakeLocator(name or role)
+        self.buttons.append(locator)
+        return locator
+
+    def expect_response(self, predicate, timeout=None) -> _FakeResponseContext:
+        return _FakeResponseContext(self.responses.pop(0))
+
+
+class _FailingHumanizer:
+    """Records submit pauses; raises the injected error on the confirm click."""
+
+    def __init__(self, error: BaseException, *, target: str = "确认发表") -> None:
+        self.error = error
+        self.target = target
+        self.clicks: list[str] = []
+
+    async def before_submit(self) -> None:
+        return None
+
+    async def click(self, locator) -> None:
+        self.clicks.append(locator.name)
+        if locator.name == self.target:
+            raise self.error
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __getattr__(self, name):
+        async def _record(*args, **kwargs) -> None:
+            self.calls.append(name)
+
+        return _record
+
+
+class DayuPublicationDispatchGuardTests(unittest.IsolatedAsyncioTestCase):
+    """确认发表可能已派发 → 结果未知退出，绝不二次派发。"""
+
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    async def _submit(self, humanizer) -> None:
+        page = _FakePage()
+        with tempfile.TemporaryDirectory() as folder:
+            with patch(
+                "uploader.dayu_uploader.publication.read_dayu_schedule",
+                new=AsyncMock(return_value={}),
+            ), patch(
+                "uploader.dayu_uploader.publication.expect",
+                lambda locator: _Recorder(),
+            ):
+                await submit_dayu_publication(
+                    page,
+                    {"manifest": {}, "style_check": {}},
+                    Path(folder) / "result.json",
+                    humanizer=humanizer,
+                )
+
+    async def test_confirm_after_mouse_down_maps_to_unknown(self):
+        humanizer = _FailingHumanizer(self._maybe_error())
+
+        with self.assertRaises(PublishResultUnknownError):
+            await self._submit(humanizer)
+
+        self.assertEqual(humanizer.clicks, ["发表", "确认发表"])
+
+    async def test_pre_dispatch_confirm_failure_propagates(self):
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+        humanizer = _FailingHumanizer(error)
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            await self._submit(humanizer)
+
+        self.assertIs(caught.exception, error)
+        self.assertEqual(humanizer.clicks, ["发表", "确认发表"])
 
 
 class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):

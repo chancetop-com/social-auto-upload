@@ -744,12 +744,54 @@ class HumanizeGateTests(unittest.TestCase):
         )
         self.assertEqual(self._violations(), [])
 
+    def test_gate_a_rejects_a_hoisted_js_click_constant(self):
+        self._write(
+            "_JS_CLICK = \"const el = document.querySelector(a); el.click();\"\n"
+            "async def go(page):\n"
+            "    await page.evaluate(_JS_CLICK)\n"
+        )
+        self._assert_gate("gate A")
+
+    def test_gate_a_rejects_a_js_click_inside_an_fstring(self):
+        self._write(
+            "async def go(page, selector):\n"
+            "    await page.eval_on_selector_all(\n"
+            "        f\"{selector} => [...document.querySelectorAll(x)]\"\n"
+            "        f\".forEach(e => e.click())\"\n"
+            "    )\n"
+        )
+        self._assert_gate("gate A")
+
+    def test_gate_a_ignores_docstrings_that_mention_click(self):
+        self._write(
+            '"""Prose: every click goes through ``Humanizer.click``."""\n'
+            "async def go(page):\n"
+            "    return await page.evaluate('() => document.title')\n"
+        )
+        self.assertEqual(self._violations(), [])
+
     def test_gate_b_requires_a_native_click_marker(self):
         self._write(
             "async def go(page):\n"
             "    await page.locator('#shell').click()\n"
         )
         self._assert_gate("gate B")
+
+    def test_gate_b_rejects_a_humanizer_lookalike_receiver(self):
+        self._write(
+            "async def go(self):\n"
+            "    await self.humanizer_page.click()\n"
+        )
+        self._assert_gate("gate B")
+
+    def test_gate_b_exempts_the_humanizer_and_its_suffixed_holders(self):
+        self._write(
+            "async def go(self, editor_humanizer):\n"
+            "    await humanizer.click(self.a)\n"
+            "    await self.humanizer.click(self.b)\n"
+            "    await editor_humanizer.click(self.c)\n"
+        )
+        self.assertEqual(self._violations(), [])
 
     def test_gate_b_accepts_a_marked_native_click(self):
         self._write(

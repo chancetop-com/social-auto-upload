@@ -1,22 +1,24 @@
 # -*- coding: utf-8 -*-
 """Executable form of spec §4 gates A–E (humanize rollout).
 
-The gates are AST-based and deliberately **content-read-free**: they look at
-calls, receivers and the comment inside the call's span, never at formatted
-strings.  Every later platform ticket wires its own package in with::
+The gates are AST-based: they look at calls, receivers, string constants and
+the comment inside the call's span.  Every later platform ticket wires its own
+package in with::
 
     from tests.humanize_gates import assert_clean
     assert_clean(Path(__file__).resolve().parent.parent / "uploader" / "xhs")
 
 Gate A
-    No ``evaluate`` / ``eval_on_selector`` call with a constant string argument
-    containing ``el.click`` or ``.click()``.
+    No string constant in a wired package contains ``el.click`` or ``.click()``
+    (JS click payloads, including ones hoisted into a module constant or built
+    as an f-string).  Docstrings are prose and exempt.
 
 Gate B
-    Every native ``.click(...)`` (receiver name without ``humanizer``) carries
+    Every native ``.click(...)`` (receiver that is not the humanizer) carries
     ``# native-click: <class>；<reason>`` inside its ``[lineno, end_lineno]``.
     Allowed classes: login / file / focus / manage / read / verify / chrome /
-    language.
+    language.  Exempt receivers are exactly ``humanizer``, ``<name>_humanizer``
+    and attribute chains ending in ``humanizer`` (``self.humanizer``).
 
 Gate C
     Every ``force=True`` call carries
@@ -51,7 +53,6 @@ _IMPOSSIBLE_RE = re.compile(
 )
 _NATIVE_FILL_RE = re.compile(r"#\s*native-fill:\s*[^#\n]+")
 
-_JS_CLICK_ATTRS = frozenset({"evaluate", "eval_on_selector"})
 _HORIZON = "type_horizon_chars"
 #: ``X.type_horizon_chars`` reads the single definition; only bare mentions
 #: (assignments, literals, comments) count as a second definition.
@@ -99,30 +100,74 @@ def _receiver_name(node: ast.AST) -> str:
         return ""
 
 
-def _constant_strings(node: ast.Call) -> list[str]:
-    values: list[str] = []
-    nodes = list(node.args) + [keyword.value for keyword in node.keywords]
-    for argument in nodes:
-        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
-            values.append(argument.value)
-    return values
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """``id()`` of every docstring constant (module / class / function).
+
+    Docstrings are prose: they may *mention* ``Humanizer.click`` without being
+    a JS payload, so gate A ignores them.
+    """
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            continue
+        body = getattr(node, "body", None) or []
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            found.add(id(first.value))
+    return found
 
 
 def _scan_gate_a(tree: ast.AST, lines: list[str]) -> list[tuple[int, str]]:
+    """Every string constant that could be a JS click payload.
+
+    Scanning all constants (not only ``evaluate`` / ``eval_on_selector`` /
+    ``eval_on_selector_all`` / ``evaluate_all`` arguments) catches payloads
+    hoisted into a module constant or built as an f-string, which the
+    call-argument scan could never see.  Docstrings are prose and exempt.
+    """
+    docstrings = _docstring_nodes(tree)
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
             continue
-        func = node.func
-        if not isinstance(func, ast.Attribute) or func.attr not in _JS_CLICK_ATTRS:
+        if id(node) in docstrings:
             continue
-        for text in _constant_strings(node):
-            if "el.click" in text or ".click()" in text:
-                found.append(
-                    (node.lineno, f"gate A: JS click via {func.attr}(): {text!r}")
-                )
-                break
+        text = node.value
+        if "el.click" in text or ".click()" in text:
+            found.append(
+                (node.lineno, f"gate A: JS click in string constant: {text[:80]!r}")
+            )
     return found
+
+
+def _is_humanizer_name(name: str) -> bool:
+    """``humanizer`` or ``<prefix>_humanizer`` — the shared layer's own names."""
+    return name == "humanizer" or name.endswith("_humanizer")
+
+
+def _is_humanizer_receiver(node: ast.AST) -> bool:
+    """Only real humanizer receivers are exempt from gate B's marker.
+
+    ``humanizer``, ``<name>_humanizer`` and attribute chains ending in
+    ``humanizer`` (``self.humanizer``) are the shared layer, including the
+    page-scoped accessor call ``self._humanizer(page)``.  Lookalikes such as
+    ``self.humanizer_page`` are still native clicks.
+    """
+    if isinstance(node, ast.Call):
+        return _is_humanizer_receiver(node.func)
+    if isinstance(node, ast.Name):
+        return _is_humanizer_name(node.id)
+    if isinstance(node, ast.Attribute):
+        return _is_humanizer_name(node.attr)
+    return False
 
 
 def _scan_gate_b(tree: ast.AST, lines: list[str]) -> list[tuple[int, str]]:
@@ -133,9 +178,9 @@ def _scan_gate_b(tree: ast.AST, lines: list[str]) -> list[tuple[int, str]]:
         func = node.func
         if not isinstance(func, ast.Attribute) or func.attr != "click":
             continue
-        receiver = _receiver_name(func.value)
-        if "humanizer" in receiver.lower():
+        if _is_humanizer_receiver(func.value):
             continue
+        receiver = _receiver_name(func.value)
         match = _NATIVE_CLICK_RE.search(_span(lines, node))
         if match is None:
             found.append(
