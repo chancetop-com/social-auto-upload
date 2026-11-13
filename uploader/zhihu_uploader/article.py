@@ -300,6 +300,7 @@ class ZhihuArticle:
         multilogin = session.managed
         page = None
         submitted = False
+        publish_clicked = False
         try:
             page = await session.context.new_page()
             # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
@@ -331,6 +332,7 @@ class ZhihuArticle:
             result["status"] = "submission_unknown"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             await self._submit(page, publish)
+            publish_clicked = True
             # 草稿也有 /p/<id>/edit 地址；必须到正式详情页并读到作品标题才算发表。
             try:
                 await page.wait_for_url(
@@ -348,7 +350,7 @@ class ZhihuArticle:
             raise
         except Exception as exc:
             if multilogin and page is not None:
-                raise_if_login_required(page)
+                raise_if_login_required(page, publish_attempted=publish_clicked)
             result["error"] = str(exc)
             if submitted:
                 result["status"] = "submission_unknown"

@@ -128,13 +128,18 @@ def instagram_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
     return {**INSTAGRAM_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
 
 
-def _raise_if_login_required(page: Page) -> None:
-    """Map a mid-upload login/challenge/2FA redirect to ``LoginRequiredError``."""
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
+    """Map a mid-upload login/challenge/2FA redirect to ``LoginRequiredError``.
+
+    ``publish_attempted`` must be true when the redirect is observed after the
+    publish click was dispatched.
+    """
     current_url = str(getattr(page, "url", "") or "").lower()
     if any(marker in current_url for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "Instagram 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -1134,6 +1139,12 @@ class InstagramUploader:
             await self._capture_failure_safely(page, error)
             raise
         except Exception as error:
+            if session.managed:
+                # 发布点击之后的登录跳转：结果可能已提交，必须带上 publish_attempted。
+                _raise_if_login_required(
+                    page,
+                    publish_attempted=self.result.get('status') == 'submission_unknown',
+                )
             raise await self._capture_failure(page, error) from error
 
     async def upload(self, *, session: BrowserSession | None = None) -> dict:

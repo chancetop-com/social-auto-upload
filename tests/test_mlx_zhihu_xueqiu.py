@@ -539,8 +539,9 @@ class MultiloginUploaderSeamTests(unittest.TestCase):
                         patch.object(module, "read_zhihu_identity", AsyncMock(), create=True),
                         patch.object(module, "read_xueqiu_identity", AsyncMock(), create=True),
                     ):
-                        with self.assertRaises(LoginRequiredError):
+                        with self.assertRaises(LoginRequiredError) as caught:
                             asyncio.run(app.upload_in(session))
+                self.assertFalse(caught.exception.publish_attempted)
                 self.assertEqual(page.goto_calls[0][0], start_url)
                 self.assertEqual(context.storage_state_calls, [])
                 self.assertEqual(context.forbidden_calls, [])
@@ -565,6 +566,110 @@ class MultiloginUploaderSeamTests(unittest.TestCase):
         page3.context.grant_permissions.assert_awaited_once_with(
             ["clipboard-read", "clipboard-write"], origin="https://mp.xueqiu.com"
         )
+
+
+class PublishLoginRedirectTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``（退出 10 不撒谎）。"""
+
+    def _expect(self, *args, **kwargs):
+        return SimpleNamespace(
+            to_have_count=AsyncMock(return_value=None),
+            to_be_visible=AsyncMock(return_value=None),
+            to_be_enabled=AsyncMock(return_value=None),
+            not_to_have_class=AsyncMock(return_value=None),
+        )
+
+    def test_zhihu_article_post_click_redirect_is_marked_as_dispatched(self):
+        signin = "https://www.zhihu.com/signin?next=%2Fwrite"
+
+        async def _submit(page, publish) -> None:
+            page.url = signin
+
+        with tempfile.TemporaryDirectory() as folder:
+            app, _ = _make_zhihu_article(folder, account_file=None, prepare_only=False)
+            page = _RecordingPage(final_url=ZHIHU_ARTICLE_URL)
+            page.get_by_role = MagicMock(return_value=MagicMock())
+            # 点击已派发，随后等待详情页时被登录页接管。
+            page.wait_for_url = AsyncMock(side_effect=RuntimeError("login redirect"))
+            app.fill_article_form = AsyncMock()
+            app._submit = AsyncMock(side_effect=_submit)
+            session, _context = _mlx_session(page)
+
+            with patch.object(zhihu_article, "expect", self._expect):
+                with self.assertRaises(LoginRequiredError) as caught:
+                    asyncio.run(app.upload_in(session))
+
+        self.assertTrue(caught.exception.publish_attempted)
+
+    def test_zhihu_video_post_click_redirect_is_marked_as_dispatched(self):
+        signin = "https://www.zhihu.com/signin?next=%2Fupload-video"
+
+        async def _submit(page, publish) -> None:
+            page.url = signin
+
+        with tempfile.TemporaryDirectory() as folder:
+            app, _ = _make_zhihu_video(folder, account_file=None, prepare_only=False)
+            page = _RecordingPage(final_url=ZHIHU_VIDEO_URL)
+            page.locator = MagicMock(
+                return_value=MagicMock(set_input_files=AsyncMock(return_value=None))
+            )
+            page.get_by_text = MagicMock(return_value=MagicMock())
+            page.get_by_role = MagicMock(return_value=MagicMock())
+            page.expect_popup = MagicMock(side_effect=RuntimeError("login redirect"))
+            app.video_options = AsyncMock(
+                return_value={"category": ["x"], "video_mark": ["y"]}
+            )
+            app.select_option = AsyncMock(return_value="x")
+            app.fill_video_form = AsyncMock()
+            app._submit = AsyncMock(side_effect=_submit)
+            session, _context = _mlx_session(page)
+
+            with patch.object(zhihu_video, "expect", self._expect):
+                with self.assertRaises(LoginRequiredError) as caught:
+                    asyncio.run(app.upload_in(session))
+
+        self.assertTrue(caught.exception.publish_attempted)
+
+    def test_xueqiu_article_post_click_redirect_is_marked_as_dispatched(self):
+        signin = "https://xueqiu.com/account/login"
+
+        async def _submit(page, publish) -> None:
+            page.url = signin
+
+        class _Submitted:
+            def __init__(self) -> None:
+                self.url = "https://mp.xueqiu.com/writeV2/"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc) -> bool:
+                return False
+
+            @property
+            def value(self):
+                async def _resolve():
+                    raise RuntimeError("login redirect")
+
+                return _resolve()
+
+        with tempfile.TemporaryDirectory() as folder:
+            app, _ = _make_xueqiu_article(folder, account_file=None, prepare_only=False)
+            page = _RecordingPage(final_url="https://mp.xueqiu.com/writeV2/")
+            page.get_by_role = MagicMock(return_value=MagicMock())
+            page.expect_response = MagicMock(return_value=_Submitted())
+            app.fill_article_form = AsyncMock()
+            app._close_preview = AsyncMock()
+            app._submit = AsyncMock(side_effect=_submit)
+            session, _context = _mlx_session(page)
+
+            with patch.object(xueqiu_article, "expect", self._expect), patch.object(
+                xueqiu_article, "logger", MagicMock()
+            ):
+                with self.assertRaises(LoginRequiredError) as caught:
+                    asyncio.run(app.upload_in(session))
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 # ---------------------------------------------------------------------------

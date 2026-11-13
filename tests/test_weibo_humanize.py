@@ -23,6 +23,7 @@ import asyncio
 import os
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.fakes_xhs_dom import (
@@ -37,6 +38,7 @@ from uploader.weibo_uploader import main as weibo_main
 from uploader.weibo_uploader.main import WeiBoVideo
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 
 PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "weibo_uploader"
@@ -503,19 +505,17 @@ class WeiboPublishPointTests(unittest.TestCase):
         self.assertEqual(publish.click_count, 0)
 
     def test_publish_is_not_retried_after_the_mouse_went_down(self):
+        # 原始异常类型是普通 RuntimeError（Playwright 不会抛 ElementUnusableError）：
+        # mouse.down 之后失败仍必须映射为结果未知，不能落回 (0.35,0.5) 重试。
         page, publish = _publish_page()
         page.mouse = ExplodingMouse(RuntimeError("mouse up failed"))
 
         with patch.object(weibo_main, "Humanizer", RecordingHumanizer):
             app = _video()
             humanizer = app._humanizer(page)
-            with self.assertRaises(RuntimeError) as caught:
+            with self.assertRaises(PublishResultUnknownError):
                 asyncio.run(app._submit_publish(page, humanizer=humanizer))
 
-        self.assertEqual(
-            getattr(caught.exception, MAYBE_DISPATCHED, None),
-            MAYBE_DISPATCHED_VALUE,
-        )
         self.assertEqual(humanizer.points, [(0.65, 0.5)])
         self.assertEqual(page.mouse.down_count, 1)
         self.assertEqual(publish.click_count, 0)
@@ -544,6 +544,34 @@ class WeiboPublishPointTests(unittest.TestCase):
         self.assertTrue(caught.exception.publish_clicked)
         self.assertEqual(humanizer.points, [(0.65, 0.5)])
         self.assertEqual(publish.click_count, 0)
+
+
+class LoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``。"""
+
+    def test_pre_click_redirect_is_not_marked_as_dispatched(self):
+        page = SimpleNamespace(url="https://passport.weibo.com/sso/signin")
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            weibo_main._raise_if_login_required(page)
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_post_click_poll_marks_the_redirect_as_dispatched(self):
+        page, publish = _publish_page()
+        publish.on_human_click = lambda: setattr(
+            page, "url", "https://passport.weibo.com/sso/signin"
+        )
+
+        with patch.object(weibo_main, "Humanizer", RecordingHumanizer):
+            app = _video()
+            humanizer = app._humanizer(page)
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(
+                    app._submit_publish(page, multilogin=True, humanizer=humanizer)
+                )
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 # ---------------------------------------------------------------------------

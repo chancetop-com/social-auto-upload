@@ -27,6 +27,7 @@ import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import uploader.ks_uploader.main as ks_main
@@ -41,7 +42,7 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
-from utils.errors import PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
@@ -900,6 +901,48 @@ class PublishDispatchGuardTests(unittest.TestCase):
 
             self.assertNotIsInstance(ctx.exception, PublishResultUnknownError)
             self.assertEqual(humanizer.dispatches, ["publish"] * ks_main.KUAISHOU_PUBLISH_ATTEMPTS)
+
+
+class LoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``。"""
+
+    def test_pre_click_redirect_is_not_marked_as_dispatched(self):
+        page = SimpleNamespace(url="https://passport.kuaishou.com/pc/account/login/")
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            ks_main._raise_if_login_required(page)
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_post_click_redirect_marks_publish_attempted(self):
+        with _temp_dir() as tmp:
+            log: list = []
+            editor = _TypingLocator("desc-editor", log=log)
+            page = _page(_video_selectors(log, editor), log=log)
+            page.url = ks_main.KUAISHOU_UPLOAD_URL
+            login_url = "https://passport.kuaishou.com/pc/account/login/"
+
+            async def _wait_for_url(url, *, timeout=None, **kwargs):
+                raise PWTimeoutError("login redirect")
+
+            # 点击后页面被登录页接管：wait_for_url 失败，异常分支必须带派发标记。
+            page.wait_for_url = _wait_for_url
+
+            class _Redirecting(_QuietHumanizer):
+                async def click(self, locator, *, point=None) -> None:
+                    await super().click(locator, point=point)
+                    if getattr(locator, "name", "") == "publish":
+                        self.page.url = login_url
+
+            app = _video_app(tmp, desc="描述")
+            humanizer = _Redirecting(page, log=log)
+            app._humanizer_instance = humanizer
+
+            with _fast_clock():
+                with self.assertRaises(LoginRequiredError) as caught:
+                    asyncio.run(app._upload_video_on_page(page, multilogin=True))
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 # ---------------------------------------------------------------------------

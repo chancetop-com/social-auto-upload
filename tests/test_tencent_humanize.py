@@ -22,9 +22,11 @@ import random
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import uploader.tencent_uploader.main as tencent_main
+from patchright.async_api import TimeoutError as PWTimeoutError
 from tests.fakes_xhs_dom import (
     FakeLocator,
     RecordingKeyboard,
@@ -34,6 +36,7 @@ from tests.fakes_xhs_dom import (
     UnscriptedSelectorError,
 )
 from tests.humanize_gates import assert_clean
+from utils.errors import LoginRequiredError
 from utils.humanize import HumanizeProfile, LogNormal
 
 AFTER_TYPE = 5.0
@@ -488,6 +491,61 @@ class HumanizeEventSequenceTests(unittest.TestCase):
         for expression, _arg in page.evaluate_calls:
             self.assertNotIn("click", str(expression))
             self.assertNotIn("el =>", str(expression))
+
+
+class LoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``。"""
+
+    def test_pre_click_redirect_is_not_marked_as_dispatched(self):
+        page = SimpleNamespace(url="https://channels.weixin.qq.com/login")
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            tencent_main._raise_if_login_required(page)
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_post_click_redirect_marks_publish_attempted(self):
+        log: list = []
+        publish = _Clickable("publish", log=log)
+        page = _page(
+            {
+                "role:button:发表": publish,
+                '.changeAccount-dialog button:has-text("取消")': FakeLocator(
+                    "switch-cancel", count=0
+                ),
+                ".changeAccount-dialog .weui-desktop-dialog__close-btn": FakeLocator(
+                    "switch-close", count=0
+                ),
+            },
+            log=log,
+        )
+        create_url = "https://channels.weixin.qq.com/platform/post/create"
+        # 平台把登录页挂在 create 地址前：URL 同时含 login 与 /post/create。
+        login_url = "https://channels.weixin.qq.com/login?next=/platform/post/create"
+        page.url = create_url
+
+        async def _wait_for_url(url, *, timeout=None, **kwargs):
+            raise PWTimeoutError("login redirect")
+
+        page.wait_for_url = _wait_for_url
+
+        class _Redirecting(_QuietHumanizer):
+            async def click(self, locator, *, point=None) -> None:
+                await super().click(locator, point=point)
+                if getattr(locator, "name", "") == "publish":
+                    page.url = login_url
+
+        app = _video()
+        app.publish_not_before = None
+        app._publish_budget = app.start_publish_budget()
+        humanizer = _Redirecting(page)
+        app._humanizer_instance = humanizer
+
+        with patch.object(asyncio, "sleep", new=AsyncMock(return_value=None)):
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app.submit_publish(page, multilogin=True))
+
+        self.assertTrue(caught.exception.publish_attempted)
 
 
 # ---------------------------------------------------------------------------

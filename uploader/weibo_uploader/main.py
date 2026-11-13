@@ -33,7 +33,7 @@ from uploader.base_video import BaseVideoUploader
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError
-from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
+from utils.humanize import Humanizer, maybe_dispatched
 from utils.log import weibo_logger
 from utils.login_qrcode import build_login_qrcode_path, remove_qrcode_file
 
@@ -97,11 +97,12 @@ WEIBO_LOGIN_POSITIVE_SELECTORS = (
 WEIBO_LOGIN_URL_MARKERS = ("newlogin", "passport", "signin")
 
 
-def _raise_if_login_required(page) -> None:
+def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this.  Local mode keeps its historical
-    retry/timeout behaviour.
+    retry/timeout behaviour.  ``publish_attempted`` must be true when the
+    redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -109,12 +110,14 @@ def _raise_if_login_required(page) -> None:
     if any(marker in url for marker in WEIBO_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "微博上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
     if any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa")):
         raise LoginRequiredError(
             "微博上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -964,10 +967,15 @@ class WeiBoVideo(BaseVideoUploader):
         await humanizer.before_submit()
         try:
             await humanizer.click(publish_btn, point=(0.65, 0.5))
-        except ElementUnusableError as exc:
-            dispatched = getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE
-            if dispatched or getattr(exc, "publish_clicked", False):
-                # 按下之后失败：可能已经在页面上触发了提交，禁止二次派发。
+        except Exception as exc:
+            # 按下鼠标之后的任何异常（``mouse.down`` 之后的 Playwright/原生报错）
+            # 都可能已经触发提交：禁止二次派发，按结果未知上抛。
+            if maybe_dispatched(exc):
+                raise budget.timeout_error(True) from exc
+            if not isinstance(exc, ElementUnusableError):
+                raise
+            if getattr(exc, "publish_clicked", False):
+                # 确定已派发的异常：原样上抛，不再点第二次。
                 raise
             weibo_logger.warning(
                 _msg(
@@ -976,15 +984,21 @@ class WeiBoVideo(BaseVideoUploader):
                     "改用 (0.35,0.5) 再试一次",
                 )
             )
-            await humanizer.click(publish_btn, point=(0.35, 0.5))
+            try:
+                await humanizer.click(publish_btn, point=(0.35, 0.5))
+            except Exception as retry_exc:
+                if maybe_dispatched(retry_exc):
+                    raise budget.timeout_error(True) from retry_exc
+                raise
         weibo_logger.info(_msg("🏃", "已点击发布按钮"))
+        publish_clicked = True
 
         success_layer = page.locator('div[class*="_layer1_9a8j7"]').first
         again_btn = page.locator('button:has(span:text-is("再发一条视频"))').first
         dialog_confirmed = False
         while budget.remaining_seconds() > 0:
             if multilogin:
-                _raise_if_login_required(page)
+                _raise_if_login_required(page, publish_attempted=publish_clicked)
             try:
                 if await again_btn.is_visible():
                     weibo_logger.success(_msg("🥳", "视频发布成功（出现「再发一条视频」）"))

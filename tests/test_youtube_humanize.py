@@ -25,7 +25,8 @@ import asyncio
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.fakes_xhs_dom import (
     FakeLocator,
@@ -37,7 +38,9 @@ from tests.fakes_xhs_dom import (
 from tests.humanize_gates import assert_clean
 from uploader.youtube_uploader import main as youtube_main
 from uploader.youtube_uploader.main import YouTubeVideo
-from utils.humanize import Humanizer
+from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
+from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 
 PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "youtube_uploader"
 TITLE_INPUT = "#title-textarea #textbox"
@@ -634,6 +637,70 @@ class YouTubeStaticGateTests(unittest.TestCase):
         source = (PACKAGE / "main.py").read_text(encoding="utf-8")
         self.assertNotIn("_click_if_present(page, selector", source)
         self.assertIn("humanizer=humanizer", source)
+
+
+class YouTubePublishDispatchGuardTests(unittest.TestCase):
+    """``#done-button`` 按下之后失败 = 结果未知（退出 9），绝不二次派发。"""
+
+    def _video(self):
+        app = YouTubeVideo("标题", "demo.mp4", [], "account.json")
+        app.start_publish_budget()
+        return app
+
+    def _page(self):
+        page = MagicMock()
+        locator = MagicMock()
+        locator.first = locator
+        locator.wait_for = AsyncMock(return_value=True)
+        locator.set_input_files = AsyncMock(return_value=None)
+        locator.is_visible = AsyncMock(return_value=True)
+        locator.count = AsyncMock(return_value=1)
+        page.locator.return_value = locator
+        page.wait_for_timeout = AsyncMock(return_value=None)
+        return page
+
+    def _run(self, error: BaseException) -> list:
+        page = self._page()
+        app = self._video()
+        app._humanizer_instance = SimpleNamespace(page=page, before_submit=AsyncMock())
+        dispatches: list[str] = []
+
+        async def _click_if_present(page, selector, timeout=4000, *, humanizer):
+            if selector == "#done-button":
+                dispatches.append(selector)
+                raise error
+            return True
+
+        with (
+            patch.object(youtube_main, "_click_if_present", _click_if_present),
+            patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(
+                youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
+            ),
+        ):
+            asyncio.run(app._upload_video_on_page(page, multilogin=False))
+        return dispatches
+
+    def test_maybe_dispatched_done_click_maps_to_result_unknown(self):
+        error = RuntimeError("mouse up failed")
+        setattr(error, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+
+        with self.assertRaises(PublishResultUnknownError):
+            self._run(error)
+
+    def test_pre_dispatch_done_failure_propagates(self):
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            self._run(error)
+
+        self.assertIs(caught.exception, error)
 
 
 class YouTubeHumanizeDisabledTests(unittest.TestCase):

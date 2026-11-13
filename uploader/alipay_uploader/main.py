@@ -148,11 +148,12 @@ async def _cover_input_attached(locator) -> bool:
         return False
 
 
-def _raise_if_login_required(page) -> None:
+def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    retry/timeout behaviour untouched.
+    retry/timeout behaviour untouched.  ``publish_attempted`` must be true when
+    the redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -160,7 +161,8 @@ def _raise_if_login_required(page) -> None:
     if any(marker in url for marker in ALIPAY_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "支付宝上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -881,7 +883,7 @@ class AlipayVideo(BaseVideoUploader):
 
             while budget.remaining_seconds() > 0:
                 if multilogin:
-                    _raise_if_login_required(page)
+                    _raise_if_login_required(page, publish_attempted=publish_clicked)
                 if "/content-creation/posts" in page.url:
                     alipay_logger.success(_msg("🥳", "视频发布成功"))
                     return

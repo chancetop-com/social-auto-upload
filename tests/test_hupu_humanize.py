@@ -26,6 +26,7 @@ import os
 import random
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import uploader.hupu_uploader.main as hupu_main
@@ -39,7 +40,7 @@ from tests.fakes_xhs_dom import (
 )
 from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
-from utils.errors import PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
 
@@ -467,6 +468,39 @@ class PublishDispatchGuardTests(unittest.TestCase):
             self._submit(page, humanizer)
 
         self.assertIs(caught.exception, error)
+        self.assertEqual(targets["publish"].click_count, 0)
+
+
+class LoginRedirectPublishAttemptTests(unittest.TestCase):
+    """发布点击之后的登录跳转必须带 ``publish_attempted=True``。"""
+
+    def test_pre_click_redirect_is_not_marked_as_dispatched(self):
+        page = SimpleNamespace(url="https://passport.hupu.com/pc/login")
+
+        with self.assertRaises(LoginRequiredError) as caught:
+            hupu_main._raise_if_login_required(page)
+
+        self.assertFalse(caught.exception.publish_attempted)
+
+    def test_post_click_poll_marks_the_redirect_as_dispatched(self):
+        log: list = []
+        page, targets = _publish_page(log)
+        page.url = "https://bbs.hupu.com/publish"
+
+        class _Redirecting(_QuietHumanizer):
+            async def click(self, locator, *, point=None) -> None:
+                await super().click(locator, point=point)
+                if getattr(locator, "name", "") == "publish":
+                    page.url = "https://passport.hupu.com/pc/login"
+
+        app = _app()
+        humanizer = _Redirecting(page)
+        with patch.object(hupu_main, "Humanizer", lambda page, **kwargs: humanizer):
+            app._humanizer_instance = humanizer
+            with self.assertRaises(LoginRequiredError) as caught:
+                asyncio.run(app._submit_publish(page, multilogin=True))
+
+        self.assertTrue(caught.exception.publish_attempted)
         self.assertEqual(targets["publish"].click_count, 0)
 
 

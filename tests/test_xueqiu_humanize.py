@@ -30,6 +30,7 @@ from unittest.mock import AsyncMock, patch
 
 from uploader.xueqiu_uploader import article as xueqiu_article
 from uploader.xueqiu_uploader.article import XueqiuArticle
+from uploader.publish_timeout import PublishTimeoutBudget
 from tests.fakes_xhs_dom import (
     FakeFileChooser,
     FakeLocator,
@@ -40,7 +41,14 @@ from tests.fakes_xhs_dom import (
     UnscriptedSelectorError,
 )
 from tests.humanize_gates import assert_clean
-from utils.humanize import HumanizeProfile, LogNormal
+from utils.dom import ElementUnusableError
+from utils.errors import PublishResultUnknownError
+from utils.humanize import (
+    MAYBE_DISPATCHED,
+    MAYBE_DISPATCHED_VALUE,
+    HumanizeProfile,
+    LogNormal,
+)
 
 AFTER_TYPE = 5.0
 BEFORE_SUBMIT = 7.0
@@ -681,6 +689,51 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             self.assertLess(
                 log.index(("evaluate", "hit-test", "publish")), log.index(("down",))
             )
+
+
+class SubmitDispatchGuardTests(unittest.TestCase):
+    """提交点：``mouse.down`` 之后失败 = 结果未知（退出 9），绝不二次派发。"""
+
+    def _maybe_error(self) -> RuntimeError:
+        exc = RuntimeError("mouse up failed")
+        setattr(exc, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
+        return exc
+
+    def _run(self, error: BaseException) -> list:
+        """Run the submit point once with a failing click; return the click log."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _article(tmp)
+            app._publish_budget = PublishTimeoutBudget("雪球")
+            log: list = []
+            publish = _Clickable("publish", log=log)
+            page = _page({PUBLISH_BUTTON: publish}, log=log)
+
+            class _Failing(_QuietHumanizer):
+                async def click(self, locator, *, point=None) -> None:
+                    raise error
+
+            with patch.object(xueqiu_article, "Humanizer", _Failing):
+                asyncio.run(app._submit(page, publish))
+        # The humanizer fake never reaches its own coordinate click: one attempt only.
+        return publish.click_calls
+
+    def test_maybe_dispatched_submit_failure_maps_to_result_unknown(self):
+        with self.assertRaises(PublishResultUnknownError):
+            self._run(self._maybe_error())
+
+    def test_pre_dispatch_submit_failure_propagates(self):
+        error = ElementUnusableError(
+            what="点击目标",
+            role="interactive",
+            selector="",
+            reason="covered-by:mask",
+            publish_clicked=False,
+        )
+
+        with self.assertRaises(ElementUnusableError) as caught:
+            self._run(error)
+
+        self.assertIs(caught.exception, error)
 
 
 # ---------------------------------------------------------------------------

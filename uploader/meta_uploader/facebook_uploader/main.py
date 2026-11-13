@@ -58,17 +58,19 @@ def facebook_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
     return {**FACEBOOK_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
 
 
-def _raise_if_login_required(page: Page) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its legacy
-    cookie-invalid error.
+    cookie-invalid error.  ``publish_attempted`` must be true when the redirect
+    is observed after the publish click was dispatched.
     """
     current_url = str(getattr(page, "url", "") or "").lower()
     if any(marker in current_url for marker in _FACEBOOK_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "Facebook 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
@@ -420,7 +422,8 @@ class FacebookPost:
             _raise_if_login_required(page)
         await self._publish_on_page(page)
         if session.managed:
-            _raise_if_login_required(page)
+            # 发布点击已成功走完（``_publish_and_verify`` 只在确认成功后才返回）。
+            _raise_if_login_required(page, publish_attempted=True)
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:

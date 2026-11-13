@@ -31,16 +31,18 @@ def is_xueqiu_login_url(url: str) -> bool:
     )
 
 
-def raise_if_login_required(page: Page) -> None:
+def raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload Xueqiu sign-in redirect to ``LoginRequiredError``.
 
     Only the Multilogin branch calls this; the local branch keeps its historical
-    behaviour untouched.
+    behaviour untouched.  ``publish_attempted`` must be true when the redirect is
+    observed after the publish click was dispatched.
     """
     if is_xueqiu_login_url(str(getattr(page, "url", "") or "")):
         raise LoginRequiredError(
             "雪球上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "请在 Multilogin 应用中登录 Profile 后重试。",
+            publish_attempted=publish_attempted,
         )
 
 
