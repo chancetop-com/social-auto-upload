@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/github/license/dreammis/social-auto-upload)
 ![Release](https://img.shields.io/github/v/release/dreammis/social-auto-upload?display_name=tag)
-[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-18-0D9488?logo=github)](./docs/skill-distribution.md)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-19-0D9488?logo=github)](./docs/skill-distribution.md)
 [![skills.sh](https://img.shields.io/badge/skills.sh-Agent%20Skills-4B32C3?logo=github)](https://www.skills.sh/dreammis/social-auto-upload/douyin-upload)
 
 `social-auto-upload` 是一个面向内容创作者和运营者的多平台发布工具，提供统一 CLI 和供 Codex、OpenClaw、Claude Code 等 Agent 使用的 Skill。
@@ -81,6 +81,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | 抖音 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
 | Bilibili | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 视频发布；运行时自动准备 `biliup` |
 | 小红书（浏览器版） | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
+| Rednote（国际版） | ✅ | 实验性 | - | 实验性 | 实验性 | ✅ | ✅ | [本地登录及发布前准备已验收](./docs/rednote.md)，最终提交尚未实测 |
 | 快手 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
 | 视频号 | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 视频发布 |
 | 百家号 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频发布 |
@@ -135,7 +136,7 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 - [CLI 使用说明](./docs/CLI.md)
 - [Agent Bootstrap Prompt](./docs/agent-bootstrap.md)
 - 跨平台总入口：[social-auto-upload](./skills/social-auto-upload/SKILL.md)
-- 各平台 Skill：[抖音](./skills/douyin-upload/SKILL.md)、[Bilibili](./skills/bilibili-upload/SKILL.md)、[小红书](./skills/xiaohongshu-upload/SKILL.md)、[快手](./skills/kuaishou-upload/SKILL.md)、[视频号](./skills/tencent-upload/SKILL.md)、[百家号](./skills/baijiahao-upload/SKILL.md)、[大鱼号](./skills/dayu-upload/SKILL.md)、[支付宝生活号](./skills/alipay-upload/SKILL.md)、[微博](./skills/weibo-upload/SKILL.md)、[虎扑](./skills/hupu-upload/SKILL.md)、[TikTok](./skills/tiktok-upload/SKILL.md)、[雪球](./skills/xueqiu-upload/SKILL.md)、[YouTube](./skills/youtube-upload/SKILL.md)、[知乎](./skills/zhihu-upload/SKILL.md)、[Facebook](./skills/facebook-upload/SKILL.md)、[Facebook Page](./skills/meta-upload/SKILL.md)、[Instagram](./skills/instagram-upload/SKILL.md)
+- 各平台 Skill：[抖音](./skills/douyin-upload/SKILL.md)、[Bilibili](./skills/bilibili-upload/SKILL.md)、[小红书](./skills/xiaohongshu-upload/SKILL.md)、[Rednote](./skills/rednote-upload/SKILL.md)、[快手](./skills/kuaishou-upload/SKILL.md)、[视频号](./skills/tencent-upload/SKILL.md)、[百家号](./skills/baijiahao-upload/SKILL.md)、[大鱼号](./skills/dayu-upload/SKILL.md)、[支付宝生活号](./skills/alipay-upload/SKILL.md)、[微博](./skills/weibo-upload/SKILL.md)、[虎扑](./skills/hupu-upload/SKILL.md)、[TikTok](./skills/tiktok-upload/SKILL.md)、[雪球](./skills/xueqiu-upload/SKILL.md)、[YouTube](./skills/youtube-upload/SKILL.md)、[知乎](./skills/zhihu-upload/SKILL.md)、[Facebook](./skills/facebook-upload/SKILL.md)、[Facebook Page](./skills/meta-upload/SKILL.md)、[Instagram](./skills/instagram-upload/SKILL.md)
 
 #### Skill 分发与市场
 
@@ -237,6 +238,7 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 | 平台 | 平台参数 | 发布说明 |
 | --- | --- | --- |
 | 抖音、快手、小红书 | `douyin`、`kuaishou`、`xiaohongshu` | [CLI 参数](./docs/CLI.md) |
+| Rednote（国际版，初始适配） | `rednote` | [登录与发布前验证](./docs/rednote.md) |
 | Bilibili、视频号 | `bilibili`、`tencent` | [CLI 参数](./docs/CLI.md) |
 | 百家号、大鱼号 | `baijiahao`、`dayu` | [大鱼号视频](./docs/dayu.md)、[CLI 参数](./docs/CLI.md) |
 | 支付宝生活号、微博、虎扑 | `alipay`、`weibo`、`hupu` | [CLI 参数](./docs/CLI.md) |
@@ -407,7 +409,7 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 
 ## 📜许可证
 
-仓库主体采用 [MIT License](LICENSE)。纳入版本控制的 Agent Skills 按各自 `SKILL.md` frontmatter 中声明的许可证发布；当前 18 个产品 Skill 为 MIT-0，以便在要求该许可证的平台分发。该范围不改变仓库其余代码的 MIT License。
+仓库主体采用 [MIT License](LICENSE)。纳入版本控制的 Agent Skills 按各自 `SKILL.md` frontmatter 中声明的许可证发布；当前 19 个产品 Skill 为 MIT-0，以便在要求该许可证的平台分发。该范围不改变仓库其余代码的 MIT License。
 
 ## ⭐Star-History
 

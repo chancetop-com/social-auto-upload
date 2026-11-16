@@ -48,8 +48,9 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     validate_publish_options,
 )
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -934,17 +935,23 @@ class InstagramUploader:
         ``RuntimeError``（退出 1），不能映射成结果未知（退出 9）。
         """
         budget.check_pre_click()
-        timeout_ms = min(60_000, max(1, int(budget.remaining_seconds() * 1000)))
-        deadline = time.monotonic() + timeout_ms / 1000
-        try:
-            await expect(action).to_have_count(1, timeout=timeout_ms)
-            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-            await expect(action).to_be_enabled(timeout=remaining_ms)
-        except (BrowserTimeoutError, AssertionError) as error:
-            raise RuntimeError(
-                "Instagram 发布就绪超时（上限 60 秒或剩余预算）："
-                "Share 按钮未出现或不可用；尚未点击发布，未发布任何内容。"
-            ) from error
+        deadline = time.monotonic() + min(60, budget.remaining_seconds())
+        while True:
+            remaining = min(deadline - time.monotonic(), budget.remaining_seconds())
+            if remaining <= 0:
+                raise RuntimeError(
+                    "Instagram 发布就绪超时（上限 60 秒或剩余预算）："
+                    "Share 按钮未出现或不可用；尚未点击发布，未发布任何内容。"
+                )
+            count = await reject_ambiguous(action, "Instagram Share")
+            if count == 1:
+                try:
+                    if await action.is_enabled(timeout=min(200, max(1, int(remaining * 1000)))):
+                        return
+                except BrowserTimeoutError:
+                    # The unique button may detach between count and probe.
+                    pass
+            await asyncio.sleep(min(0.2, remaining))
 
     async def _publish(
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
@@ -979,12 +986,7 @@ class InstagramUploader:
                 "Instagram 发布就绪，--no-publish 停在 Share 前（未点击发布）"
             )
             return
-        await expect(action).to_have_count(
-            1, timeout=budget.clamp_ms(30_000)
-        )
-        await expect(action).to_be_enabled(
-            timeout=budget.clamp_ms(30_000)
-        )
+        await self._wait_until_publish_ready(action, budget=budget)
         await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
             logger=logger,
@@ -1078,7 +1080,10 @@ class InstagramUploader:
         try:
             return await self._upload_flow(page, identity, budget=budget)
         finally:
-            await page.remove_locator_handler(notifications)
+            try:
+                await page.remove_locator_handler(notifications)
+            except Exception as error:
+                logger.warning("Instagram handler cleanup failed; preserving upload result: {}", error)
 
     async def _upload_flow(
         self, page: Page, identity: dict, *, budget: PublishTimeoutBudget
@@ -1177,7 +1182,7 @@ class InstagramUploader:
                 identity = await instagram_identity(page, self.account_file)
                 result = await self._upload_steps(page, identity, budget=budget)
                 self.stage = 'save_session'
-                await context.storage_state(path=str(self.account_file))
+                await save_upload_session(context, str(self.account_file))
                 return result
             except PublishResultUnknownError as error:
                 # 结果未知必须保留专用错误类型（退出码 9），但先落盘现场证据。
@@ -1186,4 +1191,4 @@ class InstagramUploader:
             except Exception as error:
                 raise await self._capture_failure(page, error) from error
             finally:
-                await browser.close()
+                await close_browser_resources(browser=browser)

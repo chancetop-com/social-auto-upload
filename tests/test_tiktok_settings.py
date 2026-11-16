@@ -1890,6 +1890,9 @@ class HashtagEntityTests(unittest.TestCase):
         async def inner_text(self):
             return self.text
 
+        async def dispose(self):
+            pass
+
         async def get_attribute(self, name):
             if name == "aria-selected" and self.selected:
                 return "true"
@@ -1909,6 +1912,9 @@ class HashtagEntityTests(unittest.TestCase):
 
         async def count(self):
             return len(self.items)
+
+        async def element_handles(self):
+            return list(self.items)
 
         def nth(self, index):
             return self.items[index]

@@ -47,6 +47,9 @@ class _FakeLocator:
     async def count(self) -> int:
         return 1
 
+    async def is_visible(self) -> bool:
+        return True
+
     async def hover(self) -> None:
         """Platform click entry hovers before clicking (spec §2.5.1)."""
         if self.hover_error is not None:

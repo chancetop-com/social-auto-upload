@@ -5,6 +5,7 @@
 - `douyin`
 - `kuaishou`
 - `xiaohongshu`
+- `rednote`：小红书国际版的独立初始适配，默认英文浏览器环境；见 [Rednote 使用说明](./rednote.md)
 - `bilibili`
 - `tencent`
 - `baijiahao`
@@ -43,6 +44,7 @@ uv pip install -e .
 sau douyin --help
 sau kuaishou --help
 sau xiaohongshu --help
+sau rednote --help
 sau bilibili --help
 sau tencent --help
 sau baijiahao --help
@@ -130,7 +132,8 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 - **失败语义**：候选选择器一个都没出现 → 退出 `1`，属**选择器问题**，改代码而不是重试；
   元素找到但不可用（`ambiguous:N`、`zero-box`、`no-bounding-box`、`point-drift`、
   `covered-by:*`、`disabled`、`pointer-events-none`）→ 退出 `1`，属**页面问题**，只在调用方的
-  状态重试循环里按业务重试（`ambiguous:` 不重试）；鼠标按下之后才失败时异常带
+  状态重试循环里按业务重试。`ambiguous:` 首次发现即停止，上传完成等待和发布就绪等待也不重试，
+  不取第一个按钮继续。鼠标按下之后才失败时异常带
   `click_dispatched="maybe"`，**禁止再次派发**。没有运行时自动降级：失败不会悄悄退回
   JS 点击或 `force`。
 - **与 15 分钟预算的关系**：人类化停顿不是额外预算，只消耗
@@ -215,6 +218,8 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `10` | 需要登录 / 人机验证 | 登录页、登录表单、验证码、2FA；本地运行前预检失败（账号文件缺失/失效）；`check` 确定未登录 | 点击前：排人工登录，登录后可直接重跑。点击后（stderr 另有 `publish_attempted=true`）：**先核对笔记是否存在** |
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
+
+本地上传结束后的 cookie 回写、context/browser 关闭失败只记录 warning；两项关闭分别尝试，不覆盖主流程的成功、结果未知或原始错误。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -491,13 +496,9 @@ sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --t
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-海外环境如果无法登录默认创作者后台，可以通过环境变量切换到 RedNote 域名。该设置同时作用于登录、cookie 校验、视频发布和图文发布：
+Rednote 使用独立命令 `sau rednote`，账号文件与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
 
-```bash
-SAU_XHS_CREATOR_BASE_URL=https://creator.rednote.com sau xiaohongshu login --account <account_name>
-```
-
-本地模式的浏览器 context 固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`，不依赖操作系统语言；托管模式不会应用该设置，Multilogin / AdsPower 的 Profile 界面必须保持**中文**。若 RedNote 后台实际为英文 UI，当前中文选择器不适用。
+小红书本地模式的浏览器 context 固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`；Rednote 使用 `en-US`。托管模式沿用 Profile 自身的语言设置。
 
 ### 小红书发布声明
 

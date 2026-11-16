@@ -22,6 +22,7 @@ from patchright.async_api import (
 )
 
 from uploader.base_video import BaseVideoUploader
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError
@@ -700,6 +701,12 @@ class MetaBusinessUploader(BaseVideoUploader):
         await self._fill_schedule(page)
         await self._publish(page)
 
+    def _write_result_safely(self) -> None:
+        try:
+            self._write_result()
+        except Exception as error:
+            logger.warning("Facebook Page result write-back failed; preserving upload result: {}", error)
+
     async def upload_in(self, session: BrowserSession) -> dict:
         """Multilogin body: consume the injected context, touch no cookies."""
         self.start_publish_budget()
@@ -723,7 +730,7 @@ class MetaBusinessUploader(BaseVideoUploader):
                 _raise_if_login_required(page, publish_attempted=True)
             return self.result
         finally:
-            self._write_result()
+            self._write_result_safely()
 
     async def upload(self, *, session: BrowserSession | None = None) -> dict:
         # Media validation is shared; cookie handling stays local-only.
@@ -748,5 +755,5 @@ class MetaBusinessUploader(BaseVideoUploader):
                     )
                 return self.result
             finally:
-                self._write_result()
-                await browser.close()
+                self._write_result_safely()
+                await close_browser_resources(browser=browser)

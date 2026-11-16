@@ -30,8 +30,9 @@ from patchright.async_api import (
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError
 from utils.humanize import Humanizer, maybe_dispatched
 from utils.log import weibo_logger
@@ -457,11 +458,10 @@ class WeiBoVideo(BaseVideoUploader):
             )
 
             # 保存 cookie
-            await context.storage_state(path=self.account_file)
-            weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
+            if await save_upload_session(context, self.account_file):
+                weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
@@ -950,9 +950,10 @@ class WeiBoVideo(BaseVideoUploader):
             pass
 
         budget = self.publish_budget
-        publish_btn = page.locator('div[class*="_check_2z30i"] button:has(span:text-is("发布"))').first
-        if not await publish_btn.count():
-            publish_btn = page.get_by_role("button", name="发布").first
+        publish_btn = page.locator('div[class*="_check_2z30i"] button:has(span:text-is("发布"))')
+        if not await reject_ambiguous(publish_btn, "发布按钮"):
+            publish_btn = page.get_by_role("button", name="发布")
+        await reject_ambiguous(publish_btn, "发布按钮")
         await publish_btn.wait_for(
             state="visible", timeout=budget.clamp_ms(15000)
         )
@@ -973,6 +974,8 @@ class WeiBoVideo(BaseVideoUploader):
             if maybe_dispatched(exc):
                 raise budget.timeout_error(True) from exc
             if not isinstance(exc, ElementUnusableError):
+                raise
+            if exc.reason.startswith("ambiguous:"):
                 raise
             if getattr(exc, "publish_clicked", False):
                 # 确定已派发的异常：原样上抛，不再点第二次。

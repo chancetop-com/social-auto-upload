@@ -19,6 +19,7 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 | 抖音 | `douyin-upload` | `douyin` |
 | Bilibili | `bilibili-upload` | `bilibili` |
 | 小红书 | `xiaohongshu-upload` | `xiaohongshu` |
+| Rednote（国际版，初始适配） | `rednote-upload` | `rednote` |
 | 快手 | `kuaishou-upload` | `kuaishou` |
 | 视频号 | `tencent-upload` | `tencent` |
 | 百家号 | `baijiahao-upload` | `baijiahao` |

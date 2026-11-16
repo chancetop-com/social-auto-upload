@@ -665,7 +665,7 @@ class YouTubePublishDispatchGuardTests(unittest.TestCase):
         app._humanizer_instance = SimpleNamespace(page=page, before_submit=AsyncMock())
         dispatches: list[str] = []
 
-        async def _click_if_present(page, selector, timeout=4000, *, humanizer):
+        async def _click_if_present(page, selector, timeout=4000, *, humanizer, unique=False):
             if selector == "#done-button":
                 dispatches.append(selector)
                 raise error
@@ -731,7 +731,7 @@ class YouTubePostPublishCloseTests(unittest.TestCase):
         setattr(error, MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE)
         close_selectors: list[str] = []
 
-        async def _click_if_present(page, selector, timeout=4000, *, humanizer):
+        async def _click_if_present(page, selector, timeout=4000, *, humanizer, unique=False):
             if selector == "#done-button":
                 return True
             if "Close" in selector:

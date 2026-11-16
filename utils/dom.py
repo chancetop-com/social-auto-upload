@@ -130,6 +130,16 @@ class ElementUnusableError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+async def reject_ambiguous(locator, what: str, *, role: str = "interactive") -> int:
+    """Count without waiting; missing controls may be polled, ambiguity may not."""
+    count = await locator.count()
+    if count > 1:
+        raise ElementUnusableError(
+            what, role=role, reason=f"ambiguous:{count}", publish_clicked=False,
+        )
+    return count
+
+
 _FACTS_JS = """
 el => {
   const own = getComputedStyle(el);
@@ -1076,6 +1086,7 @@ __all__ = [
     "check",
     "clear_overlays",
     "normalise_point",
+    "reject_ambiguous",
     "resolve",
     "wait_dom_quiet",
     "wait_resolved",

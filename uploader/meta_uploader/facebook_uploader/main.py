@@ -14,6 +14,7 @@ from pathlib import Path
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.humanize import Humanizer
@@ -447,9 +448,9 @@ class FacebookPost:
             if await _is_logged_out(page):
                 raise RuntimeError("Facebook 登录态失效，请先执行 sau facebook login")
             await self._publish_on_page(page)
-            await context.storage_state(path=str(self.account_file))
+            await save_upload_session(context, str(self.account_file))
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
     async def main(self, *, session: BrowserSession | None = None) -> None:
         if session is not None:

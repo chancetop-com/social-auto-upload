@@ -112,6 +112,12 @@ class FakeNode:
     async def count(self) -> int:
         return self._scripted_count()
 
+    async def element_handles(self) -> list["FakeNode"]:
+        return [self.nth(index) for index in range(await self.count())]
+
+    async def dispose(self) -> None:
+        pass
+
     @property
     def first(self) -> "FakeNode":
         return self._items[0] if self._items else self

@@ -196,6 +196,12 @@ class FakeLocator:
     async def count(self) -> int:
         return self._scripted_count()
 
+    async def element_handles(self) -> list["FakeLocator"]:
+        return [self.nth(index) for index in range(await self.count())]
+
+    async def dispose(self) -> None:
+        pass
+
     async def get_attribute(self, name: str) -> Any:
         return self._attributes.get(name)
 

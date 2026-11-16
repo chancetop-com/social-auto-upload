@@ -174,6 +174,9 @@ class _Locator:
             return self.page.item_href
         return None
 
+    async def is_visible(self) -> bool:
+        return self._count > 0
+
     async def is_enabled(self) -> bool:
         if "text=Post" in self.selector or "role=button" in self.selector:
             return self.page.post_enabled

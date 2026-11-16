@@ -14,6 +14,7 @@ from loguru import logger
 from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer, maybe_dispatched
@@ -305,7 +306,7 @@ class XueqiuArticle:
                     BrowserSession(browser=browser, context=context, mode="local")
                 )
             finally:
-                await browser.close()
+                await close_browser_resources(browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: editor/preview/publish plus one server response check."""

@@ -9,7 +9,7 @@ from typing import Sequence
 from sau_commands import (
     article, douyin, kuaishou, xiaohongshu, bilibili, tencent, alipay, weibo,
     hupu, facebook, facebook_page, instagram, youtube, baijiahao, dayu, xueqiu, zhihu,
-    tiktok,
+    tiktok, rednote,
 )
 from sau_commands.arguments import resolve_account_file
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, credentials_conflict
@@ -26,6 +26,7 @@ PLATFORMS = {
     "douyin": douyin,
     "kuaishou": kuaishou,
     "xiaohongshu": xiaohongshu,
+    "rednote": rednote,
     "bilibili": bilibili,
     "tencent": tencent,
     "alipay": alipay,

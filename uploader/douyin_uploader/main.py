@@ -15,9 +15,10 @@ from patchright.async_api import async_playwright
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 from utils.login_qrcode import build_login_qrcode_path
@@ -1316,7 +1317,7 @@ class DouYinVideo(DouYinBaseUploader):
 
                 # ── 正常发布流程 ──
                 publish_button = page.get_by_role("button", name="发布", exact=True)
-                if not publish_clicked and await publish_button.count():
+                if not publish_clicked and await reject_ambiguous(publish_button, "抖音发布按钮"):
                     await humanizer.before_submit()
                     try:
                         await humanizer.click(publish_button)
@@ -1332,7 +1333,10 @@ class DouYinVideo(DouYinBaseUploader):
                 )
                 douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                 break
-            except Exception:
+            except Exception as exc:
+                if (not publish_clicked and isinstance(exc, ElementUnusableError)
+                        and exc.reason.startswith("ambiguous:")):
+                    raise
                 if multilogin:
                     _raise_if_login_required(page, publish_attempted=publish_clicked)
                 await self.handle_auto_video_cover(page)
@@ -1461,7 +1465,7 @@ class DouYinNote(DouYinBaseUploader):
                 raise budget.timeout_error(publish_clicked)
             try:
                 publish_button = page.get_by_role("button", name="发布", exact=True)
-                if not publish_clicked and await publish_button.count():
+                if not publish_clicked and await reject_ambiguous(publish_button, "抖音发布按钮"):
                     await humanizer.before_submit()
                     try:
                         await humanizer.click(publish_button)
@@ -1477,7 +1481,10 @@ class DouYinNote(DouYinBaseUploader):
                 )
                 douyin_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                 break
-            except Exception:
+            except Exception as exc:
+                if (not publish_clicked and isinstance(exc, ElementUnusableError)
+                        and exc.reason.startswith("ambiguous:")):
+                    raise
                 douyin_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
                 await asyncio.sleep(0.5)
 
@@ -1517,8 +1524,7 @@ class DouYinNote(DouYinBaseUploader):
                         _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
                     )
                 await asyncio.sleep(2)
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()

@@ -17,9 +17,10 @@ from patchright.async_api import async_playwright
 from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError
 from utils.files_times import get_absolute_path
 from utils.humanize import Humanizer
@@ -163,12 +164,12 @@ async def _focus_desc_editor(page, humanizer: Humanizer) -> None:
 
 async def _click_visible_publish_confirm(page: Page, humanizer: Humanizer) -> bool:
     """Confirm an already-open Ant Design publish dialog before touching the page behind it."""
-    modal = page.locator("div.ant-modal-confirm-centered:visible").first
-    if not await modal.count():
+    modal = page.locator("div.ant-modal-confirm-centered:visible")
+    if not await reject_ambiguous(modal, "快手发布确认弹窗"):
         return False
 
-    primary_button = modal.locator("button.ant-btn-primary:visible").first
-    if not await primary_button.count():
+    primary_button = modal.locator("button.ant-btn-primary:visible")
+    if not await reject_ambiguous(primary_button, "快手确认发布按钮"):
         raise RuntimeError("快手发布确认弹窗已显示，但未找到可点击的主按钮")
 
     await humanizer.click(primary_button)
@@ -844,19 +845,15 @@ class KSVideo(KSBaseUploader):
         )
         context = await set_init_script(context)
 
-        upload_success = False
         try:
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            upload_success = True
-        finally:
-            if upload_success:
-                await context.storage_state(path=self.account_file)
+            if await save_upload_session(context, self.account_file):
                 kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
-                await asyncio.sleep(2)
-            await context.close()
-            await browser.close()
+            await asyncio.sleep(2)
+        finally:
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
@@ -968,9 +965,10 @@ class KSVideo(KSBaseUploader):
                     confirmed = await _click_visible_publish_confirm(page, humanizer)
                     if not confirmed:
                         publish_button = page.get_by_text("发布", exact=True)
-                        if await publish_button.count() == 0:
+                        if await reject_ambiguous(publish_button, "快手发布按钮") == 0:
                             raise RuntimeError("未找到快手发布按钮")
                         await humanizer.click(publish_button)
+                        publish_clicked = True
                         await asyncio.sleep(1)
                         await _click_visible_publish_confirm(page, humanizer)
                     publish_clicked = True
@@ -983,6 +981,11 @@ class KSVideo(KSBaseUploader):
                     # The publish/confirm click may already have landed:
                     # re-dispatching could publish twice.
                     raise budget.timeout_error(True) from exc
+                if (isinstance(exc, ElementUnusableError)
+                        and exc.reason.startswith("ambiguous:")):
+                    if publish_clicked:
+                        raise budget.timeout_error(True) from exc
+                    raise
                 if multilogin:
                     _raise_if_login_required(page, publish_attempted=publish_clicked)
                 last_publish_error = exc
@@ -1137,12 +1140,13 @@ class KSNote(KSBaseUploader):
                 if not publish_clicked:
                     await humanizer.before_submit()
                     publish_button = page.get_by_text("发布", exact=True)
-                    if await publish_button.count() > 0:
+                    if await reject_ambiguous(publish_button, "快手发布按钮") > 0:
                         await humanizer.click(publish_button)
+                        publish_clicked = True
 
                     await asyncio.sleep(1)
                     confirm_button = page.get_by_text("确认发布")
-                    if await confirm_button.count() > 0:
+                    if await reject_ambiguous(confirm_button, "快手确认发布按钮") > 0:
                         await humanizer.click(confirm_button)
                     publish_clicked = True
 
@@ -1153,6 +1157,11 @@ class KSNote(KSBaseUploader):
                 if maybe_dispatched(exc):
                     # 图文发布/确认发布可能已经点出去：绝不二次派发。
                     raise budget.timeout_error(True) from exc
+                if (isinstance(exc, ElementUnusableError)
+                        and exc.reason.startswith("ambiguous:")):
+                    if publish_clicked:
+                        raise budget.timeout_error(True) from exc
+                    raise
                 if multilogin:
                     _raise_if_login_required(page, publish_attempted=publish_clicked)
                 kuaishou_logger.info(_msg("🏃", f"小人正在冲刺发布图文: {exc}"))
@@ -1180,19 +1189,15 @@ class KSNote(KSBaseUploader):
         )
         context = await set_init_script(context)
 
-        upload_success = False
         try:
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            upload_success = True
-        finally:
-            if upload_success:
-                await context.storage_state(path=self.account_file)
+            if await save_upload_session(context, self.account_file):
                 kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
-                await asyncio.sleep(2)
-            await context.close()
-            await browser.close()
+            await asyncio.sleep(2)
+        finally:
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()

@@ -26,6 +26,7 @@ from utils.base_social_media import set_init_script
 from utils.blocked import BlockedKind
 from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_session import log_local_session_ready
 from utils.browser_session import provider_label
@@ -592,6 +593,9 @@ async def _arm_ready(
     只用于契约对齐（谓词本身无等待）。
     """
     locator = page.locator(XHS_PUBLISH_BUTTON_SELECTOR)
+    count = await locator.count()
+    if count != 1:
+        return False, f"ambiguous:{count}" if count > 1 else "not-attached"
     # 长表单里发布按钮常在首屏下方：先滚入视口，再做 interactive 落点判定。
     await ensure_in_viewport(page, locator, point=XHS_PUBLISH_BUTTON_POINT)
     ready, reason = await check(
@@ -626,7 +630,13 @@ async def _wait_for_arm(
         # C2 优先于预算出口：命中登录/验证页时永远是 10，而不是 1。
         await _check_blocked(page, mode, publish_attempted=publish_clicked)
         budget.check_pre_click()
-        ready, _reason = await _arm_ready(page, budget=budget)
+        ready, reason = await _arm_ready(page, budget=budget)
+        if reason and reason.startswith("ambiguous:"):
+            raise ElementUnusableError(
+                "发布按钮", role="interactive",
+                selector=XHS_PUBLISH_BUTTON_SELECTOR,
+                reason=reason, publish_clicked=False,
+            )
         if ready:
             return
 
@@ -1000,6 +1010,12 @@ async def _video_upload_gate(
             )
 
         ready, reason = await _arm_ready(page, budget=budget)
+        if reason and reason.startswith("ambiguous:"):
+            raise ElementUnusableError(
+                "发布按钮", role="interactive",
+                selector=XHS_PUBLISH_BUTTON_SELECTOR,
+                reason=reason, publish_clicked=False,
+            )
         if ready:
             return
 
@@ -2074,55 +2090,55 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         return self.publish_budget.clamp_ms(default_ms)
 
     async def _scan_topic_candidate(self, page: Page, tag: str):
-        """顺序扫描全部渲染候选项，返回 ``(item, item_count)``。
+        """读取当前候选节点快照，返回 ``(ElementHandle, item_count)``。
 
         只认 name **全等**的项（无前缀/包含匹配）；多个全等取最前并打 info。
-        容器需 ATTACHED、被点项需 INTERACTIVE。读取失败按「无候选」处理。
+        被点项需 INTERACTIVE；返回节点由调用方释放，其余节点在此释放。
+        不按旧数量逐项解析 nth：候选刷新会让消失的位置等待默认 30 秒，
+        也可能让已核对的位置重新指向别的话题。
         """
-        container = page.locator(XHS_TOPIC_MENU_SELECTOR)
+        items = []
+        selected = None
+        count = 0
         try:
-            attached, _reason = await check(container, "attached")
-        except Exception:
-            attached = False
-        if not attached:
-            return None, 0
-
-        items_locator = page.locator(XHS_TOPIC_ITEM_SELECTOR)
-        try:
-            count = int(await items_locator.count())
-        except Exception:
-            return None, 0
-        if count <= 0:
-            return None, 0
-
-        target = _normalise_topic(tag)
-        matches = []
-        try:
-            for index in range(count):
-                item = items_locator.nth(index)
-                name = await item.locator(
-                    XHS_TOPIC_ITEM_NAME_CHILD_SELECTOR
-                ).text_content()
-                if _normalise_topic(name) == target:
-                    matches.append(item)
+            if await page.locator(XHS_TOPIC_MENU_SELECTOR).count() != 1:
+                return None, 0
+            items = await page.locator(XHS_TOPIC_ITEM_SELECTOR).element_handles()
+            count = len(items)
+            if not items:
+                return None, 0
+            details = await page.evaluate(
+                """({items, nameSelector}) => items.map(item => ({
+                    name: item.querySelector(nameSelector)?.textContent,
+                    attached: item.isConnected
+                }))""",
+                {"items": items, "nameSelector": XHS_TOPIC_ITEM_NAME_CHILD_SELECTOR},
+            )
+            target = _normalise_topic(tag)
+            matches = [
+                item
+                for item, detail in zip(items, details)
+                if detail["attached"]
+                and _normalise_topic(detail.get("name")) == target
+            ]
+            if not matches:
+                return None, count
+            if len(matches) > 1:
+                xiaohongshu_logger.info(_msg("🏷️", f"topic-ambiguous:{len(matches)}"))
+            candidate = matches[0]
+            usable, _reason = await check(candidate, "interactive")
+            if not usable:
+                return None, count
+            selected = candidate
+            return selected, count
         except Exception:
             # 读取候选失败 = 这一轮没有候选；话题缺失只降级，不失败。
             return None, count
-
-        if not matches:
-            return None, count
-        if len(matches) > 1:
-            xiaohongshu_logger.info(
-                _msg("🏷️", f"topic-ambiguous:{len(matches)}")
+        finally:
+            await asyncio.gather(
+                *(item.dispose() for item in items if item is not selected),
+                return_exceptions=True,
             )
-        candidate = matches[0]
-        try:
-            usable, _reason = await check(candidate, "interactive")
-        except Exception:
-            usable = False
-        if not usable:
-            return None, count
-        return candidate, count
 
     async def _read_topic_nodes(self, page: Page) -> list[str] | None:
         """读正文编辑器根内的全部话题锚点（只读 ``data-topic``，只需 ATTACHED）。
@@ -2132,17 +2148,12 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         """
         try:
             locator = XHS_TOPIC_READBACK_CANDIDATES[0].build(page)
-            count = int(await locator.count())
+            # 在一个浏览器调用中读完，编辑器重建不能让旧 nth 等待 30 秒。
+            return await locator.evaluate_all(
+                "nodes => nodes.map(node => node.getAttribute('data-topic') || '')"
+            )
         except Exception:
             return None
-        values: list[str] = []
-        for index in range(count):
-            try:
-                raw = await locator.nth(index).get_attribute("data-topic")
-            except Exception:
-                return None
-            values.append(raw or "")
-        return values
 
     async def _readback_new_topics(
         self, page: Page, baseline: list[str]
@@ -2214,14 +2225,17 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 await asyncio.sleep(min(XHS_TOPIC_POLL_SECONDS, remaining))
                 continue
 
-            if baseline is None:
-                # 基线按标签条目固定：第一次点击前取一次，重试不刷新。
-                baseline = await self._read_topic_nodes(page)
+            try:
                 if baseline is None:
-                    # 读不到编辑区就不点：宁可降级也不插入无法校验的内容。
-                    break
+                    # 基线按标签条目固定：第一次点击前取一次，重试不刷新。
+                    baseline = await self._read_topic_nodes(page)
+                    if baseline is None:
+                        # 读不到编辑区就不点：宁可降级也不插入无法校验的内容。
+                        break
 
-            await humanizer.click(candidate)
+                await humanizer.click(candidate)
+            finally:
+                await asyncio.gather(candidate.dispose(), return_exceptions=True)
             attempts += 1
             if attempts >= XHS_TOPIC_MAX_CLICKS:
                 break
@@ -2998,8 +3012,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
                     _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
                 )
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
@@ -3212,8 +3225,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
                     _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
                 )
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()

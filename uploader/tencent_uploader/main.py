@@ -18,9 +18,10 @@ from patchright.async_api import async_playwright
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
-from utils.dom import ElementMissingError, ElementUnusableError
+from utils.dom import ElementMissingError, ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError
 from utils.humanize import (
     MAYBE_DISPATCHED,
@@ -1117,8 +1118,8 @@ class TencentBaseUploader(BaseVideoUploader):
             if multilogin:
                 _raise_if_login_required(page)
             try:
-                publish_button = page.locator('div.form-btns button:has-text("发表"):visible').first
-                if await publish_button.count():
+                publish_button = page.locator('div.form-btns button:has-text("发表"):visible')
+                if await reject_ambiguous(publish_button, "发布按钮"):
                     button_class = await publish_button.get_attribute("class")
                     if (
                         not await publish_button.is_disabled()
@@ -1172,10 +1173,12 @@ class TencentBaseUploader(BaseVideoUploader):
                 await page.evaluate("""() => document.querySelectorAll('.mask, .changeAccount-dialog, .common-dialog').forEach(e => e.remove())""")
             except Exception:
                 pass
-            publish_btn = page.get_by_role("button", name="发表", exact=True).first if not is_draft else page.get_by_role("button", name="保存草稿").first
+            publish_btn = page.get_by_role("button", name="发表", exact=True) if not is_draft else page.get_by_role("button", name="保存草稿")
             try:
-                if await publish_btn.count() and await publish_btn.is_visible():
+                if await reject_ambiguous(publish_btn, "发布按钮") and await publish_btn.is_visible():
                     break
+            except ElementUnusableError:
+                raise
             except Exception:
                 pass
             await asyncio.sleep(1)
@@ -1237,6 +1240,10 @@ class TencentBaseUploader(BaseVideoUploader):
                     raise Exception("发表后 10s 页面未变化")
                 return
             except Exception as exc:
+                if (not publish_clicked and not maybe_dispatched
+                        and isinstance(exc, ElementUnusableError)
+                        and exc.reason.startswith("ambiguous:")):
+                    raise
                 current_url = page.url
                 if is_draft and ("post/list" in current_url or "draft" in current_url):
                     tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
@@ -1448,11 +1455,10 @@ class TencentVideo(TencentBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await context.storage_state(path=self.account_file)
-            tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
+            if await save_upload_session(context, self.account_file):
+                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
@@ -1584,11 +1590,10 @@ class TencentNote(TencentBaseUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await context.storage_state(path=self.account_file)
-            tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
+            if await save_upload_session(context, self.account_file):
+                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()

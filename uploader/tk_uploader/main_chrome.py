@@ -36,6 +36,8 @@ from uploader.tk_uploader.tk_config import (
     Tk_Locator,
 )
 from utils.base_social_media import set_init_script
+from utils.dom import ElementUnusableError, reject_ambiguous
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from uploader.tk_uploader.schedule import prepare_schedule
 from utils.errors import LoginRequiredError, PublishResultUnknownError
@@ -208,19 +210,34 @@ def _find_scheduled_row_marker(
     return None
 
 
-async def _find_candidate(scope, candidates, *, visible: bool = False):
+async def _find_candidate(scope, candidates, *, visible: bool = False, unique: bool = False):
     """Return ``(locator, index, description)`` for the first present candidate.
 
     When ``visible`` is true every match is checked, not just ``.first``: a
     hidden duplicate earlier in the list must not mask the visible control.
-    A locator double that does not implement ``is_visible`` is treated as
-    visible so the pure in-memory tests stay minimal.
+    ``unique`` is used for publish controls: more than one visible match is
+    terminal and must not fall through to another candidate. Legacy callers
+    retain their existing first-match behavior.
     """
     for index, (description, factory) in enumerate(candidates):
         try:
             locator = factory(scope)
             count = await locator.count()
             if not count:
+                continue
+            if unique:
+                matches = []
+                for position in range(count):
+                    candidate = locator.nth(position) if count > 1 else locator
+                    if not visible or await candidate.is_visible():
+                        matches.append(candidate)
+                if len(matches) > 1:
+                    raise ElementUnusableError(
+                        "TikTok 发布按钮", role="interactive", selector=description,
+                        reason=f"ambiguous:{len(matches)}", publish_clicked=False,
+                    )
+                if matches:
+                    return matches[0], index, description
                 continue
             if visible:
                 nth = getattr(locator, "nth", None)
@@ -246,6 +263,8 @@ async def _find_candidate(scope, candidates, *, visible: bool = False):
                         continue
                 return first, index, description
             return locator.first, index, description
+        except ElementUnusableError:
+            raise
         except Exception:
             # A detached frame/closed page makes ``count`` throw; treat it as
             # this candidate being absent and try the next one.
@@ -1340,9 +1359,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                     )
                 await asyncio.sleep(2)
             finally:
-                await context.close()
+                await close_browser_resources(context=context)
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
     async def change_language(self, page):
         # Best-effort only: local mode already sets ``locale=en-US``; TikTok's
@@ -2534,58 +2553,64 @@ class TiktokBaseUploader(BaseVideoUploader):
             rendered = False
             for scope in scopes:
                 try:
-                    options = scope.locator('[role="option"]')
-                    count = await options.count()
+                    # A snapshot pins each option to the node whose name we read.
+                    # Re-resolving nth after an async refresh can wait 30s or click
+                    # a different hashtag at the same position.
+                    options = await scope.locator('[role="option"]').element_handles()
                 except Exception:
                     continue
-                if count:
-                    rendered = True
-                for index in range(count):
-                    option = options.nth(index)
-                    try:
-                        first_line = (
-                            await option.inner_text()
-                        ).strip().splitlines()[0].strip()
-                    except Exception:
-                        continue
-                    if not first_line.startswith("#"):
-                        continue
-                    if first_line.casefold() == wanted:
-                        selected = False
+                try:
+                    if options:
+                        rendered = True
+                    for option in options:
                         try:
-                            selected = (
-                                str(
-                                    await option.get_attribute(
-                                        "aria-selected"
-                                    )
-                                ).lower()
-                                == "true"
-                            )
+                            first_line = (
+                                await option.inner_text()
+                            ).strip().splitlines()[0].strip()
                         except Exception:
+                            continue
+                        if not first_line.startswith("#"):
+                            continue
+                        if first_line.casefold() == wanted:
                             selected = False
-                        if selected:
-                            # The typed tag is already the focused suggestion;
-                            # Enter accepts it without viewport/overlay issues.
-                            await humanizer.press("Enter")
-                        else:
                             try:
-                                await _humanized_click(humanizer, option)
-                            except Exception as exc:
-                                # Keep the plain text and fire the association
-                                # suggestion instead of aborting the publish.
-                                # A click that may have been dispatched is
-                                # never retried (the loop exits below).
-                                tiktok_logger.warning(
-                                    f"  [-] tag #{tag} suggestion click failed: {exc}"
+                                selected = (
+                                    str(
+                                        await option.get_attribute(
+                                            "aria-selected"
+                                        )
+                                    ).lower()
+                                    == "true"
                                 )
-                                suggestion_failed = True
-                                break
-                        await page.wait_for_timeout(300)
-                        tiktok_logger.info(
-                            f"  [-] tag #{tag} inserted as hashtag entity"
-                        )
-                        await self._wait_for_no_options(scopes, page)
-                        return True
+                            except Exception:
+                                selected = False
+                            if selected:
+                                # The typed tag is already the focused suggestion;
+                                # Enter accepts it without viewport/overlay issues.
+                                await humanizer.press("Enter")
+                            else:
+                                try:
+                                    await _humanized_click(humanizer, option)
+                                except Exception as exc:
+                                    # Keep the plain text and fire the association
+                                    # suggestion instead of aborting the publish.
+                                    # A click that may have been dispatched is
+                                    # never retried (the loop exits below).
+                                    tiktok_logger.warning(
+                                        f"  [-] tag #{tag} suggestion click failed: {exc}"
+                                    )
+                                    suggestion_failed = True
+                                    break
+                            await page.wait_for_timeout(300)
+                            tiktok_logger.info(
+                                f"  [-] tag #{tag} inserted as hashtag entity"
+                            )
+                            await self._wait_for_no_options(scopes, page)
+                            return True
+                finally:
+                    await asyncio.gather(
+                        *(option.dispose() for option in options), return_exceptions=True
+                    )
                 if suggestion_failed:
                     break
 
@@ -2698,7 +2723,7 @@ class TiktokBaseUploader(BaseVideoUploader):
     async def _publish_button_ready(
         self, page, *, multilogin: bool
     ) -> "Locator | None":
-        """The first visible + enabled publish locator; never clicks it.
+        """The unique visible + enabled publish locator; never clicks it.
 
         Returns ``None`` when no candidate is present or the match is
         disabled / ``aria-disabled="true"``.
@@ -2706,7 +2731,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         if multilogin:
             _raise_if_login_required(page)
         found = await _find_candidate(
-            self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True
+            self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True, unique=True
         )
         if found is None:
             return None
@@ -2876,7 +2901,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                             ),
                         ),
                     ),
-                    visible=True,
+                    visible=True, unique=True,
                 )
                 if found is None:
                     continue
@@ -3354,9 +3379,8 @@ class TiktokVideo(TiktokBaseUploader):
                 post = self.locator_base.locator(
                     '[data-e2e="post_video_button"]'
                 )
-                post = post.first
                 enabled = False
-                if await post.count() > 0:
+                if await reject_ambiguous(post, "TikTok 发布按钮") > 0:
                     try:
                         enabled = await post.is_enabled()
                     except Exception:
@@ -3376,6 +3400,8 @@ class TiktokVideo(TiktokBaseUploader):
                             '[data-e2e="select_video_button"]').count():
                         tiktok_logger.info("  [-] found some error while uploading now retry...")
                         await self.handle_upload_error(page)
+            except ElementUnusableError:
+                raise
             except Exception:
                 if multilogin:
                     _raise_if_login_required(page)
@@ -3661,7 +3687,7 @@ class TiktokNote(TiktokBaseUploader):
                             ),
                         ),
                     ),
-                    visible=True,
+                    visible=True, unique=True,
                 )
                 post = found[0] if found is not None else None
                 post_enabled = False
@@ -3678,6 +3704,8 @@ class TiktokNote(TiktokBaseUploader):
                 if processed and post_enabled:
                     tiktok_logger.info("  [-] photos uploaded.")
                     return
+            except ElementUnusableError:
+                raise
             except Exception:
                 if multilogin:
                     _raise_if_login_required(page)

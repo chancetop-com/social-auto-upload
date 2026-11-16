@@ -25,6 +25,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.dom import ElementMissingError, ElementUnusableError
 from utils.errors import LoginRequiredError
@@ -531,11 +532,10 @@ class HuPuVideo(BaseVideoUploader):
                 page=page,
             )
             # 保存 cookie
-            await context.storage_state(path=self.account_file)
-            hupu_logger.success(_msg("🥳", "cookie 更新完毕"))
+            if await save_upload_session(context, self.account_file):
+                hupu_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession, *, page: Page | None = None) -> None:
         """Run the publish flow on the provided session's context only."""

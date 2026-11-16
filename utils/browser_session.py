@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.base_social_media import set_init_script
 from utils.errors import StartIncompleteError
 from utils.managed_browser import ManagedBrowserProvider
@@ -311,12 +312,11 @@ async def _local_session(
         completed = True
     finally:
         # Cookie write-back only on a clean exit, matching the uploaders.
-        if completed and account_file is not None:
-            await context.storage_state(path=account_file)
         try:
-            await context.close()
+            if completed and account_file is not None:
+                await save_upload_session(context, account_file)
         finally:
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
 
 @asynccontextmanager

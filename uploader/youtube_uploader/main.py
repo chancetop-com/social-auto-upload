@@ -20,6 +20,8 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.base_social_media import set_init_script
+from utils.dom import ElementUnusableError, reject_ambiguous
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.errors import LoginRequiredError
 from utils.humanize import (
@@ -367,6 +369,7 @@ async def _click_if_present(
     timeout: int = 4000,
     *,
     humanizer: Humanizer,
+    unique: bool = False,
 ) -> bool:
     """目标存在则用人类化指针点它；保留「可缺席」语义：不存在返回 ``False``，不抛。
 
@@ -375,12 +378,18 @@ async def _click_if_present(
     页面上，继续返回 ``False`` 会让调用方再点兜底选择器，所以原样上抛。
     """
     try:
-        el = page.locator(selector).first
+        el = page.locator(selector)
+        if unique:
+            await reject_ambiguous(el, "YouTube 发布按钮")
+        else:
+            el = el.first
         await el.wait_for(state="visible", timeout=timeout)
         await humanizer.click(el)
         return True
     except Exception as exc:
         if getattr(exc, MAYBE_DISPATCHED, None) == MAYBE_DISPATCHED_VALUE:
+            raise
+        if unique and isinstance(exc, ElementUnusableError) and exc.reason.startswith("ambiguous:"):
             raise
         return False
 
@@ -459,26 +468,18 @@ class YouTubeVideo(BaseVideoUploader):
         )
         context = await set_init_script(context)
 
-        page: Page | None = None
-        upload_success = False
         try:
             page = await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            upload_success = True
-        finally:
-            if upload_success:
-                # 刷新 cookie
+            await save_upload_session(context, self.account_file)
+            if page is not None:
                 try:
-                    await context.storage_state(path=self.account_file)
-                except Exception:
-                    pass
-                if page is not None:
                     await page.wait_for_timeout(2000)
-            try:
-                await context.close()
-            finally:
-                await browser.close()
+                except Exception as error:
+                    youtube_logger.warning(f"Post-upload pause failed; preserving upload result: {error}")
+        finally:
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> Page:
         self.start_publish_budget()
@@ -659,7 +660,7 @@ class YouTubeVideo(BaseVideoUploader):
         await humanizer.before_submit()
         try:
             published = await _click_if_present(
-                page, "#done-button", budget.clamp_ms(15000), humanizer=humanizer
+                page, "#done-button", budget.clamp_ms(15000), humanizer=humanizer, unique=True
             )
         except Exception as exc:
             if maybe_dispatched(exc):

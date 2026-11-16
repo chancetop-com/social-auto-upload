@@ -20,8 +20,9 @@ from patchright.async_api import (
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -699,7 +700,7 @@ class AlipayVideo(BaseVideoUploader):
     async def wait_for_upload_complete(self, page: Page, timeout: int = 1800) -> None:
         # 等待"确认发布"按钮变为可点击（视频上传+转码完成）
         budget = self.publish_budget
-        publish_btn = page.get_by_role("button", name=ALIPAY_PUBLISH_BUTTON_NAME).first
+        publish_btn = page.get_by_role("button", name=ALIPAY_PUBLISH_BUTTON_NAME)
         start = time.monotonic()
         timeout = budget.clamp_seconds(timeout)
         while True:
@@ -707,7 +708,7 @@ class AlipayVideo(BaseVideoUploader):
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"等待视频上传/转码超时（>{timeout}s），确认发布按钮始终不可用")
             try:
-                if not await publish_btn.count():
+                if not await reject_ambiguous(publish_btn, "发布按钮"):
                     await asyncio.sleep(2)
                     continue
                 if await publish_btn.is_disabled():
@@ -716,6 +717,8 @@ class AlipayVideo(BaseVideoUploader):
                     continue
                 alipay_logger.success(_msg("🥳", "视频上传完毕"))
                 return
+            except ElementUnusableError:
+                raise
             except Exception:
                 alipay_logger.info(_msg("🏃", "正在上传/转码视频中..."))
                 await asyncio.sleep(2)
@@ -723,7 +726,8 @@ class AlipayVideo(BaseVideoUploader):
     async def submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
         budget = self.publish_budget
         humanizer = self._humanizer(page)
-        publish_btn = page.get_by_role("button", name=ALIPAY_PUBLISH_BUTTON_NAME).first
+        publish_btn = page.get_by_role("button", name=ALIPAY_PUBLISH_BUTTON_NAME)
+        await reject_ambiguous(publish_btn, "发布按钮")
         await publish_btn.wait_for(
             state="visible", timeout=budget.clamp_ms(30000)
         )
@@ -982,11 +986,10 @@ class AlipayVideo(BaseVideoUploader):
                 BrowserSession(browser=browser, context=context, mode="local")
             )
 
-            await context.storage_state(path=self.account_file)
-            alipay_logger.success(_msg("🥳", "cookie 更新完毕"))
+            if await save_upload_session(context, self.account_file):
+                alipay_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()

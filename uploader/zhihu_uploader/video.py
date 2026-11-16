@@ -16,6 +16,7 @@ from loguru import logger
 from patchright.async_api import Page, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer
@@ -285,7 +286,7 @@ class ZhihuVideo:
                     BrowserSession(browser=browser, context=context, mode="local")
                 )
             finally:
-                await browser.close()
+                await close_browser_resources(browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: upload page operations plus a single publish click."""

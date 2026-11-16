@@ -314,7 +314,7 @@ class Field:
     async def is_visible(self) -> bool:
         return self._visible
 
-    async def is_enabled(self) -> bool:
+    async def is_enabled(self, *, timeout=None) -> bool:
         return self._enabled
 
     async def get_attribute(self, name: str):

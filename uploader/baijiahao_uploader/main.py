@@ -20,8 +20,9 @@ from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError 
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -449,19 +450,27 @@ async def _find_exact_option(options, name: str):
     （``.first`` 仅作降级），绝不对未过滤的候选集取 ``.first``。
     """
     wanted = " ".join(str(name).split())
+    items = []
+    selected = None
     try:
-        count = await options.count()
+        # 搜索结果会异步替换；固定实际节点，避免旧 nth 等待或指向另一合集。
+        items = await options.element_handles()
+        for option in items:
+            try:
+                text = await option.inner_text()
+            except Exception:
+                continue
+            if " ".join(str(text or "").split()) == wanted:
+                selected = option
+                return selected
+        return None
     except Exception:
         return None
-    for index in range(count):
-        option = options.nth(index)
-        try:
-            text = await option.inner_text()
-        except Exception:
-            continue
-        if " ".join(str(text or "").split()) == wanted:
-            return option
-    return None
+    finally:
+        await asyncio.gather(
+            *(item.dispose() for item in items if item is not selected),
+            return_exceptions=True,
+        )
 
 
 class BaiJiaHaoVideo(BaseVideoUploader):
@@ -557,11 +566,10 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             await self.upload_in(
                 BrowserSession(browser=browser, context=context, mode="local")
             )
-            await context.storage_state(path=self.account_file)
-            baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
+            if await save_upload_session(context, self.account_file):
+                baijiahao_logger.success(_msg("🥳", "cookie 更新完毕"))
         finally:
-            await context.close()
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
@@ -832,7 +840,10 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             # 从下拉选项中按合集名全等选中目标合集。
             option = await _find_exact_option(options, str(self.collection_name))
             if option is not None:
-                await humanizer.click(option)
+                try:
+                    await humanizer.click(option)
+                finally:
+                    await asyncio.gather(option.dispose(), return_exceptions=True)
                 await page.wait_for_timeout(500)
                 baijiahao_logger.success(_msg("🥳", f"已选择合集：{self.collection_name}"))
             else:
@@ -913,11 +924,12 @@ class BaiJiaHaoVideo(BaseVideoUploader):
             await page.wait_for_timeout(1000)
 
         # 百家号发布按钮有 data-testid="publish-btn"
-        publish_btn = page.locator(PUBLISH_BUTTON_SELECTOR).first
-        if not await publish_btn.count():
-            publish_btn = page.locator(PUBLISH_BUTTON_TEXT_SELECTOR).first
-        if not await publish_btn.count():
-            publish_btn = page.locator(PUBLISH_BUTTON_CONTAINS_SELECTOR).last
+        publish_btn = page.locator(PUBLISH_BUTTON_SELECTOR)
+        if not await reject_ambiguous(publish_btn, "发布按钮"):
+            publish_btn = page.locator(PUBLISH_BUTTON_TEXT_SELECTOR)
+        if not await reject_ambiguous(publish_btn, "发布按钮"):
+            publish_btn = page.locator(PUBLISH_BUTTON_CONTAINS_SELECTOR)
+        await reject_ambiguous(publish_btn, "发布按钮")
         await publish_btn.wait_for(
             state="visible", timeout=budget.clamp_ms(15000)
         )

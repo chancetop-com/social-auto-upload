@@ -88,6 +88,10 @@ class TopicNodes(FakeLocator):
     def nth(self, index: int) -> TopicNode:
         return self._items[index]
 
+    async def evaluate_all(self, expression):
+        await self.count()  # Preserve scripted failures and read-order recording.
+        return [node.raw for node in self._items]
+
     def add(self, name: str | None = None, *, raw: str | None = None) -> TopicNode:
         if raw is None:
             raw = json.dumps(
@@ -167,9 +171,16 @@ class TopicEnv:
                 TOPIC_ITEMS: self.menu,
                 TOPIC_READBACK: self.nodes,
                 BODY_EDITOR: self.body,
-            }
+            },
+            evaluate_handler=self._snapshot,
         )
         self.items: list[TopicItem] = []
+
+    @staticmethod
+    def _snapshot(expression, arg=None):
+        if "items.map" not in expression or arg.get("nameSelector") != ".name":
+            raise AssertionError(f"Unexpected page evaluation: {expression}")
+        return [{"name": item.label, "attached": True} for item in arg["items"]]
 
     def set_labels(self, labels: list[str]) -> list[TopicItem]:
         self.items = [TopicItem(label) for label in labels]
