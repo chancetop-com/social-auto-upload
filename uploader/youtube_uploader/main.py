@@ -131,7 +131,7 @@ async def cookie_auth(account_file) -> bool:
         except Exception:
             return False
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def is_logged_in(context: BrowserContext) -> bool:
@@ -194,7 +194,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             )
         return True
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def youtube_cookie_gen(account_file, headless: bool = False):

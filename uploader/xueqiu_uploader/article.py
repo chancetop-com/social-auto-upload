@@ -14,6 +14,7 @@ from loguru import logger
 from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
@@ -44,7 +45,7 @@ class XueqiuArticle:
     def __init__(self, title, content_file, account_file, visibility="公开",
                  declaration="不添加创作声明", prepare_only=False, headless=False, debug=False,
                  cover=None, publish_not_before=None):
-        self.title = title.strip()
+        self.title = validate_single_line(title).strip()
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file is not None else None
         self.visibility = visibility
@@ -88,6 +89,7 @@ class XueqiuArticle:
         Cookie/identity binding is local-only; Multilogin mode passes
         ``check_cookie=False`` because the Profile is the identity.
         """
+        validate_single_line(self.title)
         if not self.title or "\n" in self.title or "\r" in self.title:
             raise ValueError("雪球标题必须为非空单行文字")
         self.document = load_xueqiu_article(self.content_file)

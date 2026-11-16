@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 from conf import BASE_DIR
 from utils.time_utils import parse_aware_iso
+from utils.text_validation import validate_single_line
 
 #: ``--schedule`` 约定为 UTC 绝对时刻，填写前换算到浏览器时区。
 SCHEDULE_EXAMPLE = "YYYY-MM-DDTHH:MM:00Z"
@@ -68,6 +69,14 @@ def existing_file_path(value: str) -> Path:
     if not path.is_file():
         raise argparse.ArgumentTypeError(f"File not found: {value}")
     return path
+
+
+def single_line_value(value: str) -> str:
+    """Reject navigation keys while parsing CLI fields, before session setup."""
+    try:
+        return validate_single_line(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def schedule_value(value: str):

@@ -29,6 +29,7 @@ from uploader.dayu_uploader.session import (
     read_dayu_identity,
 )
 from uploader.dayu_uploader.verification import check_dayu_article_content
+from utils.text_validation import validate_single_line
 from utils.browser_session import BrowserSession, browser_session
 from utils.log import dayu_logger
 
@@ -81,6 +82,7 @@ class DayuArticle(DayuHumanizeMixin):
 
     def validate_upload_args(self, *, check_identity: bool = True):
         """在接触远端素材之前，检查正文格式、封面序号及来源的条件必填项。"""
+        validate_single_line(self.title)
         self.schedule = validate_dayu_schedule(self.schedule)
         self.document = load_dayu_article(self.content_file, self.theme)
         title_length = math.ceil(sum(.5 if ord(char) <= 255 else 1 for char in self.title.strip()))

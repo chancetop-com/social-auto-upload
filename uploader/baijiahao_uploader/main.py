@@ -20,6 +20,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError 
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
@@ -377,7 +378,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "（页面结构异常）"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def cookie_auth(account_file):
@@ -401,7 +402,7 @@ async def cookie_auth(account_file):
             baijiahao_logger.warning(_msg("😵", f"cookie 校验出错，按失效处理: {exc}"))
             return False
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def baijiahao_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
@@ -529,6 +530,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         await asyncio.sleep(min(seconds, remaining))
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
+        validate_single_line(self.title)
         if check_cookie:
             if not self.account_file or not os.path.exists(self.account_file):
                 raise RuntimeError(f"cookie文件不存在，请先完成百家号登录: {self.account_file}")

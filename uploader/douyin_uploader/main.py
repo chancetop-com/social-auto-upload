@@ -14,6 +14,7 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
+from utils.text_validation import validate_single_line
 from utils.base_social_media import set_init_script
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -161,7 +162,7 @@ async def cookie_auth(account_file):
             except Exception:
                 pass
             finally:
-                await browser.close()
+                await close_browser_resources(browser=browser)
     return False
 
 
@@ -299,7 +300,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
 
         return await _is_douyin_login_completed(page)
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def _wait_for_douyin_login(page: Page, account_file: str, qrcode_info: dict, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 100) -> dict:
@@ -799,7 +800,7 @@ class DouYinVideo(DouYinBaseUploader):
         self.thumbnail_landscape_path = thumbnail_landscape_path
         self.thumbnail_portrait_path = thumbnail_portrait_path
         self.productLink = productLink
-        self.productTitle = productTitle
+        self.productTitle = validate_single_line(productTitle, label="商品短标题")
         self.desc = desc or ""
         self.collection_name = collection_name
         self.declaration = declaration.strip() if declaration and declaration.strip() else None
@@ -917,6 +918,7 @@ class DouYinVideo(DouYinBaseUploader):
         return True
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
+        validate_single_line(self.title)
         await self.validate_base_args(check_cookie=check_cookie)
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
@@ -1381,11 +1383,12 @@ class DouYinNote(DouYinBaseUploader):
         )
         self.image_paths = image_paths
         self.note = note or ""
-        self.title = title or (self.note[:30] if self.note else "")
+        self.title = title or (" ".join(self.note.split())[:30] if self.note else "")
         self.tags = tags or []
         self.bgm = bgm or ""
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
+        validate_single_line(self.title)
         await self.validate_base_args(check_cookie=check_cookie)
         if not self.title or not str(self.title).strip():
             raise ValueError("图文模式下，title 是必须的")

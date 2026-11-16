@@ -29,6 +29,7 @@ from uploader.dayu_uploader.session import (
 )
 from uploader.dayu_uploader.constants import DAYU_SOURCE_REPRINT, DAYU_SOURCE_TYPES, DAYU_VIDEO_CATEGORIES
 from uploader.dayu_uploader.interaction import DayuHumanizeMixin, unique
+from utils.text_validation import validate_single_line
 from utils.browser_session import BrowserSession, browser_session
 from utils.log import dayu_logger
 
@@ -98,6 +99,7 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
 
     def validate_upload_args(self, *, check_identity: bool = True) -> None:
         """上传前拒绝无法解码、时长不足、超限素材及缺失必填信息。"""
+        validate_single_line(self.title)
         self.schedule = validate_dayu_schedule(self.schedule)
         self.file_path = self.validate_video_file(self.file_path)
         self.thumbnail_path = self.validate_image_file(self.thumbnail_path)

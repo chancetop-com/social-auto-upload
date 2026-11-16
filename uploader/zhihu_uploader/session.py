@@ -9,6 +9,7 @@ from patchright.async_api import BrowserContext, Page, async_playwright, expect
 
 from conf import LOCAL_CHROME_PATH
 from uploader.zhihu_uploader.constants import ZHIHU_CREATOR_URL
+from utils.browser_cleanup import close_browser_resources
 from utils.errors import LoginRequiredError
 
 
@@ -134,7 +135,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
         await read_zhihu_identity(page, timeout=ZHIHU_IDENTITY_PROBE_TIMEOUT_MS)
         return True
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def check_zhihu_account(account_file: str | Path, headless: bool = True) -> bool:
@@ -161,4 +162,4 @@ async def check_zhihu_account(account_file: str | Path, headless: bool = True) -
                 raise RuntimeError("知乎当前页头与本地账号绑定不一致")
             return True
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)

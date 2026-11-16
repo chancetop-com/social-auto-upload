@@ -35,6 +35,8 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
+from utils.text_validation import validate_single_line
 from utils.browser_session import browser_session
 
 
@@ -53,7 +55,7 @@ def register(platform_parsers):
     upload_video_parser = douyin_actions.add_parser("upload-video", help="Upload one video to Douyin")
     upload_video_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
     upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
-    upload_video_parser.add_argument("--title", required=True, help="Video title")
+    upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
     upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
@@ -62,7 +64,7 @@ def register(platform_parsers):
     upload_video_parser.add_argument("--thumbnail-landscape", type=existing_file_path, help="Optional 4:3 landscape thumbnail path")
     upload_video_parser.add_argument("--thumbnail-portrait", type=existing_file_path, help="Optional 3:4 portrait thumbnail path")
     upload_video_parser.add_argument("--product-link", default="", help="Optional product link")
-    upload_video_parser.add_argument("--product-title", default="", help="Optional product title")
+    upload_video_parser.add_argument("--product-title", type=single_line_value, default="", help="Optional product title")
     upload_video_parser.add_argument(
         "--declaration",
         help="Exact Douyin self-declaration option text; omitted means do not set one",
@@ -74,7 +76,7 @@ def register(platform_parsers):
     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
     upload_note_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
     upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path, help="Image file paths")
-    upload_note_parser.add_argument("--title", required=True, help="Note title")
+    upload_note_parser.add_argument("--title", type=single_line_value, required=True, help="Note title")
     upload_note_parser.add_argument("--note", default="", help="Optional note content")
     upload_note_parser.add_argument("--notef", default="", help="Read note content from file (txt/md)")
     upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
@@ -181,6 +183,8 @@ def _raise_login_required(target) -> None:
 
 
 async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Path | None:
+    validate_single_line(request.title)
+    validate_single_line(request.product_title, label="商品短标题")
     if target is not None:
         app = _build_video_uploader(request, None)
         async with async_playwright() as playwright:
@@ -211,6 +215,7 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
 
 
 async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path | None:
+    validate_single_line(request.title)
     if target is not None:
         app = _build_note_uploader(request, None)
         async with async_playwright() as playwright:

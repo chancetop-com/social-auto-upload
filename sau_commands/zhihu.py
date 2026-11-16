@@ -37,6 +37,7 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
 from utils.browser_session import browser_session
 
 
@@ -70,7 +71,7 @@ def register(platform_parsers):
     zhihu_verify.set_defaults(headless=False)
     zhihu_article = zhihu_actions.add_parser("upload-article", help="发布知乎文章；正文配图由原稿位置决定")
     zhihu_article.add_argument("--account", required=False, help="本地会话别名")
-    zhihu_article.add_argument("--title", required=True, help="文章标题，最多 100 字")
+    zhihu_article.add_argument("--title", type=single_line_value, required=True, help="文章标题，最多 100 字")
     zhihu_article.add_argument("--content-file", required=True, type=existing_file_path, help="UTF-8 HTML/Markdown/TXT，图片路径写在原稿对应段落中")
     zhihu_article.add_argument("--schedule", type=schedule_value,
                                help=f"实验性定时发布，{SCHEDULE_HELP_ZH}，{ZHIHU_SCHEDULE_MINUTES} 分钟后至 {ZHIHU_SCHEDULE_MAX_HOURS} 小时内")
@@ -83,7 +84,7 @@ def register(platform_parsers):
     zhihu_video = zhihu_actions.add_parser("upload-video", help="上传并发布一个知乎视频")
     zhihu_video.add_argument("--account", required=False, help="本地会话别名")
     zhihu_video.add_argument("--file", required=True, type=existing_file_path, help="视频文件，大于 100KB、最大 20GB、最长 4 小时")
-    zhihu_video.add_argument("--title", required=True, help="视频标题，5–50 字")
+    zhihu_video.add_argument("--title", type=single_line_value, required=True, help="视频标题，5–50 字")
     zhihu_video.add_argument("--desc", default="", help="可选视频简介，最多 300 字")
     zhihu_video.add_argument("--category", choices=ZHIHU_VIDEO_CATEGORIES,
                              help="所属领域；省略时在终端按编号选择，提交前核对实时菜单")

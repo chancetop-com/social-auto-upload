@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from patchright.async_api import async_playwright
 from conf import LOCAL_CHROME_PATH
+from sau_commands.arguments import single_line_value
 from utils.article_render import ARTICLE_THEMES
 from utils.browser_session import browser_session
 from utils.log import dayu_logger
@@ -63,7 +64,7 @@ def register(platform_parsers):
     dayu_upload = dayu_actions.add_parser("upload-video", help="Publish a video; succeed when Dayu confirms submission")
     dayu_upload.add_argument("--account", required=False)
     dayu_upload.add_argument("--file", required=True, type=existing_file_path)
-    dayu_upload.add_argument("--title", required=True, help="Title, 5-60 Chinese character units")
+    dayu_upload.add_argument("--title", type=single_line_value, required=True, help="Title, 5-60 Chinese character units")
     dayu_upload.add_argument("--desc", default="")
     dayu_upload.add_argument("--tags", default="", help="Comma-separated tags")
     dayu_upload.add_argument("--category", required=True, choices=DAYU_VIDEO_CATEGORIES, help="视频分类，按页面选项选择")
@@ -79,7 +80,7 @@ def register(platform_parsers):
     add_browser_flags(dayu_upload)
     dayu_article = dayu_actions.add_parser("upload-article", help="从正文文件发表图文，平台确认发表后返回成功")
     dayu_article.add_argument("--account", required=False, help="已登录的本地账号名称")
-    dayu_article.add_argument("--title", required=True, help="图文标题，5–50字")
+    dayu_article.add_argument("--title", type=single_line_value, required=True, help="图文标题，5–50字")
     dayu_article.add_argument("--content-file", required=True, type=existing_file_path, help="UTF-8 HTML、Markdown 或 TXT 正文文件")
     dayu_article.add_argument("--theme", choices=ARTICLE_THEMES, help="Markdown 渲染主题，默认 default；按大鱼号兼容排版发表")
     dayu_article.add_argument("--source", required=True, choices=DAYU_SOURCE_TYPES, help="按实际内容选择信息来源")

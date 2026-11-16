@@ -16,6 +16,7 @@ from loguru import logger
 from patchright.async_api import Page, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.errors import PublishResultUnknownError
@@ -85,6 +86,7 @@ class ZhihuVideo:
         Cookie/identity binding is local-only; Multilogin mode passes
         ``check_cookie=False`` because the Profile is the identity.
         """
+        validate_single_line(self.title)
         if not self.file_path.is_file():
             raise FileNotFoundError(f"知乎视频不存在: {self.file_path}")
         if self.file_path.suffix.lower() not in ZHIHU_VIDEO_EXTENSIONS:

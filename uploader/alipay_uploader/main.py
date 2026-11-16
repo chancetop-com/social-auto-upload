@@ -24,6 +24,7 @@ from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError, PublishResultUnknownError
+from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from utils.log import alipay_logger
@@ -217,7 +218,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "支付宝登录状态检查失败：未找到内容创作入口（页面结构异常）"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 def _resolve_account_file(account_file: str | Path) -> str:
@@ -237,6 +238,9 @@ def format_title_with_tags(title: str, tags: list[str], max_length: int = 30) ->
     按标签边界截断：先保证标题完整，再逐个追加标签，加不下的**整个标签丢弃**，
     绝不留半个标签或裸 `#`。这避免触发支付宝"断字"优化项弹窗阻断发布。
     """
+    validate_single_line(title)
+    for tag in tags or []:
+        validate_single_line(tag, label="标签")
     if not tags:
         return title[:max_length]
     result = title
@@ -429,7 +433,7 @@ async def cookie_auth(account_file):
             alipay_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
             return False
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def alipay_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
@@ -476,6 +480,7 @@ class AlipayVideo(BaseVideoUploader):
         self.max_title_length = 30
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
+        format_title_with_tags(self.title, self.tags, max_length=self.max_title_length)
         if check_cookie:
             if not self.account_file or not os.path.exists(self.account_file):
                 raise RuntimeError(f"cookie文件不存在，请先完成支付宝生活号登录: {self.account_file}")

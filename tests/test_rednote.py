@@ -361,7 +361,7 @@ class RednoteSessionTests(unittest.IsolatedAsyncioTestCase):
                     yield object()
 
                 uploader = SimpleNamespace(**{f"rednote_upload_{kind}": AsyncMock()})
-                request = SimpleNamespace(headless=False)
+                request = SimpleNamespace(headless=False, title="test")
                 with (
                     patch.object(
                         command, f"_build_{kind}_uploader", return_value=uploader

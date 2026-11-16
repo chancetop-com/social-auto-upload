@@ -46,6 +46,8 @@ from utils.dom import wait_resolved
 from utils.errors import LoginRequiredError
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
+from utils.text_validation import validate_single_line
+from utils.topic_candidates import click_topic_candidate
 from utils.humanize import Humanizer
 from utils.login_qrcode import build_login_qrcode_path
 from utils.login_qrcode import decode_qrcode_from_path
@@ -1140,6 +1142,7 @@ def xhs_truncate_title(title: str, limit: int = XHS_TITLE_MAX_LENGTH) -> str:
 
 def validate_title_length(title: str) -> str:
     """显式标题预检：超限抛 ``ValueError``（浏览器未启动），绝不截断。"""
+    validate_single_line(title)
     length = xhs_title_length(title)
     if length > XHS_TITLE_MAX_LENGTH:
         raise ValueError(
@@ -1302,7 +1305,7 @@ async def _xhs_user_agent(browser) -> str:
         probe_page = await probe_context.new_page()
         user_agent = await probe_page.evaluate("() => navigator.userAgent")
     finally:
-        await probe_context.close()
+        await close_browser_resources(context=probe_context)
     return user_agent.replace("HeadlessChrome", "Chrome")
 
 
@@ -1603,7 +1606,7 @@ async def probe_session(context: BrowserContext) -> tuple[str, str]:
             "小红书发布页检查失败：未找到上传入口（页面结构异常）"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def xiaohongshu_setup(
@@ -2233,10 +2236,11 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                         # 读不到编辑区就不点：宁可降级也不插入无法校验的内容。
                         break
 
-                await humanizer.click(candidate)
+                clicked = await click_topic_candidate(candidate, humanizer)
             finally:
                 await asyncio.gather(candidate.dispose(), return_exceptions=True)
-            attempts += 1
+            if clicked:
+                attempts += 1
             if attempts >= XHS_TOPIC_MAX_CLICKS:
                 break
             remaining = deadline - time.monotonic()
@@ -2244,7 +2248,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
                 break
             await asyncio.sleep(min(XHS_TOPIC_POLL_SECONDS, remaining))
 
-        if attempts == 0:
+        if attempts == 0 and baseline is None:
             await self._degrade_topic(tag, humanizer, attempts=attempts)
             return
 
@@ -3068,13 +3072,14 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         self.desc = desc if desc is not None else self.note
         # 显式标题原样保留（超限在校验期拒绝，绝不静默截断）；自动推导标题
         # 按同一平台口径截到 ≤20，并在校验期补一条 warning。
+        validate_single_line(title)
         explicit = bool(title and str(title).strip())
         if explicit:
             self.title = title
             self._title_explicit = True
             self._title_auto_truncated = False
         else:
-            derived = self.desc or self.note or ""
+            derived = " ".join((self.desc or self.note or "").split())
             self.title = xhs_truncate_title(derived, XHS_TITLE_MAX_LENGTH)
             self._title_explicit = False
             self._title_auto_truncated = self.title != derived

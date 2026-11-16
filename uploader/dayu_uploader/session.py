@@ -9,6 +9,7 @@ from pathlib import Path
 from patchright.async_api import Page, async_playwright, expect
 
 from conf import LOCAL_CHROME_PATH
+from utils.browser_cleanup import close_browser_resources
 from utils.errors import LoginRequiredError
 
 DAYU_HOME_URL = "https://mp.dayu.com/dashboard/index"
@@ -98,7 +99,7 @@ async def is_logged_in(context) -> bool:
             "大鱼号登录状态检查失败：未找到后台页头账号名称（页面结构异常）"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 
@@ -177,4 +178,4 @@ async def check_dayu_account(account_file: str | Path) -> bool:
                 raise RuntimeError("大鱼号主体与账号文件绑定不一致")
             return True
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)

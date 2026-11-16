@@ -385,7 +385,7 @@ async def _open_instagram_page(
         )
         return browser, context, page
     except Exception:
-        await browser.close()
+        await close_browser_resources(browser=browser)
         raise
 
 
@@ -432,7 +432,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def _multilogin_identity(page: Page, context: BrowserContext) -> dict:
@@ -487,7 +487,7 @@ async def instagram_cookie_auth(account_file: str | Path, *, proxy: str | None =
             await instagram_identity(page, account_file)
             return True
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def instagram_setup(account_file: str | Path, *, handle: bool = False, proxy: str | None = None,

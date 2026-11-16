@@ -41,6 +41,9 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
+from utils.text_validation import validate_single_line
+from utils.browser_cleanup import close_browser_resources
 from utils.base_social_media import set_init_script
 from utils.browser_session import browser_session
 from utils.browser_session import log_local_session_ready
@@ -171,7 +174,7 @@ def register(platform_parsers):
     rednote_upload_video_parser = rednote_actions.add_parser("upload-video", help="Upload one video to Rednote")
     rednote_upload_video_parser.add_argument("--account", required=False, help="Rednote user-defined account_name")
     rednote_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
-    rednote_upload_video_parser.add_argument("--title", required=True, help="Video title")
+    rednote_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
     rednote_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     rednote_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     rednote_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
@@ -184,7 +187,7 @@ def register(platform_parsers):
     rednote_upload_note_parser = rednote_actions.add_parser("upload-note", help="Upload one note to Rednote")
     rednote_upload_note_parser.add_argument("--account", required=False, help="Rednote user-defined account_name")
     rednote_upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path, help="Image file paths")
-    rednote_upload_note_parser.add_argument("--title", required=True, help="Note title")
+    rednote_upload_note_parser.add_argument("--title", type=single_line_value, required=True, help="Note title")
     rednote_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     rednote_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     rednote_upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
@@ -251,6 +254,7 @@ async def check_rednote_account(
         browser = await playwright.chromium.launch(
             headless=headless, **REDNOTE_LAUNCH_KWARGS
         )
+        context = None
         try:
             context = await browser.new_context(
                 storage_state=str(account_file),
@@ -262,16 +266,13 @@ async def check_rednote_account(
             log_local_session_ready(
                 headless=headless, account_file=str(account_file)
             )
-            try:
-                kind, _evidence = await probe_session(context)
-                if kind != "valid":
-                    raise _probe_login_error(kind, "local")
-                await save_storage_state_atomic(context, str(account_file))
-                return True
-            finally:
-                await context.close()
+            kind, _evidence = await probe_session(context)
+            if kind != "valid":
+                raise _probe_login_error(kind, "local")
+            await save_storage_state_atomic(context, str(account_file))
+            return True
         finally:
-            await browser.close()
+            await close_browser_resources(context=context, browser=browser)
 
 
 def _build_video_uploader(request: RednoteVideoUploadRequest, account_file) -> RednoteVideo:
@@ -351,6 +352,7 @@ async def upload_rednote_video(
     target=None,
     ignored_keys: tuple[str, ...] = (),
 ) -> Path | None:
+    validate_single_line(request.title)
     if target is not None:
         app = _build_video_uploader(request, None)
         async with async_playwright() as playwright:
@@ -379,6 +381,7 @@ async def upload_rednote_note(
     target=None,
     ignored_keys: tuple[str, ...] = (),
 ) -> Path | None:
+    validate_single_line(request.title)
     if target is not None:
         app = _build_note_uploader(request, None)
         async with async_playwright() as playwright:

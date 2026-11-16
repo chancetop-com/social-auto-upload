@@ -27,6 +27,7 @@ Label: wayfinder:map
 - [修正动态候选刷新时的偶发长停顿](issues/08-topic-refresh-stall.md)：实测定位 30 秒旧序号等待；修复 Rednote、小红书、TikTok 和百家号的同类路径，Rednote 图文与视频干跑复验通过。
 
 - [保留发布结果并立即拒绝发布按钮歧义](issues/09-publish-result-contracts.md)：修复 Rednote / 小红书及其他 CLI 平台的同类清理、唯一性和重试问题；故障注入、CLI 退出码及本地 Chromium 验证通过。
+- [修复提交后审查问题并完成复审](issues/10-review-fixes.md)：补齐单行输入预检、登录探测清理保护与失效话题快照重扫，同类平台同步修复；人类化和功能回归通过，Standards / Spec 最终均无未解决发现。
 
 ## Not yet specified
 

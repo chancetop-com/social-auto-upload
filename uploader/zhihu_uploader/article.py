@@ -15,6 +15,7 @@ from loguru import logger
 from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.text_validation import validate_single_line
 from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -93,6 +94,7 @@ class ZhihuArticle:
         Cookie/identity binding is local-only; Multilogin mode passes
         ``check_cookie=False`` because the Profile is the identity.
         """
+        validate_single_line(self.title)
         if not self.title.strip() or len(self.title) > ZHIHU_ARTICLE_TITLE_MAX:
             raise ValueError(f"知乎文章标题需为 1–{ZHIHU_ARTICLE_TITLE_MAX} 字")
         self.document = load_article(

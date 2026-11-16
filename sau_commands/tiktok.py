@@ -47,6 +47,7 @@ from uploader.tk_uploader.main_chrome import (
     is_logged_in,
     tiktok_setup,
 )
+from sau_commands.arguments import single_line_value
 from utils.browser_session import browser_session
 from utils.errors import UsageError
 
@@ -200,6 +201,7 @@ def register(platform_parsers):
     )
     upload_note_parser.add_argument(
         "--title",
+        type=single_line_value,
         default=None,
         help="Optional photo Title (up to 90 characters); omit to leave it empty",
     )

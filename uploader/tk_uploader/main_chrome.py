@@ -45,6 +45,7 @@ from utils.files_times import get_absolute_path
 from utils.humanize import DEFAULT_PROFILE
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
+from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.log import tiktok_logger
 
@@ -1052,7 +1053,7 @@ async def is_logged_in(context) -> bool:
             "无法识别 TikTok Studio 上传页结构（既无上传入口，也无登录表单）。"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def _new_local_context(browser, *, storage_state, attempts: int = 3):
@@ -1146,9 +1147,9 @@ async def _cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) 
                 tiktok_logger.error(f"[+] cookie check failed: {exc}")
                 return False
             finally:
-                await context.close()
+                await close_browser_resources(context=context)
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def tiktok_setup(
@@ -3460,7 +3461,7 @@ class TiktokNote(TiktokBaseUploader):
         self.tags = tags
         self.publish_date = publish_date
         self.account_file = account_file
-        self.title = title
+        self.title = validate_single_line(title)
         self.options = options
         self.no_publish = no_publish
         self.debug = debug

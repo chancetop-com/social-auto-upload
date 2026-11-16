@@ -29,6 +29,8 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
+from utils.text_validation import validate_single_line
 from utils.browser_session import browser_session
 
 
@@ -47,7 +49,7 @@ def register(platform_parsers):
     weibo_upload_video_parser = weibo_actions.add_parser("upload-video", help="Upload one video to Weibo")
     weibo_upload_video_parser.add_argument("--account", required=False, help="Weibo user-defined account_name")
     weibo_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
-    weibo_upload_video_parser.add_argument("--title", required=True, help="Video title (max 30 chars)")
+    weibo_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title (max 30 chars)")
     weibo_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     weibo_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     weibo_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path (<5MB)")
@@ -108,6 +110,7 @@ def _raise_login_required(target) -> None:
 async def upload_weibo_video(
     request: WeiboVideoUploadRequest, *, target=None
 ) -> Path | None:
+    validate_single_line(request.title)
     if target is not None:
         app = _build_weibo_uploader(request, None)
         async with async_playwright() as playwright:

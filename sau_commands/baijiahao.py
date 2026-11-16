@@ -28,6 +28,8 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
+from utils.text_validation import validate_single_line
 from utils.browser_session import browser_session
 
 
@@ -46,7 +48,7 @@ def register(platform_parsers):
     baijiahao_upload_video_parser = baijiahao_actions.add_parser("upload-video", help="Upload one video to Baijiahao")
     baijiahao_upload_video_parser.add_argument("--account", required=False, help="Baijiahao user-defined account_name")
     baijiahao_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
-    baijiahao_upload_video_parser.add_argument("--title", required=True, help="Video title")
+    baijiahao_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
     baijiahao_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     baijiahao_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     baijiahao_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path")
@@ -83,6 +85,7 @@ async def check_baijiahao_account(account_name: str) -> bool:
 
 
 async def upload_baijiahao_video(request: BaijiahaoVideoUploadRequest, *, target=None) -> Path | None:
+    validate_single_line(request.title)
     if target is not None:
         app = BaiJiaHaoVideo(
             title=request.title,

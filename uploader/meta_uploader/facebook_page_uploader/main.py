@@ -147,7 +147,7 @@ async def _open_business_page(
         await page.locator("body").wait_for(state="visible", timeout=30_000)
         return browser, context, page
     except Exception:
-        await browser.close()
+        await close_browser_resources(browser=browser)
         raise
 
 
@@ -209,7 +209,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             await wait_for_timeout(META_BUSINESS_LOGIN_CHECK_SETTLE_MS)
         return not await _is_business_logged_out(page)
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def meta_cookie_auth(account_file: str | Path, *, proxy: str | None = None) -> bool:
@@ -223,7 +223,7 @@ async def meta_cookie_auth(account_file: str | Path, *, proxy: str | None = None
         try:
             return not await _is_business_logged_out(page)
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def meta_setup(

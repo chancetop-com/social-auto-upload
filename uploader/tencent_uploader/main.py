@@ -224,7 +224,7 @@ async def cookie_auth(account_file):
             tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
             return False
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def _extract_tencent_qrcode_src(page: Page) -> str:
@@ -417,7 +417,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "（页面结构异常）"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:

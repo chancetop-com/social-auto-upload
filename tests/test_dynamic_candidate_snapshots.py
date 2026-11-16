@@ -29,6 +29,83 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
         self.xhs = xhs.XiaoHongShuVideo("test", "unused.mp4", [], 0, "unused.json")
         self.tiktok = tiktok.TiktokVideo("test", "unused.mp4", [], 0, "unused.json")
 
+    async def topic_editor(self):
+        await self.page.set_content('''
+          <div class="tiptap" role="textbox" contenteditable="true">#travel</div>
+          <div id="creator-editor-topic-container">
+            <div class="item"><span class="name">#travel</span></div>
+          </div>
+          <script>
+            document.body.dataset.clicks = '0';
+            document.querySelector('#creator-editor-topic-container').onclick = () => {
+              document.body.dataset.clicks = Number(document.body.dataset.clicks) + 1;
+              const a = document.createElement('a');
+              a.setAttribute('data-topic', JSON.stringify({name: 'travel'}));
+              a.textContent = '#travel';
+              document.querySelector('.tiptap').replaceChildren(a);
+              document.querySelector('#creator-editor-topic-container').replaceChildren();
+            };
+          </script>
+        ''')
+        await self.page.locator('.tiptap').focus()
+        await self.page.keyboard.press("End")
+
+    async def test_replaced_topic_candidate_is_rescanned_or_degraded_within_deadline(self):
+        async def no_sleep(_seconds):
+            pass
+
+        for module, cls, prefix in (
+            (rednote, rednote.RednoteVideo, "REDNOTE"),
+            (xhs, xhs.XiaoHongShuVideo, "XHS"),
+        ):
+            for enabled in ("1", "0"):
+                for replace_always in (False, True):
+                    with self.subTest(platform=prefix, humanize=enabled, churn=replace_always):
+                        await self.topic_editor()
+                        app = cls("test", "unused.mp4", [], 0, "unused.json")
+                        scan = app._scan_topic_candidate
+                        scans = []
+
+                        async def replace_after_scan(page, tag, *, scan=scan, scans=scans, replace_always=replace_always):
+                            candidate, count = await scan(page, tag)
+                            if candidate is not None and (not scans or replace_always):
+                                await candidate.evaluate("el => el.replaceWith(el.cloneNode(true))")
+                            scans.append(candidate)
+                            return candidate, count
+
+                        started = time.monotonic()
+                        with (
+                            patch.dict(os.environ, {"HUMANIZE": enabled}),
+                            patch.object(module, f"{prefix}_TOPIC_READY_WINDOW_MS", 500),
+                            patch.object(module, f"{prefix}_TOPIC_READBACK_WINDOW_MS", 200),
+                            patch.object(app, "_scan_topic_candidate", replace_after_scan),
+                        ):
+                            await app._insert_topic(self.page, "travel", Humanizer(self.page, sleep=no_sleep))
+                        self.assertLess(time.monotonic() - started, 2)
+                        self.assertGreater(len(scans), 1)
+                        self.assertEqual(int(await self.page.get_attribute("body", "data-clicks")), 0 if replace_always else 1)
+                        self.assertEqual(await self.page.locator('a[data-topic]').count(), 0 if replace_always else 1)
+                        if replace_always:
+                            self.assertEqual((await self.page.locator('.tiptap').inner_text()).strip(), "#travel")
+
+    async def test_candidate_replaced_during_humanized_pointer_movement_is_rescanned(self):
+        for module, cls in ((rednote, rednote.RednoteVideo), (xhs, xhs.XiaoHongShuVideo)):
+            with self.subTest(platform=module.__name__):
+                await self.topic_editor()
+                replaced = []
+
+                async def replace_during_move(_seconds, *, replaced=replaced):
+                    if not replaced:
+                        replaced.append(True)
+                        await self.page.locator('.item').evaluate("el => el.replaceWith(el.cloneNode(true))")
+
+                with patch.dict(os.environ, {"HUMANIZE": "1"}):
+                    app = cls("test", "unused.mp4", [], 0, "unused.json")
+                    await app._insert_topic(self.page, "travel", Humanizer(self.page, sleep=replace_during_move))
+                self.assertTrue(replaced)
+                self.assertEqual(int(await self.page.get_attribute("body", "data-clicks")), 1)
+                self.assertEqual(await self.page.locator('a[data-topic]').count(), 1)
+
     @contextmanager
     def refresh_after_capture(
         self, selector, *, root_selector="#creator-editor-topic-container"
@@ -117,7 +194,7 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
                     });
                 }""")
 
-                async def reorder_then_click(humanizer, candidate):
+                async def reorder_then_click(humanizer, candidate, *, platform=platform):
                     await self.page.locator("#creator-editor-topic-container").evaluate(
                         "root => root.append(root.firstElementChild)"
                     )

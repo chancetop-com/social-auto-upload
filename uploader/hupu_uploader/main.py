@@ -251,7 +251,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "虎扑登录状态检查失败：未找到上传按钮或已登录用户菜单（页面结构异常）"
         )
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def hupu_cookie_gen(account_file, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 120, headless: bool = False):
@@ -422,7 +422,7 @@ async def cookie_auth(account_file):
             hupu_logger.warning(_msg("😵", f"cookie 校验出错，按失效处理: {exc}"))
             return False
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def hupu_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = False):

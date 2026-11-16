@@ -10,6 +10,7 @@ from uploader.alipay_uploader.main import (
     ALIPAY_INIT_SCRIPT,
     ALIPAY_LAUNCH_KWARGS,
     AlipayVideo,
+    format_title_with_tags,
     alipay_setup,
     cookie_auth as alipay_cookie_auth,
     is_logged_in,
@@ -29,6 +30,7 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
 from utils.browser_session import browser_session
 
 
@@ -47,7 +49,7 @@ def register(platform_parsers):
     alipay_upload_video_parser = alipay_actions.add_parser("upload-video", help="Upload one video to Alipay")
     alipay_upload_video_parser.add_argument("--account", required=False, help="Alipay user-defined account_name")
     alipay_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
-    alipay_upload_video_parser.add_argument("--title", required=True, help="Video title")
+    alipay_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
     alipay_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     alipay_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     alipay_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional cover image path")
@@ -108,6 +110,7 @@ def _raise_login_required(target) -> None:
 async def upload_alipay_video(
     request: AlipayVideoUploadRequest, *, target=None
 ) -> Path | None:
+    format_title_with_tags(request.title, request.tags)
     if target is not None:
         app = _build_alipay_uploader(request, None)
         async with async_playwright() as playwright:

@@ -10,6 +10,7 @@ from patchright.async_api import BrowserContext, Page, async_playwright, expect
 
 from conf import LOCAL_CHROME_PATH
 from uploader.xueqiu_uploader.constants import XUEQIU_HOME_URL
+from utils.browser_cleanup import close_browser_resources
 from utils.errors import LoginRequiredError
 
 
@@ -135,7 +136,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
         await read_xueqiu_identity(page, timeout=XUEQIU_IDENTITY_PROBE_TIMEOUT_MS)
         return True
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def check_xueqiu_account(account_file: str | Path, headless=False) -> bool:
@@ -162,4 +163,4 @@ async def check_xueqiu_account(account_file: str | Path, headless=False) -> bool
                 raise RuntimeError("雪球会话主体与本地绑定不一致")
             return True
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)

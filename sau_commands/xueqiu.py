@@ -32,6 +32,7 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from sau_commands.arguments import single_line_value
 from utils.browser_session import browser_session
 
 
@@ -109,7 +110,7 @@ def register(platform_parsers):
     xueqiu_verify.set_defaults(headless=False)
     xueqiu_article = xueqiu_actions.add_parser("upload-article", help="HTML/Markdown/TXT 长文及原位置配图")
     xueqiu_article.add_argument("--account", required=False)
-    xueqiu_article.add_argument("--title", required=True, help="非空单行标题")
+    xueqiu_article.add_argument("--title", type=single_line_value, required=True, help="非空单行标题")
     xueqiu_article.add_argument("--content-file", required=True, type=existing_file_path, help="UTF-8 HTML/Markdown/TXT；图片由原稿位置决定")
     xueqiu_article.add_argument("--cover", type=existing_file_path, help="独立封面；采用平台默认裁剪区域")
     xueqiu_article.add_argument("--visibility", choices=XUEQIU_VISIBILITY, default="公开", help="分享范围")

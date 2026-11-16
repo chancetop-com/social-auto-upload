@@ -296,7 +296,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
 
         return True
     finally:
-        await page.close()
+        await close_browser_resources(page=page)
 
 
 async def _extract_ks_qrcode_src(page: Page) -> str:
@@ -410,7 +410,7 @@ async def cookie_auth(account_file):
             kuaishou_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
             return False
         finally:
-            await browser.close()
+            await close_browser_resources(browser=browser)
 
 
 async def ks_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS, cdp_url: str | None = None):
