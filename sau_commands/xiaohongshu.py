@@ -23,6 +23,7 @@ from uploader.xiaohongshu_uploader.main import (
     save_storage_state_atomic,
     xiaohongshu_setup,
 )
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
@@ -163,6 +164,7 @@ def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     xiaohongshu_parser = platform_parsers.add_parser("xiaohongshu", help="Xiaohongshu operations")
     xiaohongshu_actions = xiaohongshu_parser.add_subparsers(dest="action", required=True)
+    add_reset_profile_action(xiaohongshu_actions)
 
     for action_name in ("login", "check"):
         action_parser = xiaohongshu_actions.add_parser(action_name, help=f"Xiaohongshu {action_name}")
@@ -406,6 +408,8 @@ async def upload_xiaohongshu_note(
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
     if args.action == "login":
         reject_managed_login("xiaohongshu", args)
         require_local_account(args)

@@ -22,6 +22,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     validate_publish_options,
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     add_not_before_flag,
     add_runtime_flags,
@@ -47,6 +48,7 @@ def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     instagram_parser = platform_parsers.add_parser("instagram", help="Instagram independent web operations")
     instagram_actions = instagram_parser.add_subparsers(dest="action", required=True)
+    add_reset_profile_action(instagram_actions)
     for action_name in ("login", "check"):
         action_parser = instagram_actions.add_parser(action_name, help=f"Instagram {action_name}")
         action_parser.add_argument("--account", required=False)
@@ -283,6 +285,8 @@ async def upload_instagram_content(
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
     if args.action == "login":
         reject_managed_login("instagram", args)
         require_local_account(args)
