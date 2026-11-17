@@ -169,7 +169,7 @@ sau douyin check --account creator
 
 Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；新 Profile 的真实账号验收留待最终回归。见 [Rednote 说明](./docs/rednote.md)。
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、知乎、雪球 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
 
 #### 指定发布时刻（可选）
 
@@ -444,5 +444,7 @@ Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Faceb
 虎扑 login/check/视频与直接 uploader 已使用独立持久化 Profile；默认 Chrome 有头，支持完整 Chromium/自定义路径，只安装所选来源。旧 JSON 不读写；QQ 二维码、文件选择器和专区弹窗在同一自然窗口 context 中运行。先 login，再同配置 check；登录/验证退出 10，运行故障 1，提交结果未知 9 禁止自动重发。没有 no-publish，本轮只做离线与隔离 DOM 验证。见 [虎扑 CLI](./docs/CLI.md#虎扑-cli-子命令)。
 
 支付宝生活号 login/check/视频/reset-profile 与直接 uploader 已接入持久化 Profile，默认 Chrome 有头、可选完整 Chromium/自定义路径，旧 JSON 不读写。先 `sau alipay login --account creator --headed` 扫码，关闭后同配置 check；缺少 Profile/明确登录失效退出 10，页面与网络故障退出 1，发布结果未知退出 9 并禁止自动重发。生活号无 no-publish，使用离线/受控 DOM 验收。见 [支付宝 CLI](./docs/CLI.md#支付宝生活号-cli-子命令)。
+
+大鱼号 login/check/视频/文章/verify/reset-profile 与直接调用已使用持久化 Profile；默认 Chrome 有头，支持完整 Chromium 和自定义路径，旧 Cookie 与身份旁文件不参与。别名允许重新登录不同主体；显式名称和历史作品作者核验继续生效。`verify --public` 在同一已选浏览器内使用独立匿名 context，保持主 Profile 占用。见 [大鱼号说明](./docs/dayu.md)。
 
 雪球 login/check/文章/verify/reset-profile 和直接入口已使用独立持久化 Profile，默认 Chrome 有头，可选完整 Chromium/自定义路径；旧 Cookie JSON/身份旁文件不参与。别名允许换号，显式昵称及历史作品作者继续核验；verify 在托管环境下仍本地。文章验收显式 `--prepare-only`，结果保留 `cookies/xueqiu_results/`；本轮仅离线与受控浏览器验证，未操作真实账号。见 [雪球说明](./docs/xueqiu.md)。

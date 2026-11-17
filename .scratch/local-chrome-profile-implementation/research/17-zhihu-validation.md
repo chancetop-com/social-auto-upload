@@ -57,3 +57,5 @@ PYTHONPATH=. /Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-u
 ## 合入第五批并行交付
 
 合入 integration `be16eb5`（雪球 18）后，合并共享平台列表、provider 本地路由断言，并移除两个平台都已被公共 CLI 测试取代的旧 local-launch 测试类。上述离线命令增加 `tests.test_xueqiu_profiles` 后，**357 passed / 11.360s**；未修改 Xueqiu 运行时。
+
+随后合入 integration `03b6865`（大鱼号 16），共享平台列表采用 Dayu/Zhihu/Xueqiu 并集，保留各自 provider/local-action 测试。离线命令再增加 `tests.test_dayu_profiles` 后，最终 **376 passed / 14.831s**。Bilibili 未迁移 reset 的单项集合保留为真正 tuple，避免字符串逐字符测试；其专项检查再次通过。`git diff --check` 通过，未改动 Dayu/Xueqiu 运行时。

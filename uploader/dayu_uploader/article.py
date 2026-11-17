@@ -21,16 +21,17 @@ from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.schedule import fill_dayu_schedule, validate_dayu_schedule
 from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.dayu_uploader.session import (
-    DAYU_INIT_SCRIPT,
-    DAYU_LAUNCH_KWARGS,
     dayu_results_dir,
-    load_dayu_identity,
+    dayu_account_alias,
+    goto_local_dayu,
     raise_if_login_required,
     read_dayu_identity,
 )
 from uploader.dayu_uploader.verification import check_dayu_article_content
 from utils.text_validation import validate_single_line
-from utils.browser_session import BrowserSession, browser_session
+from utils.browser_session import BrowserSession
+from utils.local_browser_session import local_browser_session
+from utils.errors import LoginRequiredError
 from utils.log import dayu_logger
 
 DAYU_ARTICLE_URL = "https://mp.dayu.com/dashboard/article/write"
@@ -58,9 +59,9 @@ class DayuArticle(DayuHumanizeMixin):
     """正文以 UTF-8 文件传入；图片顺序由 HTML 中 img 的位置决定。"""
 
     def __init__(self, title, content_file, account_file, source, source_url="", author=None,
-                 cover_indices=None, headless=True, debug=False, prepare_only=False,
+                 cover_indices=None, headless=None, debug=False, prepare_only=False,
                  upload_timeout=600, theme=None, schedule=None,
-                 publish_not_before=None):
+                 publish_not_before=None, account_name=None, local_browser=None):
         self.title = title
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file else None
@@ -69,6 +70,8 @@ class DayuArticle(DayuHumanizeMixin):
         self.author = author
         self.cover_indices = cover_indices or []
         self.headless = headless
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.debug = debug
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
@@ -88,10 +91,6 @@ class DayuArticle(DayuHumanizeMixin):
         title_length = math.ceil(sum(.5 if ord(char) <= 255 else 1 for char in self.title.strip()))
         if not 5 <= title_length <= 50:
             raise ValueError("大鱼号图文标题需要 5–50 字（英文字符按半字计数并向上取整）")
-        if check_identity:
-            if self.account_file is None or not self.account_file.is_file():
-                raise FileNotFoundError("请先执行 sau dayu login 保存账号")
-            load_dayu_identity(self.account_file)
         if self.source not in DAYU_SOURCE_TYPES:
             raise ValueError(f"信息来源必须为: {', '.join(DAYU_SOURCE_TYPES)}")
         if self.source == DAYU_SOURCE_REPRINT:
@@ -324,12 +323,9 @@ class DayuArticle(DayuHumanizeMixin):
 
         self.validate_upload_args()
         async with async_playwright() as playwright:
-            async with browser_session(
-                playwright,
-                headless=self.headless,
-                account_file=str(self.account_file),
-                launch_kwargs=DAYU_LAUNCH_KWARGS,
-                init_script=DAYU_INIT_SCRIPT,
+            async with local_browser_session(
+                playwright, platform="dayu", account=dayu_account_alias(self.account_file, self.account_name),
+                headless=self.headless, local_browser=self.local_browser,
             ) as local_session:
                 return await self.upload_in(local_session)
 
@@ -338,12 +334,11 @@ class DayuArticle(DayuHumanizeMixin):
         budget = PublishTimeoutBudget("大鱼号")
         self._publish_budget = budget
         multilogin = session.managed
-        expected = None if multilogin else load_dayu_identity(self.account_file)
         results_dir = dayu_results_dir(self.account_file)
-        results_dir.mkdir(exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {"success": False, "status": "preparing", "type": "article", "title": self.title,
-                  "content_file": str(self.content_file), "identity": expected,
+                  "content_file": str(self.content_file), "identity": None,
                   "manifest": self.document.manifest, "result_file": str(result_file)}
         if self.schedule:
             result["schedule"] = self.schedule.isoformat()
@@ -352,14 +347,15 @@ class DayuArticle(DayuHumanizeMixin):
         try:
             page = await session.context.new_page()
             humanizer = self._humanizer(page)
-            await page.goto(DAYU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
+            if multilogin:
+                await page.goto(DAYU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
+            else:
+                await goto_local_dayu(page, DAYU_ARTICLE_URL)
             await humanizer.after_navigate()
             if multilogin:
                 await raise_if_login_required(page)
             else:
                 identity = await read_dayu_identity(page)
-                if identity["wmid"] != expected["wmid"]:
-                    raise RuntimeError("大鱼号主体不匹配，图文上传已中止")
                 result["identity"] = identity
             await self.fill_article_form(page, multilogin=multilogin)
             result.update(source_format=self.document.source_format, theme=self.document.theme,
@@ -367,27 +363,38 @@ class DayuArticle(DayuHumanizeMixin):
             if multilogin:
                 await raise_if_login_required(page)
             else:
-                if (await read_dayu_identity(page))["wmid"] != identity["wmid"]:
-                    raise RuntimeError("填表期间大鱼号主体发生变化，拒绝发表")
+                await raise_if_login_required(page, managed=False)
             if self.prepare_only:
                 await page.screenshot(path=str(result_file.with_suffix(".png")), full_page=True)
                 result.update(success=True, status="prepared")
                 return result
-            if multilogin:
-                await raise_if_login_required(page)
+            await raise_if_login_required(page, managed=multilogin)
             await submit_dayu_publication(
                 page, result, result_file, article_html=self.publication_html,
                 publish_not_before=getattr(self, "publish_not_before", None),
-                budget=budget, humanizer=humanizer,
+                budget=budget, humanizer=humanizer, local=not multilogin,
             )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号图文{action}: {result['content_id']}")
             return result
         except Exception as exc:
             result["error"] = str(exc)
+            if not multilogin and page is not None:
+                try:
+                    await raise_if_login_required(page, managed=False,
+                                                  publish_attempted=bool(result.get("publish_attempted")))
+                except LoginRequiredError as auth_error:
+                    result["error"] = str(auth_error)
+                    raise
             dayu_logger.error(f"大鱼号图文阶段={result['status']}，结果文件={result_file}: {exc}")
             if self.debug and page is not None:
-                await page.screenshot(path=str(result_file.with_suffix(".png")))
+                if multilogin:
+                    await page.screenshot(path=str(result_file.with_suffix(".png")))
+                else:
+                    try:
+                        await page.screenshot(path=str(result_file.with_suffix(".png")))
+                    except Exception:
+                        pass
             raise
         finally:
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

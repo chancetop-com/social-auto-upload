@@ -531,11 +531,6 @@ class ArticleUploaderBodyTests(unittest.TestCase):
                     "read_dayu_identity",
                     new=AsyncMock(),
                 ) as read_identity,
-                patch.object(
-                    dayu_article_module,
-                    "load_dayu_identity",
-                    new=MagicMock(),
-                ) as load_identity,
                 patch.object(dayu_article_module, "dayu_logger", MagicMock()),
             ):
                 result = asyncio.run(app.upload_in(session))
@@ -543,7 +538,6 @@ class ArticleUploaderBodyTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["status"], "prepared")
         read_identity.assert_not_awaited()
-        load_identity.assert_not_called()
         fill_form.assert_awaited_once_with(page, multilogin=True)
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
@@ -897,34 +891,6 @@ class LocalOnlyActionTests(unittest.TestCase):
                 ["xueqiu", "verify", "--account", "creator", "--result", str(result)],
                 "verify_xueqiu_result",
             )
-
-    def test_dayu_verify_is_local(self):
-        local_identity = MagicMock(
-            side_effect=RuntimeError("local dayu identity path")
-        )
-        resolve = MagicMock(return_value=Path("/tmp/dayu-cookie.json"))
-        managed = MagicMock(side_effect=AssertionError("managed provider used"))
-        with (
-            patch.object(dayu_command, "load_dayu_identity", new=local_identity),
-            patch.object(dayu_command, "resolve_account_file", new=resolve),
-            patch.object(dayu_command, "resolve_managed_provider", new=managed),
-        ):
-            code, _, err = _run(
-                [
-                    "dayu",
-                    "verify",
-                    "--account",
-                    "creator",
-                    "--content-id",
-                    "c",
-                ]
-            )
-
-        self.assertEqual(code, 1)
-        self.assertIn("local dayu identity path", err)
-        local_identity.assert_called_once_with(Path("/tmp/dayu-cookie.json"))
-        resolve.assert_called_once()
-        managed.assert_not_called()
 
     def test_all_local_actions_still_require_account_under_adspower(self):
         with tempfile.TemporaryDirectory() as tmp:

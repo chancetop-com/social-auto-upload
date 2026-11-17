@@ -56,9 +56,9 @@ class DayuBrowserTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TimeoutError):
             await wait_dayu_processing(self.page, "demo.mp4", timeout=.05)
 
-    async def make_public_context(self):
+    async def make_public_context(self, **kwargs):
         """公开页在本地路由中播放真实 demo，不借用任何登录状态或外网媒体。"""
-        context = await self.browser.new_context()
+        context = await self.browser.new_context(**kwargs)
         html = '''<meta charset="utf-8"><div class="pc-videoContent-test">大鱼号上传测试</div>
             <div class="pc-userInfoContainer-test"><span>测试账号</span></div>
             <video src="https://mparticle.uc.cn/test.mp4" preload="auto"></video>'''

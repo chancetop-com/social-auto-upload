@@ -19,18 +19,19 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.dayu_uploader.publication import submit_dayu_publication
 from uploader.dayu_uploader.schedule import fill_dayu_schedule, validate_dayu_schedule
 from uploader.dayu_uploader.session import (
-    DAYU_INIT_SCRIPT,
-    DAYU_LAUNCH_KWARGS,
     DAYU_VIDEO_URL,
     dayu_results_dir,
-    load_dayu_identity,
+    dayu_account_alias,
+    goto_local_dayu,
     raise_if_login_required,
     read_dayu_identity,
 )
 from uploader.dayu_uploader.constants import DAYU_SOURCE_REPRINT, DAYU_SOURCE_TYPES, DAYU_VIDEO_CATEGORIES
 from uploader.dayu_uploader.interaction import DayuHumanizeMixin, unique
 from utils.text_validation import validate_single_line
-from utils.browser_session import BrowserSession, browser_session
+from utils.browser_session import BrowserSession
+from utils.local_browser_session import local_browser_session
+from utils.errors import LoginRequiredError
 from utils.log import dayu_logger
 
 
@@ -78,9 +79,9 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
     SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".gif", ".png", ".bmp", ".jpeg"}
 
     def __init__(self, title, file_path, tags, account_file, thumbnail_path, category,
-                 source, desc="", headless=True, debug=False, prepare_only=False,
+                 source, desc="", headless=None, debug=False, prepare_only=False,
                  upload_timeout=600, source_url="", schedule=None,
-                 publish_not_before=None):
+                 publish_not_before=None, account_name=None, local_browser=None):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
@@ -91,6 +92,8 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
         self.source_url = source_url
         self.desc = desc
         self.headless = headless
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.debug = debug
         self.prepare_only = prepare_only
         self.upload_timeout = upload_timeout
@@ -103,10 +106,6 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
         self.schedule = validate_dayu_schedule(self.schedule)
         self.file_path = self.validate_video_file(self.file_path)
         self.thumbnail_path = self.validate_image_file(self.thumbnail_path)
-        if check_identity:
-            if self.account_file is None or not self.account_file.is_file():
-                raise FileNotFoundError("请先执行 sau dayu login 保存账号")
-            load_dayu_identity(self.account_file)
         # 编辑器按汉字 1、ASCII 0.5 计数（页面上 demo 显示 2/60）。
         title_length = sum(.5 if ord(char) <= 255 else 1 for char in self.title.strip())
         if not 5 <= title_length <= 60:
@@ -248,12 +247,9 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
 
         self.validate_upload_args()
         async with async_playwright() as playwright:
-            async with browser_session(
-                playwright,
-                headless=self.headless,
-                account_file=str(self.account_file),
-                launch_kwargs=DAYU_LAUNCH_KWARGS,
-                init_script=DAYU_INIT_SCRIPT,
+            async with local_browser_session(
+                playwright, platform="dayu", account=dayu_account_alias(self.account_file, self.account_name),
+                headless=self.headless, local_browser=self.local_browser,
             ) as local_session:
                 return await self.upload_in(local_session)
 
@@ -261,12 +257,11 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
         """Publish on the injected session; Multilogin never touches identity files."""
         budget = self.start_publish_budget()
         multilogin = session.managed
-        expected = None if multilogin else load_dayu_identity(self.account_file)
         results_dir = dayu_results_dir(self.account_file)
-        results_dir.mkdir(exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
         result_file = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.json"
         result = {"success": False, "status": "preparing", "type": "video", "title": self.title,
-                  "video_file": str(self.file_path), "identity": expected,
+                  "video_file": str(self.file_path), "identity": None,
                   "result_file": str(result_file)}
         if self.schedule:
             result["schedule"] = self.schedule.isoformat()
@@ -275,14 +270,15 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
         try:
             page = await session.context.new_page()
             humanizer = self._humanizer(page)
-            await page.goto(DAYU_VIDEO_URL, wait_until="domcontentloaded", timeout=45000)
+            if multilogin:
+                await page.goto(DAYU_VIDEO_URL, wait_until="domcontentloaded", timeout=45000)
+            else:
+                await goto_local_dayu(page, DAYU_VIDEO_URL)
             await humanizer.after_navigate()
             if multilogin:
                 await raise_if_login_required(page)
             else:
                 identity = await read_dayu_identity(page)
-                if identity["wmid"] != expected["wmid"]:
-                    raise RuntimeError("大鱼号主体不匹配，上传已中止")
                 result["identity"] = identity
             # 主视频上传器有 name=file，封面 input 没有此属性，可据此区分两种上传入口。
             file_input = page.locator('input[type="file"][name="file"]')
@@ -295,9 +291,7 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
             if multilogin:
                 await raise_if_login_required(page)
             else:
-                # 填表和异步封面处理之后，再次核对同一主体及视频处理结果。
-                if (await read_dayu_identity(page))["wmid"] != identity["wmid"]:
-                    raise RuntimeError("填表期间大鱼号主体发生变化，拒绝提交")
+                await raise_if_login_required(page, managed=False)
             await wait_dayu_processing(
                 page, self.file_path.name, self.upload_timeout, budget=budget
             )
@@ -306,21 +300,33 @@ class DayuVideo(DayuHumanizeMixin, BaseVideoUploader):
                 result.update(success=True, status="prepared")
                 return result
 
-            if multilogin:
-                await raise_if_login_required(page)
+            await raise_if_login_required(page, managed=multilogin)
             await submit_dayu_publication(
                 page, result, result_file,
                 publish_not_before=getattr(self, "publish_not_before", None),
-                budget=budget, humanizer=humanizer,
+                budget=budget, humanizer=humanizer, local=not multilogin,
             )
             action = "定时发布已安排" if self.schedule else "发表成功"
             dayu_logger.success(f"大鱼号{action}: {result['content_id']}")
             return result
         except Exception as exc:
             result["error"] = str(exc)
+            if not multilogin and page is not None:
+                try:
+                    await raise_if_login_required(page, managed=False,
+                                                  publish_attempted=bool(result.get("publish_attempted")))
+                except LoginRequiredError as auth_error:
+                    result["error"] = str(auth_error)
+                    raise
             dayu_logger.error(f"大鱼号阶段={result['status']}，结果文件={result_file}: {exc}")
             if self.debug and page is not None:
-                await page.screenshot(path=str(result_file.with_suffix(".png")))
+                if multilogin:
+                    await page.screenshot(path=str(result_file.with_suffix(".png")))
+                else:
+                    try:
+                        await page.screenshot(path=str(result_file.with_suffix(".png")))
+                    except Exception:
+                        pass
             raise
         finally:
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

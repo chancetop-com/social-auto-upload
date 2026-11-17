@@ -34,6 +34,8 @@
 
 - 合入 integration `be16eb5`（雪球 18）后，共享列表/测试采用两平台并集，新增雪球公共流程回归，共 **357 passed / 11.360s**。
 
+- 最终合入 integration `03b6865`（大鱼号 16），保留三个第五批平台的文档/重建列表及各自验证 helper；公共 CLI/provider/生命周期回归共 **376 passed / 14.831s**，另复查 reset 平台集合。详见验证记录。
+
 ## Answer
 
 知乎 login/check/文章/视频/verify/reset-profile 和全部可达独立调用已接入共享持久化 Profile，内部预检与业务共用 session/占用，注入会话保持调用方所有权。默认 Chrome 有头、来源和 headless 优先级完整；同别名可换号，名称/头像只用于当前操作和历史作品证据。旧 JSON/旁文件不参与正常流程，verify 仍要求原作品账号、URL 和标题，历史身份不改写。
