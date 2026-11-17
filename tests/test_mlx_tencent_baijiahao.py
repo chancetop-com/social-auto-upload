@@ -249,36 +249,7 @@ def _make_baijiahao(account_file=None) -> BaiJiaHaoVideo:
 
 
 class TencentLocalGoldenTests(unittest.TestCase):
-    def test_video_launch_context_and_init_are_golden(self):
-        video = _make_tencent_video("/tmp/tencent-cookie.json")
-        video.headless = False
-        video.validate_upload_args = AsyncMock()
-        video.upload_in = AsyncMock()
-        playwright = FakePlaywright()
-
-        with (
-            patch.object(tencent_main, "set_init_script", AsyncMock()) as init_script,
-            patch.object(tencent_main.asyncio, "sleep", AsyncMock()),
-        ):
-            asyncio.run(video.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **TENCENT_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/tencent-cookie.json", **TENCENT_CONTEXT_KWARGS}],
-        )
-        self.assertEqual(TENCENT_CONTEXT_KWARGS, {})
-        init_script.assert_not_awaited()
-        self.assertFalse(tencent_main.TENCENT_INIT_SCRIPT)
-        context = browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, ["/tmp/tencent-cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        self.assertEqual(playwright.events, ["launch", "context.close", "browser.close"])
+    # Formal video Profile lifecycle: tests.test_tencent_profiles.
 
     def test_note_keeps_legacy_init_script_and_golden_kwargs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -829,7 +800,9 @@ class _UploadCliCase(_RunHelpers):
             patch.object(self.module, "browser_session", new=self.session_factory),
             patch.object(self.module, "is_logged_in", new=probe),
             patch.object(self.module, self.builder_name, new=self.builder_mock),
-            patch.object(self.module, "resolve_account_file", new=self.resolve_account_mock, create=True),
+            (patch("utils.local_browser_session.resolve_local_browser", new=self.resolve_account_mock)
+             if self.module in (tencent_command, baijiahao_command) else
+             patch.object(self.module, "resolve_account_file", new=self.resolve_account_mock)),
             patch.object(self.module, self.setup_name, new=self.setup_mock),
         )
 

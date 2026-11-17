@@ -22,7 +22,8 @@ from utils.browser_cleanup import close_browser_resources, save_upload_session
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, UsageError
+from utils.local_browser_session import local_browser_session
 from utils.humanize import (
     MAYBE_DISPATCHED,
     MAYBE_DISPATCHED_VALUE,
@@ -120,18 +121,16 @@ def _build_launch_kwargs(headless: bool) -> dict:
     return launch_kwargs
 
 
-# Golden local-mode browser options.  ``sau_commands/tencent.py`` passes the
-# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
-# drift.  ``launch_kwargs`` never contains ``headless`` (it is injected by the
-# session seam).
+# Historical managed hints and unregistered note defaults. Preserve managed
+# ignored-option logs; formal local video uses the shared native browser resolver.
 TENCENT_LAUNCH_KWARGS = {
     key: value
     for key, value in _build_launch_kwargs(headless=False).items()
     if key != "headless"
 }
 TENCENT_CONTEXT_KWARGS: dict = {}
-# The video path never injected the stealth script; the note path did.  Keep both
-# behaviours byte-for-byte in local mode.  Multilogin ignores both values.
+# The unregistered note path retains its old script. Managed ignores these hints;
+# formal local video never injects it.
 TENCENT_INIT_SCRIPT = False
 TENCENT_NOTE_INIT_SCRIPT = True
 
@@ -145,8 +144,8 @@ _TENCENT_LOGIN_HINTS = ("login", "captcha", "verify", "two-factor", "2fa")
 def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour.  ``publish_attempted`` must be true when the
+    Managed branches retain this contract; local Profile operations use the
+    strict local probe. ``publish_attempted`` must be true when the
     redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
@@ -193,38 +192,22 @@ def format_str_for_short_title(origin_title: str) -> str:
     return formatted_string
 
 
-async def cookie_auth(account_file):
-    account_file = _resolve_account_file(account_file)
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(TENCENT_UPLOAD_URL, wait_until="domcontentloaded")
+def _account_alias(account_file=None, account_name=None):
+    """Old positional paths identify an alias only; no old file is accessed."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.startswith("tencent_") and name.endswith(".json"):
+        return name[len("tencent_"):-len(".json")]
+    return str(account_file)
 
-            # cookie 失效时, 页面先停在 post/create, 随后由前端 JS 跳转到登录页;
-            # 必须等待跳转完成再判断, 否则会误报"cookie 有效"
-            try:
-                await page.wait_for_url("**/login.html**", timeout=8000)
-                tencent_logger.info(_msg("🥹", "cookie 已失效（页面跳转到登录页），得重新登录一下"))
-                return False
-            except Exception:
-                pass  # 8 秒内未跳转, 大概率已登录
 
-            # 双保险: 页面里出现微信扫码登录 iframe 也视为失效
-            for fr in page.frames:
-                if "open.weixin.qq.com/connect/qrconnect" in fr.url:
-                    tencent_logger.info(_msg("🥹", "cookie 已失效（页面出现扫码登录框），得重新登录一下"))
-                    return False
-
-            tencent_logger.success(_msg("🥳", "cookie 有效"))
-            return True
-        except Exception as exc:
-            tencent_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await close_browser_resources(browser=browser)
+async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
+    """Check only the selected persistent Profile."""
+    return await tencent_setup(account_file, account_name=account_name,
+                               headless=headless, local_browser=local_browser)
 
 
 async def _extract_tencent_qrcode_src(page: Page) -> str:
@@ -317,7 +300,14 @@ async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_pa
     return qrcode_info
 
 
-async def _is_tencent_login_completed(page: Page) -> bool:
+async def _is_tencent_login_completed(page: Page, *, strict=False) -> bool:
+    if strict:
+        for selector in ('button.weui-desktop-btn:has-text("发表视频")',
+                         'button:has-text("发表")', 'button:has-text("保存草稿")'):
+            marker = page.locator(selector).first
+            if await marker.count() and await marker.is_visible():
+                return True
+        return False
     publish_markers = [
         page.locator('div:has-text("发表视频")').first,
         page.locator('button:has-text("发表")').first,
@@ -367,17 +357,36 @@ async def _has_tencent_login_page(page: Page) -> bool:
     return False
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to WeChat Channels.
+async def _local_login_required(page, *, publish_attempted=False, allow_login=False):
+    url = str(getattr(page, "url", "") or "").lower()
+    verification = any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa"))
+    dialog = page.locator("div.weui-desktop-dialog__wrp:visible").filter(has_text="实名验证").first
+    verification = verification or (await dialog.count() > 0 and await dialog.is_visible())
+    login = any(marker in url for marker in ("login", "signin")) or await _has_tencent_login_page(page)
+    for selector in ("div.login-qrcode-wrap", "div.qrcode-wrap", "img.qrcode",
+                     'span:has-text("微信扫码登录 视频号助手")'):
+        marker = page.locator(selector).first
+        login = login or (await marker.count() > 0 and await marker.is_visible())
+    if verification or (login and not allow_login):
+        remedy = "请在所选 Profile 完成人机验证 (reason=verification)" if verification else "请运行 sau tencent login"
+        stage = "；发布可能已提交，请先核查作品，禁止自动重发" if publish_attempted else ""
+        raise LoginRequiredError(f"视频号需要登录或验证；{remedy}{stage}。",
+                                 reason="verification" if verification else "login",
+                                 publish_attempted=publish_attempted)
+    return login
+
+
+async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
+    """Probe Channels using the existing managed or strict local Profile contract.
 
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A login page,
     QR-login iframe or expired-session redirect returns ``False``; network
     failures, 5xx responses, timeouts and unexpected page structures raise so
     the CLI exits 1 instead of treating an outage as "logged out".
 
-    The positive signal is the existing ``_is_tencent_login_completed`` check
-    (发表视频 / 保存草稿 / authenticated upload URLs), which avoids the legacy
-    "no redirect within 8s means valid" false positive.
+    Local mode requires visible authenticated controls, rejects HTTP 4xx/5xx,
+    and leaves operation pages to the persistent context owner. Managed mode
+    keeps its historical URL/anchor evidence and created-page cleanup.
 
     Worst-case budget: 20s navigation + 3s settle, inside the 15-30s spec.
     """
@@ -389,9 +398,11 @@ async def is_logged_in(context: BrowserContext) -> bool:
             timeout=TENCENT_LOGIN_CHECK_TIMEOUT_MS,
         )
         status = getattr(response, "status", None)
-        if isinstance(status, int) and status >= 500:
+        if isinstance(status, int) and status >= (500 if managed else 400):
             raise RuntimeError(f"视频号登录状态检查失败：HTTP {status}")
 
+        if not managed and await _local_login_required(page, allow_login=True):
+            return False
         if await _has_tencent_login_page(page):
             return False
 
@@ -407,7 +418,9 @@ async def is_logged_in(context: BrowserContext) -> bool:
             )
         if await _has_tencent_login_page(page):
             return False
-        if await _is_tencent_login_completed(page):
+        if not managed and await _local_login_required(page, allow_login=True):
+            return False
+        if await _is_tencent_login_completed(page, strict=not managed):
             return True
         if await _has_tencent_login_marker(page):
             return False
@@ -417,7 +430,8 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "（页面结构异常）"
         )
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:
@@ -502,11 +516,12 @@ async def _wait_for_tencent_login(
     qrcode_callback=None,
     poll_interval: int = 3,
     max_checks: int = 100,
+    qrcode_artifact: str | None = None,
 ) -> dict:
     qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info else None
     scanned_logged = False
     for _ in range(max_checks):
-        if await _is_tencent_login_completed(page):
+        if not await _local_login_required(page, allow_login=True) and await _is_tencent_login_completed(page, strict=True):
             tencent_logger.info(_msg("🥳", f"扫码成功，已经跳转到登录后页面: {page.url}"))
             return _build_login_result(True, "success", "视频号扫码登录成功", account_file, qrcode_info, page.url)
 
@@ -521,7 +536,7 @@ async def _wait_for_tencent_login(
             try:
                 qrcode_info = await _save_tencent_qrcode(
                     page,
-                    account_file,
+                    qrcode_artifact or account_file,
                     previous_qrcode_path=qrcode_path,
                     qrcode_callback=qrcode_callback,
                 )
@@ -534,113 +549,84 @@ async def _wait_for_tencent_login(
     return _build_login_result(False, "timeout", "等待视频号扫码登录超时", account_file, qrcode_info, page.url)
 
 
-async def tencent_cookie_gen(
-    account_file,
-    qrcode_callback=None,
-    poll_interval: int = 3,
-    max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
-):
-    account_file = _resolve_account_file(account_file)
-    Path(account_file).parent.mkdir(parents=True, exist_ok=True)
-
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
-        context = await browser.new_context()
-        qrcode_path = None
-        result = _build_login_result(False, "failed", "视频号登录失败", account_file)
+async def _login_tencent_context(context, account_name, *, qrcode_callback=None,
+                                 poll_interval=3, max_checks=100):
+    import conf
+    # A QR artifact name, never a storage-state path.
+    artifact = str(Path(conf.BASE_DIR) / "qr" / f"tencent_{account_name}")
+    page = await context.new_page()
+    qrcode_path = None
+    async def record_qrcode(payload):
+        nonlocal qrcode_path
+        qrcode_path = Path(payload["image_path"])
+        await _emit_qrcode_callback(qrcode_callback, payload)
+    try:
+        response = await page.goto(TENCENT_LOGIN_URL, wait_until="domcontentloaded",
+                                   timeout=TENCENT_LOGIN_CHECK_TIMEOUT_MS)
+        if response is not None and response.status >= 400:
+            raise RuntimeError(f"视频号登录页面失败：HTTP {response.status}")
         try:
-            page = await context.new_page()
-            await page.goto(TENCENT_LOGIN_URL)
-            try:
-                qrcode_info = await _save_tencent_qrcode(page, account_file, qrcode_callback=qrcode_callback)
-                qrcode_path = Path(qrcode_info["image_path"])
-            except Exception as exc:
-                tencent_logger.warning(
-                    _msg("⚠️", f"提取二维码图片失败({exc})，请直接在弹出的浏览器窗口中扫码，登录流程不受影响")
-                )
-                qrcode_info = None
-                qrcode_path = None
-            tencent_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
-            result = await _wait_for_tencent_login(
-                page,
-                account_file,
-                qrcode_info,
-                qrcode_callback=qrcode_callback,
-                poll_interval=poll_interval,
-                max_checks=max_checks,
-            )
-            if result["success"]:
-                await asyncio.sleep(2)
-                await context.storage_state(path=account_file)
-                if not await cookie_auth(account_file):
-                    result = _build_login_result(
-                        False,
-                        "cookie_invalid",
-                        "视频号扫码流程结束，但 cookie 校验失败",
-                        account_file,
-                        qrcode_info,
-                        page.url,
-                    )
-            return result
+            qrcode_info = await _save_tencent_qrcode(page, artifact, qrcode_callback=record_qrcode)
+            qrcode_path = Path(qrcode_info["image_path"])
         except Exception as exc:
-            result = _build_login_result(
-                False,
-                "failed",
-                str(exc),
-                account_file,
-                current_url=page.url if "page" in locals() else "",
-            )
-            return result
-        finally:
-            qrcode_utils = _get_qrcode_utils()
+            tencent_logger.warning(_msg("⚠️", f"提取二维码图片失败({exc})，请直接在浏览器窗口中扫码"))
+            qrcode_info = None
+        result = await _wait_for_tencent_login(page, account_name, qrcode_info,
+                                               qrcode_callback=record_qrcode,
+                                               poll_interval=poll_interval, max_checks=max_checks,
+                                               qrcode_artifact=artifact)
+        if not result["success"]:
+            raise LoginRequiredError("视频号登录超时；请运行 sau tencent login 重新扫码。")
+        if not await is_logged_in(context, managed=False):
+            raise LoginRequiredError("视频号扫码后仍需登录；请运行 sau tencent login。")
+        return result
+    finally:
+        qrcode_utils = _get_qrcode_utils()
+        try:
             if qrcode_utils["remove_qrcode_file"](qrcode_path):
                 tencent_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
-                tencent_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
+        except OSError as error:
+            tencent_logger.warning("二维码清理失败，保留登录结果: {}", error)
 
 
-async def tencent_setup(
-    account_file,
-    handle=False,
-    return_detail=False,
-    qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
-):
-    account_file = _resolve_account_file(account_file)
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
-            return result if return_detail else False
-
-        tencent_logger.info(_msg("🥹", "cookie 失效了，准备打开浏览器重新登录"))
-        result = await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
-    return result if return_detail else True
+async def tencent_setup(account_file=None, handle=False, return_detail=False,
+                        qrcode_callback=None, headless=None, *, account_name=None,
+                        local_browser=None, poll_interval=3, max_checks=100):
+    account = _account_alias(account_file, account_name)
+    async with async_playwright() as playwright:
+        async with local_browser_session(playwright, platform="tencent", account=account,
+                                         headless=headless, local_browser=local_browser,
+                                         create=handle) as session:
+            if await is_logged_in(session.context, managed=False):
+                result = _build_login_result(True, "profile_valid", "Profile 已登录", account)
+            elif handle:
+                result = await _login_tencent_context(session.context, account,
+                    qrcode_callback=qrcode_callback, poll_interval=poll_interval, max_checks=max_checks)
+            else:
+                raise LoginRequiredError("视频号 Profile 未登录；请运行 sau tencent login。")
+    result["account_name"] = account
+    return result if return_detail else result["success"]
 
 
-async def get_tencent_cookie(account_file, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
-    return await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
+async def tencent_cookie_gen(account_file=None, qrcode_callback=None, poll_interval=3,
+                             max_checks=100, headless=None, *, account_name=None, local_browser=None):
+    return await tencent_setup(account_file, handle=True, return_detail=True,
+                              qrcode_callback=qrcode_callback, headless=headless,
+                              account_name=account_name, local_browser=local_browser,
+                              poll_interval=poll_interval, max_checks=max_checks)
 
 
-async def weixin_setup(
-    account_file,
-    handle=False,
-    return_detail=False,
-    qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
-):
-    return await tencent_setup(
-        account_file,
-        handle=handle,
-        return_detail=return_detail,
-        qrcode_callback=qrcode_callback,
-        headless=headless,
-    )
+async def get_tencent_cookie(account_file=None, qrcode_callback=None, headless=None,
+                             *, account_name=None, local_browser=None):
+    return await tencent_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless,
+                                   account_name=account_name, local_browser=local_browser)
+
+
+async def weixin_setup(account_file=None, handle=False, return_detail=False,
+                       qrcode_callback=None, headless=None, *, account_name=None, local_browser=None):
+    return await tencent_setup(account_file, handle=handle, return_detail=return_detail,
+                               qrcode_callback=qrcode_callback, headless=headless,
+                               account_name=account_name, local_browser=local_browser)
 
 
 class TencentBaseUploader(BaseVideoUploader):
@@ -664,6 +650,19 @@ class TencentBaseUploader(BaseVideoUploader):
         self.headless = headless
         self.collection_name = collection_name
         self.local_executable_path = LOCAL_CHROME_PATH
+
+    async def _check_session_login(self, page, *, multilogin=False, publish_attempted=False):
+        if getattr(self, "_local_profile_active", False):
+            try:
+                await _local_login_required(page, publish_attempted=publish_attempted)
+            except LoginRequiredError:
+                raise
+            except Exception:
+                if publish_attempted:
+                    raise self.publish_budget.timeout_error(True)
+                raise
+        elif multilogin:
+            _raise_if_login_required(page, publish_attempted=publish_attempted)
 
     async def validate_base_args(self, *, check_cookie: bool = True):
         if check_cookie:
@@ -706,6 +705,8 @@ class TencentBaseUploader(BaseVideoUploader):
         timeout_seconds: float = 10 * 60,
         poll_interval_seconds: float = 2,
     ) -> Path | None:
+        if getattr(self, "_local_profile_active", False):
+            await _local_login_required(page)
         dialog = page.locator("div.weui-desktop-dialog__wrp:visible").filter(has_text="实名验证").first
         if not await dialog.count() or not await dialog.is_visible():
             return None
@@ -785,11 +786,12 @@ class TencentBaseUploader(BaseVideoUploader):
             timeout=budget.clamp_ms(120000),
             wait_until="domcontentloaded",
         )
+        if getattr(self, "_local_profile_active", False):
+            await _local_login_required(page)
         # cookie 失效时前端 JS 会跳转到登录页, 提前发现并报明确的错误
         try:
             await page.wait_for_url("**/login.html**", timeout=8000)
-            if multilogin:
-                _raise_if_login_required(page)
+            await self._check_session_login(page, multilogin=multilogin)
             raise RuntimeError("视频号 cookie 已失效（被跳转到登录页），请重新扫码登录后再发布")
         except TimeoutError:
             pass  # 8 秒内未跳转, 正常
@@ -800,8 +802,8 @@ class TencentBaseUploader(BaseVideoUploader):
         except Exception:
             pass
         if any("open.weixin.qq.com/connect/qrconnect" in fr.url for fr in page.frames):
+            await self._check_session_login(page, multilogin=multilogin)
             if multilogin:
-                _raise_if_login_required(page)
                 raise LoginRequiredError(
                     "视频号上传过程中需要重新登录（登录二维码）："
                     "请在 Multilogin 应用中登录 Profile 后重试。"
@@ -856,9 +858,13 @@ class TencentBaseUploader(BaseVideoUploader):
                     continue
             return None
 
+        if getattr(self, "_local_profile_active", False):
+            await _local_login_required(page)
         fi = await find_file_input()
         clicked_publish = False
         for _ in range(60):
+            if getattr(self, "_local_profile_active", False):
+                await _local_login_required(page)
             if fi is not None:
                 break
             if not clicked_publish:
@@ -1115,8 +1121,7 @@ class TencentBaseUploader(BaseVideoUploader):
                 raise RuntimeError(
                     f"视频号上传超过 {timeout_seconds} 秒仍未完成（「发表」按钮一直不可用）"
                 )
-            if multilogin:
-                _raise_if_login_required(page)
+            await self._check_session_login(page, multilogin=multilogin)
             try:
                 publish_button = page.locator('div.form-btns button:has-text("发表"):visible')
                 if await reject_ambiguous(publish_button, "发布按钮"):
@@ -1166,8 +1171,7 @@ class TencentBaseUploader(BaseVideoUploader):
         # 先等待并清理遮罩/弹窗,再等发表按钮出现
         for wait_round in range(60):
             budget.check_pre_click()
-            if multilogin:
-                _raise_if_login_required(page)
+            await self._check_session_login(page, multilogin=multilogin)
             await self._dismiss_switch_account_dialog(page)
             try:
                 await page.evaluate("""() => document.querySelectorAll('.mask, .changeAccount-dialog, .common-dialog').forEach(e => e.remove())""")
@@ -1196,11 +1200,9 @@ class TencentBaseUploader(BaseVideoUploader):
         maybe_dispatched = False
         for attempt in range(20):
             if budget.remaining_seconds() <= 0:
-                if multilogin:
-                    _raise_if_login_required(page, publish_attempted=publish_clicked)
+                await self._check_session_login(page, multilogin=multilogin, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
-            if multilogin:
-                _raise_if_login_required(page, publish_attempted=publish_clicked)
+            await self._check_session_login(page, multilogin=multilogin, publish_attempted=publish_clicked)
             try:
                 if (
                     not publish_clicked
@@ -1222,6 +1224,8 @@ class TencentBaseUploader(BaseVideoUploader):
                         raise
                     if not is_draft:
                         publish_clicked = True
+                    if getattr(self, "_local_profile_active", False):
+                        await _local_login_required(page, publish_attempted=publish_clicked)
                 if is_draft:
                     await page.wait_for_url("**/post/list**", timeout=5000)
                     tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
@@ -1230,6 +1234,8 @@ class TencentBaseUploader(BaseVideoUploader):
                     # 综合判断：URL 离开 /post/create 或 发表按钮不再存在。
                     for _ in range(10):
                         await asyncio.sleep(1)
+                        if getattr(self, "_local_profile_active", False):
+                            await _local_login_required(page, publish_attempted=publish_clicked)
                         cur = page.url
                         if "/post/create" not in cur:
                             tencent_logger.success(_msg("🥳", "视频发布成功"))
@@ -1244,6 +1250,15 @@ class TencentBaseUploader(BaseVideoUploader):
                         and isinstance(exc, ElementUnusableError)
                         and exc.reason.startswith("ambiguous:")):
                     raise
+                if getattr(self, "_local_profile_active", False):
+                    try:
+                        await _local_login_required(page, publish_attempted=publish_clicked)
+                    except LoginRequiredError:
+                        raise
+                    except Exception:
+                        if publish_clicked:
+                            raise budget.timeout_error(True) from exc
+                        raise
                 current_url = page.url
                 if is_draft and ("post/list" in current_url or "draft" in current_url):
                     tencent_logger.success(_msg("🥳", "视频草稿保存成功"))
@@ -1265,7 +1280,7 @@ class TencentVideo(TencentBaseUploader):
         file_path,
         tags,
         publish_date: datetime | int,
-        account_file,
+        account_file=None,
         category=None,
         is_draft=False,
         desc: str | None = None,
@@ -1275,8 +1290,9 @@ class TencentVideo(TencentBaseUploader):
         short_title: str | None = None,
         publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         collection_name: str | None = None,
+        *, account_name=None, local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -1286,6 +1302,8 @@ class TencentVideo(TencentBaseUploader):
             headless=headless,
             collection_name=collection_name,
         )
+        self.account_name = _account_alias(account_file, account_name) if (account_name is not None or account_file is not None) else None
+        self.local_browser = local_browser
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
@@ -1298,7 +1316,7 @@ class TencentVideo(TencentBaseUploader):
         self.short_title = short_title
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
-        await self.validate_base_args(check_cookie=check_cookie)
+        await self.validate_base_args(check_cookie=False)
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         self.file_path = str(self.validate_video_file(self.file_path))
@@ -1439,53 +1457,52 @@ class TencentVideo(TencentBaseUploader):
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        tencent_logger.info(_msg("🧍", "小人先检查 cookie、视频文件和发布时间"))
-        await self.validate_upload_args()
-        tencent_logger.info(_msg("🥳", "上传前检查通过"))
-
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **TENCENT_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **TENCENT_CONTEXT_KWARGS,
-        )
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            if await save_upload_session(context, self.account_file):
-                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        await self.validate_upload_args(check_cookie=False)
+        async with local_browser_session(playwright, platform="tencent", account=self.account_name,
+                                         headless=self.headless, local_browser=self.local_browser) as local:
+            if not await is_logged_in(local.context, managed=False):
+                raise LoginRequiredError("视频号 Profile 未登录；请运行 sau tencent login。")
+            await self.upload_in(local)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
+        self._local_profile_active = not session.managed
         multilogin = session.managed
         page = await session.context.new_page()
-        # 每个 page 一个行为层实例；缓存按 page 身份失效（spec §2.2）。
-        self._humanizer(page)
-        await self.open_upload_page(page, multilogin=multilogin)
-        if multilogin:
-            _raise_if_login_required(page)
-        tencent_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}"))
+        try:
+            # 每个 page 一个行为层实例；缓存按 page 身份失效（spec §2.2）。
+            self._humanizer(page)
+            await self.open_upload_page(page, multilogin=multilogin)
+            await self._check_session_login(page, multilogin=multilogin)
+            tencent_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}"))
 
-        await self.upload_video_file(page, self.file_path)
-        if multilogin:
-            _raise_if_login_required(page)
-        await self.prepare_video_for_publish(page)
-        await self.wait_for_upload_complete(page, multilogin=multilogin)
-        # 上传完成、表单稳定后再选合集（否则上传中选的会被重置）
-        await self.apply_collection(page)
-        await self.apply_original_statement(page)
-        await self.set_thumbnail(page)
+            await self.upload_video_file(page, self.file_path)
+            await self._check_session_login(page, multilogin=multilogin)
+            await self.prepare_video_for_publish(page)
+            await self.wait_for_upload_complete(page, multilogin=multilogin)
+            # 上传完成、表单稳定后再选合集（否则上传中选的会被重置）
+            await self.apply_collection(page)
+            await self.apply_original_statement(page)
+            await self.set_thumbnail(page)
 
-        if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-            await self.set_schedule_time_tencent(page, self.publish_date)
+            if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
+                await self.set_schedule_time_tencent(page, self.publish_date)
 
-        await self.set_short_title(page, self.title, self.short_title)
-        await self.submit_publish(page, multilogin=multilogin)
+            await self.set_short_title(page, self.title, self.short_title)
+            if self._local_profile_active:
+                await self._check_session_login(page)
+            await self.submit_publish(page, multilogin=multilogin)
+        except LoginRequiredError:
+            raise
+        except Exception as error:
+            if self._local_profile_active:
+                try:
+                    await _local_login_required(page, publish_attempted=getattr(error, "publish_attempted", False))
+                except LoginRequiredError:
+                    raise
+                except Exception:
+                    pass  # A broken probe must not replace the primary operation outcome.
+            raise
 
     async def tencent_upload_video(self, *, session: BrowserSession | None = None):
         if session is not None:
