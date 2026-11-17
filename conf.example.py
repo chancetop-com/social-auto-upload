@@ -2,7 +2,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.resolve()
 LOCAL_CHROME_PATH = ""  # optional, e.g. C:/Program Files/Google/Chrome/Application/chrome.exe
-LOCAL_BROWSER = "chrome"  # migrated TikTok/Rednote/Instagram/Xiaohongshu/YouTube/Facebook/Facebook Page/Douyin/Kuaishou/Tencent/Baijiahao/Weibo/Hupu/Alipay: chrome or chromium; custom path above wins
+LOCAL_BROWSER = "chrome"  # migrated TikTok/Rednote/Instagram/Xiaohongshu/YouTube/Facebook/Facebook Page/Douyin/Kuaishou/Tencent/Baijiahao/Weibo/Hupu/Alipay/Dayu: chrome or chromium; custom path above wins
 LOCAL_CHROME_HEADLESS = False  # migrated CLI + direct calls; explicit flags/bools win
 # Instagram and Facebook local login/check/uploads/verify/delete use these migrated settings.
 # Facebook Page includes independent verify/delete; Page targets share one login Profile.
@@ -18,3 +18,5 @@ YT_PROXY = None
 # Kuaishou login/check/video/note share this persistent Profile configuration.
 
 # Weibo login/check/video share a Profile and use the native window (no fixed viewport).
+
+# Dayu login/check/video/article/verify share these settings; public verification uses an isolated anonymous context.

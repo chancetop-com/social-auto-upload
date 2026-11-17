@@ -2,10 +2,12 @@
 from __future__ import annotations
 import json
 from patchright.async_api import async_playwright
-from conf import LOCAL_CHROME_PATH
 from sau_commands.arguments import single_line_value
 from utils.article_render import ARTICLE_THEMES
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
+from utils.local_browser_session import local_browser_session
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from utils.log import dayu_logger
 from uploader.dayu_uploader.article import DayuArticle
 from uploader.dayu_uploader.constants import (
@@ -22,15 +24,15 @@ from uploader.dayu_uploader.session import (
     DAYU_LAUNCH_KWARGS,
     check_dayu_account,
     is_logged_in,
-    load_dayu_identity,
     login_dayu_account,
     read_dayu_identity,
+    goto_local_dayu,
 )
 from uploader.dayu_uploader.verification import verify_dayu_article, verify_dayu_video
 from sau_commands.arguments import (
     SCHEDULE_HELP_ZH,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_tags,
     resolve_account_file,
@@ -53,13 +55,15 @@ def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     dayu_parser = platform_parsers.add_parser("dayu", help="Dayu (大鱼号) video publishing and verification")
     dayu_actions = dayu_parser.add_subparsers(dest="action", required=True)
-    dayu_login = dayu_actions.add_parser("login", help="Log in manually with visible Chrome")
+    add_reset_profile_action(dayu_actions)
+    dayu_login = dayu_actions.add_parser("login", help="Log in manually using the selected local browser")
     dayu_login.add_argument("--account", required=False, help="Local account alias")
     dayu_login.add_argument("--expected-name", help="Expected name displayed by Dayu")
     dayu_login.add_argument("--timeout", type=int, default=600, help="Login timeout in seconds")
-    dayu_check = dayu_actions.add_parser("check", help="Check login and bound Dayu identity")
+    add_local_runtime_flags(dayu_login)
+    dayu_check = dayu_actions.add_parser("check", help="Check login in the selected local Profile")
     dayu_check.add_argument("--account", required=False)
-    add_runtime_flags(dayu_check)
+    add_local_runtime_flags(dayu_check)
     add_browser_flags(dayu_check)
     dayu_upload = dayu_actions.add_parser("upload-video", help="Publish a video; succeed when Dayu confirms submission")
     dayu_upload.add_argument("--account", required=False)
@@ -76,7 +80,7 @@ def register(platform_parsers):
     dayu_upload.add_argument("--prepare-only", action="store_true", help="Upload and fill only; do not click publish")
     add_not_before_flag(dayu_upload)
     dayu_upload.add_argument("--upload-timeout", type=int, default=600, help="Upload/processing timeout in seconds")
-    add_runtime_flags(dayu_upload)
+    add_local_runtime_flags(dayu_upload)
     add_browser_flags(dayu_upload)
     dayu_article = dayu_actions.add_parser("upload-article", help="从正文文件发表图文，平台确认发表后返回成功")
     dayu_article.add_argument("--account", required=False, help="已登录的本地账号名称")
@@ -92,7 +96,7 @@ def register(platform_parsers):
     dayu_article.add_argument("--prepare-only", action="store_true", help="上传和填写后结束，不发表")
     add_not_before_flag(dayu_article)
     dayu_article.add_argument("--upload-timeout", type=int, default=600, help="每张图片上传等待秒数")
-    add_runtime_flags(dayu_article)
+    add_local_runtime_flags(dayu_article)
     add_browser_flags(dayu_article)
     dayu_verify = dayu_actions.add_parser("verify", help="Check an existing publication without uploading again")
     dayu_verify.add_argument("--account", required=False)
@@ -103,7 +107,7 @@ def register(platform_parsers):
     dayu_target.add_argument("--result", type=existing_file_path, help="Saved Dayu result JSON to recover")
     dayu_verify.add_argument("--public", action="store_true", help="额外等待审核后检查公开正文或播放；不影响发表命令的成功判定")
     dayu_verify.add_argument("--timeout", type=int, default=60)
-    add_runtime_flags(dayu_verify)
+    add_local_runtime_flags(dayu_verify)
 
 
 def _raise_login_required(target) -> None:
@@ -141,6 +145,10 @@ async def _run_mlx_upload(app, *, target, headless: bool):
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
+    args.headless = resolve_headless(getattr(args, "headless", None))
+    local_browser = getattr(args, "local_browser", None)
     if args.action == "login":
         reject_managed_login("dayu", args)
         require_local_account(args)
@@ -172,7 +180,7 @@ async def run(args):
             return 0
 
         account_file = resolve_account_file("dayu", account)
-        valid = await check_dayu_account(account_file)
+        valid = await check_dayu_account(account_file, account_name=account, headless=args.headless, local_browser=local_browser)
         print("valid" if valid else "invalid")
         return 0 if valid else 1
 
@@ -184,7 +192,8 @@ async def run(args):
     if args.action == "login":
         if args.timeout <= 0:
             raise ValueError("登录期限必须大于 0 秒")
-        result = await login_dayu_account(account_file, args.expected_name, args.timeout)
+        result = await login_dayu_account(account_file, args.expected_name, args.timeout,
+                                          account_name=account, headless=args.headless, local_browser=local_browser)
     elif args.action == "upload-video":
         app = DayuVideo(
             title=args.title, file_path=args.file, tags=parse_tags(args.tags),
@@ -192,7 +201,7 @@ async def run(args):
             source=args.source, desc=args.desc, headless=args.headless, debug=args.debug,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
             source_url=args.source_url, schedule=args.schedule,
-            publish_not_before=args.not_before,
+            publish_not_before=args.not_before, account_name=account, local_browser=local_browser,
         )
         if target is not None:
             result = await _run_mlx_upload(app, target=target, headless=args.headless)
@@ -205,7 +214,7 @@ async def run(args):
             theme=args.theme, schedule=args.schedule,
             cover_indices=args.cover_indices, headless=args.headless, debug=args.debug,
             prepare_only=args.prepare_only, upload_timeout=args.upload_timeout,
-            publish_not_before=args.not_before,
+            publish_not_before=args.not_before, account_name=account, local_browser=local_browser,
         )
         if target is not None:
             result = await _run_mlx_upload(app, target=target, headless=args.headless)
@@ -215,23 +224,20 @@ async def run(args):
         if args.timeout <= 0:
             raise ValueError("核验期限必须大于 0 秒")
         saved = json.loads(args.result.read_text(encoding="utf-8")) if args.result else {}
-        expected = load_dayu_identity(account_file)
-        if saved and saved.get("identity", {}).get("wmid") != expected["wmid"]:
-            raise RuntimeError("结果文件与所选大鱼号主体不一致")
         kind = args.type or saved.get("type", "video")
         if saved.get("type") and saved["type"] != kind:
             raise ValueError("指定作品类型与结果文件不一致")
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=args.headless,
-            )
-            try:
-                context = await browser.new_context(storage_state=str(account_file))
+            async with local_browser_session(
+                playwright, platform="dayu", account=account, headless=args.headless,
+                local_browser=local_browser,
+            ) as owned:
+                context, browser = owned.context, owned.browser
                 page = await context.new_page()
-                await page.goto(DAYU_HOME_URL, wait_until="domcontentloaded", timeout=45000)
+                await goto_local_dayu(page, DAYU_HOME_URL)
                 identity = await read_dayu_identity(page)
-                if identity["wmid"] != expected["wmid"]:
-                    raise RuntimeError("核验时大鱼号主体与账号绑定不一致")
+                if saved and saved.get("identity", {}).get("wmid") != identity["wmid"]:
+                    raise RuntimeError("结果文件与所选大鱼号主体不一致")
                 if kind == "article":
                     result = await verify_dayu_article(
                         context, browser, identity,
@@ -252,8 +258,6 @@ async def run(args):
                     saved.update(result)
                     saved.pop("error", None)
                     args.result.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding="utf-8")
-            finally:
-                await browser.close()
     else:
         raise RuntimeError(f"Unsupported Dayu action: {args.action}")
     print(json.dumps(result, ensure_ascii=False, indent=2))

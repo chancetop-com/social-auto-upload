@@ -16,6 +16,7 @@ from uploader.dayu_uploader.schedule import (
 from uploader.dayu_uploader.interaction import unique
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.errors import PublishResultUnknownError
+from uploader.dayu_uploader.session import raise_if_login_required
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from utils.log import dayu_logger
@@ -25,8 +26,11 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
                                   article_html: str | None = None,
                                   publish_not_before=None,
                                   budget: PublishTimeoutBudget | None = None,
-                                  humanizer: Humanizer | None = None) -> None:
+                                  humanizer: Humanizer | None = None, local: bool = False) -> None:
     """提交动作各执行一次；每次远端写入前后保存阶段与作品标识，供只读查询。"""
+    if local:
+        result["publish_attempted"] = False
+        await raise_if_login_required(page, managed=False)
     humanizer = humanizer or Humanizer(page)
     budget = budget or PublishTimeoutBudget("大鱼号")
     result["status"] = "preview_unknown"
@@ -72,7 +76,7 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
     result.update(origin_id=draft["_id"], status="preview_ready")
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     # 在不可逆的确认发表前读服务端设置，防止 UI 显示正确但原稿时间未保存。
-    await read_dayu_schedule(page.context, result["origin_id"], result.get("schedule"))
+    await read_dayu_schedule(page.context, result["origin_id"], result.get("schedule"), local=local)
     if article_html is not None:
         preview_url = draft.get("previewUrl", "")
         parsed = urlsplit(preview_url)
@@ -97,7 +101,8 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
             result["style_check"]["preview_checked"] = True
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         finally:
-            await preview.close()
+            if not local:
+                await preview.close()
     # 预览页的最终提交按钮有独立名称，不能复用主表单的“发表”定位。
     confirm = await unique(
         page.get_by_role("button", name="确认发表", exact=True), "确认发表"
@@ -109,6 +114,8 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
         label="大鱼号发表",
     )
     budget.check_pre_click()
+    if local:
+        await raise_if_login_required(page, managed=False)
     # 响应超时不能再点确认。保留 origin_id 后可查询本次记录，无需重新上传。
     result["status"] = "submission_unknown"
     result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -124,13 +131,20 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
                 await humanizer.click(confirm)
             except Exception as exc:
                 if maybe_dispatched(exc):
+                    if local:
+                        result["publish_attempted"] = True
                     # 确认发表可能已经发出：按结果未知上抛，禁止再次派发。
                     raise budget.timeout_error(True) from exc
                 raise
             publish_clicked = True
+            if local:
+                result["publish_attempted"] = True
         response = await submit_event.value
     except BrowserTimeoutError:
         raise budget.timeout_error(publish_clicked) from None
+    if local:
+        await raise_if_login_required(page, managed=False, publish_attempted=True)
+        await raise_if_login_required(response, managed=False, publish_attempted=True)
     # 确认发表已经派发：响应解析/字段校验的失败都不能退化成“确定未发布”，
     # 否则 CLI 退出 1 会诱发调度器重试并产生重复作品。
     try:
@@ -158,7 +172,7 @@ async def submit_dayu_publication(page: Page, result: dict, result_file: Path,
             record, saved_actual = await wait_dayu_publication(
                 page.context, content_id=result["content_id"],
                 origin_id=result["origin_id"], title=result.get("title"),
-                target=target)
+                target=target, local=local, publish_attempted=local)
             apply_schedule_result(result, record, target, saved_actual)
             result.update(success=True, platform_status=record["status"])
         except (RuntimeError, TimeoutError) as error:

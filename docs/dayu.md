@@ -7,11 +7,17 @@
 先按 [CLI 安装说明](./CLI.md) 安装项目，在项目根目录执行命令。Windows 中若找不到 `sau`，可使用 `.\.venv\Scripts\sau.exe`。
 
 ```powershell
-sau dayu login --account creator --expected-name "你的大鱼号名称"
+sau dayu login --account creator --headed --expected-name "你的大鱼号名称"
 sau dayu check --account creator
 ```
 
-登录时会打开 Chrome，请在网页中完成登录。`creator` 是你给这个账号起的本地名称，后续发布使用相同名称。检查返回 `valid` 表示账号可用；返回 `invalid` 时重新登录。
+登录、检查、视频、文章与核验共用 `browser_profiles/dayu/<原始别名>/<chrome|chromium>/`，浏览器自动保存登录态；旧 Cookie JSON 与 `.identity.json` 不读取、不导入、不写回。`creator` 是资料别名，可以重新登录其他真实账号，两种浏览器也可登录不同账号。`--expected-name` 只核对这次明确请求的名称，省略时不绑定真实账号；历史结果仍要求原作者主体一致。
+
+默认系统 Chrome、有头、自然窗口。只安装所选来源：Chrome 按官方方式安装；完整 Chromium 用 `uv run patchright install --no-shell chromium`，命令追加 `--local-browser chromium`。已有自定义路径 `LOCAL_CHROME_PATH` 优先，否则 `--local-browser` > `LOCAL_BROWSER` > `chrome`；`--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > `False`。升级保留已有 conf.py，没有新增配置项也可运行。失败会报告所选来源，不自动切换浏览器。
+
+只有 login 引导人工登录。check 返回 `valid` 为成功；缺少 Profile、明确未登录或验证退出 `10`（验证显示 `reason=verification`），网络/页面/权限/身份必要字段故障退出 `1`。发布中失效结束当前任务，提交后 `publish_attempted=true` 或结果未知 `9` 都要先核对原作品，禁止自动重发。
+
+明确重建一个 Profile 使用 `sau dayu reset-profile --account creator --browser-kind chrome`，另一种类用 `chromium`。无需浏览器安装；正在占用时拒绝，不改变历史结果或其他资料。重建后先 login，不因此恢复旧发布任务。
 
 ## 发布前准备
 
@@ -104,13 +110,14 @@ sau dayu verify --account creator --result "cookies/dayu_results/本次结果文
 sau dayu verify --account creator --result "cookies/dayu_results/本次结果文件.json" --public --timeout 900
 ```
 
-公开检查可能需要等待审核。它是独立检查，不是发表命令的成功条件。
+公开检查先在登录 context 中核对后台原作品，再从同一已选浏览器创建独立临时匿名 context，使用相同 headless 与自然窗口，不复制主会话状态。匿名完成或失败只关闭自身，主 Profile 保持占用至整个核验结束。它可能等待审核，不属于发表命令成功条件；历史结果主体不匹配时保留原文件并停止。
 
 ## 其他命令选项
 
 | 选项 | 用途 |
 | --- | --- |
-| `--headed` | 显示发布时的 Chrome 窗口 |
+| `--headed` / `--headless` | 显式选择有头 / 无头，登录与内部检查同样生效 |
+| `--local-browser chrome` / `chromium` | 选择本地浏览器种类，自定义路径优先 |
 | `--prepare-only` | 上传素材、填写表单并保存本地截图，随后结束；用于检查发布前内容，未发表，也未保存网页草稿 |
 | `--debug` | 出错时保存页面截图，便于排查 |
 

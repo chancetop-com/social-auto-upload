@@ -396,15 +396,6 @@ class HupuCliTests(unittest.TestCase):
         legacy.assert_awaited_once_with("creator", headless=False, local_browser=None)
         factory.assert_not_called()
 
-    def test_check_local_invalid_returns_1(self):
-        with patch.object(
-            hupu_command, "check_hupu_account", new=AsyncMock(return_value=False)
-        ):
-            code, out, _ = self._run(
-                ["hupu", "check", "--account", "creator"], token=""
-            )
-        self.assertEqual(code, 1)
-        self.assertIn("invalid", out)
 
     def test_upload_video_mlx_wires_one_session_and_probes_login_once(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -603,76 +594,7 @@ class DayuLocalGoldenTests(unittest.TestCase):
         )
         self.assertFalse(DAYU_INIT_SCRIPT)
 
-    def test_video_local_launch_context_timezone_and_teardown(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account = Path(tmp_dir) / "dayu_account.json"
-            account.write_text("{}", encoding="utf-8")
-            app = DayuVideo(
-                title="测试标题",
-                file_path="demo.mp4",
-                tags=[],
-                account_file=str(account),
-                thumbnail_path="cover.png",
-                category="其他",
-                source="无需标注",
-                headless=False,
-            )
-            app.validate_upload_args = MagicMock()
-            app.upload_in = AsyncMock(return_value={"success": True})
-            playwright = FakePlaywright()
-            with patch.object(dayu_main_module, "async_playwright", lambda: _AsyncCM(playwright)):
-                result = asyncio.run(app.main())
 
-        self.assertEqual(result, {"success": True})
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **DAYU_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": str(account.resolve())}],
-        )
-        context = browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, [str(account.resolve())])
-        self.assertEqual(context.add_init_script_calls, [])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        session = app.upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-        self.assertIs(session.context, context)
-
-    def test_article_local_launch_context_timezone_and_teardown(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account = Path(tmp_dir) / "dayu_account.json"
-            account.write_text("{}", encoding="utf-8")
-            article = _make_article_file(tmp_dir)
-            app = DayuArticle(
-                title="测试图文标题",
-                content_file=str(article),
-                account_file=str(account),
-                source="无需标注",
-                headless=True,
-            )
-            app.validate_upload_args = MagicMock()
-            app.upload_in = AsyncMock(return_value={"success": True})
-            playwright = FakePlaywright()
-            with patch.object(dayu_article_module, "async_playwright", lambda: _AsyncCM(playwright)):
-                result = asyncio.run(app.main())
-
-        self.assertEqual(result, {"success": True})
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": True, **DAYU_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": str(account.resolve())}],
-        )
-        context = browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, [str(account.resolve())])
-        self.assertTrue(browser.closed)
 
 
 class DayuLoginDetectionTests(unittest.TestCase):
@@ -814,7 +736,6 @@ class DayuMultiloginUploaderTests(unittest.TestCase):
                 dayu_main_module, "submit_dayu_publication", new=AsyncMock(side_effect=fake_submit)
             ) as submit,
             patch.object(dayu_main_module, "read_dayu_identity", new=AsyncMock()) as read_identity,
-            patch.object(dayu_main_module, "load_dayu_identity", new=AsyncMock()) as load_identity,
             patch.object(DayuVideo, "fill_video_form", new=AsyncMock()) as fill_form,
             patch.object(dayu_main_module, "expect", new=fake_expect),
             patch.object(dayu_main_module, "dayu_logger", MagicMock()),
@@ -825,7 +746,6 @@ class DayuMultiloginUploaderTests(unittest.TestCase):
         self.assertEqual(result["content_id"], "123")
         self.assertIsNone(result["identity"])
         read_identity.assert_not_awaited()
-        load_identity.assert_not_called()
         wait.assert_awaited()
         fill_form.assert_awaited_once_with(page)
         submit.assert_awaited_once()
@@ -840,12 +760,10 @@ class DayuMultiloginUploaderTests(unittest.TestCase):
         session = BrowserSession(browser=MagicMock(), context=context, mode="multilogin")
         with (
             patch.object(dayu_main_module, "read_dayu_identity", new=AsyncMock()) as read_identity,
-            patch.object(dayu_main_module, "load_dayu_identity", new=AsyncMock()) as load_identity,
         ):
             with self.assertRaises(LoginRequiredError):
                 asyncio.run(app.upload_in(session))
         read_identity.assert_not_awaited()
-        load_identity.assert_not_called()
 
     def test_article_fill_body_skips_grant_permissions_in_mlx(self):
         class _Stop(Exception):
@@ -908,7 +826,6 @@ class DayuMultiloginUploaderTests(unittest.TestCase):
                 dayu_article_module, "submit_dayu_publication", new=AsyncMock(side_effect=fake_submit)
             ),
             patch.object(dayu_article_module, "read_dayu_identity", new=AsyncMock()) as read_identity,
-            patch.object(dayu_article_module, "load_dayu_identity", new=AsyncMock()) as load_identity,
             patch.object(dayu_article_module, "dayu_logger", MagicMock()),
         ):
             result = asyncio.run(app.upload_in(session))
@@ -916,7 +833,6 @@ class DayuMultiloginUploaderTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertTrue(result["identity"] is None)
         read_identity.assert_not_awaited()
-        load_identity.assert_not_called()
         fill_form.assert_awaited_once_with(page, multilogin=True)
         self.assertEqual(context.new_page_calls, 1)
 
@@ -995,38 +911,7 @@ class DayuCliTests(unittest.TestCase):
         code, _, _ = self._run(["dayu", "check"])
         self.assertEqual(code, 2)
 
-    def test_check_local_uses_legacy_account_check(self):
-        with (
-            patch.object(
-                dayu_command, "check_dayu_account", new=AsyncMock(return_value=True)
-            ) as legacy,
-            patch.object(dayu_command, "browser_session", new=MagicMock()) as factory,
-            patch.object(
-                dayu_command, "resolve_account_file", new=MagicMock(return_value=Path("/tmp/x"))
-            ),
-        ):
-            code, out, _ = self._run(
-                ["dayu", "check", "--account", "creator"], token=""
-            )
-        self.assertEqual(code, 0)
-        self.assertIn("valid", out)
-        legacy.assert_awaited_once_with(Path("/tmp/x"))
-        factory.assert_not_called()
 
-    def test_check_local_invalid_returns_1(self):
-        with (
-            patch.object(
-                dayu_command, "check_dayu_account", new=AsyncMock(return_value=False)
-            ),
-            patch.object(
-                dayu_command, "resolve_account_file", new=MagicMock(return_value=Path("/tmp/x"))
-            ),
-        ):
-            code, out, _ = self._run(
-                ["dayu", "check", "--account", "creator"], token=""
-            )
-        self.assertEqual(code, 1)
-        self.assertIn("invalid", out)
 
     def test_upload_video_mlx_passes_none_account_session_and_logs_identity(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

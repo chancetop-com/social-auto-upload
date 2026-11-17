@@ -381,8 +381,8 @@ class DayuArticleBrowserTests(unittest.IsolatedAsyncioTestCase):
         await self.browser.close()
         await self.playwright.stop()
 
-    async def make_public_context(self):
-        context = await self.browser.new_context()
+    async def make_public_context(self, **kwargs):
+        context = await self.browser.new_context(**kwargs)
         await context.route("https://mparticle.uc.cn/article.html?**", lambda route: route.fulfill(
             content_type="text/html", body=self.public_html))
         await context.route("https://image.uc.cn/test.png", lambda route: route.fulfill(

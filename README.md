@@ -233,7 +233,7 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
 - Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/instagram/<原始别名>/<chrome|chromium>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文离线验证已覆盖 `--no-publish` 停止点；真实账号回归由最终迁移验收执行。
 
-- 托管模式只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号的本地 `.identity.json` / 用户 ID 比对在托管模式下不执行，账号错配风险由调度侧承担。
+- 托管模式只验证“已登录”，Profile 即身份；知乎、雪球尚未迁移本地路径的 `.identity.json` / 用户 ID 比对在托管模式下不执行；大鱼号本地已退出旧身份绑定，账号错配风险由调度侧承担。
 - 已知限制：命令级登录检测已是 provider-aware 文案；但部分平台在上传过程中遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留。
 
 完整参数、平台支持范围、部署前提与安全说明见 [CLI 使用说明的托管浏览器模式](./docs/CLI.md#托管浏览器模式通用)；MLX 与 AdsPower 分别见 [Multilogin X 模式](./docs/CLI.md#multilogin-x-模式) 和 [AdsPower 模式](./docs/CLI.md#adspower-模式)。
@@ -444,3 +444,5 @@ Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Faceb
 虎扑 login/check/视频与直接 uploader 已使用独立持久化 Profile；默认 Chrome 有头，支持完整 Chromium/自定义路径，只安装所选来源。旧 JSON 不读写；QQ 二维码、文件选择器和专区弹窗在同一自然窗口 context 中运行。先 login，再同配置 check；登录/验证退出 10，运行故障 1，提交结果未知 9 禁止自动重发。没有 no-publish，本轮只做离线与隔离 DOM 验证。见 [虎扑 CLI](./docs/CLI.md#虎扑-cli-子命令)。
 
 支付宝生活号 login/check/视频/reset-profile 与直接 uploader 已接入持久化 Profile，默认 Chrome 有头、可选完整 Chromium/自定义路径，旧 JSON 不读写。先 `sau alipay login --account creator --headed` 扫码，关闭后同配置 check；缺少 Profile/明确登录失效退出 10，页面与网络故障退出 1，发布结果未知退出 9 并禁止自动重发。生活号无 no-publish，使用离线/受控 DOM 验收。见 [支付宝 CLI](./docs/CLI.md#支付宝生活号-cli-子命令)。
+
+大鱼号 login/check/视频/文章/verify/reset-profile 与直接调用已使用持久化 Profile；默认 Chrome 有头，支持完整 Chromium 和自定义路径，旧 Cookie 与身份旁文件不参与。别名允许重新登录不同主体；显式名称和历史作品作者核验继续生效。`verify --public` 在同一已选浏览器内使用独立匿名 context，保持主 Profile 占用。见 [大鱼号说明](./docs/dayu.md)。
