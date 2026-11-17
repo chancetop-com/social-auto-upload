@@ -46,8 +46,6 @@ from uploader.meta_uploader.facebook_uploader.main import (
     FACEBOOK_INIT_SCRIPT,
     FACEBOOK_LAUNCH_KWARGS,
     FacebookPost,
-    _open_facebook_page,
-    facebook_launch_kwargs,
     is_logged_in as facebook_is_logged_in,
 )
 from uploader.meta_uploader.insgraph_uploader import main as instagram_main
@@ -289,64 +287,7 @@ def _write_media(directory: str, name: str = "clip.mp4") -> Path:
 
 
 class LocalGoldenTests(unittest.TestCase):
-    def test_facebook_local_launch_and_context_are_golden(self):
-        page = _PageStub()
-        chromium, context, browser = _local_launcher(page)
-        playwright = SimpleNamespace(chromium=chromium)
-
-        asyncio.run(
-            _open_facebook_page(
-                playwright,
-                Path("/tmp/facebook-cookie.json"),
-                proxy="http://proxy.example:8080",
-                headless=False,
-            )
-        )
-
-        self.assertEqual(
-            chromium.launch_calls,
-            [
-                {
-                    "headless": False,
-                    "channel": "chrome",
-                    "proxy": {"server": "http://proxy.example:8080"},
-                }
-            ],
-        )
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/facebook-cookie.json"}],
-        )
-        self.assertEqual(FACEBOOK_LAUNCH_KWARGS, {"channel": "chrome"})
-        self.assertEqual(FACEBOOK_CONTEXT_KWARGS, {})
-        self.assertFalse(FACEBOOK_INIT_SCRIPT)
-        self.assertEqual(
-            facebook_launch_kwargs(None), {"channel": "chrome", "proxy": None}
-        )
-
-    def test_facebook_local_upload_saves_cookie_then_closes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            media = _write_media(directory)
-            cookie = Path(directory) / "facebook.json"
-            cookie.write_text("{}", encoding="utf-8")
-            page = _PageStub()
-            context = _ContextStub(page)
-            browser = _LaunchBrowser(context, page)
-            app = FacebookPost("标题", media, "", [], cookie, proxy=None, headless=True)
-            app._publish_on_page = AsyncMock()
-
-            with patch.object(
-                facebook_main,
-                "_open_facebook_page",
-                AsyncMock(return_value=(browser, context, page)),
-            ), patch.object(
-                facebook_main, "_is_logged_out", AsyncMock(return_value=False)
-            ):
-                asyncio.run(app.upload(SimpleNamespace()))
-
-        self.assertEqual(context.storage_state_calls, [str(cookie)])
-        self.assertTrue(browser.closed)
-
+    # Facebook local lifecycle now uses real Profiles in test_facebook_profile_cli.
     def test_facebook_page_local_launch_and_context_are_golden(self):
         page = _PageStub()
         chromium, context, browser = _local_launcher(page)
@@ -1005,7 +946,7 @@ class FacebookCliTests(_CliBase):
             with patches[0], patches[1], patches[2], patch.object(
                 facebook_command, "FacebookPost", new=builder
             ), patch.object(
-                facebook_command, "resolve_account_file", new=resolve_account
+                facebook_command, "facebook_cookie_auth", new=resolve_account
             ), patch.object(facebook_command, "facebook_setup", new=setup):
                 code, out, _ = self._run(
                     [
@@ -1059,7 +1000,7 @@ class FacebookCliTests(_CliBase):
             with patches[0], patches[1], patches[2], patch.object(
                 facebook_command, "FacebookPost", new=builder
             ), patch.object(
-                facebook_command, "resolve_account_file", new=resolve_account
+                facebook_command, "facebook_cookie_auth", new=resolve_account
             ):
                 code, out, _ = self._run(
                     [

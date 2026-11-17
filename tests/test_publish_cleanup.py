@@ -181,12 +181,6 @@ class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):
             ("uploader.zhihu_uploader.article", "ZhihuArticle", "main", None),
             ("uploader.xueqiu_uploader.article", "XueqiuArticle", "main", None),
             (
-                "uploader.meta_uploader.facebook_uploader.main",
-                "FacebookPost",
-                "upload",
-                "_open_facebook_page",
-            ),
-            (
                 "uploader.meta_uploader.facebook_page_uploader.main",
                 "MetaBusinessUploader",
                 "upload",
