@@ -1,34 +1,27 @@
 # -*- coding: utf-8 -*-
-"""虎扑视频上传 + 手动登录保存 cookie。
+"""虎扑视频上传与持久化 Profile 登录。
 
-功能：
-  - hupu_cookie_gen: 打开浏览器让用户手动登录（QQ/手机号等），保存 storage_state
-  - cookie_auth: 验证 cookie 是否有效
-  - hupu_setup: 统一入口（检查/触发登录）
-  - HuPuVideo: 视频上传类
-
-基于 playwright codegen 录制脚本改写。
-发布页：https://bbs.hupu.com/newpost?tabkey=2（视频发布标签页）
-专区：固定选择「步行街 → 步行街主干道」
-
-注意：虎扑有 headless 检测，需配合反检测参数才能正常操作。
+正式本地 login/check/upload 复用所选 Profile；旧 Cookie API 名称仅保留调用兼容，
+不读写 JSON。发布页为 bbs.hupu.com/newpost?tabkey=2，专区为步行街主干道。
 """
 from __future__ import annotations
 
 import asyncio
 import inspect
-import os
 import re
+import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright
 
-from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+import conf
 from uploader.base_video import BaseVideoUploader
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementMissingError, ElementUnusableError
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from utils.log import hupu_logger
@@ -45,14 +38,6 @@ HUPU_LOGIN_CHECK_SETTLE_MS = 2_500
 
 # 虎扑发布成功后跳转的帖子 URL 模式
 HUPU_POST_URL_PATTERN = re.compile(r"bbs\.hupu\.com/\d+\.html")
-
-# 反检测 UA
-_CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-
-# 反 webdriver 检测脚本
-_STEALTH_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-"""
 
 _LOGIN_URL_MARKERS = ("passport.hupu.com", "/login", "login?", "captcha", "verify", "two-factor", "2fa")
 
@@ -96,16 +81,6 @@ async def _narrow_unique(
     return locator
 
 
-def _build_login_result(success: bool, status: str, message: str, account_file: str, current_url: str = "") -> dict:
-    return {
-        "success": success,
-        "status": status,
-        "message": message,
-        "account_file": str(account_file),
-        "current_url": current_url,
-    }
-
-
 async def _emit_qrcode_callback(qrcode_callback, payload: dict):
     if not qrcode_callback:
         return
@@ -119,22 +94,25 @@ def _build_launch_kwargs(headless: bool) -> dict:
         "headless": headless,
         "args": ["--disable-blink-features=AutomationControlled"],
     }
-    if LOCAL_CHROME_PATH:
-        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+    if getattr(conf, "LOCAL_CHROME_PATH", ""):
+        launch_kwargs["executable_path"] = conf.LOCAL_CHROME_PATH
     return launch_kwargs
 
 
-def _resolve_account_file(account_file: str | Path) -> str:
-    path = Path(account_file).expanduser()
-    if path.is_absolute():
-        return str(path)
-    if len(path.parts) == 1:
-        return str((Path(BASE_DIR) / "cookies" / path).resolve())
-    return str(path.resolve())
+def _account_alias(account_file=None, account_name=None):
+    """The old positional filename supplies only its alias, never login state."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.startswith("hupu_") and name.endswith(".json"):
+        return name[len("hupu_"):-len(".json")]
+    return str(account_file)
 
 
-# Golden local-mode options.  ``sau_commands/hupu.py`` passes the same values to
-# ``browser_session`` so the legacy and session-based local paths cannot drift.
+# Managed-only ignored options retain the historical provider startup logs.
+# Persistent local sessions never consume these options or override fingerprints.
 HUPU_LAUNCH_KWARGS = {
     key: value
     for key, value in _build_launch_kwargs(headless=False).items()
@@ -144,53 +122,10 @@ HUPU_CONTEXT_KWARGS: dict = {}
 HUPU_INIT_SCRIPT = False
 
 
-async def _create_stealth_context(browser, account_file: str | None = None) -> BrowserContext:
-    """创建带反检测的 context。"""
-    kwargs = {
-        "user_agent": _CHROME_UA,
-        "viewport": {"width": 1920, "height": 1080},
-    }
-    if account_file and os.path.exists(account_file):
-        kwargs["storage_state"] = account_file
-    context = await browser.new_context(**kwargs)
-    return context
-
-
-async def _new_stealth_page(context: BrowserContext) -> Page:
-    """创建带反检测 init script 的 page。"""
-    page = await context.new_page()
-    await page.add_init_script(_STEALTH_SCRIPT)
-    return page
-
-
-async def prepare_local_context(context: BrowserContext) -> BrowserContext:
-    """Re-create the local hupu context with the historical stealth settings.
-
-    ``browser_session`` creates the storage-state context first; this hook swaps
-    it for one configured with the hupu UA, 1920x1080 viewport and the stealth
-    init script.  It is only wired into local mode — the Multilogin branch
-    ignores ``context_setup`` entirely.
-    """
-    browser = getattr(context, "browser", None)
-    if browser is None:  # pragma: no cover - real Playwright always exposes it
-        await context.add_init_script(_STEALTH_SCRIPT)
-        return context
-
-    storage_state = await context.storage_state()
-    await context.close()
-    prepared = await browser.new_context(
-        user_agent=_CHROME_UA,
-        viewport={"width": 1920, "height": 1080},
-        storage_state=storage_state,
-    )
-    await prepared.add_init_script(_STEALTH_SCRIPT)
-    return prepared
-
-
 def _raise_if_login_required(page: Page | None, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this; local retries stay untouched.
+    Only managed sessions call this; local sessions use their own login guidance.
     ``publish_attempted`` must be true when the redirect is observed after the
     publish click was dispatched.
     """
@@ -205,10 +140,10 @@ def _raise_if_login_required(page: Page | None, *, publish_attempted: bool = Fal
         )
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to Hupu.
+async def is_logged_in(context: BrowserContext, *, managed=True, account=None) -> bool:
+    """Probe Hupu business evidence in the supplied Profile context.
 
-    Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Positive
+    Managed probes close their page; local pages stay with their context owner. Positive
     signals (publish-page upload button or a logged-in user menu) decide True;
     an explicit login page/redirect returns False; network failures, 5xx
     responses, unexpected hosts and a page with no positive signal raise so the
@@ -216,11 +151,17 @@ async def is_logged_in(context: BrowserContext) -> bool:
     """
     page = await context.new_page()
     try:
-        response = await page.goto(
-            HUPU_LOGIN_CHECK_URL,
-            timeout=HUPU_LOGIN_CHECK_TIMEOUT_MS,
-            wait_until="domcontentloaded",
-        )
+        try:
+            response = await page.goto(
+                HUPU_LOGIN_CHECK_URL, timeout=HUPU_LOGIN_CHECK_TIMEOUT_MS,
+                wait_until="domcontentloaded",
+            )
+        except Exception:
+            if not managed:
+                _raise_local_login_required(page, account=account)
+            raise
+        if not managed:
+            _check_local_response(response)
         status = getattr(response, "status", None)
         if isinstance(status, int) and status >= 500:
             raise RuntimeError(f"虎扑登录状态检查失败：HTTP {status}")
@@ -230,7 +171,14 @@ async def is_logged_in(context: BrowserContext) -> bool:
             await wait_for_timeout(HUPU_LOGIN_CHECK_SETTLE_MS)
 
         current_url = str(getattr(page, "url", "") or "")
-        if "hupu.com" not in current_url:
+        if not managed:
+            reason = _local_login_reason(page)
+            if reason == "verification":
+                raise _local_login_error(account, reason=reason)
+            if reason == "login":
+                return False
+        host = urlsplit(current_url).hostname or ""
+        if ("hupu.com" not in current_url if managed else not (host == "hupu.com" or host.endswith(".hupu.com"))):
             raise RuntimeError(
                 "虎扑登录状态检查失败：页面未停留在虎扑"
                 f"（url={current_url or '<empty>'}）"
@@ -251,92 +199,52 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "虎扑登录状态检查失败：未找到上传按钮或已登录用户菜单（页面结构异常）"
         )
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
-async def hupu_cookie_gen(account_file, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 120, headless: bool = False):
-    """QQ 扫码登录虎扑，保存 cookie。
+async def hupu_cookie_gen(account_file=None, qrcode_callback=None, poll_interval=3,
+                          max_checks=120, headless=None, *, account_name=None, local_browser=None):
+    """Guide login in the selected persistent Profile."""
+    return await hupu_setup(account_file, handle=True, return_detail=True,
+                            qrcode_callback=qrcode_callback, headless=headless,
+                            account_name=account_name, local_browser=local_browser,
+                            poll_interval=poll_interval, max_checks=max_checks)
 
-    流程：打开虎扑登录页 → 点击 QQ 登录 → 截取 QQ 二维码 → 等待扫码完成 → 保存 storage_state。
-    支持 headless 模式（终端显示二维码）。
-    """
-    account_file = _resolve_account_file(account_file)
-    Path(account_file).parent.mkdir(parents=True, exist_ok=True)
-    result = _build_login_result(False, "failed", "虎扑登录失败", account_file)
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
-        context = await _create_stealth_context(browser)
-        try:
-            page = await _new_stealth_page(context)
-            await page.goto(HUPU_LOGIN_URL, timeout=60000, wait_until="load")
-            await page.wait_for_timeout(3000)
-
-            # 点击 QQ 登录按钮
-            qq_btn = page.get_by_role("button", name="qq QQ登录")
-            if not await qq_btn.count():
-                hupu_logger.error(_msg("😢", "未找到 QQ 登录按钮"))
-                result = _build_login_result(False, "failed", "未找到 QQ 登录按钮", account_file, page.url)
-                return result
-
-            await qq_btn.click()  # native-click: login；QQ 扫码登录页保持原生点击
-            await page.wait_for_timeout(5000)
-            hupu_logger.info(_msg("🏃", "已跳转到 QQ 登录页"))
-
-            # 从 QQ iframe 中获取二维码
-            qrcode_info = await _grab_qq_qrcode(page, context, account_file)
-
-            if qrcode_info:
-                await _emit_qrcode_callback(qrcode_callback, qrcode_info)
-                hupu_logger.info(_msg("🧍", "请用 QQ 手机版扫码登录"))
-            else:
-                hupu_logger.warning(_msg("⚠️", "未能获取 QQ 二维码，请在浏览器中手动扫码"))
-
-            # 轮询等待登录完成
-            for _ in range(max_checks):
-                current_url = page.url
-                # QQ 授权成功后会跳回虎扑首页
-                if "www.hupu.com" in current_url and "passport" not in current_url and "graph.qq.com" not in current_url:
-                    hupu_logger.info(_msg("🥳", f"登录成功，跳转到: {current_url}"))
-                    result = _build_login_result(True, "success", "虎扑 QQ 扫码登录成功", account_file, current_url)
-                    break
-                # 检查是否实际跳转到虎扑 passport 回调页（不是 redirect_uri 参数中包含）
-                if current_url.startswith("https://passport.hupu.com/pc/qqcallback"):
-                    await page.wait_for_timeout(5000)
-                    current_url = page.url
-                    hupu_logger.info(_msg("🥳", f"QQ 回调成功，当前: {current_url}"))
-                    result = _build_login_result(True, "success", "虎扑 QQ 扫码登录成功", account_file, current_url)
-                    break
-                # 检查 cookies 中是否出现 u（核心登录态）
-                cookies = await context.cookies()
-                if any(c.get("name") == "u" and c.get("value") for c in cookies):
-                    hupu_logger.info(_msg("🥳", f"登录成功（检测到 u cookie），当前: {current_url}"))
-                    result = _build_login_result(True, "success", "虎扑 QQ 扫码登录成功", account_file, current_url)
-                    break
-                await page.wait_for_timeout(poll_interval * 1000)
-            else:
-                result = _build_login_result(False, "timeout", "等待 QQ 扫码登录超时", account_file, page.url)
-
-            if result["success"]:
-                await asyncio.sleep(2)
-                # 确保跳转到首页加载完 cookie
-                if "www.hupu.com" not in page.url:
-                    await page.goto(HUPU_HOME_URL, timeout=30000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(3000)
-                await context.storage_state(path=account_file)
-                hupu_logger.success(_msg("🥳", f"cookie 已保存: {account_file}"))
-        except Exception as exc:
-            result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
-        finally:
-            # 清理临时二维码文件
-            qr_path = Path(account_file).parent / f"{Path(account_file).stem}_qq_qrcode.png"
-            if qr_path.exists():
-                qr_path.unlink()
-            if not result["success"]:
-                hupu_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
-    return result
+async def _guide_login(context, account, *, qrcode_callback, poll_interval, max_checks):
+    page = await context.new_page()
+    response = await page.goto(HUPU_LOGIN_URL, timeout=60000, wait_until="load")
+    _check_local_response(response)
+    await page.wait_for_timeout(3000)
+    qq_btn = page.get_by_role("button", name="qq QQ登录")
+    if not await qq_btn.count():
+        raise RuntimeError("虎扑登录失败：未找到 QQ 登录按钮")
+    await qq_btn.click()  # native-click: login；QQ 扫码登录页保持原生点击
+    await page.wait_for_timeout(5000)
+    # QQ may navigate this page or open a popup. Both belong to this Profile.
+    login_page = next((candidate for candidate in reversed(context.pages)
+                       if "qq.com" in (urlsplit(candidate.url).hostname or "")), page)
+    with tempfile.TemporaryDirectory(prefix="sau-hupu-qr-") as qr_root:
+        qrcode_info = await _grab_qq_qrcode(login_page, context, str(Path(qr_root) / "login"))
+        if qrcode_info:
+            await _emit_qrcode_callback(qrcode_callback, qrcode_info)
+            hupu_logger.info(_msg("🧍", "请用 QQ 手机版扫码登录"))
+        else:
+            hupu_logger.warning(_msg("⚠️", "未能获取 QQ 二维码，请在浏览器中手动登录"))
+        for _ in range(max_checks):
+            # A callback/home URL is only a cue to probe the real backend.
+            urls = [str(candidate.url) for candidate in context.pages]
+            if any((urlsplit(url).hostname or "") in ("www.hupu.com", "bbs.hupu.com")
+                   or url.startswith("https://passport.hupu.com/pc/qqcallback") for url in urls):
+                try:
+                    if await is_logged_in(context, managed=False, account=account):
+                        return
+                except LoginRequiredError:
+                    pass  # Only the explicit login action may wait for user verification.
+            await page.wait_for_timeout(poll_interval * 1000)
+        reason = _local_login_reason(login_page) or "login"
+        raise _local_login_error(account, reason=reason)
 
 
 async def _grab_qq_qrcode(page: Page, context: BrowserContext, account_file: str) -> dict | None:
@@ -388,56 +296,65 @@ async def _grab_qq_qrcode(page: Page, context: BrowserContext, account_file: str
     return None
 
 
-async def cookie_auth(account_file):
-    """验证虎扑 cookie 是否有效。访问发布页，检测是否能正常加载。"""
-    account_file = _resolve_account_file(account_file)
+def _check_local_response(response):
+    status = getattr(response, "status", None)
+    if isinstance(status, int) and status >= 400:
+        raise RuntimeError(f"虎扑页面请求失败：HTTP {status}")
+
+
+def _local_login_reason(page):
+    url = urlsplit(str(getattr(page, "url", "") or ""))
+    host, path = (url.hostname or "").lower(), url.path.lower()
+    if host != "hupu.com" and not host.endswith(".hupu.com"):
+        return None
+    if any(marker in path for marker in ("captcha", "verify", "two-factor", "2fa")):
+        return "verification"
+    if host == "passport.hupu.com" or "login" in path:
+        return "login"
+    return None
+
+
+def _raise_local_login_required(page, *, account=None, publish_attempted=False):
+    reason = _local_login_reason(page)
+    if reason:
+        raise _local_login_error(account, reason=reason, publish_attempted=publish_attempted)
+
+
+def _local_login_error(account=None, *, reason="login", publish_attempted=False):
+    action = "完成人机验证" if reason == "verification" else "重新登录"
+    return LoginRequiredError(
+        f"虎扑需要{action}（reason={reason}）；请运行 sau hupu login --account {account or '<account>'!r}，"
+        "使用相同本地浏览器选择。提交后先核对作品，不要自动重发。",
+        reason=reason, publish_attempted=publish_attempted)
+
+
+async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
+    return await hupu_setup(account_file, account_name=account_name,
+                            headless=headless, local_browser=local_browser)
+
+
+async def hupu_setup(account_file=None, handle=False, return_detail=False, qrcode_callback=None,
+                     headless=None, *, account_name=None, local_browser=None,
+                     poll_interval=3, max_checks=120):
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
-        try:
-            context = await _create_stealth_context(browser, account_file)
-            page = await _new_stealth_page(context)
-            await page.goto(HUPU_PUBLISH_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
-
-            # 检查是否被跳转到登录页
-            if "passport" in page.url or "login" in page.url:
-                hupu_logger.info(_msg("🥹", "cookie 已失效（跳转到登录页）"))
-                return False
-
-            # 检查发布页是否出现「上传视频」按钮（登录后才有）
-            upload_btn = page.get_by_role("button", name="上传视频")
-            if await upload_btn.count():
-                hupu_logger.success(_msg("🥳", "cookie 有效"))
-                return True
-
-            # 兜底：检查 cookie 中是否有 u 字段
-            cookies = await context.cookies()
-            if any(c.get("name") == "u" and c.get("value") for c in cookies):
-                hupu_logger.success(_msg("🥳", "cookie 有效（u cookie 存在）"))
-                return True
-
-            hupu_logger.info(_msg("🥹", "cookie 已失效（未检测到登录态）"))
-            return False
-        except Exception as exc:
-            hupu_logger.warning(_msg("😵", f"cookie 校验出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await close_browser_resources(browser=browser)
-
-
-async def hupu_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = False):
-    """统一入口：检查 cookie → 如无效且 handle=True 则触发手动登录。"""
-    account_file = _resolve_account_file(account_file)
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie 文件不存在或已失效", account_file)
-            return result if return_detail else False
-        hupu_logger.info(_msg("🥹", "cookie 文件不存在或已失效，打开浏览器请手动登录"))
-        result = await hupu_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie 有效", account_file)
-    return result if return_detail else True
+        async with local_browser_session(playwright, platform="hupu", account=account,
+                                         headless=headless, local_browser=local_browser,
+                                         create=handle) as session:
+            try:
+                ready = await is_logged_in(session.context, managed=False, account=account)
+            except LoginRequiredError:
+                if not handle:
+                    raise
+                ready = False
+            if not ready:
+                if not handle:
+                    raise _local_login_error(account)
+                await _guide_login(session.context, account, qrcode_callback=qrcode_callback,
+                                   poll_interval=poll_interval, max_checks=max_checks)
+            result = {"success": True, "status": "profile_valid", "message": "虎扑 Profile 登录有效",
+                      "account_name": account}
+            return result if return_detail else True
 
 
 class HuPuVideo(BaseVideoUploader):
@@ -454,23 +371,25 @@ class HuPuVideo(BaseVideoUploader):
         title,
         file_path,
         tags,
-        account_file,
+        account_file=None,
         publish_date=0,
         desc: str | None = None,
         thumbnail_path: str | None = None,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
+        *, account_name=None, local_browser=None,
     ):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
-        self.account_file = _resolve_account_file(account_file) if account_file else None
+        self.account_file = account_file
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.publish_date = publish_date
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
         self.debug = debug
         self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
         self.max_title_length = 40
         self.min_title_length = 4
 
@@ -496,11 +415,6 @@ class HuPuVideo(BaseVideoUploader):
         await asyncio.sleep(min(seconds, remaining))
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
-        if check_cookie:
-            if not self.account_file or not os.path.exists(self.account_file):
-                raise RuntimeError(f"cookie文件不存在，请先完成虎扑登录: {self.account_file}")
-            if not await cookie_auth(self.account_file):
-                raise RuntimeError(f"cookie文件已失效，请先完成虎扑登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频标题不能为空")
         if len(self.title) < self.min_title_length:
@@ -509,43 +423,49 @@ class HuPuVideo(BaseVideoUploader):
         if self.thumbnail_path:
             self.thumbnail_path = str(self.validate_image_file(self.thumbnail_path))
 
-    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+    async def upload(self, playwright: Playwright | None = None, *, session: BrowserSession | None = None) -> None:
         if session is not None:
             await self.validate_upload_args(check_cookie=False)
+            if not session.managed and not await is_logged_in(session.context, managed=False, account=self.account_name):
+                raise _local_login_error(self.account_name)
             await self.upload_in(session)
             return
-
         if playwright is None:
-            raise ValueError("本地模式需要 Playwright 实例")
-
-        hupu_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
-        await self.validate_upload_args()
-        hupu_logger.info(_msg("🥳", "上传前检查通过"))
-
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
-        context = await _create_stealth_context(browser, self.account_file)
-
-        try:
-            page = await _new_stealth_page(context)
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local"),
-                page=page,
-            )
-            # 保存 cookie
-            if await save_upload_session(context, self.account_file):
-                hupu_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+            async with async_playwright() as playwright:
+                await self.upload(playwright)
+            return
+        async with local_browser_session(
+            playwright, platform="hupu", account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as session:
+            await self.upload(session=session)
 
     async def upload_in(self, session: BrowserSession, *, page: Page | None = None) -> None:
         """Run the publish flow on the provided session's context only."""
         self.start_publish_budget()
-        multilogin = session.managed
+        self._local_profile_upload = not session.managed
+        self._publish_attempted = False
         if page is None:
             page = await session.context.new_page()
+        try:
+            await self._upload_page(page, multilogin=session.managed)
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception:
+            if self._local_profile_upload:
+                _raise_local_login_required(page, account=self.account_name,
+                                            publish_attempted=self._publish_attempted)
+                if self._publish_attempted:
+                    raise self.publish_budget.timeout_error(True)
+            raise
+
+    async def _upload_page(self, page, *, multilogin):
         humanizer = self._humanizer(page)
         # 直接跳转到视频发布页（绕过首页点击）
-        await page.goto(HUPU_PUBLISH_URL, timeout=60000, wait_until="load")
+        response = await page.goto(HUPU_PUBLISH_URL, timeout=60000, wait_until="load")
+        if self._local_profile_upload:
+            _check_local_response(response)
+            _raise_local_login_required(page, account=self.account_name)
         await humanizer.after_navigate()
         if multilogin:
             _raise_if_login_required(page)
@@ -554,12 +474,18 @@ class HuPuVideo(BaseVideoUploader):
 
         # 1) 上传视频文件
         await self._upload_video_file(page)
+        if self._local_profile_upload:
+            _raise_local_login_required(page, account=self.account_name)
 
         # 2) 填写标题
         await self._fill_title(page)
+        if self._local_profile_upload:
+            _raise_local_login_required(page, account=self.account_name)
 
         # 3) 填写简介
         await self._fill_description(page)
+        if self._local_profile_upload:
+            _raise_local_login_required(page, account=self.account_name)
 
         # 4) 上传封面（如有）
         if self.thumbnail_path:
@@ -567,9 +493,13 @@ class HuPuVideo(BaseVideoUploader):
 
         # 5) 选择专区（步行街 → 步行街主干道）
         await self._select_zone(page)
+        if self._local_profile_upload:
+            _raise_local_login_required(page, account=self.account_name)
 
         # 6) 选择原创/二创 + AI 声明
         await self._check_declarations(page)
+        if self._local_profile_upload:
+            _raise_local_login_required(page, account=self.account_name)
 
         # 7) 点击发布
         await self._submit_publish(page, multilogin=multilogin)
@@ -647,6 +577,8 @@ class HuPuVideo(BaseVideoUploader):
             await page.wait_for_timeout(3000)
             hupu_logger.success(_msg("🖼️", "封面已上传"))
         except Exception as exc:
+            if getattr(self, "_local_profile_upload", False):
+                raise
             hupu_logger.warning(_msg("⚠️", f"封面上传失败: {exc}，继续发布（使用默认封面）"))
 
     async def _select_zone(self, page: Page) -> None:
@@ -676,6 +608,8 @@ class HuPuVideo(BaseVideoUploader):
             await page.wait_for_timeout(1000)
             hupu_logger.info(_msg("🏷️", "已选择专区：步行街主干道"))
         except Exception as exc:
+            if getattr(self, "_local_profile_upload", False):
+                raise
             hupu_logger.warning(_msg("⚠️", f"选择专区失败: {exc}"))
 
     async def _check_declarations(self, page: Page) -> None:
@@ -689,6 +623,8 @@ class HuPuVideo(BaseVideoUploader):
                 await page.wait_for_timeout(1000)
                 hupu_logger.info(_msg("🏷️", "已点击「原创/二创」"))
         except Exception as exc:
+            if getattr(self, "_local_profile_upload", False):
+                raise
             hupu_logger.warning(_msg("⚠️", f"点击原创/二创失败: {exc}"))
 
         # 2) 选择「含AI生成内容」。裸 role 选择器先收窄到唯一：多义是硬错，
@@ -711,6 +647,8 @@ class HuPuVideo(BaseVideoUploader):
                 await page.wait_for_timeout(500)
                 hupu_logger.info(_msg("🏷️", "已选择「含AI生成内容」"))
         except Exception as exc:
+            if getattr(self, "_local_profile_upload", False):
+                raise
             hupu_logger.warning(_msg("⚠️", f"选择 AI 声明失败: {exc}"))
 
     async def _submit_publish(self, page: Page, *, multilogin: bool = False) -> None:
@@ -729,18 +667,26 @@ class HuPuVideo(BaseVideoUploader):
         )
         budget.check_pre_click()
         await humanizer.before_submit()
+        if getattr(self, "_local_profile_upload", False):
+            _raise_local_login_required(page, account=self.account_name)
         try:
             await humanizer.click(publish_btn)
         except Exception as exc:
             if maybe_dispatched(exc):
+                self._publish_attempted = True
+                if getattr(self, "_local_profile_upload", False):
+                    _raise_local_login_required(page, account=self.account_name, publish_attempted=True)
                 # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
                 raise budget.timeout_error(True) from exc
             raise
         hupu_logger.info(_msg("🏃", "已点击「确定发布」"))
         publish_clicked = True
+        self._publish_attempted = True
 
         # 等待跳转到帖子详情页（URL 匹配 bbs.hupu.com/{数字}.html）
         while budget.remaining_seconds() > 0:
+            if getattr(self, "_local_profile_upload", False):
+                _raise_local_login_required(page, account=self.account_name, publish_attempted=True)
             if multilogin:
                 _raise_if_login_required(page, publish_attempted=publish_clicked)
             current_url = page.url
@@ -752,6 +698,5 @@ class HuPuVideo(BaseVideoUploader):
 
         raise budget.timeout_error(True)
 
-    async def main(self):
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
+    async def main(self, *, session=None):
+        await self.upload(session=session)

@@ -4,7 +4,7 @@
 
 **Blocked by:** [09：抖音全流程接入](./09-douyin-persistent-profile.md)；[10：快手全流程接入](./10-kuaishou-persistent-profile.md)；[11：视频号正式流程接入](./11-tencent-persistent-profile.md)；[12：百家号正式流程接入](./12-baijiahao-persistent-profile.md)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **批次：** 第四批
 
@@ -22,3 +22,10 @@
 - [ ] 本平台 MLX/AdsPower 仅采用新 headless 来源；忽略本地浏览器选择/路径且不额外报错或警告，不访问本地安装、Profile、锁或旧资料。保留原动作路由、login 限制、provider 参数/日志、CDP 所有权、停止/断开与限流退出 11；尚未迁移的平台保持旧行为。
 - [ ] 从正式 CLI dispatch 经真实配置解析和共享编排，复用浏览器/平台/provider 边界替身完成相关离线回归；覆盖本票动作、配置传播、旧文件无关、换号、登录分类、重建、资源所有权和提交结果保护，不把 session 整体替换成 parser 测试。直接调用只补缺口，共享能力变化时补跑受影响的跨进程/真实浏览器检查。
 - [ ] 同步本平台 CLI/平台 skill、配置及登录说明、Agent Bootstrap 和运行依赖说明；只在本平台接入后更新其行为描述，保留未迁移平台的准确说明。交付记录列出覆盖入口、验证命令/实际结果、未迁移平台和未执行项，离线结果不表述为真实平台验收。
+
+## Comments
+
+- 2026-11-17: Claimed ticket 14 on `codex/local-profile-14` from integration `b8be345`. Approved test seams are formal CLI dispatch through real configuration/Profile/session orchestration with browser/platform/provider boundary fakes, plus direct uploader gaps and isolated browser DOM evidence. TDD uses one vertical slice at a time. `conf.__file__` and BASE_DIR both resolve to this isolated worktree. No ADR directory exists.
+
+- 2026-11-17: Implemented all registered Hupu local actions and direct setup/uploader paths. Removed context recreation, Cookie JSON flows and hidden precheck launch; all local business uses the acquired persistent context. Managed ignored-option startup logs and probe/ownership behavior remain; optional conf attributes are no longer module import requirements. See [14 validation](../research/14-hupu-validation.md) for exact entry points and red/green evidence.
+- 2026-11-17: Executed 323 related offline/shared/provider/CLI tests, all passed in 17.825s. Executed actual Chrome headed/full Chromium headless controlled DOM test: 1 test, two flows, four persistent launches, passed in 90.141s. No real platform account operations; temporary roots and locally fulfilled requests only. Updated Hupu CLI/skill, bootstrap, install/config docs and completed-platform lists. Final latest-integration merge remains before delivery.
