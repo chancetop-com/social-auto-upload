@@ -21,4 +21,18 @@
 
 ## 范围与未执行
 
-没有真实登录、发布、作品删除、旧 Cookie 导入/清理，未进行 Facebook 平台真实账号验收。本票无共享生产 API 改动；01/02 的跨进程/真实浏览器基础证据继续有效，相关共享生命周期回归已重跑。YouTube与Facebook Page由06/08并行接入；后续09–18的平台仍保留各自既有行为，Bilibili不属本地浏览器Profile范围。普通命令不会启动19迁移作业。
+没有真实登录、发布、作品删除、旧 Cookie 导入/清理，未进行 Facebook 平台真实账号验收。本票无共享生产 API 改动；01/02 的跨进程/真实浏览器基础证据继续有效，相关共享生命周期回归已重跑。YouTube06现已合入，Facebook Page仍由08独立接入；后续09–18的平台仍保留各自既有行为，Bilibili不属本地浏览器Profile范围。普通命令不会启动19迁移作业。
+
+## 最终合并后结果
+
+- 已合并集成 `7646984`（Instagram测试修复）与 `c5a3141`（YouTube06）；共享文档、重建名单和旧 Cookie 测试按平台相加合并，无共享生产 API 改动。
+- 最终命令：
+
+```bash
+/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_facebook_profile_cli tests.test_facebook_humanize tests.test_mlx_meta tests.test_publish_cleanup tests.test_review_regressions tests.test_adspower_cli tests.test_adspower_platform_contract tests.test_adspower_article_identity_platforms tests.test_adspower_browser_session tests.test_local_profile tests.test_local_browser_session tests.test_publish_timeout tests.test_publish_gate tests.test_humanize tests.test_sau_browser_cli tests.test_multilogin_cli tests.test_publish_ambiguity tests.test_youtube_profiles tests.test_mlx_youtube tests.test_adspower_video_platforms -q
+```
+
+结果：**365 tests，18.296s，OK**。包含14项新增 Facebook Profile CLI 测试，provider check与视频/图文均穿过真实 BrowserSession，补测显式headed、忽略本地来源及provider所有权。最后一次 Facebook专属旧MLX测试门槛改为监测真实作品入口，缺账号仍在动作前退出2。
+
+- 最终受控浏览器复验：`tests.test_facebook_profile_dom tests.test_facebook_uploader tests.test_facebook_posts -v`，**13 tests，35.745s，OK**。这次在新增首页异步挂载等待之后运行，包含两种浏览器共6次独立持久化生命周期；后续合并仅引入YouTube生产代码及共享测试/说明，不改变Facebook路径。
+- `git diff --check` 通过；Facebook正式源码检索没有 storage_state、独立 launch/new_context、旧文件存在检查、固定viewport/locale/stealth。旧形参名仅作为直接调用者的别名输入适配，不执行文件I/O。已记录的初始失败已全部解决；没有本票遗留阻塞。
