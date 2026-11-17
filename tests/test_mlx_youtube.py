@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """YouTube uploader seam + Multilogin CLI wiring (ticket 22).
 
-Local mode must stay behaviour-equivalent (channel chrome, proxy from
-``YT_PROXY``, init script on).  The Multilogin branch is a pure consumer of the
+Persistent local behavior is covered by test_youtube_profiles.
+The Multilogin branch is a pure consumer of the
 injected ``BrowserSession``: it never launches, never creates a context, never
 injects the init script, never reads/writes cookies, and never closes a browser
 it does not own.
@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
 from sau_commands import youtube as youtube_command
-from tests.fakes import FakePlaywright
 from uploader.youtube_uploader import main as youtube_main
 from uploader.youtube_uploader.main import (
     STUDIO_URL,
@@ -243,81 +242,7 @@ def _make_video(tmp_dir: str, account_file=None, **kwargs) -> YouTubeVideo:
     return YouTubeVideo("标题", str(video_path), [], account_file, **kwargs)
 
 
-class LegacyLocalUploadTests(unittest.TestCase):
-    """``session is None`` keeps the historical launch/context/init path."""
-
-    def test_local_launch_context_and_init_script_are_golden(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(tmp_dir, "/tmp/youtube-cookie.json", headless=False)
-            page = _RecordingPage()
-            upload_in = AsyncMock(return_value=page)
-            video.upload_in = upload_in
-
-            playwright = FakePlaywright()
-            init_script = AsyncMock(side_effect=lambda context: context)
-
-            with patch.object(youtube_main, "set_init_script", init_script):
-                asyncio.run(video.upload(playwright))
-
-        expected_proxy = {"server": youtube_main.YT_PROXY} if youtube_main.YT_PROXY else None
-        self.assertEqual(
-            YOUTUBE_LAUNCH_KWARGS,
-            {"channel": "chrome", "proxy": expected_proxy},
-        )
-        self.assertEqual(YOUTUBE_CONTEXT_KWARGS, {})
-        self.assertTrue(YOUTUBE_INIT_SCRIPT)
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **YOUTUBE_LAUNCH_KWARGS}],
-        )
-
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/youtube-cookie.json", **YOUTUBE_CONTEXT_KWARGS}],
-        )
-
-        context = browser.contexts[0]
-        init_script.assert_awaited_once_with(context)
-        upload_in.assert_awaited_once()
-        session = upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-        self.assertIs(session.context, context)
-
-    def test_local_teardown_saves_cookie_then_closes_context_and_browser(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(tmp_dir, "/tmp/youtube-cookie.json")
-            page = _RecordingPage()
-            video.upload_in = AsyncMock(return_value=page)
-
-            playwright = FakePlaywright()
-            with patch.object(
-                youtube_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
-            ):
-                asyncio.run(video.upload(playwright))
-
-        browser = playwright.chromium.launch_browser
-        context = browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, ["/tmp/youtube-cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        self.assertEqual(playwright.events, ["launch", "context.close", "browser.close"])
-        self.assertIn(2000, page.wait_timeouts)
-
-    def test_local_upload_in_keeps_legacy_login_runtime_error(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(tmp_dir, "/tmp/youtube-cookie.json")
-            page = _RecordingPage(final_url="https://accounts.google.com/signin")
-            context = _RecordingContext(page)
-            session = BrowserSession(
-                browser=MagicMock(), context=context, mode="local"
-            )
-
-            with self.assertRaises(RuntimeError) as caught:
-                asyncio.run(video.upload_in(session))
-            self.assertNotIsInstance(caught.exception, LoginRequiredError)
-
-        self.assertIn("登录态失效", str(caught.exception))
+# Persistent local contracts are covered at CLI/browser boundaries in test_youtube_profiles.
 
 
 class MultiloginUploadTests(unittest.TestCase):
@@ -338,12 +263,10 @@ class MultiloginUploadTests(unittest.TestCase):
 
             with (
                 patch.object(youtube_main, "async_playwright", MagicMock()) as async_playwright,
-                patch.object(youtube_main, "set_init_script", AsyncMock()) as init_script,
             ):
                 asyncio.run(video.upload(None, session=session))
 
         async_playwright.assert_not_called()
-        init_script.assert_not_awaited()
         browser.close.assert_not_called()
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
@@ -390,7 +313,7 @@ class MultiloginUploadTests(unittest.TestCase):
         async_playwright.assert_not_called()
         video.upload.assert_awaited_once_with(None, session=session)
 
-    def test_wrapper_without_session_keeps_legacy_playwright(self):
+    def test_wrapper_without_session_owns_playwright(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video = _make_video(tmp_dir, "/tmp/cookie.json")
             video.upload = AsyncMock()
@@ -514,7 +437,7 @@ class YouTubeMlxCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         session_factory.assert_not_called()
 
-    def test_local_mode_keeps_legacy_check(self):
+    def test_local_mode_does_not_use_managed_session(self):
         with (
             patch.object(
                 youtube_command,
@@ -552,7 +475,7 @@ class YouTubeMlxCliTests(unittest.TestCase):
                 patch.object(youtube_command, "async_playwright", lambda: playwright_cm),
                 patch.object(youtube_command, "browser_session", new=session_factory),
                 patch.object(youtube_command, "is_logged_in", new=probe),
-                patch.object(youtube_command, "resolve_account_file", new=resolve_account),
+                patch("utils.local_profile.acquire_local_profile", new=resolve_account),
                 patch.object(youtube_command, "youtube_setup", new=setup),
                 patch.object(youtube_command, "_build_youtube_uploader", new=builder),
             ):
@@ -689,16 +612,16 @@ class YouTubeMlxCliTests(unittest.TestCase):
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
 
-    def test_local_upload_video_stays_on_legacy_path(self):
+    def test_local_upload_video_has_no_managed_target(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
             video_path.write_bytes(b"video")
 
-            legacy_upload = AsyncMock()
+            local_upload = AsyncMock()
             session_factory = MagicMock()
 
             with (
-                patch.object(youtube_command, "upload_youtube_video", new=legacy_upload),
+                patch.object(youtube_command, "upload_youtube_video", new=local_upload),
                 patch.object(youtube_command, "browser_session", new=session_factory),
             ):
                 code, out, _ = self._run(
@@ -718,9 +641,9 @@ class YouTubeMlxCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("YouTube video upload submitted", out)
         session_factory.assert_not_called()
-        request = legacy_upload.await_args.args[0]
+        request = local_upload.await_args.args[0]
         self.assertEqual(request.account_name, "creator")
-        self.assertIsNone(legacy_upload.await_args.kwargs.get("target"))
+        self.assertIsNone(local_upload.await_args.kwargs.get("target"))
 
 
 if __name__ == "__main__":

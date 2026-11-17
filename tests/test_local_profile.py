@@ -268,24 +268,24 @@ class LocalProfileTests(unittest.TestCase):
                         metadata.write_bytes(valid)
         self.assertEqual(self.run_reset()[0], 0)
 
-    def test_reset_is_first_batch_only_and_rejects_managed_mode_without_external_calls(self):
+    def test_reset_is_migrated_platforms_only_and_rejects_managed_mode_without_external_calls(self):
         from contextlib import ExitStack
         from sau_commands import browser
         with ExitStack() as stack:
-            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "facebook-page"):
+            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook-page"):
                 stack.enter_context(patch(f"sau_commands.{platform.replace('-', '_')}.async_playwright",
                                           side_effect=AssertionError("must not start browser")))
             stack.enter_context(patch.object(browser, "MultiloginClient", side_effect=AssertionError("provider")))
             stack.enter_context(patch.object(browser, "AdspowerClient", side_effect=AssertionError("provider")))
             stack.enter_context(patch("subprocess.run", side_effect=AssertionError("must not inspect browser product")))
-            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "facebook-page"):
+            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook-page"):
                 self.assertEqual(self.run_reset(platform=platform)[0], 0)
                 for variable in ("MLX_API_TOKEN", "ADSPOWER_API_KEY"):
                     with patch.dict(os.environ, {variable: "test-credential"}):
                         code, out, err = self.run_reset(platform=platform)
                         self.assertEqual(code, 2, err)
                         self.assertIn("仅支持本地模式", err)
-            for platform in ("youtube", "facebook", "douyin", "kuaishou", "tencent",
+            for platform in ("facebook", "douyin", "kuaishou", "tencent",
                              "baijiahao", "weibo", "hupu", "alipay", "dayu", "zhihu", "xueqiu", "bilibili"):
                 self.assertEqual(self.run_reset(platform=platform)[0], 2)
 

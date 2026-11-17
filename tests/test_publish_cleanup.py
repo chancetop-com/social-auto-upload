@@ -24,7 +24,7 @@ LOCAL_UPLOADS = (
     ("hupu", "HuPuVideo"),
     ("douyin", "DouYinVideo"),
     ("douyin", "DouYinNote"),
-    ("youtube", "YouTubeVideo"),
+    # YouTube persistent outcomes: test_youtube_profiles.
     # Xiaohongshu persistent outcomes: test_xhs_profile_cli.
     # TikTok persistent-context outcomes are covered by test_tiktok_profile_cli.
 )
@@ -124,15 +124,6 @@ class PublishCleanupTests(unittest.IsolatedAsyncioTestCase):
                 await fixture.upload(platform, cls)
                 fixture.context.close.assert_awaited_once()
                 fixture.browser.close.assert_awaited_once()
-
-    async def test_youtube_post_success_page_disconnection_is_cleanup_only(self):
-        fixture = LocalFixture()
-        fixture.page.wait_for_timeout.side_effect = RuntimeError(
-            "page closed after success"
-        )
-        await fixture.upload("youtube", "YouTubeVideo")
-        fixture.context.close.assert_awaited_once()
-        fixture.browser.close.assert_awaited_once()
 
     async def test_shared_local_session_preserves_result_and_closes_after_writeback_failure(
         self,
