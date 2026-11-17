@@ -23,9 +23,9 @@ uv run sau douyin --help
 uv pip install -e .
 ```
 
-## cookie 无效或已过期
+## Profile 缺失、登录失效或需要验证
 
-先检查 cookie 状态：
+先检查 Profile 登录状态：
 
 ```bash
 sau douyin check --account <account>
@@ -85,3 +85,5 @@ YYYY-MM-DDTHH:MM:00Z
 ```
 
 如果不需要定时发布，去掉 `--schedule` 即可改为立即发布。
+
+退出 10：用同一浏览器配置 login 完成人工登录/验证。退出 1：按实际网络、权限、页面或浏览器来源错误排查。Profile 占用时等待拥有者结束，不强制抢占；需要清空资料时显式 reset-profile 指定 browser-kind，无需安装浏览器。退出 9 或 publish_attempted=true：先核对作品，不能自动重发。

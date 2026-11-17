@@ -48,7 +48,7 @@ uv pip install -e .
 
 ### 4. 按所选浏览器准备运行环境
 
-项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手、视频号 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
+项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
 
 - **Chrome 路线**：用户从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 安装适合系统的 Chrome；项目使用 `channel="chrome"`，不会自动安装或更新它。macOS 选择相应 Apple 芯片或 Intel 版本。
 - **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。未迁移平台仍可能使用 headless shell，保留它们需要的 `uv run patchright install chromium` 安装方式。
@@ -71,8 +71,8 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`：非空时优先作为实际可执行文件。
-- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手、视频号 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
-- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手、视频号 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手、视频号 同样解析 headless，但完全忽略本地来源配置。
+- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
+- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号 同样解析 headless，但完全忽略本地来源配置。
 
 ### 6. 验证 CLI 是否可用
 
@@ -104,19 +104,11 @@ sau douyin upload-note --account <account_name> --images videos/demo1.png videos
 sau douyin upload-note --account <account_name> --images videos/demo1.png videos/demo2.png --title "图文标题" --note $noteText --tags 'tag1,tag2' --bgm '音乐名称'
 ``` 
 
-抖音短信验证码补充说明：
+抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/douyin/<原始别名>/<chrome|chromium>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
 
-- 视频发布过程中如果触发短信二次验证，程序会优先读取项目根目录下的 `verify_code.txt`
-- 如果当前是你手动运行的交互式终端，没提供 `verify_code.txt` 时，CLI 会直接提示你在终端输入验证码
-- 如果是 agent 或自动化桥接场景，仍然可以继续通过写入 `verify_code.txt` 来提供验证码
-- 验证通过后，程序会自动删除 `verify_code.txt`
+只有 login 引导扫码或验证；缺少 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。同别名可以重新登录另一真实账号，Chrome 与 Chromium 各自隔离。发布中遇到验证即结束本次任务；提交后退出 `10` 会附 `publish_attempted=true`，退出 `9` 表示结果未知，都先核对作品再决定重试。重建使用 `sau douyin reset-profile --account creator --browser-kind chrome`，无需 binary，拒绝占用，保留另一浏览器及历史结果；不会自动恢复发布任务。抖音没有 `--no-publish`，环境验证使用离线或受控页面，不能以真实提交验收。
 
-抖音卡login手动获取cookie:
-
-- 目标服务器使用vnc
-- 浏览器登录抖音创作者中心https://creator.douyin.com/
-- 执行`bash export_douyin_cookie.sh --account <account_name>`
-- 检查cookie可用性,执行`sau douyin check --account <account_name>`
+托管模式保留 `verify_code.txt`/交互终端短信验证码流程；本地发布遇到验证立即退出，先用同配置 login 完成验证。
 
 ### 8. 快手主线示例
 
@@ -198,7 +190,7 @@ sau xiaohongshu --help
 sau bilibili --help
 ```
 
-6. 如果用户的目标是抖音或快手的登录、cookie 校验、视频上传、图文上传，优先走 CLI：
+6. 如果用户的目标是抖音或快手的登录、登录态校验、视频上传、图文上传，优先走 CLI：
 
 ```bash
 sau douyin login

@@ -20,7 +20,7 @@ from uploader.douyin_uploader.main import (
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_image_files,
     parse_tags,
@@ -38,6 +38,8 @@ from sau_commands.browser import (
 from sau_commands.arguments import single_line_value
 from utils.text_validation import validate_single_line
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
 
 def register(platform_parsers):
@@ -45,10 +47,12 @@ def register(platform_parsers):
     douyin_parser = platform_parsers.add_parser("douyin", help="Douyin operations")
     douyin_actions = douyin_parser.add_subparsers(dest="action", required=True)
 
+    add_reset_profile_action(douyin_actions)
+
     for action_name in ("login", "check"):
         action_parser = douyin_actions.add_parser(action_name, help=f"Douyin {action_name}")
         action_parser.add_argument("--account", required=False, help="Douyin user-defined account_name")
-        add_runtime_flags(action_parser)
+        add_local_runtime_flags(action_parser)
         if action_name == "check":
             add_browser_flags(action_parser)
 
@@ -70,7 +74,7 @@ def register(platform_parsers):
         help="Exact Douyin self-declaration option text; omitted means do not set one",
     )
     upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
-    add_runtime_flags(upload_video_parser)
+    add_local_runtime_flags(upload_video_parser)
     add_browser_flags(upload_video_parser)
 
     upload_note_parser = douyin_actions.add_parser("upload-note", help="Upload one note to Douyin")
@@ -83,7 +87,7 @@ def register(platform_parsers):
     upload_note_parser.add_argument("--bgm", default="", help="BGM music name to search and select")
     upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(upload_note_parser)
-    add_runtime_flags(upload_note_parser)
+    add_local_runtime_flags(upload_note_parser)
     add_browser_flags(upload_note_parser)
 
 
@@ -102,10 +106,11 @@ class DouyinVideoUploadRequest:
     product_title: str = ""
     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
     declaration: str | None = None
     collection_name: str | None = None
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
 @dataclass(slots=True)
@@ -118,21 +123,19 @@ class DouyinNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = DOUYIN_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
     bgm: str = ""
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
-async def login_douyin_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("douyin", account_name)
-    return await douyin_setup(str(account_file), handle=True, return_detail=True, headless=headless)
+async def login_douyin_account(account_name, headless=None, *, local_browser=None):
+    return await douyin_setup(account_name=account_name, handle=True, return_detail=True,
+                              headless=headless, local_browser=local_browser)
 
 
-async def check_douyin_account(account_name: str) -> bool:
-    account_file = resolve_account_file("douyin", account_name)
-    if not account_file.exists():
-        return False
-    return await douyin_cookie_auth(str(account_file))
+async def check_douyin_account(account_name, headless=None, *, local_browser=None):
+    return await douyin_cookie_auth(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
 def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> DouYinVideo:
@@ -155,6 +158,8 @@ def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> Do
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
         collection_name=request.collection_name,
     )
     app.publish_not_before = request.publish_not_before
@@ -172,6 +177,8 @@ def _build_note_uploader(request: DouyinNoteUploadRequest, account_file) -> DouY
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
         bgm=request.bgm,
     )
     app.publish_not_before = request.publish_not_before
@@ -190,7 +197,7 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=DOUYIN_LAUNCH_KWARGS,
@@ -202,16 +209,9 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
                 await app.douyin_upload_video(session=session)
         return None
 
-    account_file = resolve_account_file("douyin", request.account_name)
-    is_ready = await douyin_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
-        )
-
-    app = _build_video_uploader(request, str(account_file))
+    app = _build_video_uploader(request, None)
     await app.douyin_upload_video()
-    return account_file
+    return None
 
 
 async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path | None:
@@ -221,7 +221,7 @@ async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path 
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=DOUYIN_LAUNCH_KWARGS,
@@ -233,27 +233,22 @@ async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path 
                 await app.douyin_upload_note(session=session)
         return None
 
-    account_file = resolve_account_file("douyin", request.account_name)
-    is_ready = await douyin_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Douyin cookie is missing or expired: {account_file}. Run `sau douyin login --account {request.account_name}` first."
-        )
-
-    app = _build_note_uploader(request, str(account_file))
+    app = _build_note_uploader(request, None)
     await app.douyin_upload_note()
-    return account_file
+    return None
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
     if args.action == "login":
         reject_managed_login("douyin", args)
         require_local_account(args)
-        result = await login_douyin_account(args.account, headless=args.headless)
+        result = await login_douyin_account(args.account, headless=args.headless, local_browser=getattr(args, "local_browser", None))
         if not result["success"]:
             raise RuntimeError(result["message"])
-        print(f"Douyin login flow completed: {result['account_file']}")
+        print(f"Douyin Profile login completed: {args.account}")
         return 0
 
     target = resolve_managed_provider(args)
@@ -265,7 +260,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=args.headless,
+                    headless=resolve_headless(args.headless),
                     managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
@@ -274,7 +269,7 @@ async def run(args):
             print("valid")
             return 0
 
-        is_valid = await check_douyin_account(account_label)
+        is_valid = await check_douyin_account(args.account, headless=args.headless, local_browser=getattr(args, "local_browser", None))
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -297,6 +292,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=getattr(args, "local_browser", None),
             collection_name=args.collection,
             publish_not_before=args.not_before,
         )
@@ -324,6 +320,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=getattr(args, "local_browser", None),
             bgm=args.bgm or "",
             publish_not_before=args.not_before,
         )

@@ -163,3 +163,5 @@ Facebook 已迁移 login/check/视频/图文/verify/delete：使用项目专用 
 快手环境准备：读取 `skills/kuaishou-upload/SKILL.md` 的本地 Profile 契约，按所选来源安装浏览器，保留已有配置；执行 `sau kuaishou login --account <alias> --headed` 扫码后同配置 check。只有 login 引导登录，旧 JSON 不参与；快手没有 --no-publish，未有真实发布任务时用离线/受控页面验证。重建明确指定 --browser-kind，不借重建重新提交旧任务。
 
 视频号的 login/check/upload-video 已迁移：按 `skills/tencent-upload/SKILL.md` 准备所选 Chrome/完整 Chromium，保留 conf.py。先 `sau tencent login --account <alias> --headed` 扫码，正常关闭后同配置 check；仅 login 引导登录，旧 JSON 不导入。视频预检和业务共用 Profile。明确未登录/验证退出 10，运行故障退出 1，提交后先核查作品；退出 9 禁止自动重发。该平台无 --no-publish，不以真实发布或保存草稿验收，使用离线替身/受控 DOM。需要重建时显式指定 reset-profile 的 browser-kind。
+
+抖音已迁移 login/check/视频/图文：保留 conf.py，准备所选系统 Chrome、完整 Chromium 或自定义路径；先 `sau douyin login --account <alias> --headed`，正常关闭后同配置 check。Profile 路径为 `browser_profiles/douyin/<原始别名>/<chrome|chromium>`，旧 JSON 不参与，默认/显式 headless 与其他已迁移平台一致。只有 login 处理扫码/验证，发布中退出 10 安排人工恢复；提交后先核对作品，9 禁止自动重发。没有 no-publish 开关，未获真实发布任务时只做离线/受控 DOM 验证。显式 reset-profile 仅清空选定种类，无需浏览器安装。

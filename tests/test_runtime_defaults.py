@@ -2,8 +2,8 @@
 """运行参数契约（ticket 29，规格 §3 U13 ①②）。
 
 两条规则：
-- `headless` 默认有头；`--headed` 等价默认，`--headless` 显式无头；
-  CLI 参数层不读 `conf.LOCAL_CHROME_HEADLESS`。
+- CLI 参数层不读 `conf.LOCAL_CHROME_HEADLESS`；已迁移平台用 None 表示未提供，
+  在执行时读取配置，显式 headed/headless 保留布尔值。
 - `debug` 默认关，CLI 显式开启；uploader 构造默认值保持关闭。
 """
 
@@ -80,7 +80,7 @@ class CliRuntimeDefaultsTests(unittest.TestCase):
                     args = parser.parse_args(
                         ["douyin", "check", "--account", "creator"]
                     )
-                self.assertFalse(args.headless)
+                self.assertIsNone(args.headless)  # Resolve migrated platform config at execution time.
 
 
 if __name__ == "__main__":
