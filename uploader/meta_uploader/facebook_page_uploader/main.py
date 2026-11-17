@@ -352,7 +352,9 @@ class MetaBusinessUploader(BaseVideoUploader):
         humanizer = self._humanizer(page)
         combo = page.locator('[data-surface$="bizweb_create_post:left_panel"] [role="combobox"][aria-haspopup="listbox"]').filter(has=page.locator('img[alt="Facebook"]'))
         await combo.wait_for(state="visible")
-        selected_name = (await combo.inner_text()).replace('\u200b', '').strip()
+        selected_name = await combo.inner_text()
+        if getattr(self, '_local_mode', False):
+            selected_name = selected_name.replace('\u200b', '').strip()
         matches = (selected_name == self.page_name if getattr(self, '_local_mode', False)
                    else self.page_name in selected_name if self.page_name else True)
         if self.page_name and not matches:
