@@ -72,6 +72,28 @@ class RednoteProfileCliTests(unittest.TestCase):
         with acquire_local_profile('rednote', 'creator', kind, create=True) as profile:
             return profile.path
 
+    def test_reappearing_legacy_file_is_untouched_and_login_does_not_restart(self):
+        with patch.object(rednote.asyncio, 'sleep', new=self.no_sleep):
+            code, _, err = self.cli('login', '--account', 'creator', '--headed')
+            self.assertEqual(code, 0, err)
+        legacy = self.root / 'cookies/rednote_creator.json'
+        legacy.parent.mkdir(exist_ok=True)
+        legacy.write_bytes(b'reappeared broken credentials')
+        open_file = Path.open
+        def deny_legacy_open(path, *args, **kwargs):
+            if path == legacy:
+                raise AssertionError('normal commands must never read or rewrite old credentials')
+            return open_file(path, *args, **kwargs)
+        with patch.object(Path, 'open', deny_legacy_open):
+            with patch.object(rednote.asyncio, 'sleep', new=self.no_sleep):
+                code, _, err = self.cli('login', '--account', 'creator', '--headed')
+                self.assertEqual(code, 0, err)
+            code, _, err = self.cli('check', '--account', 'creator', '--headed')
+            self.assertEqual(code, 0, err)
+        self.assertEqual(legacy.read_bytes(), b'reappeared broken credentials')
+        self.assertEqual(len(self.pw.chromium.persistent_calls), 3)
+        self.assertFalse(self.context.storage_state_calls)
+
     def test_check_uses_profile_and_config_without_legacy_json(self):
         profile = self.profile()
         (self.root / 'cookies').mkdir()

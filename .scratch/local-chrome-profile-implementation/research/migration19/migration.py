@@ -44,12 +44,14 @@ async def strict_close(context, timeout):
     finally:
         if not task.done(): task.cancel()
 
-async def migrate(playwright, *, platform, account, base, login, probe, close_timeout=10, record=lambda **event: None):
+async def migrate(playwright, *, platform, account, base, login, probe, close_timeout=10, context_kwargs=None, record=lambda **event: None):
     config = resolve_local_browser(headless=False)
     targets = locate(base, platform, account)
+    options = {**dict(context_kwargs or {}), **config.launch_options}
     with acquire_local_profile(platform, account, config.kind, root=Path(base)/'browser_profiles', create=True) as profile:
         for stage, action in [('login', login), ('reopen', probe)]:
-            context = await playwright.chromium.launch_persistent_context(user_data_dir=str(profile.path), **config.launch_options)
+            context = await playwright.chromium.launch_persistent_context(user_data_dir=str(profile.path), **options)
+            record(stage=stage, launched=True, profile=str(profile.path), browser_kind=config.kind, source=config.source, headless=config.headless, version=getattr(context.browser, "version", "unknown"))
             try:
                 positive = await action(BrowserSession(browser=context.browser, context=context, mode='local'))
                 if positive is not True: raise RuntimeError(f'{stage}: no positive login evidence')

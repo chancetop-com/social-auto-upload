@@ -136,3 +136,7 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
         await self.run_migration(platform='dayu')
         self.assertFalse(sidecar.exists())
         await self.run_migration(platform='dayu')
+    async def test_platform_proxy_configuration_is_identical_on_reopen(self):
+        await self.run_migration(platform='instagram', context_kwargs={'proxy': {'server': 'http://localhost:7890'}})
+        self.assertEqual(self.pw.calls[0]['proxy'], {'server': 'http://localhost:7890'})
+        self.assertEqual(self.pw.calls[0], self.pw.calls[1])

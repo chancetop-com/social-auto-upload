@@ -94,9 +94,14 @@ async def main():
     record(state='preflight', source_root=str(WORKTREE), conf_path=conf.__file__, data_root=str(conf.BASE_DIR),
            browser_kind=config.kind, source=config.source, headless=config.headless,
            targets=[{'path':str(p), 'exists':p.exists()} for p in targets])
+    context_kwargs = {}
+    if platform == 'instagram':
+        from uploader.meta_uploader.insgraph_uploader.main import _proxy_options
+        context_kwargs = {'proxy': _proxy_options(None)}
+        record(proxy_configured=context_kwargs['proxy'] is not None)
     async with async_playwright() as playwright:
         await migrate(playwright, platform=platform, account=account, base=ORIGINAL,
-                      login=login, probe=probe, record=record)
+                      login=login, probe=probe, context_kwargs=context_kwargs, record=record)
     record(state='complete')
 
 if __name__ == '__main__':

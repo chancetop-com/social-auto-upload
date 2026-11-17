@@ -92,6 +92,28 @@ class InstagramProfileCliTests(unittest.TestCase):
     def profile(self, kind='chrome'):
         with acquire_local_profile('instagram', 'Creator', kind, create=True): pass
 
+    def test_reappearing_legacy_file_is_untouched_and_login_does_not_restart(self):
+        with ExitStack():
+            code, _, err = self.run_cli('login', '--account', 'Creator', '--headed')
+            self.assertEqual(code, 0, err)
+        legacy = self.root / 'cookies/instagram_Creator.json'
+        legacy.parent.mkdir(exist_ok=True)
+        legacy.write_bytes(b'reappeared broken credentials')
+        open_file = Path.open
+        def deny_legacy_open(path, *args, **kwargs):
+            if path == legacy:
+                raise AssertionError('normal commands must never read or rewrite old credentials')
+            return open_file(path, *args, **kwargs)
+        with patch.object(Path, 'open', deny_legacy_open):
+            with ExitStack():
+                code, _, err = self.run_cli('login', '--account', 'Creator', '--headed')
+                self.assertEqual(code, 0, err)
+            code, _, err = self.run_cli('check', '--account', 'Creator', '--headed')
+            self.assertEqual(code, 0, err)
+        self.assertEqual(legacy.read_bytes(), b'reappeared broken credentials')
+        self.assertEqual(len(self.pw.chromium.persistent_calls), 3)
+        self.assertFalse(self.context.storage_state_calls)
+
     def test_check_uses_configured_persistent_profile_without_legacy_json(self):
         self.profile()
         (self.root / 'cookies').mkdir()
