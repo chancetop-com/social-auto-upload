@@ -823,7 +823,7 @@ class LocalOnlyActionTests(unittest.TestCase):
 
         self.assertEqual(code, 0, err)
         helper.assert_awaited_once()
-        if module in (instagram_command, facebook_page_command):
+        if module in (instagram_command, facebook_command, facebook_page_command):
             self.assertEqual(helper.await_args.kwargs['account_name'], 'creator')
             resolve.assert_not_called()
         else:

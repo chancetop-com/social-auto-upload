@@ -77,4 +77,6 @@
 
 - 2026-11-17：[06 已解决](./issues/06-youtube-persistent-profile.md)。YouTube login/check/upload-video/reset-profile 与直接调用使用持久化 Profile；合入 04 测试修复后 273 项相关回归及完整 Chromium 自然窗口合成 DOM 实测通过，保留托管与上传结果契约。[06 验证记录](./research/06-youtube-validation.md) 区分实际合成浏览器检查与未执行的真实账号动作。
 
+- 2026-11-17：[07 已解决](./issues/07-facebook-persistent-profile.md)。Facebook全部正式本地动作、直接调用与独立作品操作接入持久化Profile，与Facebook Page隔离；保留作者/原作品/正文核验及原有托管路由。合并YouTube06后365项相关离线/共享回归、13项受控浏览器/DOM回归通过；未操作真实账号或作品。见 [07验证记录](./research/07-facebook-validation.md)。
+
 - 2026-11-17：[08 已解决](./issues/08-facebook-page-persistent-profile.md)。Facebook Page 全部正式本地动作和直接调用使用独立持久化 Profile，多个 Page 目标共用同一登录容器，保持显式目标和原作品证据核验。252 项合并后离线回归、10 项受控 Chrome/DOM 回归及最后 74 项 Page 相关回归通过；未操作真实账号或发布/删除作品。[08 验证记录](./research/08-facebook-page-validation.md)。

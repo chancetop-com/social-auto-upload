@@ -45,19 +45,6 @@ class AccountCheckCleanupTests(unittest.TestCase):
 
 
 class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
-    async def test_meta_openers_keep_setup_error_when_cleanup_also_fails(self):
-        for platform, name in (("facebook_uploader", "_open_facebook_page"),):
-            with self.subTest(platform=platform):
-                module = importlib.import_module(f"uploader.meta_uploader.{platform}.main")
-                original = ValueError("invalid storage state")
-                browser = SimpleNamespace(new_context=AsyncMock(side_effect=original),
-                                          close=AsyncMock(side_effect=RuntimeError("close failed")))
-                playwright = SimpleNamespace(chromium=SimpleNamespace(launch=AsyncMock(return_value=browser)))
-                with self.assertRaises(ValueError) as caught:
-                    await getattr(module, name)(playwright, Path("unused.json"), proxy=None, headless=True)
-                self.assertIs(caught.exception, original)
-                browser.close.assert_awaited_once()
-
     async def test_alipay_tags_and_douyin_product_title_cannot_send_navigation_keys(self):
         from sau_commands.alipay import upload_alipay_video
         from uploader.alipay_uploader.main import format_title_with_tags

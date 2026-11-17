@@ -6,7 +6,7 @@
 
 所有平台 Skill 都说明两种运行方式：
 
-- **本地模式**（默认）：不设置任何托管凭据；TikTok、Rednote、Instagram、小红书使用专用持久化 Profile、默认系统 Chrome，其他平台在各自迁移前仍使用 Chromium 与 `cookies/<platform>_<account>.json`。
+- **本地模式**（默认）：不设置任何托管凭据；TikTok、Rednote、Instagram、小红书、YouTube、Facebook使用专用持久化 Profile、默认系统 Chrome，其他平台在各自迁移前仍使用 Chromium 与 `cookies/<platform>_<account>.json`。
 - **托管浏览器模式**：设置 `MLX_API_TOKEN`（Multilogin X 模式）或 `ADSPOWER_API_KEY`（AdsPower 模式），由桌面应用提供 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 cookie 文件。Bilibili 是明确特例，不支持托管浏览器模式（`biliup` 没有浏览器上下文）。
 
 | 平台 | Skill 目录 | CLI 入口 |

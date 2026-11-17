@@ -10,16 +10,24 @@ summary: 管理 Facebook 个人主页登录、视频图文发布和作品核验�
 
 # Facebook 个人主页发布与删除
 
+本 Skill 需要已安装的 `sau` CLI；独立安装 Skill 不会安装 Python 项目。若 `sau --help` 不可用，在项目根目录使用 Python 3.10–3.12 创建环境：`uv venv --python 3.11`，激活后 `uv pip install -e .`。首次没有 conf.py 时从 conf.example.py 复制，已有配置保留。
+
+本地默认使用系统 Chrome、有头。Chrome 由用户正常安装；显式 Chromium 先在同一项目环境运行 `uv run patchright install --no-shell chromium`，再给动作传 `--local-browser chromium`。自定义可执行文件配置 `LOCAL_CHROME_PATH`，实际产品种类决定 Profile；路径优先于 `--local-browser`/`LOCAL_BROWSER`，无路径时显式选择 > `LOCAL_BROWSER` > chrome。只要求选定来源，失败不切换浏览器或模式。有头运行需可用桌面/显示服务；无头环境显式传 `--headless`。保留项目固定 Patchright，安装与运行使用相同 `PLAYWRIGHT_BROWSERS_PATH`（如设置）。
+
+所有本地动作与直接调用采用显式 `--headed`/`--headless` 或布尔值 > `LOCAL_CHROME_HEADLESS` > False，已有 True 不覆盖。浏览器自然窗口、不固定 viewport、不修改界面语言。只有 login 引导登录；登录正常关闭后，用同一来源和别名 check。缺少 Profile/明确未登录/验证码退出 10；网络、权限、页面结构及启动故障退出 1，不能当作需要反复登录。浏览器来源或参数错误退出 2。
+
+需要重建时运行 `sau facebook reset-profile --account creator --browser-kind chrome`（或 chromium）。它无需安装 binary，只删除指定平台/别名/种类，拒绝占用或归属不明资料。重建后先 login；不要因此重发旧任务。
+
 本 Skill 调用现有 CLI。默认不配置代理，浏览器按系统网络直连；网络环境需要代理时显式传 `--proxy` 或设置 `SAU_FACEBOOK_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。
 
 ```powershell
-sau facebook login --account creator
+sau facebook login --account creator --headed
 sau facebook check --account creator
 sau facebook upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "正文" --tags 生活,分享
 sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图文标题" --note "正文"
 ```
 
-登录时在可见 Chrome 完成登录，账号保存为 `cookies/facebook_creator.json`。`check` 验证个人主页登录态，不代表 Page 权限或作品发布结果。标题、正文、标签合并为一段配文。当前支持立即发布，未接入个人主页定时；Page 使用独立 `facebook-page` 命令。
+登录、检查、视频/图文及作品管理均使用 `browser_profiles/facebook/<原始别名>/<chrome|chromium>`；浏览器保存登录态，旧 Cookie JSON 不读取、不导入或导出。与 `facebook-page` 的 Profile 完全隔离。别名允许重新登录其他真实账号，两类浏览器也可使用不同账号；原作者/作品证据仍须核对。`check` 验证个人主页登录态，不代表 Page 权限或作品发布结果。标题、正文、标签合并为一段配文。当前支持立即发布，未接入个人主页定时；Page 使用独立 `facebook-page` 命令。
 
 取得原作品链接后管理作品：
 
@@ -33,7 +41,7 @@ sau facebook delete --account creator --post-url "原作品链接" --owner-id "�
 
 `verify --from-trash` 查询垃圾箱原记录；`verify --deleted` 仅确认编号不在垃圾箱，返回 `absent_from_trash`，不能单凭缺席证明过去发生过永久删除。当前仅检索有限滚动范围的近期作品；没有找到或同文案无法唯一定位时明确失败。
 
-只有平台出现本次提交的成功提示才认为发表已确认。点击后超时或浏览器断开应视为结果未知：先在同一账号个人主页或垃圾箱核对原作品，不重复上传或重复删除。本地素材不会被删除。完整参数以 `sau facebook upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。
+只有平台出现本次提交的成功提示才认为发表已确认。点击后超时或浏览器断开应视为结果未知：先在同一账号个人主页或垃圾箱核对原作品，不重复上传或重复删除。本地素材不会被删除。Facebook 当前没有 no-publish 参数；不要用真实发表或删除来替代离线验收。退出 9 禁止自动重发，退出 10 若带 publish_attempted=true 也须先核对原作品。完整参数以 `sau facebook upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。
 
 ## 托管浏览器模式（可选）
 
@@ -41,7 +49,8 @@ sau facebook delete --account creator --post-url "原作品链接" --owner-id "�
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
-- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 托管 check/上传使用 `profile_id` 作为身份与日志标签，忽略 `--account`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 托管 headless 同样读取上述优先级，但忽略本地来源/路径/安装；verify/delete 仍要求本地 `--account` 并使用本地代理与配置。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ## 示例脚本

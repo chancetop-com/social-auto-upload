@@ -20,7 +20,7 @@
 
 ## 本地模式（Local 模式）
 
-不设置任一托管模式环境变量时，由项目启动并关闭浏览器。迁移阶段 TikTok、Rednote、Instagram、小红书、YouTube、Facebook Page 已使用独立持久化本地浏览器 Profile 作为唯一登录态来源；其他平台仍沿用旧 Cookie JSON / storage_state 流程，随平台接入逐批替换。托管动作不使用本地资料；Instagram 和 Facebook Page 的 verify/delete 即使设置托管环境变量仍是本地动作。
+不设置任一托管模式环境变量时，由项目启动并关闭浏览器。迁移阶段 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 已使用独立持久化本地浏览器 Profile 作为唯一登录态来源；其他平台仍沿用旧 Cookie JSON / storage_state 流程，随平台接入逐批替换。托管动作不使用本地资料；Instagram、Facebook 和 Facebook Page 的 verify/delete 即使设置托管环境变量仍是本地动作。
 
 ## 本地浏览器 Profile
 
