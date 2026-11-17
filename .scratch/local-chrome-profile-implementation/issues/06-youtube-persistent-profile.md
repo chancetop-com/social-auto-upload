@@ -29,7 +29,7 @@
 - 2026-11-17：按已批准 CLI→真实配置/Profile/session 边界使用 TDD；红绿证据、入口清单、执行命令和限制见 [06 验证记录](../research/06-youtube-validation.md)。首轮登录/上传旧路径、权限/验证分类、点击可能派发后的阶段标记、上传跳登录后的超时分类均先出现失败，再通过实现修正。
 - 2026-11-17：最终针对性离线回归 **240 项通过**，其中新 YouTube Profile CLI/直接调用测试 22 项；共享 Profile 回归包含真实进程互斥和 reset 部分失败。`git diff --check` 与修改文件编译检查通过。
 - 2026-11-17：隔离完整 Chromium 156.0.8078.4 的自然 viewport 合成页面实测两次通过（末次为最终导航实现）：756×469，真实人类化交互完成标题/简介回读、播放列表选择及浮层关闭、页面滚动、单次合成提交。首次 sandbox 启动被 EPERM/SIGABRT 阻止；reviewed outside-sandbox 执行成功。所有请求均由本地 HTML 响应；未操作任何真实账号、上传、发布或删除。
-- 扩大到 272 项的中间回归曾暴露两项已有 Instagram `resolve_account_file` 替身错误；04 独立修复，06 未改相关 hunk。合并后复验另记。原生 `--schedule` 在本平台原本未实现，仍提前退出 2；本票保留 not-before，没有新增原生定时或 no-publish 功能。
+- 扩大到 272 项的中间回归曾暴露两项已有 Instagram `resolve_account_file` 替身错误；04 独立修复，06 未改相关 hunk。合并 integration `7646984` 后连同 `tests.test_multilogin_cli` 复验 **273 项通过（8.902 秒）**，无剩余失败。原生 `--schedule` 在本平台原本未实现，仍提前退出 2；本票保留 not-before，没有新增原生定时或 no-publish 功能。
 
 ## Answer
 

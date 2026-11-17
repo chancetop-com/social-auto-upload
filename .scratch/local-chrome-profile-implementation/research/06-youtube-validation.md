@@ -54,3 +54,7 @@ Observed natural viewport: **756 × 469**. Readback: title `Fixture title`, desc
 ## Remaining scope
 
 No YouTube-specific acceptance is blocked. Facebook and Facebook Page are parallel ticket 07/08 work; later batches remain on their existing flows. Real account operations are outside this ticket. Legacy material migration is ticket 19, and the four explicitly named real no-publish platform runs are ticket 20. YouTube does not gain a no-publish flag or native scheduling in this change.
+
+## Final integration check
+
+Merged integration `7646984` (ticket 04's stale Instagram guard fix) into the YouTube branch as `82622c5`, after implementation commit `d01bb6c`. Re-ran the final targeted command plus `tests.test_multilogin_cli`: **273 passed**, 8.902 seconds. No remaining failures. `git diff --check` passed. The final Chromium controlled-DOM rerun also passed with the same observed 756×469 dimensions, field readback, closed overlay and one synthetic submit.
