@@ -190,7 +190,7 @@ class InstagramProfileCliTests(unittest.TestCase):
                 super().__init__(context)
                 self.composer_open, self.post_clicks = False, 0
             def locator(self, selector):
-                if selector == 'a[href="#"]:has(svg[aria-label="帖子"])':
+                if 'svg[aria-label="帖子"]' in selector:
                     return MenuLocator(self, 'post-menu', int(not self.composer_open))
                 if 'input[type="file"]' in selector:
                     return ComposerLocator(self, 'media-input', int(self.composer_open))
@@ -211,6 +211,75 @@ class InstagramProfileCliTests(unittest.TestCase):
                 self.assertEqual(page.share_clicks, 0)
                 self.assertIn('prepared', out)
                 self.assertTrue(self.context.closed)
+
+    def test_injected_local_and_managed_creator_sessions_stop_before_share(self):
+        import asyncio
+        from tests.fakes_clock import FakeClock
+        import uploader.publish_timeout as timeout
+        from utils.browser_session import BrowserSession
+        clock = FakeClock()
+        class MenuLocator(ComposerLocator):
+            async def click(self):
+                if self.kind == 'post-menu':
+                    self.page.post_clicks += 1
+                    self.page.composer_open = True
+                else:
+                    await super().click()
+        class MenuPage(ComposerPage):
+            def __init__(self, context):
+                super().__init__(context)
+                self.composer_open, self.post_clicks = False, 0
+            def locator(self, selector):
+                if 'svg[aria-label="帖子"]' in selector:
+                    return MenuLocator(self, 'post-menu', int(not self.composer_open))
+                if 'input[type="file"]' in selector:
+                    return ComposerLocator(self, 'media-input', int(self.composer_open))
+                return super().locator(selector)
+            async def wait_for_timeout(self, milliseconds):
+                clock.advance(milliseconds / 1000)
+        self.context.page_type = MenuPage
+        for mode in ('local', 'multilogin', 'adspower'):
+            for video in (False, True):
+                with self.subTest(mode=mode, video=video):
+                    path = self.root / ('video.mp4' if video else 'image.png')
+                    path.write_bytes(b'media fixture')
+                    app = main.InstagramUploader(account_name='Creator', title='caption',
+                        video_file=path if video else None, image_files=[] if video else [path],
+                        no_publish=True, result_file=self.root/'result.json')
+                    session = BrowserSession(browser=None, context=self.context, mode=mode)
+                    with clock.patch(main, timeout):
+                        result = asyncio.run(app.upload(session=session))
+                    page = self.context.pages[-1]
+                    self.assertEqual(result['status'], 'prepared')
+                    self.assertEqual(page.files, [str(path)])
+                    self.assertEqual(page.post_clicks, 1)
+                    self.assertEqual(page.share_clicks, 0)
+                    self.assertFalse(self.context.closed)
+                    self.assertFalse(self.pw.chromium.persistent_calls)
+
+    def test_editor_rejects_early_share_without_dispatching_it(self):
+        class EarlyShareLocator(ComposerLocator):
+            def get_by_role(self, role, **kwargs):
+                if role == 'button' and 'name' in kwargs:
+                    return EarlyShareLocator(self.page, 'action', int(bool(kwargs['name'].fullmatch('Share'))))
+                return super().get_by_role(role, **kwargs)
+            async def click(self):
+                if self.kind == 'action':
+                    self.page.share_clicks += 1
+                else:
+                    await super().click()
+        class EarlySharePage(ComposerPage):
+            def get_by_role(self, role, **kwargs):
+                return EarlyShareLocator(self, role)
+        self.profile()
+        self.context.page_type = EarlySharePage
+        for action, option, filename in [('upload-video', '--file', 'video.mp4'), ('upload-note', '--images', 'image.png')]:
+            with self.subTest(action=action):
+                path = self.root / filename
+                path.write_bytes(b'media fixture')
+                code, _, err = self.run_cli(action, '--account', 'Creator', option, str(path), '--title', 'caption', '--no-publish')
+                self.assertEqual(code, 1, err)
+                self.assertEqual(self.context.pages[-1].share_clicks, 0)
 
     def test_local_composer_uses_observed_continue_label_before_share(self):
         class ChineseLocator(ComposerLocator):
@@ -418,6 +487,11 @@ class ComposerLocator(Locator):
     async def wait_for(self, **kwargs):
         if not self.value: raise main.BrowserTimeoutError('absent prompt')
     async def is_enabled(self, **kwargs): return True
+    async def is_visible(self): return True
+    async def bounding_box(self): return {'x':0, 'y':0, 'width':80, 'height':30}
+    async def evaluate(self, script, *args):
+        # DOM facts and hit-test boundary used by publish readiness.
+        return {'isConnected':True, 'disabled':False, 'self':True}
     async def hover(self): pass
     async def click(self):
         if self.kind == 'action':
@@ -446,6 +520,7 @@ class ComposerPage(Page):
     def locator(self, selector):
         if 'direct/inbox' in selector or selector == 'a[href]': return super().locator(selector)
         if 'launcher.png' in selector or 'reels_nux' in selector: return ComposerLocator(self, 'absent', 0)
+        if 'svg[aria-label="帖子"]' in selector: return ComposerLocator(self, 'absent', 0)
         return ComposerLocator(self, 'editor' if 'contenteditable' in selector else 'entry')
     async def press(self, key):
         if key == 'Delete': self.caption = ''

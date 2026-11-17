@@ -50,7 +50,7 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
-from utils.dom import ElementUnusableError, reject_ambiguous
+from utils.dom import ElementUnusableError, check, reject_ambiguous
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -61,15 +61,11 @@ INSTAGRAM_PROXY = os.environ.get("SAU_INSTAGRAM_PROXY")
 # 创建弹窗在选素材阶段只有一个 file input（编辑页的封面 input 此时尚未挂载）。
 # 用类型定位而不是 accept 文案顺序，避免 accept 改成仅 quicktime/仅图片时失效。
 INSTAGRAM_MEDIA_INPUT = 'input[type="file"]'
-# 主定位一律用 role/可访问名；不再使用任何 hash 类名，哪怕作为兜底。
-# 主动作以可访问名（Next/Share/中文）定位；找不到即按漂移失败，不猜 hash 容器。
-INSTAGRAM_PRIMARY_ACTION_NAME = re.compile(
-    r'^(Next|Share|Post|下一步|分享|发布)$', re.IGNORECASE
-)
-# Local creator UI observed 2026-11-17 uses 继续 in the crop/edit steps.
-INSTAGRAM_LOCAL_PRIMARY_ACTION_NAME = re.compile(
-    r'^(Next|Share|Post|下一步|继续|分享|发布)$', re.IGNORECASE
-)
+# Observed header buttons have role/tabindex but no dedicated stable action
+# attribute. Scope exact accessible names to the dialog AND the expected stage;
+# a premature Share must never be treated as an editor's Next.
+INSTAGRAM_PRIMARY_ACTION_NAME = re.compile(r'^(Share|Post|分享|发布)$', re.IGNORECASE)
+INSTAGRAM_NEXT_ACTION_NAME = re.compile(r'^(Next|下一步|继续)$', re.IGNORECASE)
 # 可选提示的明确关闭文案；未命中时退回对话框最后一个按钮。
 PROMPT_DISMISS_TEXT = re.compile(
     r'^(Not Now|Not now|Later|OK|Got it|Continue|以后再说|稍后|暂不|知道了|好的|关闭|取消)$',
@@ -90,9 +86,13 @@ INSTAGRAM_COVER_INPUT_FALLBACK = 'input[type="file"][accept="image/jpeg,image/pn
 INSTAGRAM_COVER_INPUTS = (
     f'{INSTAGRAM_COVER_INPUT}, {INSTAGRAM_COVER_INPUT_FALLBACK}'
 )
-# 创建入口以导航图标的 aria-label 为主；无 aria-label 时才退回无 hash 的
-# “四个 a[href="#"] + aria-selected 入口，创建是第二项”。不含 Story 文案。
+# 创建入口只用已观察的链接与图标语义；缺失或歧义时失败，不猜导航次序。
 INSTAGRAM_CREATE_ENTRY_LABELS = ('New post', 'Create', '新帖子', '创建')
+# Observed creator submenu: no menu role/test id; its exposed container and
+# Post icon distinguish it from Live/Ad without using their order or text.
+INSTAGRAM_POST_ENTRY = (
+    'div[aria-hidden="false"] a[href="#"]:has(svg[aria-label="帖子"])'
+)
 
 INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS = 20_000
 INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS = 8_000
@@ -194,9 +194,9 @@ async def _composer_heading(dialog: Locator) -> Locator:
     return dialog.get_by_role('heading')
 
 
-async def _primary_action(dialog: Locator, *, local: bool = False) -> Locator:
-    """返回向导主动作：只按可访问名（Next/Share/中文）定位，不使用 hash 类名。"""
-    name = INSTAGRAM_LOCAL_PRIMARY_ACTION_NAME if local else INSTAGRAM_PRIMARY_ACTION_NAME
+async def _primary_action(dialog: Locator, *, publish: bool = False) -> Locator:
+    """Use the observed role/name fallback only within the expected composer stage."""
+    name = INSTAGRAM_PRIMARY_ACTION_NAME if publish else INSTAGRAM_NEXT_ACTION_NAME
     return dialog.get_by_role('button', name=name)
 
 
@@ -301,28 +301,17 @@ async def _click_submit(locator: Locator, humanizer: Humanizer) -> None:
 
 
 async def _create_entry(page: Page, *, budget: PublishTimeoutBudget | None) -> Locator:
-    """返回首页“创建”导航入口。
-
-    首选导航图标的 aria-label（可访问名），不再把 hash 类名当首选；标签全部
-    缺失时才退回无 hash 的结构：四个 ``a[href="#"]`` + ``[aria-selected]``，
-    创建是第二项。数量不符时保留原断言，明确报告漂移。
-    """
-    for label in INSTAGRAM_CREATE_ENTRY_LABELS:
-        candidate = page.locator(
-            f'a[href="#"]:has(svg[aria-label="{label}" i])'
-        )
-        try:
-            if await candidate.count():
-                return candidate
-        except Exception:
-            continue
-    navigation_popups = page.locator('a[href="#"]').filter(
-        has=page.locator('[aria-selected]')
-    )
+    """Select the observed create icon across labels; never guess a rail position."""
+    # A union counts every matching anchor, including different language labels.
+    # Returning the first matching label would hide an ambiguous second entry.
+    candidate = page.locator(', '.join(
+        f'a[href="#"]:has(svg[aria-label="{label}" i])'
+        for label in INSTAGRAM_CREATE_ENTRY_LABELS
+    ))
+    await reject_ambiguous(candidate, 'Instagram 创建入口')
     timeout_ms = budget.clamp_ms(30_000) if budget else 30_000
-    await expect(navigation_popups).to_have_count(4, timeout=timeout_ms)
-    # 实测顺序：通知、创建、设置、Meta；结构组未变时创建是第二项。
-    return navigation_popups.nth(1)
+    await expect(candidate).to_have_count(1, timeout=timeout_ms)
+    return candidate
 
 
 async def _media_input(dialog: Locator) -> Locator:
@@ -685,16 +674,19 @@ class InstagramUploader:
                     page, notifications, humanizer=humanizer
                 )
             file_input = await _media_input(dialog)
-            if await file_input.count():
+            media_count = await reject_ambiguous(file_input, 'Instagram 素材入口', role='attached')
+            post_entry = page.locator(INSTAGRAM_POST_ENTRY)
+            post_count = await reject_ambiguous(post_entry, 'Instagram 创建菜单帖子入口')
+            if media_count:
+                if post_count:
+                    raise RuntimeError('Instagram 创建状态不明确：素材编辑器与帖子菜单同时出现')
                 break
-            if not getattr(self, '_managed', False) and not post_menu_selected:
-                # Observed 2026-11-17: the local Chinese creator navigation
-                # opens a Post / Live / Ad submenu before the media dialog.
-                # Match its actual icon label, never a positional menu item.
-                post_entry = page.locator('a[href="#"]:has(svg[aria-label="帖子"])')
-                if await reject_ambiguous(post_entry, 'Instagram 创建菜单帖子入口'):
-                    await humanizer.click(post_entry)
-                    post_menu_selected = True
+            if post_count and not post_menu_selected:
+                # Account UI is observed per page, never inferred from alias or
+                # browser provider. Ordinary accounts open the composer directly.
+                budget.check_pre_click()
+                await _click_nav(post_entry, humanizer)
+                post_menu_selected = True
             if time.monotonic() >= deadline:
                 raise RuntimeError(
                     'Instagram 创建弹窗未出现素材入口（可能被未知弹窗遮挡）'
@@ -717,7 +709,7 @@ class InstagramUploader:
                 has=page.locator('img[src*="reels_nux"]'))
             await self._dismiss_prompt(page, reels_intro, humanizer=humanizer)
         # 裁剪标题栏主动作实际出现，才可推进；上传失败或未知弹窗阻断会保留现场并报错。
-        action = await _primary_action(dialog, local=not getattr(self, '_managed', False))
+        action = await _primary_action(dialog)
         await expect(action).to_have_count(
             1, timeout=budget.clamp_ms(60_000)
         )
@@ -768,7 +760,7 @@ class InstagramUploader:
                 1, timeout=budget.clamp_ms(30_000)
             )
             previous = await heading.inner_text()
-            action = await _primary_action(dialog, local=not getattr(self, '_managed', False))
+            action = await _primary_action(dialog)
             await expect(action).to_have_count(
                 1, timeout=budget.clamp_ms(30_000)
             )
@@ -936,10 +928,14 @@ class InstagramUploader:
             count = await reject_ambiguous(action, "Instagram Share")
             if count == 1:
                 try:
-                    if await action.is_enabled(timeout=min(200, max(1, int(remaining * 1000)))):
+                    usable, _ = await asyncio.wait_for(
+                        check(action, 'interactive'), timeout=min(0.2, remaining)
+                    )
+                    if usable:
                         return
-                except BrowserTimeoutError:
-                    # The unique button may detach between count and probe.
+                except (BrowserTimeoutError, asyncio.TimeoutError):
+                    # The unique button may detach between count and probe;
+                    # keep the whole multi-probe check inside the readiness budget.
                     pass
             await asyncio.sleep(min(0.2, remaining))
 
@@ -964,7 +960,7 @@ class InstagramUploader:
             # 未请求时保持既有 stage（legacy 失败证据不变）。
             self.stage = 'options'
         await self._apply_options(page, budget=budget)
-        action = await _primary_action(dialog, local=not getattr(self, '_managed', False))
+        action = await _primary_action(dialog, publish=True)
         if self.no_publish:
             # 干跑：上传、配文与全部选项已完成后停在 Share 前；跳过
             # --not-before，不注册响应监听，也不进入结果观察循环。

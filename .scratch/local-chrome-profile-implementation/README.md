@@ -99,3 +99,5 @@
 
 
 - 2026-11-17：[20 原定范围验收已完成，整体仍待追加要求](./issues/20-final-convergence-and-no-publish-validation.md)。17 个浏览器平台、87 个正式动作完成最终审计；最小配置导入、小红书已认证 login、Instagram 实际中文入口及本地 no-publish 输出修复。集成离线 2,030 项（2 skip）、最后相关 274 项、受控浏览器 33 项及最后 6 项通过；原仓库四平台普通 login/重开 check 与全部 8 个真实 no-publish 流程通过，无实际发布或删除。用户随后要求改为 kind/platform/account 目录并移除明确废弃的旧入口与 stealth 资源；本基线不宣称这些追加工作已完成，父规格保持未完成。见 [20 分层验证记录](./research/20-final-validation.md)。
+
+- 2026-11-17：[23：Instagram 普通号/creator 界面兼容](./issues/23-instagram-account-ui-compatibility.md) 承接用户账号类型更正。保留普通号直接编辑器，按实际 DOM 识别 creator 帖子子菜单，覆盖两种媒体、人类化交互与发布前停止；真实 creator 复验须等待 21 完成 Profile 搬迁并释放账号。

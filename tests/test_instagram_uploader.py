@@ -222,10 +222,10 @@ class InstagramContractTests(unittest.TestCase):
                     launch.assert_not_called()
 
 
-# 首页四个导航弹出入口，第二项是创建；脚本让通知提示晚于创建弹窗出现。
+# 首页导航保留已观察的 New post 图标；脚本让通知提示晚于创建弹窗出现。
 _NAVIGATION_HTML = ''.join(
     '<a class="_a6hd" href="#" ' + ('onclick="createPost()"' if i == 1 else '')
-    + '><span aria-selected="false">Navigation</span></a>' for i in range(4))
+    + '><span aria-selected="false">' + ('<svg aria-label="New post" width="24" height="24"></svg>' if i == 1 else 'Navigation') + '</span></a>' for i in range(4))
 
 _DELAYED_NOTIFICATION_SCRIPT = """
       function picked(input) {
@@ -312,7 +312,7 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                     for prompts in (True, False):
                         navigation = ''.join(
                             '<a class="_a6hd" href="#" ' + ('onclick="create()"' if i == 1 else '')
-                            + '><span aria-selected="false">Navigation</span></a>' for i in range(4))
+                            + '><span aria-selected="false">' + ('<svg aria-label="New post" width="24" height="24"></svg>' if i == 1 else 'Navigation') + '</span></a>' for i in range(4))
                         await page.set_content(f'<body data-prompts="{str(prompts).lower()}">{navigation}{html}</body>')
                         # 通知提示与创建入口都在 250ms 后才出现；先等它们挂载，
                         # 否则 locator handler 可能在提示出现前就被移除。
