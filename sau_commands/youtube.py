@@ -9,16 +9,14 @@ from uploader.youtube_uploader.main import (
     YOUTUBE_INIT_SCRIPT,
     YOUTUBE_LAUNCH_KWARGS,
     YouTubeVideo,
-    cookie_auth as youtube_cookie_auth,
     is_logged_in,
     youtube_setup,
 )
 from sau_commands.arguments import (
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_tags,
-    resolve_account_file,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -31,17 +29,20 @@ from sau_commands.browser import (
 )
 from utils.browser_session import browser_session
 from utils.errors import UsageError
+from utils.local_browser import resolve_headless
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     youtube_parser = platform_parsers.add_parser("youtube", help="YouTube operations")
     youtube_actions = youtube_parser.add_subparsers(dest="action", required=True)
+    add_reset_profile_action(youtube_actions)
 
     for action_name in ("login", "check"):
         action_parser = youtube_actions.add_parser(action_name, help=f"YouTube {action_name}")
         action_parser.add_argument("--account", required=False, help="YouTube user-defined account_name")
-        add_runtime_flags(action_parser)
+        add_local_runtime_flags(action_parser)
         if action_name == "check":
             add_browser_flags(action_parser)
 
@@ -61,7 +62,7 @@ def register(platform_parsers):
         help="Not supported yet; omit to publish immediately",
     )
     add_not_before_flag(youtube_upload_video_parser)
-    add_runtime_flags(youtube_upload_video_parser)
+    add_local_runtime_flags(youtube_upload_video_parser)
     add_browser_flags(youtube_upload_video_parser)
 
 
@@ -77,20 +78,18 @@ class YouTubeVideoUploadRequest:
     visibility: str = "public"
     schedule: datetime | int = 0
     debug: bool = True
-    headless: bool = False
+    headless: bool | None = None
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
-async def login_youtube_account(account_name: str, headless: bool = False) -> dict:
-    account_file = resolve_account_file("youtube", account_name)
-    return await youtube_setup(str(account_file), handle=True, return_detail=True, headless=headless)
+async def login_youtube_account(account_name, headless=None, *, local_browser=None):
+    return await youtube_setup(account_name=account_name, handle=True, return_detail=True,
+                               headless=headless, local_browser=local_browser)
 
 
-async def check_youtube_account(account_name: str) -> bool:
-    account_file = resolve_account_file("youtube", account_name)
-    if not account_file.exists():
-        return False
-    return await youtube_cookie_auth(str(account_file))
+async def check_youtube_account(account_name, headless=None, *, local_browser=None):
+    return await youtube_setup(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
 def _build_youtube_uploader(request: YouTubeVideoUploadRequest, account_file) -> YouTubeVideo:
@@ -105,6 +104,8 @@ def _build_youtube_uploader(request: YouTubeVideoUploadRequest, account_file) ->
         visibility=request.visibility,
         debug=request.debug,
         headless=request.headless,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -114,13 +115,13 @@ def _raise_login_required(target) -> None:
     raise login_required_error("YouTube", target.profile_id, mode=target.mode)
 
 
-async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> Path | None:
+async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> None:
     if target is not None:
         app = _build_youtube_uploader(request, None)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=YOUTUBE_LAUNCH_KWARGS,
@@ -133,28 +134,25 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=Non
                 await app.main(session=session)
         return None
 
-    account_file = resolve_account_file("youtube", request.account_name)
-    is_ready = await youtube_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"YouTube cookie is missing or expired: {account_file}. Run `sau youtube login --account {request.account_name}` first."
-        )
-
-    app = _build_youtube_uploader(request, str(account_file))
+    app = _build_youtube_uploader(request, None)
     app.set_publish_date(request.schedule)
     await app.main()
-    return account_file
+    return None
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
+    args.headless = resolve_headless(getattr(args, "headless", None))
+    local_browser = getattr(args, "local_browser", None)
     if args.action == "login":
         reject_managed_login("youtube", args)
         require_local_account(args)
-        result = await login_youtube_account(args.account, headless=args.headless)
+        result = await login_youtube_account(args.account, headless=args.headless, local_browser=local_browser)
         if not result["success"]:
             raise RuntimeError(result["message"])
-        print(f"YouTube login flow completed: {result['account_file']}")
+        print(f"YouTube login flow completed: {result['account_name']}")
         return 0
 
     if args.action == "upload-video" and args.schedule:
@@ -178,7 +176,7 @@ async def run(args):
             print("valid")
             return 0
 
-        is_valid = await check_youtube_account(account_label)
+        is_valid = await check_youtube_account(args.account, headless=args.headless, local_browser=local_browser)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -196,6 +194,7 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             publish_not_before=args.not_before,
+            local_browser=local_browser,
         )
         await upload_youtube_video(request, target=target)
         print(f"YouTube video upload submitted: {request.video_file}")
