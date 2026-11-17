@@ -29,6 +29,7 @@
 | [19](./issues/19-one-time-legacy-migration.md) | 执行一次性旧资料迁移并删除临时实现 | 五批接入后的一次性作业 | 16、17、18 |
 | [20](./issues/20-final-convergence-and-no-publish-validation.md) | 完成全入口收口与四平台真实验收 | 最终交付 | 19 |
 | [21](./issues/21-browser-kind-first-layout.md) | 浏览器种类首层布局与现有资料安全搬迁 | 用户追加 | 19，20 已验证基线 |
+| [24](./issues/24-clarify-no-publish-output.md) | 明确三个平台 no-publish 成功摘要 | 用户追加要求 | 19（基于 20 已验证基线） |
 
 ## 执行顺序
 
@@ -100,3 +101,5 @@
 
 
 - 2026-11-17：[20 原定范围验收已完成，整体仍待追加要求](./issues/20-final-convergence-and-no-publish-validation.md)。17 个浏览器平台、87 个正式动作完成最终审计；最小配置导入、小红书已认证 login、Instagram 实际中文入口及本地 no-publish 输出修复。集成离线 2,030 项（2 skip）、最后相关 274 项、受控浏览器 33 项及最后 6 项通过；原仓库四平台普通 login/重开 check 与全部 8 个真实 no-publish 流程通过，无实际发布或删除。用户随后要求改为 kind/platform/account 目录并移除明确废弃的旧入口与 stealth 资源；本基线不宣称这些追加工作已完成，父规格保持未完成。见 [20 分层验证记录](./research/20-final-validation.md)。
+
+- 2026-11-17：[24 已解决](./issues/24-clarify-no-publish-output.md) 明确 Rednote、TikTok、小红书视频/图文 no-publish 成功摘要；本地及托管统一说明素材上传、检查完成且未点击发布，历史日志原文保留。305 项离线与 18 项真实浏览器受控 DOM 检查通过；未操作真实账号或额外上传。验证结果见票据 Comments。
