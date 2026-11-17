@@ -607,18 +607,12 @@ class ArticleUploaderBodyTests(unittest.TestCase):
                     "read_xueqiu_identity",
                     new=AsyncMock(),
                 ) as read_identity,
-                patch.object(
-                    xueqiu_article_module,
-                    "load_xueqiu_identity",
-                    new=MagicMock(),
-                ) as load_identity,
             ):
                 result = asyncio.run(app.upload_in(session))
 
         self.assertTrue(result["success"])
         self.assertEqual(result["status"], "prepared")
         read_identity.assert_not_awaited()
-        load_identity.assert_not_called()
         fill_form.assert_awaited_once_with(page, multilogin=True)
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
@@ -817,7 +811,7 @@ class LocalOnlyActionTests(unittest.TestCase):
 
         self.assertEqual(code, 0, err)
         helper.assert_awaited_once()
-        if module in (instagram_command, facebook_command, facebook_page_command):
+        if module in (instagram_command, facebook_command, facebook_page_command, xueqiu_command):
             self.assertEqual(helper.await_args.kwargs['account_name'], 'creator')
             resolve.assert_not_called()
         else:

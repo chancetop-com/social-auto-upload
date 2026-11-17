@@ -63,4 +63,8 @@
 
 ## 范围限制
 
-以上是离线和真实浏览器合成页面验证，不是大鱼号真实账号/平台验收。未执行任何真实登录、素材上传、发布、删除、旧资料迁移或 Windows/Linux 浏览器实测。旧资料一次性处理仍属 19，四平台真实 no-publish 属 20。当前本分支尚未接入知乎/雪球（17/18 并行实施）；Bilibili 在此次 Profile 范围外。
+以上是离线和真实浏览器合成页面验证，不是大鱼号真实账号/平台验收。未执行任何真实登录、素材上传、发布、删除、旧资料迁移或 Windows/Linux 浏览器实测。旧资料一次性处理仍属 19，四平台真实 no-publish 属 20。合入 `be16eb5` 后，雪球 18 已接入；当前本分支尚未接入知乎（17 并行实施）；Bilibili 在此次 Profile 范围外。
+
+集成同步：实施提交 `f76a532` 后合入 `be16eb5`（18 雪球）。冲突限于迁移平台清单、文档追加段落和 reset 注册测试；保留双方条目及身份迁移说明。共享 article/provider 测试按平台范围自动合并。
+
+合并后验证：上面的完整离线命令再追加 `tests.test_xueqiu_profiles`，实际 **157 tests passed**（`/private/tmp/dayu-merged-regressions.log`）。共享 reset 清单和 Dayu/Xueqiu 的 provider 测试均通过；本次合并未改 Dayu 浏览器业务，15 项受控 DOM 与 2/2 匿名实测证据仍适用。

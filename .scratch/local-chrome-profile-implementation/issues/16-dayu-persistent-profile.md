@@ -32,6 +32,8 @@
 - 实际最终离线 143 项通过（20 项新增 Profile 测试），真实浏览器合成 DOM/内容/播放 15 项通过；Chrome 有头与完整 Chromium 无头的 Dayu 匿名/持久化受控流程 2/2 通过。API 采用 02 已实测的同一 browser.new_context(no_viewport=True)，未改共享运行时能力；匿名关闭有界且不释放外层锁。
 - 同步 CLI、配置示例、安装依赖、README、术语、大鱼号视频/文章说明、独立分发 Skill 和 Agent Bootstrap。保留托管行为及尚未迁移平台说明。没有操作真实账号或作品；19 的一次性旧资料迁移和 20 的四平台 no-publish 未在本票执行。
 
+- 集成前同步：实施提交 `f76a532` 后合入 `be16eb5`（雪球 18），保留两平台文档/重建列表及共享 article/provider 测试。合并后的相关离线命令加雪球 Profile 回归，实际 **157 项通过**；无未解决冲突或运行阻塞。
+
 ## Answer
 
 大鱼号全部正式动作与可达直接入口已使用持久化本地 Profile。默认 Chrome 有头、可选完整 Chromium/自定义路径；只安装所选来源，别名可重新登录不同主体。verify 先核对登录后台作品，显式 public 时使用同一浏览器的独立匿名 context；历史作者、作品与排期证据保留。正常命令不再读写旧 Cookie 或身份旁文件，清理保持所有权和发布结果；详细命令、实际结果及未执行范围见 [验证记录](../research/16-dayu-validation.md)。

@@ -89,4 +89,6 @@
 
 - 2026-11-17：[15 已解决](./issues/15-alipay-persistent-profile.md)。支付宝生活号 login/check/视频/reset-profile 和直接调用接入持久化 Profile，QR 回调与 qiankun 无 stealth 保留，登录分类与提交结果保护完整。合入微博、虎扑和 TikTok 生命周期补丁后 340 项相关离线检查通过；Chrome 有头/完整 Chromium 无头两条自然窗口受控 DOM 流程通过，未操作真实账号或作品。见 [15 验证记录](./research/15-alipay-validation.md)。
 
-- 2026-11-17：[16 已解决](./issues/16-dayu-persistent-profile.md)。大鱼号 login/check/视频/文章/verify/reset-profile 与直接调用接入持久化 Profile，当前身份替代旧绑定，公开核验保持匿名隔离和主锁。143 项相关离线检查、15 项真实浏览器合成 DOM/内容回归及 Chrome 有头/完整 Chromium 无头 2 条受控匿名流程通过；未操作真实账号或作品。见 [16 验证记录](./research/16-dayu-validation.md)。
+- 2026-11-17：[16 已解决](./issues/16-dayu-persistent-profile.md)。大鱼号 login/check/视频/文章/verify/reset-profile 与直接调用接入持久化 Profile，当前身份替代旧绑定，公开核验保持匿名隔离和主锁。合入雪球 18 后 157 项相关离线检查、15 项真实浏览器合成 DOM/内容回归及 Chrome 有头/完整 Chromium 无头 2 条受控匿名流程通过；未操作真实账号或作品。见 [16 验证记录](./research/16-dayu-validation.md)。
+
+- 2026-11-17：[18 已解决](./issues/18-xueqiu-persistent-profile.md)。雪球 login/check/文章/verify/reset-profile 与直接入口使用持久化 Profile，移除旧身份旁文件约束，保留当次主体和历史作者核验及结果路径。299 项相关离线检查、16 项浏览器/内容检查通过，完整文章合成流程在 Chrome 有头和 Chromium 无头通过；未操作真实账号或作品。见 [18 验证记录](./research/18-xueqiu-validation.md)。
