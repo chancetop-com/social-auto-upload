@@ -12,7 +12,7 @@
 - `alipay`
 - `weibo`
 - `hupu`
-- `tiktok`：本地 cookie 模式或托管浏览器模式（MLX / AdsPower）
+- `tiktok`：本地持久化 Profile 或托管浏览器模式（MLX / AdsPower）
 - `youtube`
 - `facebook`：Facebook 个人主页视频/图文立即发布、查询和删除
 - `facebook-page`：Meta Business Suite 的 Facebook Page 视频/图文立即或定时发布
@@ -22,7 +22,7 @@
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
-面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地 cookie 模式；设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 后走[托管浏览器模式](#托管浏览器模式通用)（[Multilogin X 模式](#multilogin-x-模式) / [AdsPower 模式](#adspower-模式)）。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
+面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地持久化 Profile 模式；设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 后走[托管浏览器模式](#托管浏览器模式通用)（[Multilogin X 模式](#multilogin-x-模式) / [AdsPower 模式](#adspower-模式)）。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
 
 实现说明：
 
@@ -70,7 +70,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。此阶段先交付重建和占用基础设施，既有 login/check/上传/作品动作仍保持原行为；后续平台接入记录说明何时开始使用持久化 Profile。
+目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok 的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；其他平台仍保持旧动作行为，随各票逐步接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -208,7 +208,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
 | 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
 | 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 |
-| `--headless` | 默认 False（有头） | 默认 False（有头），传给 Launcher | 默认 False（有头），V2 编码 `"0"` |
+| `--headless` | TikTok 读取 LOCAL_CHROME_HEADLESS，缺省 False；其他平台仍 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
 | `--headed` | False（等价默认） | False（等价默认） | False（等价默认），V2 编码 `"0"` |
 | `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower |
 | `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
@@ -238,7 +238,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-本地上传结束后的 cookie 回写、context/browser 关闭失败只记录 warning；两项关闭分别尝试，不覆盖主流程的成功、结果未知或原始错误。用户中断仍按 `130` 处理。
+未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -306,7 +306,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 设计规格中的部分历史决策与最终实现不同，**实现以 uploader 的 golden 常量和对应测试为准**：
 
 - 视频号：视频上传的 `init_script` 实际为 `False`，图文上传仍为 `True`（`TENCENT_INIT_SCRIPT=False`、`TENCENT_NOTE_INIT_SCRIPT=True`）。
-- TikTok：legacy 本地路径的 `set_init_script` 原本就未启用，`TIKTOK_INIT_SCRIPT=False`；托管分支同样不注入。
+- TikTok：本地持久化 Profile 与托管分支均不注入 stealth。
 - 托管分支会静默忽略 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
 
 ## Multilogin X 模式
@@ -332,7 +332,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；都不传即默认有头；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
@@ -342,7 +342,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 1. CLI 与 Multilogin 桌面应用在**同一台 macOS/Windows 机器**上，桌面应用已启动，45001/45003 未被占用。
 2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
 3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
-4. TikTok 的 MLX 模式额外要求 Profile 界面语言为 **English (US)**；MLX 模式会跳过 CLI 内的语言切换。本地模式会自动切换页面语言。
+4. TikTok 现有选择器依赖 **English (US)** 页面；本地保留当前语言，托管沿用既有 English 登录探测入口；遇到不支持的布局会报告步骤错误，不自动修改 Profile 偏好。
 5. 小红书的托管 Profile 界面语言必须为**中文**；CLI 不切换托管 Profile 的语言，中文选择器依赖中文界面。本地模式固定 `zh-CN`。
 6. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`（本地与 MLX 相同）。
 
@@ -399,7 +399,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
 - `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` 显式无头，V2 编码 `"1"`；`--headed`（默认）为 False，V2 编码 `"0"`；`--debug` 不传给 AdsPower。
+- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
 - 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
@@ -746,7 +746,7 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 
 结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible`（无归因时省略）。`options` 是新增字段，旧消费方可直接忽略。
 
-本地模式的浏览器 context 固定 `locale=en-US` 与 `Accept-Language: en-US`，不依赖操作系统的浏览器语言（与 TikTok 一致）；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
+本地模式的浏览器 context 固定 `locale=en-US` 与 `Accept-Language: en-US`，不依赖操作系统的浏览器语言（TikTok 已迁移为保留当前语言）；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
 
 > 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
 >
@@ -800,13 +800,13 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 TikTok 支持本地与两种托管子模式：
 
-- **本地模式**（默认）：不设置任一托管凭据，使用本地 Chromium 与 `cookies/tiktok_<account>.json`；`--account` 必填，`--folder-id` / `--profile-id` 忽略。本地 context 固定 `en-US`，不需要改系统语言。
+- **本地模式**（默认）：不设置托管凭据，使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 的专用持久化 Profile；`--account` 必填，`--folder-id` / `--profile-id` 忽略。默认系统 Chrome、有头，保留当前语言与自然窗口尺寸。
 - **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**（小红书须为中文）。
 - **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`；`--folder-id` 忽略；Profile 界面须为 **English (US)**（小红书须为中文）。
 
 ```bash
 # 本地模式：先交互式登录一次（打开有头浏览器，登录后回终端按 Enter）
-sau tiktok login --account creator
+sau tiktok login --account creator --headed
 sau tiktok check --account creator
 sau tiktok upload-video --account creator --file videos/demo.mp4 --title "示例标题"
 sau tiktok upload-note --account creator --images images/1.jpg images/2.png
@@ -841,12 +841,15 @@ sau tiktok upload-video \
   --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
 ```
 
-- 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`，请先在对应桌面应用中登录 Profile。
-- 本地 `check` 返回 `0`（有效）/ `1`（无效）；托管模式 `check` 返回 `0/10/1/2`。
-- 本地模式读写 `cookies/tiktok_<account>.json`；托管模式不读写 cookie 文件。
-- 托管分支跳过页面语言切换，因此 Profile 界面必须为 **English (US)**；本地模式会自动切换页面语言。
-- 本地模式与托管模式共用 15 分钟上传预算；登录页、验证码或 2FA 在托管模式下退出 `10`，本地模式按运行失败退出 `1`。
-- 真实账号的本地登录、`upload-note` / `upload-video` 发布、四项选项与 `delete` 已完成真发验收（2026-11-10）；2026-11-12 另用 `--no-publish` 干跑验收视频、图文与三图轮播（含 `--privacy friends` / `--no-comments` / `--aigc`）。`--not-before`、`--proxy`、`--headless`、托管模式、中文界面与专业账号仍未验收。
+- 支持 `login`、`check`、`upload-video`、`upload-note`、`reset-profile`；login/reset-profile 仅本地模式，托管登录仍在对应桌面应用完成。
+- `LOCAL_CHROME_PATH` 非空时优先。否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`；Chrome 使用系统 channel，Chromium 使用项目固定 Patchright 配套完整 channel，两种模式均不改用 headless shell。只要求选定来源；失败不回退。
+- `--headed`/`--headless` 或直接调用显式布尔值 > `LOCAL_CHROME_HEADLESS` > `False`；未传与显式 False 不同。已有 True 保留，示例默认 False。同一动作预检与业务共用同次配置和 session。
+- 自定义路径必须先根据产品信息识别种类；无法识别/证据冲突退出 `1`。生效配置非法退出 `2`；托管完全忽略本地路径与种类配置，仅应用同一 headless 优先级。
+- Profile 是唯一登录态来源，旧 JSON 不参与读写或自动清理。只有 login 引导人工登录；缺少 Profile、明确未登录或验证挑战退出 `10`，网络、页面结构、权限或浏览器故障退出 `1`。check 成功返回 `0`，目录存在本身不证明登录。
+- 别名是管理名称，可登录不同真实账号；Chrome / Chromium 隔离，同种类改路径、版本或 headless 复用资料。跨种类不复制凭据；另一个种类未登录需单独 login。
+- 持有 Profile 独占权直到业务和关闭结束；占用时立即失败，不抢占外部浏览器。正常关闭只关闭 persistent context；关闭故障独立告警，保持成功/未知/主异常，取消继续传播。重建不恢复任务或自动重发。
+- TikTok 本地持久化路径不再注入 stealth、UA、请求头、语言参数或固定 viewport。现有选择器仍依赖支持的页面布局；自动化不会切换语言。
+- 本地与托管共用 15 分钟发布预算；提交后登录/验证错误保留 `publish_attempted=true`。2026-11-17 已完成隔离浏览器矩阵与离线回归；持久化 Profile 的真实平台 login/no-publish 验收留待最终收口。此前 Cookie 路径验收不作为新 Profile 的登录证据。
 - `--no-publish`：上传、标题/正文/话题、全部发布选项、封面与 `--schedule` 完成后，等待发布按钮可点击（`post_video_button` / `Post` / `Schedule`，窗口 `min(60s, 剩余预算)`）即停止，不点击发布，也不等待 `--not-before`；成功退出 `0`，就绪超时退出 `1`。
 - 未注册的子命令仍由 argparse 退出 `2`。
 
@@ -931,7 +934,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-如果都不传，CLI 默认按 `headless=False`（有头）运行。
+TikTok 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 

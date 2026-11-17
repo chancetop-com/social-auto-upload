@@ -456,41 +456,6 @@ class PublishReadyWaitTests(unittest.TestCase):
                 )
 
 
-class DryRunLocalCookieTests(unittest.TestCase):
-    def test_dry_run_clean_exit_rewrites_the_cookie(self):
-        note = TiktokNote(
-            ["/tmp/cover.png"],
-            "",
-            [],
-            0,
-            "/tmp/cookie.json",
-            title=None,
-            no_publish=True,
-        )
-        note.change_language = AsyncMock()
-        note.locator_base = _ButtonBase(_Button())
-
-        async def dry_upload(page, *, multilogin, budget):
-            await note.wait_publish_ready(
-                page, deadline=budget, multilogin=multilogin
-            )
-
-        note._upload_on_page = dry_upload
-        playwright = FakePlaywright()
-
-        with (
-            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
-            patch.object(tk_main.time, "monotonic", return_value=1000.0),
-        ):
-            asyncio.run(note.upload(playwright))
-
-        context = playwright.chromium.launch_browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, ["/tmp/cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": True, **TIKTOK_LAUNCH_KWARGS}],
-        )
 
 
 

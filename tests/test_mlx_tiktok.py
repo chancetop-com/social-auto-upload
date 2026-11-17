@@ -21,6 +21,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import sau_cli
 from conf import LOCAL_CHROME_PATH
+import conf
 from sau_commands import tiktok as tiktok_command
 from tests.fakes import FakeContext, FakePage, FakePlaywright
 from uploader.tk_uploader import main_chrome as tk_main
@@ -92,7 +93,7 @@ class _AsyncCM:
 
 def _run(argv, token=TOKEN):
     environ = {"MLX_API_TOKEN": token}
-    with patch.dict(os.environ, environ):
+    with patch.dict(os.environ, environ), patch.object(conf, "LOCAL_CHROME_HEADLESS", True):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(
             io.StringIO()
         ) as err:
@@ -112,7 +113,7 @@ class TiktokParserTests(unittest.TestCase):
     def test_actions_are_check_upload_video_upload_note_login_only(self):
         self.assertEqual(
             set(_action_names("tiktok")),
-            {"check", "upload-video", "upload-note", "login"},
+            {"check", "upload-video", "upload-note", "login", "reset-profile"},
         )
 
     def test_upload_video_parameters_match_repository_naming(self):
@@ -210,217 +211,19 @@ class TiktokParserTests(unittest.TestCase):
 
 
 class LocalModeTests(unittest.TestCase):
-    """Local (non-Multilogin) cookie mode."""
+    """Local argument requirements; Profile behavior lives in test_tiktok_profile_cli."""
 
-    def _cookie_file(self, tmp_dir: str) -> Path:
-        return Path(tmp_dir) / "tiktok_creator.json"
-
-    def test_check_local_valid_returns_0(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=True)
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-            ):
-                code, out, err = _run(
-                    ["tiktok", "check", "--account", "creator"], token=""
-                )
-        self.assertEqual(code, 0, err)
-        self.assertIn("valid", out)
-        setup.assert_awaited_once_with(
-            str(account_file), handle=False, headless=False
-        )
-
-    def test_check_local_passes_headed_flag(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=True)
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-            ):
-                code, _, err = _run(
-                    [
-                        "tiktok",
-                        "check",
-                        "--account",
-                        "creator",
-                        "--headed",
-                    ],
-                    token="",
-                )
-        self.assertEqual(code, 0, err)
-        setup.assert_awaited_once_with(
-            str(account_file), handle=False, headless=False
-        )
-
-    def test_check_local_invalid_returns_1(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=False)
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-            ):
-                code, out, _ = _run(
-                    ["tiktok", "check", "--account", "creator"], token=""
-                )
-        self.assertEqual(code, 1)
-        self.assertIn("invalid", out)
 
     def test_check_local_missing_account_exits_2_without_browser(self):
         playwright = MagicMock()
-        setup = AsyncMock()
         with (
             patch.object(tiktok_command, "async_playwright", playwright),
-            patch.object(tiktok_command, "tiktok_setup", new=setup),
         ):
             code, _, err = _run(["tiktok", "check"], token="")
         self.assertEqual(code, 2)
         self.assertIn("--account", err)
         playwright.assert_not_called()
-        setup.assert_not_awaited()
 
-    def test_login_local_runs_interactive_setup(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=True)
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-            ):
-                code, out, err = _run(
-                    ["tiktok", "login", "--account", "creator"], token=""
-                )
-        self.assertEqual(code, 0, err)
-        self.assertIn("login flow completed", out)
-        setup.assert_awaited_once_with(
-            str(account_file), handle=True, headless=False, force=True
-        )
-
-    def test_login_local_failure_returns_1(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=False)
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-            ):
-                code, _, err = _run(
-                    ["tiktok", "login", "--account", "creator"], token=""
-                )
-        self.assertEqual(code, 1)
-        self.assertIn("登录未完成", err)
-
-    def test_upload_video_local_uses_cookie_and_local_upload(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = Path(tmp_dir) / "demo.mp4"
-            video.write_bytes(b"video")
-            account_file = self._cookie_file(tmp_dir)
-            playwright = object()
-            app = MagicMock()
-            app.upload = AsyncMock()
-            builder = MagicMock(return_value=app)
-            setup = AsyncMock(return_value=True)
-            session = MagicMock()
-            with (
-                patch.object(
-                    tiktok_command,
-                    "async_playwright",
-                    lambda: _AsyncCM(playwright),
-                ),
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-                patch.object(
-                    tiktok_command, "_build_video_uploader", new=builder
-                ),
-                patch.object(tiktok_command, "browser_session", new=session),
-            ):
-                code, out, err = _run(
-                    [
-                        "tiktok",
-                        "upload-video",
-                        "--account",
-                        "creator",
-                        "--file",
-                        str(video),
-                        "--title",
-                        "标题",
-                    ],
-                    token="",
-                )
-        self.assertEqual(code, 0, err)
-        self.assertIn("TikTok video upload submitted", out)
-        setup.assert_awaited_once_with(
-            str(account_file), handle=False, headless=False
-        )
-        self.assertEqual(builder.call_args.args[0].account_file, account_file)
-        app.upload.assert_awaited_once_with(playwright)
-        session.assert_not_called()
-
-    def test_local_upload_invalid_cookie_exits_1_without_launching(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = Path(tmp_dir) / "demo.mp4"
-            video.write_bytes(b"video")
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=False)
-            builder = MagicMock()
-            playwright = MagicMock()
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-                patch.object(
-                    tiktok_command, "_build_video_uploader", new=builder
-                ),
-                patch.object(tiktok_command, "async_playwright", playwright),
-            ):
-                code, out, err = _run(
-                    [
-                        "tiktok",
-                        "upload-video",
-                        "--account",
-                        "creator",
-                        "--file",
-                        str(video),
-                        "--title",
-                        "标题",
-                    ],
-                    token="",
-                )
-        self.assertEqual(code, 1)
-        self.assertIn("sau tiktok login --account creator", err)
-        self.assertNotIn("submitted", out)
-        builder.assert_not_called()
-        playwright.assert_not_called()
 
     def test_local_upload_missing_account_exits_2(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -443,116 +246,6 @@ class LocalModeTests(unittest.TestCase):
         self.assertIn("--account", err)
         playwright.assert_not_called()
 
-    def test_upload_note_local_uses_cookie_and_local_upload(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            image = Path(tmp_dir) / "cover.png"
-            image.write_bytes(b"image")
-            account_file = self._cookie_file(tmp_dir)
-            playwright = object()
-            app = MagicMock()
-            app.upload = AsyncMock()
-            builder = MagicMock(return_value=app)
-            setup = AsyncMock(return_value=True)
-            session = MagicMock()
-            with (
-                patch.object(
-                    tiktok_command,
-                    "async_playwright",
-                    lambda: _AsyncCM(playwright),
-                ),
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-                patch.object(
-                    tiktok_command, "_build_note_uploader", new=builder
-                ),
-                patch.object(tiktok_command, "browser_session", new=session),
-            ):
-                code, out, err = _run(
-                    [
-                        "tiktok",
-                        "upload-note",
-                        "--account",
-                        "creator",
-                        "--images",
-                        str(image),
-                    ],
-                    token="",
-                )
-        self.assertEqual(code, 0, err)
-        self.assertIn("TikTok note upload submitted: 1 images", out)
-        self.assertEqual(builder.call_args.args[0].account_file, account_file)
-        app.upload.assert_awaited_once_with(playwright)
-        session.assert_not_called()
-
-    def test_whitespace_token_is_local_mode(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account_file = self._cookie_file(tmp_dir)
-            setup = AsyncMock(return_value=True)
-            with (
-                patch.object(
-                    tiktok_command,
-                    "resolve_account_file",
-                    return_value=account_file,
-                ),
-                patch.object(tiktok_command, "tiktok_setup", new=setup),
-            ):
-                code, out, err = _run(
-                    ["tiktok", "check", "--account", "creator"], token="   "
-                )
-        self.assertEqual(code, 0, err)
-        self.assertIn("valid", out)
-        setup.assert_awaited_once()
-
-    def test_mlx_upload_does_not_resolve_a_cookie_file(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = Path(tmp_dir) / "demo.mp4"
-            video.write_bytes(b"video")
-            session_cm = _AsyncCM(Namespace(context=object()))
-            factory = MagicMock(return_value=session_cm)
-            app = MagicMock()
-            app.upload = AsyncMock()
-            builder = MagicMock(return_value=app)
-            resolver = MagicMock()
-            with (
-                patch.object(
-                    tiktok_command,
-                    "async_playwright",
-                    lambda: _AsyncCM(object()),
-                ),
-                patch.object(tiktok_command, "browser_session", new=factory),
-                patch.object(
-                    tiktok_command,
-                    "is_logged_in",
-                    new=AsyncMock(return_value=True),
-                ),
-                patch.object(
-                    tiktok_command, "_build_video_uploader", new=builder
-                ),
-                patch.object(
-                    tiktok_command, "resolve_account_file", new=resolver
-                ),
-            ):
-                code, _, err = _run(
-                    [
-                        "tiktok",
-                        "upload-video",
-                        "--folder-id",
-                        "folder",
-                        "--profile-id",
-                        "profile",
-                        "--file",
-                        str(video),
-                        "--title",
-                        "标题",
-                    ]
-                )
-        self.assertEqual(code, 0, err)
-        resolver.assert_not_called()
-
 
 class MlxLoginRejectionTests(unittest.TestCase):
     def test_login_in_mlx_exits_1_with_placeholder(self):
@@ -563,8 +256,6 @@ class MlxLoginRejectionTests(unittest.TestCase):
         self.assertIn("Multilogin 模式不支持 CLI 登录", err)
         self.assertIn("指定 Profile", err)
         playwright.assert_not_called()
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -787,13 +478,11 @@ class UploaderSeamTests(unittest.TestCase):
 
         with (
             patch.object(tk_main, "async_playwright", MagicMock()) as async_playwright,
-            patch.object(tk_main, "set_init_script", AsyncMock()) as init_script,
             patch.object(tk_main.time, "monotonic", return_value=1000.0),
         ):
             asyncio.run(video.upload(None, session=session))
 
         async_playwright.assert_not_called()
-        init_script.assert_not_awaited()
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
         self.assertEqual(context.add_init_script_calls, [])
@@ -833,63 +522,6 @@ class UploaderSeamTests(unittest.TestCase):
         asyncio.run(video.upload(None, session=session))
         video.change_language.assert_not_awaited()
 
-    def test_legacy_local_path_keeps_golden_launch_context_and_teardown(self):
-        video = self._video(account_file="/tmp/couple-cookie.json")
-        video.headless = False
-        video.change_language = AsyncMock()
-        page_ops = AsyncMock()
-        video._upload_on_page = page_ops
-
-        playwright = FakePlaywright()
-        with (
-            patch.object(tk_main, "set_init_script", AsyncMock()) as init_script,
-            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
-            patch.object(tk_main.time, "monotonic", return_value=1000.0),
-        ):
-            asyncio.run(video.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **TIKTOK_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/couple-cookie.json", **TIKTOK_CONTEXT_KWARGS}],
-        )
-        context = browser.contexts[0]
-        init_script.assert_not_awaited()
-        video.change_language.assert_awaited_once()
-        page_ops.assert_awaited_once_with(
-            ANY, multilogin=False, budget=ANY
-        )
-        self.assertEqual(page_ops.await_args.kwargs["budget"].deadline, 1900.0)
-        self.assertEqual(
-            context.storage_state_calls, ["/tmp/couple-cookie.json"]
-        )
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-
-    def test_local_cookie_save_failure_after_publish_is_log_only(self):
-        video = self._video(account_file="/tmp/cookie.json")
-        video.change_language = AsyncMock()
-        video._upload_on_page = AsyncMock()
-
-        context = FakeContext()
-        context.storage_state_error = OSError("磁盘已满")
-        playwright = FakePlaywright()
-        with (
-            patch.object(
-                tk_main, "_new_local_context", AsyncMock(return_value=context)
-            ),
-            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
-            patch.object(tk_main.tiktok_logger, "warning") as warning,
-        ):
-            asyncio.run(video.upload(playwright))
-
-        self.assertTrue(context.closed)
-        self.assertTrue(playwright.chromium.launch_browser.closed)
-        warning.assert_called_once()
 
     def test_local_upload_without_playwright_fails_before_browser(self):
         video = self._video(account_file="/tmp/cookie.json")
@@ -1131,7 +763,7 @@ class TiktokCheckCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
-        self.assertEqual(factory.call_args.kwargs["headless"], False)
+        self.assertEqual(factory.call_args.kwargs["headless"], True)
         self.assertEqual(
             factory.call_args.kwargs["managed"].target.profile_id, "profile"
         )
@@ -1539,7 +1171,7 @@ class StopOwnershipTests(unittest.TestCase):
         client = _FakeClient.instances[0]
         self.assertEqual(client.token, TOKEN)
         self.assertEqual(client.probe_calls, 1)
-        self.assertEqual(client.start_calls, [("folder", "profile", False)])
+        self.assertEqual(client.start_calls, [("folder", "profile", True)])
         self.assertEqual(client.stop_calls, ["profile"])
         self.assertEqual(playwright.chromium.connect_calls[0]["url"], "http://127.0.0.1:9222")
         self.assertTrue(browser.closed)
@@ -1547,7 +1179,6 @@ class StopOwnershipTests(unittest.TestCase):
         session = upload.await_args.kwargs["session"]
         self.assertEqual(session.mode, "multilogin")
         self.assertFalse(hasattr(session, "stop"))
-
 
 
 _HUMANIZE_BEFORE = None

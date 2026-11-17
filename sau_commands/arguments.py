@@ -128,3 +128,15 @@ def add_runtime_flags(parser: argparse.ArgumentParser) -> None:
     headless_group.add_argument("--headed", dest="headless", action="store_false", help="Run with browser UI")
     headless_group.add_argument("--headless", dest="headless", action="store_true", help="Run in headless mode")
     parser.set_defaults(headless=False)
+
+
+def add_local_runtime_flags(parser: argparse.ArgumentParser) -> None:
+    """Opt a migrated platform into configured headless and browser selection.
+
+    Validate selection only once effective mode/path is known, so managed mode
+    and an explicit executable ignore irrelevant local settings.
+    """
+    add_runtime_flags(parser)
+    parser.set_defaults(headless=None)
+    parser.add_argument('--local-browser', default=None, metavar='chrome|chromium',
+                        help='Local browser kind (default LOCAL_BROWSER or chrome)')

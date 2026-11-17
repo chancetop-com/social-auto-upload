@@ -1,9 +1,4 @@
-"""tiktok 的命令参数与执行逻辑（本地 cookie 模式 / Multilogin 模式）。
-
-未设置 ``MLX_API_TOKEN`` 时使用本地 Chromium 与
-``cookies/tiktok_<account>.json``；设置后使用 Multilogin Profile。本地模式会
-自动切换页面语言，MLX Profile 仍需 English (US)。
-"""
+"""TikTok formal actions using dedicated local Profiles or managed providers."""
 from __future__ import annotations
 
 import argparse
@@ -17,10 +12,9 @@ from sau_commands.local_profile import add_reset_profile_action, run_reset_profi
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_tags,
-    resolve_account_file,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -46,14 +40,16 @@ from uploader.tk_uploader.main_chrome import (
     TiktokPublishOptions,
     TiktokVideo,
     is_logged_in,
-    tiktok_setup,
+    login_in,
 )
 from sau_commands.arguments import single_line_value
 from utils.browser_session import browser_session
-from utils.errors import UsageError
+from utils.errors import UsageError, LoginRequiredError
+from utils.local_browser import resolve_headless
+from utils.local_browser_session import local_browser_session
 
 TIKTOK_ACCOUNT_HELP = (
-    "TikTok account name; local mode uses cookies/tiktok_<account>.json, "
+    "TikTok account alias; local mode uses a dedicated browser Profile, "
     "MLX mode uses it as a log label"
 )
 
@@ -154,7 +150,7 @@ def register(platform_parsers):
             required=False,
             help=TIKTOK_ACCOUNT_HELP,
         )
-        add_runtime_flags(action_parser)
+        add_local_runtime_flags(action_parser)
         # Repo-wide contract: ``login`` never accepts Profile flags.  They are
         # only meaningful for check/upload actions.
         if action_name == "check":
@@ -183,7 +179,7 @@ def register(platform_parsers):
         "--thumbnail", type=existing_file_path, help="Optional thumbnail path"
     )
     _add_publish_option_flags(upload_video_parser, include_reuse=True)
-    add_runtime_flags(upload_video_parser)
+    add_local_runtime_flags(upload_video_parser)
     add_browser_flags(upload_video_parser)
 
     upload_note_parser = tiktok_actions.add_parser(
@@ -229,7 +225,7 @@ def register(platform_parsers):
     # Photo posts have no content-reuse control, so ``--disable-reuse`` is not
     # registered here.  The first image is the cover: no thumbnail/cover flag.
     _add_publish_option_flags(upload_note_parser, include_reuse=False)
-    add_runtime_flags(upload_note_parser)
+    add_local_runtime_flags(upload_note_parser)
     add_browser_flags(upload_note_parser)
 
 
@@ -242,7 +238,8 @@ class TiktokVideoUploadRequest:
     publish_date: datetime | int
     thumbnail_file: Path | None = None
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
+    local_browser: str | None = None
     options: TiktokPublishOptions | None = None
     account_file: Path | None = None
     publish_not_before: datetime | None = None
@@ -300,8 +297,7 @@ def _validate_branded_content_privacy(args) -> None:
 def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
     """Build the uploader with the legacy positional order.
 
-    ``request.account_file`` is ``None`` in Multilogin mode and the local cookie
-    path in local mode.
+    The formal CLI passes an account alias and never resolves a cookie file.
     """
     app = TiktokVideo(
         request.title,
@@ -315,6 +311,8 @@ def _build_video_uploader(request: TiktokVideoUploadRequest) -> TiktokVideo:
         options=request.options,
         headless=request.headless,
         no_publish=request.no_publish,
+        account_name=request.account_label,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -329,7 +327,8 @@ class TiktokNoteUploadRequest:
     publish_date: datetime | int
     title: str | None = None
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
+    local_browser: str | None = None
     options: TiktokPublishOptions | None = None
     account_file: Path | None = None
     publish_not_before: datetime | None = None
@@ -442,38 +441,21 @@ def _build_note_uploader(request: TiktokNoteUploadRequest) -> TiktokNote:
         debug=request.debug,
         headless=request.headless,
         no_publish=request.no_publish,
+        account_name=request.account_label,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
 
 
-async def _require_local_cookie(account_file, account_label: str, headless: bool) -> None:
-    """Fail with a human-actionable message when the local cookie is invalid."""
-    ready = await tiktok_setup(str(account_file), handle=False, headless=headless)
-    if not ready:
-        raise RuntimeError(
-            f"TikTok cookie 不存在或已失效：{account_file}。"
-            f"请先运行 `sau tiktok login --account {account_label}`。"
-        )
-
-
-async def _prepare_account_file(args, target, account_label):
-    """Resolve and validate the local cookie; ``None`` in MLX mode."""
-    if target is not None:
-        return None
-    account_file = resolve_account_file("tiktok", args.account)
-    await _require_local_cookie(account_file, account_label, args.headless)
-    return account_file
-
-
 async def _upload_media(request, target, builder) -> None:
-    """Run any TikTok upload in MLX (session) or local (own browser) mode."""
+    """Run preflight and upload under one owned local or managed session."""
     app = builder(request)
     if target is not None:
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=TIKTOK_LAUNCH_KWARGS,
@@ -486,7 +468,11 @@ async def _upload_media(request, target, builder) -> None:
         return
 
     async with async_playwright() as playwright:
-        await app.upload(playwright)
+        async with local_browser_session(playwright, platform='tiktok', account=request.account_label,
+                                         headless=request.headless, local_browser=request.local_browser) as session:
+            if not await is_logged_in(session.context, managed=False):
+                raise LoginRequiredError(f'TikTok 需要登录；请先运行 sau tiktok login --account {request.account_label!r}')
+            await app.upload(None, session=session)
 
 
 async def _upload_note(request: TiktokNoteUploadRequest, target) -> None:
@@ -502,7 +488,7 @@ def _raise_login_required(target) -> None:
 
 
 async def run(args):
-    """执行本平台命令；本地 cookie 模式与 Multilogin 模式共用上传器。"""
+    """执行本平台命令；本地 Profile 与托管模式共用上传器。"""
     if args.action == "reset-profile":
         return run_reset_profile(args)
     # Reject impossible option combinations before resolving the Profile or
@@ -527,15 +513,11 @@ async def run(args):
         # Multilogin profiles are logged in through the Multilogin app.
         reject_managed_login("tiktok", args)
         require_local_account(args)
-        account_file = resolve_account_file("tiktok", args.account)
-        ready = await tiktok_setup(
-            str(account_file), handle=True, headless=False, force=True
-        )
-        if not ready:
-            raise RuntimeError(
-                f"TikTok 登录未完成或 cookie 仍无效：{account_file}。"
-            )
-        print(f"TikTok login flow completed: {account_file}")
+        async with async_playwright() as playwright:
+            async with local_browser_session(playwright, platform='tiktok', account=args.account,
+                                             headless=args.headless, local_browser=args.local_browser, create=True) as session:
+                await login_in(session)
+                print(f"TikTok login flow completed: {args.account}")
         return 0
 
     target = resolve_managed_provider(args)
@@ -547,7 +529,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=args.headless,
+                    headless=resolve_headless(args.headless),
                     managed=target,
                 ) as session:
                     is_valid = await is_logged_in(session.context)
@@ -556,18 +538,16 @@ async def run(args):
             print("valid")
             return 0
 
-        account_file = resolve_account_file("tiktok", args.account)
-        is_valid = await tiktok_setup(
-            str(account_file), handle=False, headless=args.headless
-        )
-        print("valid" if is_valid else "invalid")
-        return 0 if is_valid else 1
+        async with async_playwright() as playwright:
+            async with local_browser_session(playwright, platform='tiktok', account=args.account,
+                                             headless=args.headless, local_browser=args.local_browser) as session:
+                if not await is_logged_in(session.context, managed=False):
+                    raise LoginRequiredError(f'TikTok 需要登录；请先运行 sau tiktok login --account {args.account!r}')
+                print('valid')
+        return 0
 
     if args.action == "upload-note":
         image_files, title, note, tags = note_inputs
-        account_file = await _prepare_account_file(
-            args, target, account_label
-        )
         request = TiktokNoteUploadRequest(
             account_label=account_label,
             image_files=image_files,
@@ -578,7 +558,8 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             options=_build_publish_options(args),
-            account_file=account_file,
+            account_file=None,
+            local_browser=getattr(args, "local_browser", None),
             publish_not_before=args.not_before,
             no_publish=getattr(args, "no_publish", False),
         )
@@ -589,9 +570,6 @@ async def run(args):
         return 0
 
     if args.action == "upload-video":
-        account_file = await _prepare_account_file(
-            args, target, account_label
-        )
         request = TiktokVideoUploadRequest(
             account_label=account_label,
             video_file=args.file,
@@ -602,7 +580,8 @@ async def run(args):
             debug=args.debug,
             headless=args.headless,
             options=_build_publish_options(args),
-            account_file=account_file,
+            account_file=None,
+            local_browser=getattr(args, "local_browser", None),
             publish_not_before=args.not_before,
             no_publish=getattr(args, "no_publish", False),
         )
