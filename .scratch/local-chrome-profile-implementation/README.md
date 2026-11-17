@@ -28,6 +28,7 @@
 | [18](./issues/18-xueqiu-persistent-profile.md) | 雪球全流程与当次身份接入 | 第五批 | 13、14、15 |
 | [19](./issues/19-one-time-legacy-migration.md) | 执行一次性旧资料迁移并删除临时实现 | 五批接入后的一次性作业 | 16、17、18 |
 | [20](./issues/20-final-convergence-and-no-publish-validation.md) | 完成全入口收口与四平台真实验收 | 最终交付 | 19 |
+| [22](./issues/22-remove-obsolete-browser-and-stealth.md) | 删除废弃浏览器入口与 stealth 资源 | 用户追加收口 | 19（已完成） |
 
 ## 执行顺序
 
@@ -40,7 +41,7 @@
 ## 每张票都要遵守的范围
 
 - 采用术语表中的本地浏览器 Profile、Profile 占用、Profile 重建、账号别名、发布目标、Browser session、不发布模式和发布结果未知。原始规格给出完整契约；票据补充可验证交付边界，不放宽规格。
-- 平台接入覆盖正式 CLI 可达的全部本地动作及直接支撑它们的 uploader；保持真实 local 模式及既有 session 注入边界。未注册历史入口和 Bilibili biliup 不扩大为本次改造范围。
+- 平台接入覆盖正式 CLI 可达的全部本地动作及直接支撑它们的 uploader；保持真实 local 模式及既有 session 注入边界。Bilibili biliup 保持原流程。用户追加授权删除指定的历史 TikTok Firefox、TencentNote、旧通用本地会话及无剩余消费者的 stealth 资源，见票 22；其他历史入口不扩大范围。
 - 默认 Chrome 有头，支持显式 Chromium、自定义路径和 headless；只要求选定来源，失败不回退。Profile 按平台、原始别名和实际种类隔离，保留 01 的目录归属、锁和重建边界。
 - 只有 login 引导登录；业务登录失效即结束。使用当前会话所需身份，别名可以换号；显式发布目标和历史作品核验仍有效。正常流程不读取旧登录态，也不承担一次性迁移。
 - 保持提交至多一次、发布预算、not-before、结果文件、publish_attempted 和禁止自动重发。用法错误为 2，运行/探测故障为 1，登录/验证为 10，发布结果未知为 9，托管限流为 11；提交后异常保留既有阶段信息和恢复指导。
@@ -99,3 +100,5 @@
 
 
 - 2026-11-17：[20 原定范围验收已完成，整体仍待追加要求](./issues/20-final-convergence-and-no-publish-validation.md)。17 个浏览器平台、87 个正式动作完成最终审计；最小配置导入、小红书已认证 login、Instagram 实际中文入口及本地 no-publish 输出修复。集成离线 2,030 项（2 skip）、最后相关 274 项、受控浏览器 33 项及最后 6 项通过；原仓库四平台普通 login/重开 check 与全部 8 个真实 no-publish 流程通过，无实际发布或删除。用户随后要求改为 kind/platform/account 目录并移除明确废弃的旧入口与 stealth 资源；本基线不宣称这些追加工作已完成，父规格保持未完成。见 [20 分层验证记录](./research/20-final-validation.md)。
+
+- 2026-11-17：[22 已解决](./issues/22-remove-obsolete-browser-and-stealth.md)。按追加授权删除旧 TikTok Firefox、TencentNote、generic local branch 和 stealth helper/资源/打包/旧测试；保留正式业务与完整 provider 契约。897 项相关回归（2 skip）、交互/资源门禁 4 项、解压 wheel 3 项及 wheel/sdist 检查通过；未操作真实账号。见 [22 验证记录](./research/22-obsolete-browser-removal.md)。

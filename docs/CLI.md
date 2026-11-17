@@ -301,9 +301,10 @@ TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、
 
 设计规格中的部分历史决策与最终实现不同，**实现以 uploader 的 golden 常量和对应测试为准**：
 
-- 视频号：视频上传的 `init_script` 实际为 `False`，图文上传仍为 `True`（`TENCENT_INIT_SCRIPT=False`、`TENCENT_NOTE_INIT_SCRIPT=True`）。
+- 视频号仅提供正式视频上传，`TENCENT_INIT_SCRIPT=False`；未完成且未注册的历史图文实现已移除。
 - TikTok：本地持久化 Profile 与托管分支均不注入 stealth。
-- 托管分支会静默忽略 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
+- 托管分支不应用 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，非空选项继续记录既有忽略警告及启动日志，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
+- Python 调用方使用 `local_browser_session(..., platform=..., account=...)` 取得本地持久化会话；通用 `browser_session` 必须传入 managed provider，缺少 provider 会在浏览器启动前明确报错。旧临时本地会话、TikTok Firefox 实现及 stealth 资源已移除。
 
 ## Multilogin X 模式
 
