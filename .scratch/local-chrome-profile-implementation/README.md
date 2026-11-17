@@ -79,4 +79,4 @@
 
 - 2026-11-17：[07 已解决](./issues/07-facebook-persistent-profile.md)。Facebook全部正式本地动作、直接调用与独立作品操作接入持久化Profile，与Facebook Page隔离；保留作者/原作品/正文核验及原有托管路由。合并YouTube06后365项相关离线/共享回归、13项受控浏览器/DOM回归通过；未操作真实账号或作品。见 [07验证记录](./research/07-facebook-validation.md)。
 
-- 2026-11-17：[08 已解决](./issues/08-facebook-page-persistent-profile.md)。Facebook Page 全部正式本地动作和直接调用使用独立持久化 Profile，多个 Page 目标共用同一登录容器，保持显式目标和原作品证据核验。252 项合并后离线回归、10 项受控 Chrome/DOM 回归及最后 74 项 Page 相关回归通过；未操作真实账号或发布/删除作品。[08 验证记录](./research/08-facebook-page-validation.md)。
+- 2026-11-17：[08 已解决](./issues/08-facebook-page-persistent-profile.md)。Facebook Page 全部正式本地动作和直接调用使用独立持久化 Profile，多个 Page 目标共用同一登录容器，保持显式目标和原作品证据核验。合入 YouTube 06 与 Facebook 07 后 270 项相关离线回归通过，另有 10 项受控 Chrome/DOM 回归通过；未操作真实账号或发布/删除作品。[08 验证记录](./research/08-facebook-page-validation.md)。

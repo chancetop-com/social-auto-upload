@@ -1,6 +1,6 @@
 # 08 Facebook Page 验证记录
 
-日期：2026-11-17。工作树 `/private/tmp/sau-local-profile-08`，分支 `codex/local-profile-08`。初始基线 ec6ea39，提交实现后合入集成 c5a3141（含 YouTube 06、Instagram 04 测试修复），合并提交 02b7a1f。工作树 conf.py 来自示例，已确认 conf、sau_cli 与 BASE_DIR 均指向工作树；未读取真实账号 Cookie 内容。
+日期：2026-11-17。工作树 `/private/tmp/sau-local-profile-08`，分支 `codex/local-profile-08`。初始基线 ec6ea39，提交实现后合入集成 c5a3141（含 YouTube 06、Instagram 04 测试修复），合并提交 02b7a1f；随后再合入含 Facebook 07 的 e4a21a8，合并提交 cab66b3。工作树 conf.py 来自示例，已确认 conf、sau_cli 与 BASE_DIR 均指向工作树；未读取真实账号 Cookie 内容。
 
 ## 交付边界
 
@@ -50,4 +50,14 @@ Python：项目原 checkout 的 `.venv/bin/python`（3.11.11），所有命令 c
 
 未登录真实 Facebook Page 账号、发布、上传真实素材或删除真实作品；不声称新 Profile 已获真实平台验收。Facebook Page 没有 --no-publish，本票没有增设或绕过此开关。两种 provider 均为离线边界验证，没有操作真实桌面账号。未执行旧资料一次性迁移（19）或四平台真实不发布回归（20）。
 
-本工作树在 c5a3141 上，Facebook 07 仍为并行票；抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球仍保留各自待迁移路径。本文不扩大本票平台范围。没有未解决的本票阻塞。
+最终工作树已合入 YouTube 06 与 Facebook 07。抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球仍保留各自待迁移路径。本文不扩大本票平台范围。没有未解决的本票阻塞。
+
+## 合入 Facebook 07 后的最终检查
+
+集成 tip e4a21a8 合入本分支为 cab66b3。合并按平台集合取并集：Instagram/Facebook/Facebook Page 的本地作品 helper、七个平台 reset 与文档列表均保留；两项旧 Meta opener 测试都由对应真实 Profile CLI 生命周期证据替代。没有改动另两平台的生产行为。
+
+```sh
+/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_facebook_page_profile_cli tests.test_facebook_profile_cli tests.test_mlx_meta tests.test_facebook_page_humanize tests.test_facebook_humanize tests.test_publish_cleanup tests.test_review_regressions tests.test_adspower_video_platforms tests.test_local_profile tests.test_adspower_article_identity_platforms tests.test_adspower_platform_contract tests.test_adspower_cli tests.test_multilogin_cli tests.test_youtube_profiles tests.test_mlx_youtube tests.test_humanize.PlatformWideGateTests -q
+```
+
+结果：**270 tests，16.668s，OK**。本次合并未改 Page 生产代码/受控 DOM 路径，因此沿用前述 10 项真实浏览器结果。`git diff --check` 通过，集成分支为当前分支祖先。
