@@ -130,6 +130,21 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
                     wait_for_timeout=AsyncMock(),
                     url="/post/create",
                 )
+                if module is tiktok:
+                    # An authenticated Studio page with duplicate publish
+                    # controls, not duplicate login forms or login text.
+                    absent = AmbiguousLocator(0)
+                    page.locator = Mock(
+                        side_effect=lambda selector: (
+                            duplicate
+                            if selector in (
+                                '[data-e2e="post_video_button"]',
+                                "div.button-group button",
+                            )
+                            else absent
+                        )
+                    )
+                    page.get_by_text = Mock(return_value=absent)
                 app = cls.__new__(cls)
                 app.locator_base = page
                 app._publish_budget = PublishTimeoutBudget("fixture")

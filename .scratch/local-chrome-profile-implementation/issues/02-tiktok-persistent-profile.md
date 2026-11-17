@@ -54,3 +54,10 @@ TikTok 的 login、check、upload-video、upload-note 与直接 uploader 调用�
 
 - 最终托管兼容核验发现原跨平台测试仍 patch 已移除的 TikTok cookie resolver，已改为禁止取得本地 session，并将 headless 配置固定为字面 False。另以 red→green 保留托管原 English 登录探测 URL 与 `ignored=context_kwargs` 启动日志；本地 URL 无 lang 参数、local session 不接收 locale。托管路径/种类仍完全忽略，不新增相关警告。
 - `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_tiktok_profile_cli tests.test_mlx_tiktok tests.test_adspower_video_platforms tests.test_sau_browser_cli tests.test_adspower_cli tests.test_adspower_platform_contract -v`：最终 **123 tests passed**（2.271 秒），包含托管 legacy probe URL / ignored 日志以及本地 language-free URL 外部边界断言。
+
+### 2026-11-17 — 后续重复发布按钮回归修复
+
+- 先在 ticket 02 worktree 合并 integration `c6edef0`，复现 `tests.test_publish_ambiguity.OtherPlatformAmbiguityTests.test_duplicate_publish_buttons_never_pass_media_or_publish_gates` 的 **3 个 TikTok error**：原 DOM fixture 对每个 selector/text 均返回两个匹配，错误地表示登录表单和登录文字也存在；真实 `_guard_login` 因此正确抛出 LoginRequiredError，未进入重复发布按钮检查。
+- 仅修改该测试内的 TikTok DOM fixture：发布按钮仍返回两个匹配，登录及其他无关锚点为零。没有修改生产源码、绕开登录 guard、改变 `ambiguous:2` 断言、关闭 no-retry 保护或削弱零点击断言；其他平台 fixture 保持原样。
+- Red：上述单测试 **FAILED (errors=3)**，日志 `/private/tmp/sau-local-profile-notes/02-ambiguity-red.log`。Green：同一单测试 **1 passed**（0.035 秒），日志 `02-ambiguity-green.log`。
+- `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_publish_ambiguity tests.test_tiktok_profile_cli tests.test_tiktok_exit_codes tests.test_tiktok_no_publish -v`：**63 tests passed**（1.712 秒），日志 `/private/tmp/sau-local-profile-notes/02-ambiguity-regression.log`。包含其他平台歧义检查、TikTok 登录表单停止、真实 uploader no-publish 停止点与提交后退出码保护；没有浏览器或账号操作。`git diff --check` 通过。
