@@ -1,4 +1,38 @@
-# 20：原定范围最终验证记录
+# 20：累计最终验证记录
+
+## 最终收口：包含用户追加的 21–24
+
+2026-11-17，集成代码 `91d2cc03`。原定 01–20 及追加 21–24 的实现和约定验收已完成；本票、实施索引及父规格可标 resolved。**最终独立两轴代码审查仍由 root 后续执行，本记录不是独立审查结果，也不声称审查或最终工作树清理已完成。** 本轮只做隔离离线回归、公共 parser 核对和文档收口，没有再次启动实际账号或上传素材。
+
+当前运行契约与追加证据：
+
+| 追加票 | 当前结果 | 离线/包证据 | 真实浏览器或平台证据 |
+| --- | --- | --- | --- |
+| [21：新布局](./21-layout-validation.md) | `browser_profiles/<chrome|chromium>/<platform>/<raw_account>`；外置归属、guard 与重建标记；无旧布局回退 | 30 项共享、post-merge 121 项等通过，真实进程占用/碰撞/重建保护保留 | 相同 Profile 测试集合 sandbox 外 352/352；新布局 8 配置完整持久化/匿名隔离矩阵通过；四个原 Profile 同 inode 移动并各自正常 Chrome 有头 check valid/0 |
+| [22：废弃实现删除](./22-obsolete-browser-removal.md) | 旧 TikTok Firefox、TencentNote、generic `_local_session`、stealth helper/资源/包数据和专属旧测试已删除；通用会话无 provider 明确拒绝 | 897 项（2 skip）、合并后 165 项及解压 wheel 检查通过，wheel/sdist 内容检查保留 Bilibili 与 article renderer | 无账号操作，不把包检查当浏览器实测 |
+| [23：两种 Instagram 界面](./23-instagram-account-ui.md) | ordinary 直接编辑器、creator 帖子子菜单均由当次 DOM 判断；保留 Humanizer、阶段分离与可交互 Share 检查 | 合并后 101 项通过；保留 local/managed 生命周期与结果契约 | 新受控 Chrome 6 测试/19 场景、既有 33 项及最终就绪 5 项通过；新布局真实 creator 视频/图文 no-publish 均通过。普通号只有受控证据 |
+| [24：明确停止摘要](../issues/24-clarify-no-publish-output.md) | TikTok、Rednote、小红书六个媒体动作的适用 local/managed no-publish 成功摘要为“素材已上传，发布前检查已通过；已停止，未点击发布按钮。” | 305 项离线通过，成功/失败/登录失效和零点击均覆盖 | 18 项既有 Rednote 真实浏览器合成 DOM 通过；文案改动没有额外上传 |
+
+21 的实际移动保留四个原资料的 inode、原 conf.py 和历史结果；四个精确旧叶子已不存在，未知旧 Instagram `.DS_Store` 与父目录保留。每个新 Profile 正常 check 后又取得/释放占用；无 reset、重新登录、覆盖/合并目录、跨浏览器复制、读取 Cookie/History 内容、清 singleton 或杀外部进程。一次性搬迁程序已删除。详细旧/新路径与执行事实仅追加在 [21 搬迁事件](./21-relocation-events.jsonl)，下方原 19/20 执行路径不改写。
+
+23 在 21 搬迁/check/guard 释放后，当前真实 creator 账号以 HUMANIZE=1、默认系统 Chrome 有头分别完成视频（12:00:31 UTC）及图文（12:01:06 UTC），均退出 0，结果 prepared，日志明确停在 Share 前；没有发布字段或清理警告。获批素材、完整参数与新路径见 [23 实际事件](./23-live-events.jsonl)。因此实际证据是原四平台 8 个 no-publish 流程，另加受影响 Instagram creator 2 次复验；不是两个真实 Instagram 账号，不证明真正发布、等待定时、发布后核验或风控。素材仍可能留作临时素材/草稿。
+
+### 最后集成离线回归
+
+共享路径、旧会话删除及 Instagram 业务选择器均已变化，因此本轮完整离线重跑有必要。执行前确认 `/private/tmp/sau-local-profile-20` 的忽略配置 `BASE_DIR` 指向工作树、`LOCAL_CHROME_HEADLESS=True`、`LOCAL_BROWSER` 缺省、无自定义路径，与原用户可选设置等价；文章依赖通过 ignored node_modules symlink 复用。原仓库配置/账号资料不参与离线测试。
+
+```sh
+# cwd: /private/tmp/sau-local-profile-20
+/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python /private/tmp/sau-local-profile-notes/run20-final-offline.py
+```
+
+外部 runner 复用前述 unittest discover 选择方式：分列基线 80 个已识别真实浏览器用例和 12 个 `*_profile_dom` 用例，再明确分列票 23 新增 `tests.test_instagram_account_ui` 的全部 6 个方法。共收集 **2,123 项**，选择 **2,025 项离线**，分列 **98 项真实浏览器**；没有通过忽略新失败改变选择。manifest 确认新模块 6 项均在 deferred、0 项在 selected。真实浏览器项由各票的已执行记录证明，本轮未重跑无变化的浏览器矩阵或实际账号。
+
+**实际结果：2,025 tests / 124.370s；2,023 passed、2 个既有 MLX/AdsPower opt-in 实际服务 smoke skipped；0 failures、0 errors。** 原始日志 `/private/tmp/sau-local-profile-notes/20-cumulative-offline.log`；完整选择清单 `/private/tmp/sau-local-profile-notes/20-cumulative-offline-manifest.json`。无需代码修复。不同阶段与受影响子集存在重叠，不相加声称唯一测试总数；本轮数量变化包含旧测试删除及新回归加入。
+
+当前公共 `sau_cli.build_parser()` 再核对仍是 **17 浏览器平台 / 87 浏览器动作 / 93 总动作**，所有普通动作具备 account/local-browser/headless/headed，reset 具备 account/browser-kind，与[原入口清单](./20-cli-inventory.json)一致。文档提供两条按需 CI 安装路线；仍未执行 Linux CI/Windows 原生实测，未新增 workflow、未自动安装/更新 Chrome。原实现验收与追加要求均无剩余阻塞；下一步是 root 的独立审查。
+
+## 原定范围历史记录（af47cf4，以下事实按执行当时保留）
 
 日期：2026-11-17，Darwin arm64。实施基线：`1c8220b`，工作分支 `codex/local-profile-20`。本记录分别列出离线替身、真实浏览器合成页面和真实平台证据。
 

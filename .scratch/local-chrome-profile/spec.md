@@ -1,6 +1,6 @@
 # 本地浏览器持久化 Profile 迁移
 
-Status: ready-for-agent
+Status: resolved
 Date: 2026-11-17
 Source: [决策地图](./map.md)
 
@@ -278,3 +278,11 @@ Source: [决策地图](./map.md)
 用户确认当前实际 Instagram 账号为 creator、此前为普通号。普通号直接进入素材编辑器与 creator 先显示 Create 子菜单的页面状态均须支持，覆盖视频和图文；账号别名不绑定账号类型。该业务兼容同样适用于托管会话，provider 路由、所有权、日志及发布结果契约保持。
 
 选择器以实际 DOM 的语义属性、链接及局部结构为依据，所有待操作目标须唯一并能正常交互。图标 `aria-label` 是已有语义属性；裁剪/编辑按钮没有专用稳定属性时，允许在当前 dialog 和正确阶段内用 role 加已观察的完整按钮名。禁止依导航次序、hash class、宽泛文案或强制/脚本点击猜目标。保留 Humanizer，普通号/creator × 视频/图文的受控 DOM 回归和当前实际 creator 的两条显式 no-publish 验收由 [23](../local-chrome-profile-implementation/issues/23-instagram-account-ui-compatibility.md) 执行；无另一个普通号 Profile 时须明确其仅有受控回归证据。
+
+## 实施完成记录（2026-11-17）
+
+原 01–20 及用户追加 21–24 的实现、文档和约定验收均已落实；当前实现集成基线为 `91d2cc03`。17 个浏览器平台的 87 个正式动作（全 CLI 共 93 个动作）已核对。最终布局、外置 guard/归属/重建隔离、四份原资料同 inode 搬迁与正常 check、废弃历史代码和 stealth 删除、Instagram 两种界面/Humanizer、三平台明确停止摘要均按以上最新追加条款交付。正文中规格制定时的代码原状和分批过渡描述保留为历史背景，不代表当前还存在旧本地会话或未迁移平台。
+
+累计离线、真实受控浏览器、实际平台证据分列于 [20 最终验证](../local-chrome-profile-implementation/research/20-final-validation.md)。最后从隔离工作树运行 2,025 项离线测试：2,023 passed、2 个原有 opt-in provider smoke skipped，0 failures/errors；98 个真实浏览器用例分列使用已完成的各票证据。原四平台 login/关闭重开 check 与八个 no-publish 流程、21 搬迁后四个 check、23 当前 creator 两个受影响 no-publish 复验全部落实；普通 Instagram 本次仅受控 DOM，未扩大为另一个真实账号成功。没有实际发布或删除作品；素材可能留下临时资料/草稿。19/20 的历史路径与原日志不改写，21 另存搬迁记录，用户配置和真实 Profile 保留。
+
+本规格 resolved 表示实施与上述约定验收完成。**最终独立两轴代码审查仍由 root 后续执行；此状态不声称审查、审查发现的后续修复或最终工作树清理已完成。** 未执行的 Linux CI/Windows 原生浏览器、实际发布/发布后观察及真实 managed 服务仍按既定边界说明，不以安装示例或替身测试冒充。
