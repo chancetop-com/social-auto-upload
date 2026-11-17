@@ -82,3 +82,5 @@
 - 2026-11-17：[08 已解决](./issues/08-facebook-page-persistent-profile.md)。Facebook Page 全部正式本地动作和直接调用使用独立持久化 Profile，多个 Page 目标共用同一登录容器，保持显式目标和原作品证据核验。合入 YouTube 06 与 Facebook 07 后 270 项相关离线回归通过，另有 10 项受控 Chrome/DOM 回归通过；未操作真实账号或发布/删除作品。[08 验证记录](./research/08-facebook-page-validation.md)。
 
 - 2026-11-17：[10 已解决](./issues/10-kuaishou-persistent-profile.md)。快手 login/check/视频/图文/reset-profile 与全部可达直接调用使用持久化 Profile；219 项相关离线回归及真实 Chrome 小窗口的两个合成内容流程通过。保留封面、合集、定时、QR 和提交后保护，未操作真实账号。见 [10 验证记录](./research/10-kuaishou-validation.md)。
+
+- 2026-11-17：[12 已解决](./issues/12-baijiahao-persistent-profile.md)。百家号 login/check/视频/reset-profile 与直接调用使用持久化 Profile，严格区分登录/验证与运行故障，保护提交结果及清理所有权。372 项相关离线回归通过，Chrome 有头/完整 Chromium 无头两条受控 DOM 合成流程通过；未操作真实账号或发布作品。见 [12 验证记录](./research/12-baijiahao-validation.md)。

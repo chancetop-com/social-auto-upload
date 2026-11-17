@@ -284,36 +284,8 @@ class TencentLocalGoldenTests(unittest.TestCase):
 
 
 class BaijiahaoLocalGoldenTests(unittest.TestCase):
-    def test_launch_context_and_init_are_golden(self):
-        app = _make_baijiahao("/tmp/baijiahao-cookie.json")
-        app.headless = False
-        app.validate_upload_args = AsyncMock()
-        app.upload_in = AsyncMock()
-        playwright = FakePlaywright()
-
-        with patch.object(baijiahao_main.asyncio, "sleep", AsyncMock()):
-            asyncio.run(app.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **BAIJIAHAO_LAUNCH_KWARGS}],
-        )
-        self.assertEqual(
-            BAIJIAHAO_CONTEXT_KWARGS, {"permissions": ["geolocation"]}
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/baijiahao-cookie.json", **BAIJIAHAO_CONTEXT_KWARGS}],
-        )
-        self.assertFalse(baijiahao_main.BAIJIAHAO_INIT_SCRIPT)
-        context = browser.contexts[0]
-        self.assertEqual(context.forbidden_calls, [])
-        self.assertEqual(context.add_init_script_calls, [])
-        self.assertEqual(context.storage_state_calls, ["/tmp/baijiahao-cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-
+    # Local lifecycle, flags and no-JSON behavior are exercised through the CLI
+    # and direct uploader in test_baijiahao_profiles.
     def test_mlx_account_file_none_does_not_crash_constructor(self):
         self.assertIsNone(_make_baijiahao(None).account_file)
 
@@ -829,7 +801,7 @@ class _UploadCliCase(_RunHelpers):
             patch.object(self.module, "is_logged_in", new=probe),
             patch.object(self.module, self.builder_name, new=self.builder_mock),
             (patch("utils.local_browser_session.resolve_local_browser", new=self.resolve_account_mock)
-             if self.module is tencent_command else
+             if self.module in (tencent_command, baijiahao_command) else
              patch.object(self.module, "resolve_account_file", new=self.resolve_account_mock)),
             patch.object(self.module, self.setup_name, new=self.setup_mock),
         )
