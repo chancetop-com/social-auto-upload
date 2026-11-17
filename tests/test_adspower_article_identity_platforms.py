@@ -260,6 +260,7 @@ class _SeamHarness:
             patch.object(
                 module,
                 "resolve_account_file",
+                create=True,
                 new=MagicMock(
                     side_effect=AssertionError(
                         "managed mode must not build a cookie path"
@@ -805,7 +806,7 @@ class LocalOnlyActionTests(unittest.TestCase):
         stack = ExitStack()
         stack.enter_context(patch.object(module, helper_attr, new=helper))
         stack.enter_context(
-            patch.object(module, "resolve_account_file", new=resolve)
+            patch.object(module, "resolve_account_file", new=resolve, create=True)
         )
         stack.enter_context(
             patch.object(module, "resolve_managed_provider", new=managed)
@@ -822,8 +823,12 @@ class LocalOnlyActionTests(unittest.TestCase):
 
         self.assertEqual(code, 0, err)
         helper.assert_awaited_once()
-        self.assertEqual(helper.await_args.args[0], Path("/tmp/local-cookie.json"))
-        resolve.assert_called_once()
+        if module is instagram_command:
+            self.assertEqual(helper.await_args.kwargs['account_name'], 'creator')
+            resolve.assert_not_called()
+        else:
+            self.assertEqual(helper.await_args.args[0], Path("/tmp/local-cookie.json"))
+            resolve.assert_called_once()
         managed.assert_not_called()
 
     def test_facebook_verify_and_delete_are_local(self):

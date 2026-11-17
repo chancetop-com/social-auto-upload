@@ -70,7 +70,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；其他平台仍保持旧动作行为，随各票逐步接入。
+目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram 的 login/check/视频/图文/verify/delete 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -208,7 +208,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
 | 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
 | 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 |
-| `--headless` | TikTok 读取 LOCAL_CHROME_HEADLESS，缺省 False；其他平台仍 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
+| `--headless` | TikTok、Instagram 读取 LOCAL_CHROME_HEADLESS，缺省 False；其他平台仍 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
 | `--headed` | False（等价默认） | False（等价默认） | False（等价默认），V2 编码 `"0"` |
 | `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower |
 | `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
@@ -238,7 +238,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、小红书持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Instagram、小红书持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -280,7 +280,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 
 ### 账号一致性风险
 
-托管模式只验证平台页面“已登录”，**Profile 即身份**。知乎、雪球、大鱼号和 Instagram 在本地模式下会比对 `.identity.json` / 用户 ID；托管模式下这些比对会跳过，CLI 仅打印一条 INFO 说明“账号一致性未校验”。请确保 `profile_id` 与目标账号匹配。
+托管模式只验证平台页面“已登录”，**Profile 即身份**。知乎、雪球、大鱼号在本地模式下会比对 `.identity.json` / 用户 ID；托管模式下这些比对会跳过，CLI 仅打印一条 INFO 说明“账号一致性未校验”。请确保 `profile_id` 与目标账号匹配。
 
 已知限制：命令级 `check` / 上传前登录检测已经是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留，不代表 AdsPower 模式需要 Multilogin。
 
@@ -332,7 +332,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Instagram 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
@@ -399,7 +399,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
 - `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
+- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Instagram 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
 - 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
@@ -700,7 +700,7 @@ Page 的 `--scheduled` 选择定时列表，删除会取消排期并永久移除
 
 ## Instagram 独立网页发布
 
-Instagram 使用工程的 Patchright Chrome，不依赖 Facebook Page 或 Business Suite 绑定。默认可见浏览器，未配置代理时按系统网络直连；需要代理时可使用 `--proxy` 或 `SAU_INSTAGRAM_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。首次使用先安装依赖和 Chrome，按本文的项目环境准备步骤执行。
+Instagram 使用 Patchright 与项目专用持久化 Profile，不依赖 Facebook Page 或 Business Suite 绑定。默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 保留，显式 headed/headless 优先），未配置代理时按系统网络直连；需要代理时可使用 `--proxy` 或 `SAU_INSTAGRAM_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。首次使用按安装指南准备所选来源：系统 Chrome、显式 `--local-browser chromium` 或 `LOCAL_CHROME_PATH` 自定义路径；只检查所选来源，失败不回退。
 
 ```powershell
 sau instagram login --account creator
@@ -714,7 +714,11 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 `--no-publish`：素材上传、配文/话题、全部发布选项完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，只记录平台/标题/选项，不写 `content_id`/`post_id`/`post_url`。
 
-`login` 在工程浏览器中等待人工登录和必要验证，将状态保存为 `cookies/instagram_creator.json`，并通过新会话验证。`check` 检查该账号的登录状态和用户绑定，不能代替发布权限检查；网络或未知页面超时会报告错误，不会直接视为 Cookie 失效。
+`login` 在同一个持久化 context 中等待人工登录和必要验证，资料由浏览器保存在 `browser_profiles/instagram/<原始别名>/<chrome|chromium>/`；`check`、视频/图文和作品操作复用同目录。当前会话须有正向登录证据和有效 `ds_user_id`，别名不绑定真实账号，两种浏览器可以登录不同账号。正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 login 引导登录；其他动作缺少 Profile、明确未登录/验证退出 `10`，探测、网络、页面和必需字段故障退出 `1`。`check` 不代替发布权限检查。
+
+所有本地入口和直接 uploader 统一采用 `LOCAL_CHROME_PATH` > 显式 `--local-browser` > `LOCAL_BROWSER` > Chrome；headless 为显式参数/布尔值 > `LOCAL_CHROME_HEADLESS` > False。注入的 session 由调用方关闭。`reset-profile --account creator --browser-kind chrome` 只清空指定种类且无需 binary；之后重新 login。
+
+视频和图文回归都显式传 `--no-publish`：完成素材上传、编辑及 Share 就绪检查后停止，结果 `prepared`，不等待 not-before 或提交。它可能留下临时素材/草稿；本轮离线验证不代表真实账号验收。
 
 视频输入为 MP4/MOV；照片为 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际解码与处理受平台限制。多个图片路径按传入顺序创建轮播；当前已实测单张照片及两张不同照片。标题、正文、标签合并为配文，合计最多 2200 字符。`--headless` 可切换无头运行，人工登录使用默认可见模式。
 
@@ -750,7 +754,7 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 
 结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible`（无归因时省略）。`options` 是新增字段，旧消费方可直接忽略。
 
-本地模式的浏览器 context 固定 `locale=en-US` 与 `Accept-Language: en-US`，不依赖操作系统的浏览器语言（TikTok 已迁移为保留当前语言）；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
+本地模式保持浏览器/Profile/站点原有语言，不设置 locale、请求头、固定 viewport 或最大化；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
 
 > 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
 >
@@ -776,7 +780,7 @@ sau instagram verify --account creator --post-url "https://www.instagram.com/p/�
 sau instagram delete --account creator --post-url "https://www.instagram.com/reel/作品编号/" --expected-text "原作品中的准确文字" --result .local/instagram-delete.json
 ```
 
-接受 `/p/编号/`、`/reel/编号/` 以及带作者名的原作品链接。操作前核对账号绑定、作者、作品编号和正文，拒绝删除其他作者的作品。`delete` 将作品移至 Instagram 的“最近删除”，最终返回 `deleted`；不实现批量删除或提前永久清空。“最近删除”的保留规则由平台决定，本地素材不会被删除。
+`verify` / `delete` 在 MLX/AdsPower 环境下仍走本地路径，要求原始 `--account`，保留本地来源/headless/代理。接受 `/p/编号/`、`/reel/编号/` 以及带作者名的原作品链接。操作前读取当前会话用户并核对原作品作者、作品编号和正文，换号后仍拒绝删除其他作者的作品。`delete` 将作品移至 Instagram 的“最近删除”，最终返回 `deleted`；不实现批量删除或提前永久清空。“最近删除”的保留规则由平台决定，本地素材不会被删除。
 
 结果未知且没有链接时，先在同一账号主页按配文、素材和发布时间查找原作品，复制原作品链接再运行 `verify`；找不到不能证明提交失败，也不要直接重发。删除出现 `deletion_unknown` 时同样先查原作品和“最近删除”，不要重复删除。失败结果会包含阶段/错误和本地证据目录；账号状态、截图及页面记录均放在 Git 忽略目录，不应提交到仓库。
 
@@ -938,7 +942,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、小红书已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Instagram、小红书已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 

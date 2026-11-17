@@ -534,7 +534,7 @@ class ParameterMatrixTests(unittest.TestCase):
                     resolve = MagicMock(
                         side_effect=AssertionError("cookie path must not be built")
                     )
-                    with patch.object(module, "resolve_account_file", new=resolve):
+                    with patch.object(module, "resolve_account_file", new=resolve, create=True):
                         code, _, err = _run(argv, env={"ADSPOWER_API_KEY": KEY})
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)

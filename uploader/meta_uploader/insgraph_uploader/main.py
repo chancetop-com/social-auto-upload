@@ -16,7 +16,6 @@ from patchright.async_api import (
     BrowserContext,
     Locator,
     Page,
-    Playwright,
     TimeoutError as BrowserTimeoutError,
     async_playwright,
     expect,
@@ -48,8 +47,9 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     validate_publish_options,
 )
 from uploader.publish_timeout import PublishTimeoutBudget
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
+from utils.local_browser_session import local_browser_session
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
@@ -103,12 +103,10 @@ _INSTAGRAM_PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "已存在则不要重发，不存在才可人工重试。"
 )
 
-# Golden local-mode browser options.  Multilogin mode reuses the same values
-# only so the call sites stay symmetric; ``browser_session`` ignores them.
+# Retain historical managed-session inputs for identical ignored-option logs.
+# Local sessions use only the shared native configuration plus the local proxy.
 INSTAGRAM_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
-# 本地模式固定英文界面，不依赖操作系统的浏览器语言：四个发布选项的选择器
-# （Add location / Alt text / Turn off commenting / Add AI label）只在英文 UI 实测过。
-# 托管模式不会应用 context_kwargs：MLX / AdsPower Profile 必须由人工保持英文界面。
+# These are ignored by managed providers and never applied to local Profiles.
 INSTAGRAM_CONTEXT_KWARGS: dict[str, object] = {
     "locale": "en-US",
     "extra_http_headers": {"Accept-Language": "en-US,en;q=0.9"},
@@ -124,12 +122,7 @@ _INSTAGRAM_LOGIN_URL_MARKERS = (
 )
 
 
-def instagram_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
-    """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
-    return {**INSTAGRAM_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
-
-
-def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False, managed: bool = True) -> None:
     """Map a mid-upload login/challenge/2FA redirect to ``LoginRequiredError``.
 
     ``publish_attempted`` must be true when the redirect is observed after the
@@ -137,9 +130,13 @@ def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> 
     """
     current_url = str(getattr(page, "url", "") or "").lower()
     if any(marker in current_url for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
+        verification = any(marker in current_url for marker in ('/challenge', '/checkpoint', '/two_step'))
+        message = ('Instagram 上传过程中需要重新登录（登录页/验证码/二次验证）：'
+                   '请在 Multilogin 应用中登录 Profile 后重试。' if managed else
+                   'Instagram 需要重新登录或完成验证：请运行 sau instagram login --account <别名> 完成登录或验证，再重新执行命令。')
         raise LoginRequiredError(
-            "Instagram 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。",
+            message,
+            reason='verification' if verification and not managed else 'login',
             publish_attempted=publish_attempted,
         )
 
@@ -359,36 +356,6 @@ async def _own_profile_link(page: Page) -> Locator:
     )
 
 
-async def _open_instagram_page(
-    playwright: Playwright,
-    account_file: Path,
-    *,
-    proxy: str | None,
-    headless: bool,
-    budget: PublishTimeoutBudget | None = None,
-):
-    """使用工程 Chrome 和指定存储状态，导航失败保留原异常。"""
-    browser = await playwright.chromium.launch(
-        headless=headless, **instagram_launch_kwargs(proxy)
-    )
-    try:
-        # 与 TikTok / 小红书一致：本地 context 固定界面语言，见 INSTAGRAM_CONTEXT_KWARGS。
-        context = await browser.new_context(
-            storage_state=str(account_file), **INSTAGRAM_CONTEXT_KWARGS
-        )
-        page = await context.new_page()
-        page.set_default_timeout(30_000)
-        await page.goto(
-            INSTAGRAM_HOME_URL,
-            wait_until="domcontentloaded",
-            timeout=budget.clamp_ms(120_000) if budget else 120_000,
-        )
-        return browser, context, page
-    except Exception:
-        await close_browser_resources(browser=browser)
-        raise
-
-
 async def _is_instagram_logged_out(page: Page, *, timeout_ms: int = 60_000) -> bool:
     """等待明确登录/未登录业务区域；网络或未知页面超时不能解释为 Cookie 失效。"""
     # 消息入口是登录后的导航，href 前缀允许站点附加 hl 参数；登录表单字段不依赖翻译。
@@ -455,73 +422,82 @@ async def _multilogin_identity(page: Page, context: BrowserContext) -> dict:
     return {"user_id": next(iter(user_ids)), "username": username}
 
 
-async def instagram_identity(page: Page, account_file: Path) -> dict:
-    """将当前会话用户 ID 与账号文件绑定的 ID 比对，读取自己的导航主页。"""
-    if await _is_instagram_logged_out(page):
-        raise RuntimeError("Instagram 未登录，请执行 sau instagram login")
-    state = json.loads(account_file.read_text(encoding="utf-8"))
-    expected = {c['value'] for c in state['cookies'] if c['name'] == 'ds_user_id' and c['domain'].lstrip('.') == 'instagram.com'}
-    current = {c['value'] for c in await page.context.cookies(INSTAGRAM_HOME_URL) if c['name'] == 'ds_user_id'}
-    if len(expected) != 1 or current != expected:
-        raise RuntimeError("Instagram 当前登录用户与账号文件绑定的用户 ID 不匹配")
-    # 当前用户导航头像位于 aria-selected 图标容器中；动态流和推荐头像没有导航选中状态。
-    own_profile = await _own_profile_link(page)
-    await expect(own_profile).to_have_count(1)
-    href = await own_profile.get_attribute('href')
-    username = urlparse(href).path.strip('/')
-    if not username or '/' in username:
-        raise RuntimeError("Instagram 当前用户主页链接结构不符")
-    return {"user_id": next(iter(expected)), "username": username}
+async def _navigate_local_page(page: Page, url: str = INSTAGRAM_HOME_URL, *, timeout=120_000):
+    response = await page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+    status = getattr(response, 'status', None)
+    if isinstance(status, int) and status >= 500:
+        raise RuntimeError(f'Instagram 页面请求失败：HTTP {status}')
+    if urlparse(page.url).hostname not in {'www.instagram.com', 'instagram.com'}:
+        raise RuntimeError('Instagram 页面未停留在 instagram.com')
 
 
-async def instagram_cookie_auth(account_file: str | Path, *, proxy: str | None = None) -> bool:
-    """独立验证登录和账号绑定；未知页面/网络错误直接上报。"""
-    account_file = Path(account_file)
-    if not account_file.is_file():
-        return False
+async def instagram_identity(page: Page, account_file=None) -> dict:
+    """Read the current positive login identity; aliases never bind a user ID."""
+    _raise_if_login_required(page, managed=False)
+    if urlparse(page.url).hostname not in {'www.instagram.com', 'instagram.com'}:
+        raise RuntimeError('Instagram 登录检查未停留在 instagram.com')
+    if await _is_instagram_logged_out(page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS):
+        raise LoginRequiredError("Instagram 未登录；请执行 sau instagram login --account <别名>。")
+    identity = await _multilogin_identity(page, page.context)
+    if not isinstance(identity['user_id'], str) or not re.fullmatch(r'[1-9][0-9]*', identity['user_id']):
+        raise RuntimeError('Instagram 当前会话用户 ID 格式无效')
+    return identity
+
+
+async def instagram_cookie_auth(account_file=None, *, account_name=None, proxy=None,
+                                headless=None, local_browser=None) -> bool:
+    """Check the selected local Profile, with no legacy credential I/O."""
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        browser, context, page = await _open_instagram_page(playwright, account_file, proxy=proxy, headless=True)
-        try:
-            if await _is_instagram_logged_out(page):
-                return False
-            await instagram_identity(page, account_file)
+        async with local_browser_session(
+            playwright, platform='instagram', account=account,
+            headless=headless, local_browser=local_browser,
+            context_kwargs={'proxy': _proxy_options(proxy)},
+        ) as session:
+            page = await session.context.new_page()
+            await _navigate_local_page(page, timeout=INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS)
+            await instagram_identity(page)
             return True
-        finally:
-            await close_browser_resources(browser=browser)
 
 
-async def instagram_setup(account_file: str | Path, *, handle: bool = False, proxy: str | None = None,
-                          headless: bool = False, return_detail: bool = False, timeout_seconds: int = 900):
-    """工程浏览器人工登录，导出候选状态并在新 context 验证后替换账号文件。"""
-    account_file = Path(account_file)
-    account_file.parent.mkdir(parents=True, exist_ok=True)
-    if await instagram_cookie_auth(account_file, proxy=proxy):
-        result = {"success": True, "status": "cookie_valid", "account_file": str(account_file)}
-        return result if return_detail else True
+def _account_alias(account_file=None, account_name=None):
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        from utils.errors import UsageError
+        raise UsageError('本地调用需要 account_name 账号别名。')
+    name = Path(str(account_file)).name
+    if name.startswith('instagram_') and name.endswith('.json'):
+        return name[len('instagram_'):-len('.json')]
+    return str(account_file)
+
+
+async def instagram_setup(account_file=None, *, handle=False, proxy=None, headless=None,
+                          return_detail=False, timeout_seconds=900, account_name=None,
+                          local_browser=None):
+    """Only login may create a Profile and wait for human authentication."""
+    account = _account_alias(account_file, account_name)
     if not handle:
-        result = {"success": False, "status": "cookie_invalid", "account_file": str(account_file)}
-        return result if return_detail else False
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=_proxy_options(proxy), args=["--start-maximized"])
-        candidate = account_file.with_name(f'{account_file.stem}.{uuid4().hex}.pending.json')
-        try:
-            # 登录窗口同样固定英文，导出的存储状态与后续发布界面一致。
-            context = await browser.new_context(
-                no_viewport=not headless, **INSTAGRAM_CONTEXT_KWARGS
-            )
-            page = await context.new_page()
-            await page.goto(INSTAGRAM_HOME_URL + 'accounts/login/', wait_until='domcontentloaded', timeout=120_000)
-            # 消息入口仅在人工登录及挑战完成后出现；不按 URL 或登录表单消失宣告成功。
-            await page.locator('a[href^="/direct/inbox/"]').wait_for(state='visible', timeout=timeout_seconds * 1000)
-            await context.storage_state(path=str(candidate))
-            if not await instagram_cookie_auth(candidate, proxy=proxy):
-                raise RuntimeError('Instagram 导出的候选状态未通过新会话验证')
-            candidate.replace(account_file)
-            result = {"success": True, "status": "logged_in", "account_file": str(account_file)}
+        valid = await instagram_cookie_auth(account_name=account, proxy=proxy,
+                                            headless=headless, local_browser=local_browser)
+        result = {'success': valid, 'status': 'valid', 'account': account}
+        return result if return_detail else valid
+    async with async_playwright() as playwright:
+        async with local_browser_session(
+            playwright, platform='instagram', account=account, create=True,
+            headless=headless, local_browser=local_browser,
+            context_kwargs={'proxy': _proxy_options(proxy)},
+        ) as session:
+            page = await session.context.new_page()
+            await _navigate_local_page(page, INSTAGRAM_HOME_URL + 'accounts/login/')
+            try:
+                await page.locator('a[href^="/direct/inbox/"]').wait_for(state='visible', timeout=timeout_seconds * 1000)
+            except BrowserTimeoutError:
+                _raise_if_login_required(page, managed=False)
+                raise
+            await instagram_identity(page)
+            result = {'success': True, 'status': 'logged_in', 'account': account}
             return result if return_detail else True
-        finally:
-            candidate.unlink(missing_ok=True)
-            await browser.close()
 
 
 def instagram_response_payload(body: str) -> dict:
@@ -550,12 +526,13 @@ def instagram_created_media(payload: dict, *, owner_id: str, caption: str) -> di
 class InstagramUploader:
     """独立网页立即发布；最终创建响应确认成功后返回作品链接。"""
 
-    def __init__(self, account_file: str | Path | None, *, title: str, description: str = '', tags: list[str] | None = None,
+    def __init__(self, account_file: str | Path | None = None, *, title: str, description: str = '', tags: list[str] | None = None,
                  video_file: str | Path | None = None, image_files: list[str | Path] | None = None,
                  thumbnail: str | Path | None = None,
-                 proxy: str | None = None, headless: bool = False, result_file: str | Path | None = None,
+                 proxy: str | None = None, headless: bool | None = None, account_name=None, local_browser=None, result_file: str | Path | None = None,
                  options: InstagramPublishOptions | None = None, no_publish: bool = False):
-        self.account_file = Path(account_file) if account_file is not None else None
+        self.account_file = account_file
+        self.account_name, self.local_browser = account_name, local_browser
         self.title, self.description = title.strip(), description.strip()
         self.tags = [t.strip().lstrip('#') for t in (tags or []) if t.strip().lstrip('#')]
         self.video_file = Path(video_file) if video_file else None
@@ -798,8 +775,7 @@ class InstagramUploader:
     async def _log_option_outcome(self, key: str, page: Page | None) -> None:
         """入口缺失/不一致时打印页面语言，便于判断是否账号界面语言未固定。
 
-        本地模式已通过 ``INSTAGRAM_CONTEXT_KWARGS`` 固定 en-US；托管模式的界面
-        语言由 Profile 决定，这里的 ``html[lang]`` 是排查入口缺失的第一线索。
+        界面语言由 Profile 与站点决定；``html[lang]`` 是排查入口缺失的线索。
         """
         record = self.result['options'][key]
         if record['status'] not in (UNSUPPORTED, MISMATCH):
@@ -993,6 +969,8 @@ class InstagramUploader:
             label="Instagram 发布",
         )
         budget.check_pre_click()
+        if not getattr(self, '_managed', False):
+            _raise_if_login_required(page, managed=False)
         # status 只是结果记录；点击是否派发由独立的 publish_clicked 标记。
         self.publish_clicked = False
         self.result.update(identity, status='submission_unknown')
@@ -1010,6 +988,8 @@ class InstagramUploader:
             except Exception as exc:
                 if maybe_dispatched(exc):
                     # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
+                    if not getattr(self, '_managed', False):
+                        self.publish_clicked = True
                     raise budget.timeout_error(True) from exc
                 raise
             # 点击已经返回：从这里开始的任何失败都算「结果可能已提交」。
@@ -1097,6 +1077,8 @@ class InstagramUploader:
         await self._advance_media_editor(page, budget=budget)
         budget.check_pre_click()
         self.stage = 'publish'
+        if not getattr(self, '_managed', False):
+            _raise_if_login_required(page, managed=False)
         await self._publish(page, identity, budget=budget)
         return self.result
 
@@ -1117,16 +1099,16 @@ class InstagramUploader:
             logger.warning(f"Instagram 失败现场保存失败: {capture_error}")
 
     async def upload_in(self, session: BrowserSession) -> dict:
-        """Multilogin body: no cookie read/write, no identity-file comparison."""
+        """Run in the caller-owned session without credential files or cleanup."""
+        self._managed = session.managed
         # 预算从打开首页开始，覆盖登录检查、素材上传、编辑、配文与发布。
         budget = self.start_publish_budget()
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
-        await page.goto(
-            INSTAGRAM_HOME_URL,
-            wait_until='domcontentloaded',
-            timeout=budget.clamp_ms(120_000),
-        )
+        if session.managed:
+            await page.goto(INSTAGRAM_HOME_URL, wait_until='domcontentloaded', timeout=budget.clamp_ms(120_000))
+        else:
+            await _navigate_local_page(page, timeout=budget.clamp_ms(120_000))
         # 一个 page 一个行为层实例：在页面打开后立刻构造并缓存。
         self._humanizer(page)
         if session.managed:
@@ -1142,23 +1124,25 @@ class InstagramUploader:
             if session.managed:
                 identity = await _multilogin_identity(page, session.context)
             else:
-                identity = await instagram_identity(page, self.account_file)
+                identity = await instagram_identity(page)
             return await self._upload_steps(page, identity, budget=budget)
-        except LoginRequiredError:
+        except LoginRequiredError as error:
+            if not session.managed:
+                error.publish_attempted = error.publish_attempted or self.publish_clicked
+                await self._capture_failure_safely(page, error)
             raise
         except PublishResultUnknownError as error:
-            # 结果未知必须保留专用错误类型（退出码 9），但先落盘现场证据。
             await self._capture_failure_safely(page, error)
+            if not session.managed:
+                _raise_if_login_required(page, publish_attempted=self.publish_clicked, managed=False)
             raise
         except Exception as error:
+            if not session.managed:
+                await self._capture_failure_safely(page, error)
+            _raise_if_login_required(page, publish_attempted=self.publish_clicked, managed=session.managed)
             if session.managed:
-                # 发布点击之后的登录跳转：结果可能已提交，必须带上 publish_attempted。
-                # 只认点击标志；提交前失败也会把 status 写成 submission_unknown。
-                _raise_if_login_required(
-                    page,
-                    publish_attempted=self.publish_clicked,
-                )
-            raise await self._capture_failure(page, error) from error
+                raise await self._capture_failure(page, error) from error
+            raise
 
     async def upload(self, *, session: BrowserSession | None = None) -> dict:
         """在同一会话核验身份、上传并发表；失败保存阶段与本地证据。"""
@@ -1166,29 +1150,11 @@ class InstagramUploader:
         if session is not None:
             return await self.upload_in(session)
 
-        budget = self.start_publish_budget()
-        async with async_playwright() as p:
-            browser, context, page = await _open_instagram_page(
-                p,
-                self.account_file,
-                proxy=self.proxy,
-                headless=self.headless,
-                budget=budget,
-            )
-            # 一个 page 一个行为层实例：在页面打开后立刻构造并缓存。
-            self._humanizer(page)
-            try:
-                self.stage = 'identity'
-                identity = await instagram_identity(page, self.account_file)
-                result = await self._upload_steps(page, identity, budget=budget)
-                self.stage = 'save_session'
-                await save_upload_session(context, str(self.account_file))
-                return result
-            except PublishResultUnknownError as error:
-                # 结果未知必须保留专用错误类型（退出码 9），但先落盘现场证据。
-                await self._capture_failure_safely(page, error)
-                raise
-            except Exception as error:
-                raise await self._capture_failure(page, error) from error
-            finally:
-                await close_browser_resources(browser=browser)
+        account = _account_alias(self.account_file, self.account_name)
+        async with async_playwright() as playwright:
+            async with local_browser_session(
+                playwright, platform='instagram', account=account,
+                headless=self.headless, local_browser=self.local_browser,
+                context_kwargs={'proxy': _proxy_options(self.proxy)},
+            ) as owned_session:
+                return await self.upload_in(owned_session)

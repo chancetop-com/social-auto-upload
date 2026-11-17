@@ -9,7 +9,11 @@ from uuid import uuid4
 
 from patchright.async_api import Page, async_playwright, expect
 
-from .main import _open_instagram_page, instagram_identity, instagram_response_payload
+from loguru import logger
+from utils.errors import LoginRequiredError, PublishResultUnknownError
+from utils.local_browser_session import local_browser_session
+from .main import (_navigate_local_page, _account_alias, _proxy_options,
+                   _raise_if_login_required, instagram_identity, instagram_response_payload)
 
 # 菜单项、确认框与删除响应的等待窗口；确认框会多一层动画，给更长的时间。
 _MENU_TIMEOUT_MS = 30_000
@@ -38,7 +42,8 @@ async def find_instagram_post(page: Page, *, post_url: str, expected_text: str, 
     if not expected_text.strip():
         raise ValueError('expected_text 不能为空')
     # 同一作品通过 /p/ 进入详情，避免 /reel/ 路由进入带其他作品的全屏推荐播放器。
-    await page.goto(f'https://www.instagram.com/p/{shortcode}/', wait_until='domcontentloaded', timeout=120_000)
+    await _navigate_local_page(page, f'https://www.instagram.com/p/{shortcode}/')
+    _raise_if_login_required(page, managed=False)
     # 作品页 head 的 og:url、instapp:owner_user_id 是平台实际输出的规范链接/作者元数据，
     # 不根据主页推荐作品或同文案猜作者；正文限定 main 排除导航及其他窗口。
     canonical = page.locator('meta[property="og:url"]')
@@ -68,59 +73,72 @@ async def find_instagram_post(page: Page, *, post_url: str, expected_text: str, 
             'owner_id': owner_id, 'expected_text': expected_text, 'status': 'published'}
 
 
-async def instagram_post_action(account_file: Path, *, post_url: str, expected_text: str, delete: bool = False,
-                                proxy: str | None = None, headless: bool = False,
+async def instagram_post_action(account_file=None, *, post_url: str, expected_text: str, delete: bool = False,
+                                proxy: str | None = None, headless: bool | None = None,
+                                account_name=None, local_browser=None, session=None,
                                 result_file: str | Path | None = None) -> dict:
     """核对原作品后执行一次删除，只接受目标 ID 的 did_delete 业务响应。"""
     instagram_post_id(post_url)
+    if session is None:
+        account = _account_alias(account_file, account_name)
+        async with async_playwright() as playwright:
+            async with local_browser_session(
+                playwright, platform='instagram', account=account,
+                headless=headless, local_browser=local_browser,
+                context_kwargs={'proxy': _proxy_options(proxy)},
+            ) as owned_session:
+                return await instagram_post_action(
+                    post_url=post_url, expected_text=expected_text, delete=delete,
+                    result_file=result_file, session=owned_session,
+                )
     result_file = Path(result_file) if result_file else Path('.local/instagram-results') / f'{uuid4().hex}.json'
     result = {'platform': 'instagram', 'post_url': post_url, 'status': 'not_submitted'}
-    async with async_playwright() as p:
-        browser, context, page = await _open_instagram_page(p, account_file, proxy=proxy, headless=headless)
-        try:
-            identity = await instagram_identity(page, account_file)
-            result.update(await find_instagram_post(page, post_url=post_url, expected_text=expected_text, owner_id=identity['user_id']))
-            if delete:
-                # 当前详情唯一的三圆点菜单按钮含 aria-haspopup=dialog 与 svg circle；评论表情
-                # 菜单不含 circle。该结构已在中英文照片、轮播、Reel 详情观察。找不到即失败关闭：
-                # 不用 “More options” 文案兜底，避免命中评论的溢出菜单后误删评论。
-                menu_button = page.locator('[role="button"][aria-haspopup="dialog"]').filter(has=page.locator('svg circle'))
-                await expect(menu_button).to_have_count(1)
-                # 作品管理/删除路径不在发布交互层范围内（spec §3.9）。
-                await menu_button.click()  # native-click: manage；作品管理/删除不是发布交互层
-                menu = page.get_by_role('dialog')
-                buttons = menu.get_by_role('button')
-                # 实测 2026-11 菜单项由 8 项增至 9 项（Instagram 新增条目），不再按数量/下标定位：
-                # 只在菜单里找文案精确等于“删除”的项，找不到就报错，绝不猜其他条目。
-                delete_item = buttons.filter(has_text=_DELETE_TEXT)
-                await expect(delete_item).to_have_count(1, timeout=_MENU_TIMEOUT_MS)
-                # 实测鼠标激活有时只关闭弹出菜单；该 role=button 支持 Enter，键盘激活正常进入确认框。
-                await delete_item.first.press('Enter')
-                # 确认框是带标题的模态 dialog，只有删除、取消两项。删除按钮必须按文案
-                # 精确命中；文案缺失时失败关闭，绝不按首位猜测，避免重排后误点取消。
-                confirm = page.locator('[role="dialog"][aria-modal="true"]').filter(has=page.get_by_role('heading'))
-                await expect(confirm).to_have_count(1, timeout=_CONFIRM_TIMEOUT_MS)
-                confirm_buttons = confirm.get_by_role('button')
-                await expect(confirm_buttons).to_have_count(2)
-                delete_confirm = confirm_buttons.filter(has_text=_DELETE_TEXT)
-                await expect(delete_confirm).to_have_count(
-                    1, timeout=_CONFIRM_TIMEOUT_MS
-                )
-                result['status'] = 'deletion_unknown'
-                result_file.parent.mkdir(parents=True, exist_ok=True)
-                result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-                target = f"/api/v1/web/create/{result['content_id']}/delete/"
-                async with page.expect_response(lambda r: urlparse(r.url).path == target and r.request.method == 'POST', timeout=_DELETE_RESPONSE_TIMEOUT_MS) as event:
-                    await delete_confirm.press('Enter')
-                payload = instagram_response_payload(await (await event.value).text())
-                if payload.get('payload', {}).get('did_delete') is not True:
-                    raise RuntimeError('Instagram 未确认目标作品删除成功')
-                result['status'] = 'deleted'
+    page = await session.context.new_page()
+    try:
+        await _navigate_local_page(page)
+        identity = await instagram_identity(page)
+        result.update(await find_instagram_post(page, post_url=post_url, expected_text=expected_text, owner_id=identity['user_id']))
+        if delete:
+            # 当前详情唯一的三圆点菜单按钮含 aria-haspopup=dialog 与 svg circle；评论表情
+            # 菜单不含 circle。该结构已在中英文照片、轮播、Reel 详情观察。找不到即失败关闭：
+            # 不用 “More options” 文案兜底，避免命中评论的溢出菜单后误删评论。
+            menu_button = page.locator('[role="button"][aria-haspopup="dialog"]').filter(has=page.locator('svg circle'))
+            await expect(menu_button).to_have_count(1)
+            # 作品管理/删除路径不在发布交互层范围内（spec §3.9）。
+            await menu_button.click()  # native-click: manage；作品管理/删除不是发布交互层
+            menu = page.get_by_role('dialog')
+            buttons = menu.get_by_role('button')
+            # 实测 2026-11 菜单项由 8 项增至 9 项（Instagram 新增条目），不再按数量/下标定位：
+            # 只在菜单里找文案精确等于“删除”的项，找不到就报错，绝不猜其他条目。
+            delete_item = buttons.filter(has_text=_DELETE_TEXT)
+            await expect(delete_item).to_have_count(1, timeout=_MENU_TIMEOUT_MS)
+            # 实测鼠标激活有时只关闭弹出菜单；该 role=button 支持 Enter，键盘激活正常进入确认框。
+            await delete_item.first.press('Enter')
+            # 确认框是带标题的模态 dialog，只有删除、取消两项。删除按钮必须按文案
+            # 精确命中；文案缺失时失败关闭，绝不按首位猜测，避免重排后误点取消。
+            confirm = page.locator('[role="dialog"][aria-modal="true"]').filter(has=page.get_by_role('heading'))
+            await expect(confirm).to_have_count(1, timeout=_CONFIRM_TIMEOUT_MS)
+            confirm_buttons = confirm.get_by_role('button')
+            await expect(confirm_buttons).to_have_count(2)
+            delete_confirm = confirm_buttons.filter(has_text=_DELETE_TEXT)
+            await expect(delete_confirm).to_have_count(
+                1, timeout=_CONFIRM_TIMEOUT_MS
+            )
+            result['status'] = 'deletion_unknown'
             result_file.parent.mkdir(parents=True, exist_ok=True)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-            await context.storage_state(path=str(account_file))
-            return result
-        except Exception as error:
+            target = f"/api/v1/web/create/{result['content_id']}/delete/"
+            async with page.expect_response(lambda r: urlparse(r.url).path == target and r.request.method == 'POST', timeout=_DELETE_RESPONSE_TIMEOUT_MS) as event:
+                await delete_confirm.press('Enter')
+            payload = instagram_response_payload(await (await event.value).text())
+            if payload.get('payload', {}).get('did_delete') is not True:
+                raise RuntimeError('Instagram 未确认目标作品删除成功')
+            result['status'] = 'deleted'
+        result_file.parent.mkdir(parents=True, exist_ok=True)
+        result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        return result
+    except Exception as error:
+        try:
             folder = Path('.local/instagram-errors') / uuid4().hex
             folder.mkdir(parents=True)
             result.update(error=str(error), evidence_dir=str(folder))
@@ -128,6 +146,9 @@ async def instagram_post_action(account_file: Path, *, post_url: str, expected_t
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
             await page.screenshot(path=str(folder/'page.png'))
             (folder/'page.html').write_text(await page.content(), encoding='utf-8')
-            raise RuntimeError(f'Instagram 原作品操作未完成；结果记录: {result_file}；原因: {error}') from error
-        finally:
-            await browser.close()
+        except Exception as capture_error:
+            logger.warning('Instagram 原作品现场保存失败: {}', capture_error)
+        if isinstance(error, (LoginRequiredError, PublishResultUnknownError)):
+            raise
+        _raise_if_login_required(page, managed=False)
+        raise RuntimeError(f'Instagram 原作品操作未完成；结果记录: {result_file}；原因: {error}') from error

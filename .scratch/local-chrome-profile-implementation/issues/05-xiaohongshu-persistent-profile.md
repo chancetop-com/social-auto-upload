@@ -44,3 +44,5 @@
 - 历史本地 JSON/UA/临时双关闭测试随删除行为退役；相应主结果保护迁入真实 Profile CLI 测试，保留探测、内容/声明/定时、提交与托管测试。初次交叉回归发现已移除 resolver 的 AdsPower 测试 fixture，按本平台改为禁止 local session；旧 Namespace 缺少新增字段使用 getattr 兼容。另有错误模块名 `test_local_browser`，更正为 `test_local_browser_session` 后验证。TikTok ambiguity 的旧 fake 登录锚点问题交给票 02 修复，未在本票修改其源代码。
 - 按 writing-for-agents 同步独立平台 Skill 及其运行前提/CLI/排障引用、配置示例、README、CLI、安装、Bootstrap、术语及分发说明。浏览器安装按所选来源；同目录各项动作保持同配置。未发布技能源市场。
 - 尚未迁移平台保持各自既有行为；Rednote/Instagram 由同批 03/04 独立推进，第二至第五批依赖仍按实施计划执行。
+
+- 合并 integration `9120889` 后，`tests.test_xhs_profile_cli tests.test_publish_ambiguity` **24 tests passed**（0.977 秒），确认票 02 的 TikTok fixture 修复。随后合并 Instagram 票 04 的 `6d0ead1`，文档按三平台已迁移合并，保留 Instagram verify/delete 本地例外。

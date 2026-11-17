@@ -48,7 +48,7 @@ uv pip install -e .
 
 ### 4. 按所选浏览器准备运行环境
 
-项目保留固定版本的 Patchright。TikTok、小红书已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
+项目保留固定版本的 Patchright。TikTok、Instagram、小红书 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
 
 - **Chrome 路线**：用户从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 安装适合系统的 Chrome；项目使用 `channel="chrome"`，不会自动安装或更新它。macOS 选择相应 Apple 芯片或 Intel 版本。
 - **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。未迁移平台仍可能使用 headless shell，保留它们需要的 `uv run patchright install chromium` 安装方式。
@@ -71,8 +71,8 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`：非空时优先作为实际可执行文件。
-- `LOCAL_BROWSER`：TikTok、小红书 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
-- `LOCAL_CHROME_HEADLESS`：TikTok、小红书的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、小红书同样解析 headless，但完全忽略本地来源配置。
+- `LOCAL_BROWSER`：TikTok、Instagram、小红书 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
+- `LOCAL_CHROME_HEADLESS`：TikTok、Instagram、小红书 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Instagram、小红书 同样解析 headless，但完全忽略本地来源配置。
 
 ### 6. 验证 CLI 是否可用
 
