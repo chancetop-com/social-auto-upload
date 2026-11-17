@@ -424,8 +424,21 @@ class UsageAndExitCodeTests(unittest.TestCase):
                     resolve = MagicMock(
                         side_effect=AssertionError("cookie path must not be built")
                     )
-                    with patch.object(module, "resolve_account_file", new=resolve):
-                        code, err = self._run(argv, SENTINEL_TOKEN)
+                    if module is instagram_command:
+                        # Migrated works actions use the raw local alias, never
+                        # a Cookie path or a managed provider/account label.
+                        with (
+                            patch.object(module, "instagram_post_action", new=resolve),
+                            patch.object(
+                                module, "resolve_managed_provider",
+                                side_effect=AssertionError("managed provider must not be resolved"),
+                            ) as provider,
+                        ):
+                            code, err = self._run(argv, SENTINEL_TOKEN)
+                        provider.assert_not_called()
+                    else:
+                        with patch.object(module, "resolve_account_file", new=resolve):
+                            code, err = self._run(argv, SENTINEL_TOKEN)
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
                     resolve.assert_not_called()

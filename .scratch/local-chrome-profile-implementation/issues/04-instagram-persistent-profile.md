@@ -66,3 +66,9 @@ python -m unittest tests.test_instagram_humanize tests.test_instagram_uploader.I
 - 已将 integration `9120889` 合入本票工作树；仅新增 TikTok 已认证 ambiguity fixtures，无冲突。`git diff --check` 通过。Instagram 本地 probe/login/works 都把页面交给有界 persistent-context owner 清理，不存在先等待无界 page.close 的本地路径；managed-only `is_logged_in` 保留原关闭行为。
 
 - 合入最新 integration 后执行 `python -m unittest tests.test_publish_ambiguity tests.test_instagram_profile_cli tests.test_mlx_meta tests.test_adspower_article_identity_platforms -v`：**84 tests passed，4.139 秒**。新的提交阶段保护与托管兼容断言均通过。
+
+### 2026-11-17 — MLX 跨平台夹具跟进
+
+- 合入 integration `ec6ea39` 后复现 `tests.test_multilogin_cli.UsageAndExitCodeTests`：12 项中仅 Instagram verify/delete 两个子场景因 patch 已删除的 `resolve_account_file` 报 AttributeError。未发现生产行为缺陷。
+- 仅更新 Instagram 分支夹具：缺少 `--account` 时禁止进入 `instagram_post_action`，同时明确禁止解析 managed provider；继续断言退出 2 与 `--account` 提示。其他平台的旧 resolver 断言保持原样，未修改生产代码。
+- 使用本工作树隔离 conf.py 与共享 Python 3.11 interpreter 执行 `python -m unittest tests.test_multilogin_cli tests.test_instagram_profile_cli -v`：**47 tests passed，3.827 秒**。覆盖有效账号的 provider 环境下真实本地 Profile 编排，以及无账号时零业务/零 provider 解析。`git diff --check` 通过，无真实账号操作。
