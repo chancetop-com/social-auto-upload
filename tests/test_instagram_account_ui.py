@@ -1,6 +1,7 @@
 """Public upload boundary against controlled, observed Instagram UI shapes.
 
-Creator anchors/labels come from 20's 2026-11-17 captured menu; ordinary
+Chinese creator anchors come from 20's 2026-11-17 captured menu; the English
+div/icon shape comes from adspower commit 7ee8380's 09-creator-entry-evidence.md. Ordinary
 navigation and composer roles come from the existing browser fixtures. No live
 account, remote request or persistent Profile is used by this module.
 """
@@ -22,7 +23,7 @@ from utils.browser_session import BrowserSession
 
 
 HTML = '''<!doctype html><meta charset="utf-8"><style>
-a,[role=button]{display:inline-block;padding:16px;margin:8px}
+a,[role=button],[data-action=post],[data-action=wrong]{display:inline-block;padding:16px;margin:8px}
 [role=dialog]{padding:20px} [contenteditable]{min-height:45px;width:400px}
 </style><body>
 <a href="/direct/inbox/">Inbox</a>
@@ -49,7 +50,7 @@ function composer(){
  };
 }
 function edit(step){
- const label=step<2 ? (config.creator?'继续':'Next') : 'Share';
+ const label=step<2 ? (config.creator&&!config.english?'继续':'Next') : 'Share';
  const action=config.earlyShare&&step===0?'Share':label;
  surface.innerHTML='<div role="dialog"><div role="heading">'+['Crop','Edit','Create new post'][step]+'</div>'+
  '<div role="button" tabindex="0" data-action="advance">'+action+'</div>'+
@@ -64,14 +65,22 @@ function edit(step){
  }
 }
 function menu(){
- surface.innerHTML='<div aria-hidden="false">'+
- ['帖子','直播视频','广告'].map((label,i)=>'<a href="#" data-action="'+(i===0?'post':'wrong')+'"><div><svg role="img" aria-label="'+label+'" width="24" height="24"></svg></div></a>').join('')+'</div>';
+ const labels=config.english?['Post','Live video','Ad']:['帖子','直播视频','广告'];
+ const tag=config.english?'div':'a', attrs=config.english?'':' href="#"';
+ surface.innerHTML=(config.english?'<div>':'<div aria-hidden="false">')+
+ labels.map((label,i)=>'<'+tag+attrs+' data-action="'+(i===0?'post':'wrong')+'"><svg aria-label="'+label+'" width="24" height="24"></svg><span>'+label+'</span></'+tag+'>').join('')+'</div>';
+ // Feed text also says Post: it must never substitute for the menu icon.
+ surface.insertAdjacentHTML('beforeend','<button data-action="wrong">Post</button>');
  const post=surface.querySelector('[data-action=post]');
  if(config.duplicatePost) post.after(post.cloneNode(true));
+ if(config.mixedPost) surface.insertAdjacentHTML('beforeend','<div aria-hidden="false"><a href="#" data-action="post"><svg aria-label="帖子" width="24" height="24"></svg></a></div>');
  if(config.blockedPost) post.setAttribute('aria-disabled','true');
+ if(config.disablePostOnHover) post.onpointerenter=()=>post.setAttribute('aria-disabled','true');
+ if(config.offscreenPost) surface.style.marginTop='1600px';
  if(config.missingPost) post.remove();
+ if(config.driftPost) post.onpointerenter=()=>{if(!post.dataset.moved){post.dataset.moved='1';post.style.transform='translateX(35px)';}};
  if(config.bothStates) surface.insertAdjacentHTML('beforeend','<div role="dialog"><input type="file"></div>');
- surface.onclick=e=>{const a=e.target.closest('a');if(!a)return;e.preventDefault();if(a.dataset.action==='post')composer();else wrongClicks++;};
+ surface.onclick=e=>{const action=e.target.closest('[data-action="post"],[data-action="wrong"]');if(!action)return;e.preventDefault();if(action.dataset.action==='post'){if(!config.stalledPost)composer();}else wrongClicks++;};
 }
 const create=document.querySelector('[data-action=create]');
 create.onclick=e=>{e.preventDefault();config.creator?menu():composer();};
@@ -84,7 +93,8 @@ if(config.missingCreate){
 
 
 class InstagramAccountUiTests(unittest.TestCase):
-    async def scenario(self, *, creator=False, video=False, mode='local', humanize=True, failure=False, **changes):
+    async def scenario(self, *, creator=False, video=False, mode='local', humanize=True,
+                       failure=False, failure_timeout=5, **changes):
         config = dict(creator=creator, **changes)
         html = HTML.replace('CONFIG', json.dumps(config))
         async with async_playwright() as p:
@@ -104,7 +114,7 @@ class InstagramAccountUiTests(unittest.TestCase):
                     session = BrowserSession(browser=browser, context=context, mode=mode)
                     # A short real clock budget bounds negative UI cases; no selector,
                     # humanizer, session, upload or publishing implementation is mocked.
-                    budget = functools.partial(PublishTimeoutBudget, timeout_seconds=5 if failure else 40)
+                    budget = functools.partial(PublishTimeoutBudget, timeout_seconds=failure_timeout if failure else 40)
                     with patch.object(main, 'PublishTimeoutBudget', budget):
                         if failure:
                             with self.assertRaises(Exception):
@@ -118,7 +128,7 @@ class InstagramAccountUiTests(unittest.TestCase):
                             self.assertEqual(result['status'], 'prepared')
                     self.assertEqual(page_errors, [], 'fixture JavaScript errors')
                     page=context.pages[-1]
-                    observed=await page.evaluate('({...JSON.parse(document.body.dataset.observed),caption:document.querySelector("[contenteditable]")?.innerText})')
+                    observed=await page.evaluate('({...JSON.parse(document.body.dataset.observed),caption:document.querySelector("[contenteditable]")?.innerText,postDisabled:document.querySelector("[data-action=post]")?.getAttribute("aria-disabled"),scrollY:window.scrollY})')
                     self.assertEqual(observed['wrongClicks'],0)
                     self.assertEqual(observed['shareClicks'],0)
                     self.assertEqual(len(context.pages),1)  # caller still owns context
@@ -150,6 +160,49 @@ class InstagramAccountUiTests(unittest.TestCase):
         for creator in (False,True):
             with self.subTest(creator=creator):
                 asyncio.run(self.scenario(creator=creator,humanize=False))
+
+    def test_english_creator_video_and_note_reach_no_publish(self):
+        for mode in ('local', 'adspower'):
+            for video in (False, True):
+                with self.subTest(mode=mode, video=video):
+                    asyncio.run(self.scenario(creator=True, english=True, mode=mode, video=video))
+
+    def test_english_creator_recovers_before_dispatch_from_menu_drift(self):
+        asyncio.run(self.scenario(creator=True, english=True, driftPost=True))
+
+    def test_english_creator_rejects_duplicate_and_mixed_language_menus(self):
+        for change in ('duplicatePost', 'mixedPost', 'missingPost'):
+            with self.subTest(change=change):
+                state=asyncio.run(self.scenario(creator=True, english=True,
+                    failure=True, humanize=False, **{change:True}))
+                self.assertEqual([e['target'] for e in state['events'] if e['name']=='click'], ['create'])
+                self.assertEqual(state['files'], [])
+
+    def test_english_creator_never_repeats_a_dispatched_menu_click(self):
+        state=asyncio.run(self.scenario(creator=True, english=True,
+            failure=True, humanize=False, stalledPost=True))
+        self.assertEqual([e['target'] for e in state['events'] if e['name']=='click'], ['create', 'post'])
+        self.assertEqual(state['files'], [])
+
+    def test_english_creator_disabled_container_never_dispatches(self):
+        for humanize, change in ((False, 'blockedPost'), (False, 'disablePostOnHover'),
+                                 (True, 'blockedPost'),
+                                 (True, 'disablePostOnHover')):
+            with self.subTest(humanize=humanize, change=change):
+                state = asyncio.run(self.scenario(creator=True, english=True,
+                    mode='adspower', humanize=humanize, failure=True,
+                    failure_timeout=15, **{change: True}))
+                self.assertEqual(state['postDisabled'], 'true')
+                self.assertEqual([e['target'] for e in state['events'] if e['name']=='click'], ['create'])
+                self.assertEqual(state['files'], [])
+
+    def test_offscreen_creator_menu_scrolls_before_interaction_check(self):
+        for english in (False, True):
+            for humanize in (False, True):
+                with self.subTest(english=english, humanize=humanize):
+                    state = asyncio.run(self.scenario(creator=True, english=english,
+                        humanize=humanize, offscreenPost=True))
+                    self.assertGreater(state['scrollY'], 0)
 
     def test_ambiguous_or_missing_navigation_never_dispatches(self):
         for change in ('duplicateCreate','missingCreate'):

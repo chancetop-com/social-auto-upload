@@ -639,6 +639,8 @@ sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title
 
 视频号支持定时发布、草稿、合集和双比例封面：
 
+`--draft` 成功后输出 `saved as draft`；正常发布成功后输出 `submitted`。本地和托管模式使用相同文案。
+
 ```bash
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z" --thumbnail-landscape covers/landscape.png --thumbnail-portrait covers/portrait.png --collection "我的合集"
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --draft
@@ -777,6 +779,8 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 配文超过 2200 字符、视频与图片同时传入或都未传入、`--thumbnail` 与图片同传、替代文字条数或长度不合法、`--location` 为空等静态错误，都在启动浏览器或托管 Profile **之前**校验并退出 `2`。**注意**：配文超长此前退出 `1`（`ValueError`），现在改为退出 `2`（用法错误），与 TikTok、小红书对齐；调度层若按 `1` 判断需同步调整。
 
 当前账号的照片/Reels 发布页及高级设置中没有定时入口，因此此独立网页实现只支持立即发布，不提供 `--schedule`；这不代表所有 Instagram 账号和客户端都没有定时能力。首次通知提示会自动选择稍后，视频上传时的 Reels 介绍会自动确认；没有提示则继续。登录、验证仍由用户在工程浏览器完成，未知弹窗或操作失败会明确报错。
+
+创建入口兼容普通账号直接打开编辑器，以及 creator 的英文 `Create → Post`、中文“创建 → 帖子”子菜单。菜单按 SVG 的 `aria-label` 属性识别，不匹配页面中的可见 `Post` 文本；多个候选（包括中英文同时出现）会停止，菜单项或外层容器仍被禁用时不会派发点击。开启人类化时，由 Humanizer 完成滚动、移动与最终校验，不额外 hover；`HUMANIZE=0` 时先原生 hover 完成滚动和移入，再校验并原生点击。未派发的暂时失败在原预算内重试，可能已派发的点击不重试。此入口支持不扩大下述发布选项的真实账号验收范围。
 
 ### Instagram 发布选项
 

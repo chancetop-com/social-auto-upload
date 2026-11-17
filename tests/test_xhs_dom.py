@@ -8,8 +8,8 @@ test below pins one boundary of that ladder, plus the two failure channels:
 * blocked -> ``(False, reason)`` and the caller raises ``ElementUnusableError``;
 * allowed-with-warning -> ``(True, warning_reason)`` (probe far from dispatch).
 
-Fakes come from ticket 28 (``tests/fakes_xhs_dom.py`` / ``fakes_clock.py``),
-so nothing here touches a browser or the wall clock.
+Most cases use ticket 28 fakes (``tests/fakes_xhs_dom.py`` / ``fakes_clock.py``).
+Browser cases exercise JavaScript probes against isolated synthetic pages.
 """
 
 from __future__ import annotations
@@ -243,6 +243,26 @@ class Decision06ReadinessInteractiveTests(unittest.IsolatedAsyncioTestCase):
     async def test_aria_disabled_blocks(self):
         loc = scripted(style=styles(disabled=True), hit={"self": True, "tag": "button"})
         self.assertEqual(await check(loc, "interactive"), (False, "disabled"))
+
+    async def test_aria_disabled_container_blocks_descendants_until_enabled(self):
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True, channel="chrome")
+            try:
+                page = await browser.new_page()
+                await page.set_content('''<div id="menu" aria-disabled="true">
+                    <span><svg id="icon" width="24" height="24"></svg></span>
+                    <input id="caption" value="caption">
+                </div>''')
+                icon, caption = page.locator("#icon"), page.locator("#caption")
+                self.assertTrue(await icon.is_enabled())
+                self.assertEqual(await check(icon, "visible"), (True, None))
+                self.assertEqual(await check(icon, "interactive"), (False, "disabled"))
+                self.assertEqual(await check(caption, "editable"), (False, "disabled"))
+                await page.locator("#menu").evaluate("el => el.setAttribute('aria-disabled', 'false')")
+                self.assertEqual(await check(icon, "interactive"), (True, None))
+                self.assertEqual(await check(caption, "editable"), (True, None))
+            finally:
+                await browser.close()
 
     async def test_disabled_class_token_blocks(self):
         loc = scripted(style=styles(disabledClass=True), hit={"self": True, "tag": "button"})

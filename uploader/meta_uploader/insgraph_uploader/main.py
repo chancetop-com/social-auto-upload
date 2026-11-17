@@ -89,10 +89,12 @@ INSTAGRAM_COVER_INPUTS = (
 )
 # 创建入口只用已观察的链接与图标语义；缺失或歧义时失败，不猜导航次序。
 INSTAGRAM_CREATE_ENTRY_LABELS = ('New post', 'Create', '新帖子', '创建')
-# Observed creator submenu: no menu role/test id; its exposed container and
-# Post icon distinguish it from Live/Ad without using their order or text.
+# Observed creator submenus have no menu role/test id. The Chinese layout uses
+# an exposed anchor; the English layout uses a plain div with a Post SVG.
+# Match both in one union so duplicate/mixed-language candidates fail safely.
 INSTAGRAM_POST_ENTRY = (
-    'div[aria-hidden="false"] a[href="#"]:has(svg[aria-label="帖子"])'
+    'div[aria-hidden="false"] a[href="#"]:has(svg[aria-label="帖子"]), '
+    'svg[aria-label="Post"]'
 )
 
 INSTAGRAM_LOGIN_CHECK_TIMEOUT_MS = 20_000
@@ -678,8 +680,33 @@ class InstagramUploader:
                 # Account UI is observed per page, never inferred from alias or
                 # browser provider. Ordinary accounts open the composer directly.
                 budget.check_pre_click()
-                await _click_nav(post_entry, humanizer)
-                post_menu_selected = True
+                # Humanized clicks scroll, move, then check before mouse.down;
+                # a separate humanized hover can move the expanded submenu.
+                # Retry only failures known to precede dispatch, within this
+                # existing deadline. Never repeat a possibly dispatched click.
+                try:
+                    if not humanizer.enabled:
+                        # Native hover scrolls/moves without clicking. Check
+                        # afterwards: pointerenter may disable the container,
+                        # and a screen hit test before scrolling would block it.
+                        await humanizer.hover(post_entry)
+                        usable, reason = await check(post_entry, 'interactive')
+                        if not usable:
+                            raise ElementUnusableError(
+                                'Instagram 创建菜单帖子入口', role='interactive',
+                                reason=reason or 'probe-failed',
+                            )
+                    await humanizer.click(post_entry)
+                except ElementUnusableError as error:
+                    if error.reason.startswith('ambiguous:') or maybe_dispatched(error):
+                        raise
+                    logger.warning(
+                        'Instagram 创建菜单 Post 点击暂不可用（{}）；继续轮询',
+                        error.reason,
+                    )
+                else:
+                    post_menu_selected = True
+                    await humanizer.after_navigate()
             if time.monotonic() >= deadline:
                 raise RuntimeError(
                     'Instagram 创建弹窗未出现素材入口（可能被未知弹窗遮挡）'

@@ -843,6 +843,22 @@ class TencentUploadCliTests(_UploadCliCase, unittest.TestCase):
     context_kwargs = TENCENT_CONTEXT_KWARGS
     _local_check_name = "check_tencent_account"
 
+    def test_draft_upload_reports_saved_as_draft(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            self.session_cm = _AsyncCM(Namespace(context=object()))
+            app = MagicMock()
+            app.tencent_upload_video = AsyncMock()
+            patches = self._upload_patches(app, AsyncMock(return_value=True))
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                code, out, _ = self._run(self._upload_args(tmp_dir) + ["--draft"])
+
+        self.assertEqual(code, 0)
+        self.assertTrue(self.builder_mock.call_args.kwargs["is_draft"])
+        self.assertIn("Tencent/WeChat Channels video upload saved as draft:", out)
+        self.assertNotIn("submitted", out)
+        app.tencent_upload_video.assert_awaited_once()
+        self.assertEqual(self.session_cm.exit_calls, 1)
+
 
 class BaijiahaoUploadCliTests(_UploadCliCase, unittest.TestCase):
     module = baijiahao_command

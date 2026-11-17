@@ -147,6 +147,7 @@ el => {
   let visibility = own.visibility;
   let opacity = 1.0;
   let ancestorAriaHidden = false;
+  let ancestorAriaDisabled = false;
   let node = el.parentElement;
   while (node) {
     const style = getComputedStyle(node);
@@ -158,6 +159,9 @@ el => {
     if (!Number.isNaN(ancestorOpacity)) { opacity *= ancestorOpacity; }
     if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') {
       ancestorAriaHidden = true;
+    }
+    if (node.getAttribute && node.getAttribute('aria-disabled') === 'true') {
+      ancestorAriaDisabled = true;
     }
     node = node.parentElement;
   }
@@ -172,7 +176,7 @@ el => {
     opacity: opacity,
     ariaHidden: el.getAttribute ? el.getAttribute('aria-hidden') : null,
     ancestorAriaHidden: ancestorAriaHidden,
-    disabled: hasAttr('disabled') ||
+    disabled: hasAttr('disabled') || ancestorAriaDisabled ||
       (el.getAttribute && el.getAttribute('aria-disabled') === 'true'),
     disabledClass: classes.indexOf('disabled') !== -1,
     pointerEvents: own.pointerEvents,

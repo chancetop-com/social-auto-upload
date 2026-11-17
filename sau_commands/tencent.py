@@ -228,7 +228,8 @@ async def run(args):
             local_browser=local_browser,
         )
         await upload_tencent_video(request, target=target)
-        print(f"Tencent/WeChat Channels video upload submitted: {request.video_file}")
+        outcome = "saved as draft" if request.is_draft else "submitted"
+        print(f"Tencent/WeChat Channels video upload {outcome}: {request.video_file}")
         return 0
 
     raise RuntimeError(f"Unsupported Tencent/WeChat Channels action: {args.action}")
