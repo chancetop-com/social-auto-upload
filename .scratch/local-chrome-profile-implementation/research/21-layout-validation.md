@@ -27,7 +27,24 @@ reset 持有与 session 相同的非等待跨进程锁，删除账号数据及�
 
 ## 实际资料搬迁
 
-待 root 集成代码检查点后执行。原 19/20 的旧路径与平台 no-publish 记录保留为历史；本记录只追加本次布局变化的移动及四个普通 check 证据。没有因目录变化增加真实素材上传。
+代码检查点 `6f831fd` 已集成为原仓库 `3455f1f`，root 明确放行后执行一次性搬迁。先列出原目录及四个精确目标，确认专用目录、归属、无 singleton 与无实际账号浏览器进程，再同时取得四个旧 guard、四个新 guard 和短时 layout 锁。使用 macOS `renamex_np(RENAME_EXCL)` 原子移动，已有目标即拒绝；合成测试已验证即使目标为空目录也不覆盖。没有复制/合并资料、跨种类复制、reset、重新登录、直接读取 Cookie/History 内容、清 singleton 或杀外部进程。
+
+[原始搬迁事件](./21-relocation-events.jsonl)保留旧/新路径和移动前 inode；四个目录移动后及真实 check 后 inode 均未改变。只有核验归属的旧 `.sau-owner.json`、旧 guard 文件和空父目录按计划退出；未知 `browser_profiles/instagram/.DS_Store` 及其父目录/平台记录保留，未读取其内容。原 `instagram/luke/chrome` 等四个精确旧目标全部不存在；常规代码只使用新布局，没有旧路径回退。
+
+初次事后验证把“所有旧平台父目录不存在”写成了过严断言，在发现 `.DS_Store` 时停止；此前 TikTok、Rednote、Instagram 的 guard 已成功重新取得并释放。修正为精确目标不存在且保留未知文件后，完成小红书 guard 验证；没有删除未知文件来满足断言。Instagram 随后交还票 23，21 不再访问该 Profile。
+
+原 `conf.py` 的 device/inode/size/mtime_ns 前后相同；核对未读取其内容，历史发布结果不在搬迁操作范围内。临时 `/private/tmp/sau-local-profile-notes/21-relocate.py` 与临时配置 stat 记录已实际删除；临时实现及专用合成测试没有进入仓库。原 19/20 的旧路径和八个真实 no-publish 结果保留为历史，本次没有新增素材上传。
+
+实际检查从原仓库运行 `.venv/bin/python sau_cli.py <platform> check --account <alias> --headed`，不传浏览器选择，正常解析为 `channel=chrome`、Chrome `157.0.8103.79`、`headless=False`；四次输出均为 `valid` 且进程退出 `0`：
+
+| 平台 | 别名 | 新路径（相对原仓库） | 启动日志时间（Asia/Shanghai） | 结果 |
+| --- | --- | --- | --- | --- |
+| TikTok | lukechen | `browser_profiles/chrome/tiktok/lukechen` | 2026-11-17 19:56:21 | valid / 0 |
+| Rednote | rednote | `browser_profiles/chrome/rednote/rednote` | 2026-11-17 19:56:39 | valid / 0 |
+| Instagram | luke | `browser_profiles/chrome/instagram/luke` | 2026-11-17 19:57:13 | valid / 0 |
+| 小红书 | 180 | `browser_profiles/chrome/xiaohongshu/180` | 2026-11-17 19:57:40 | valid / 0 |
+
+每份资料在 check 后都成功重新取得项目占用、通过原有 native singleton 检查并释放。没有关闭超时。此证据只证明已搬迁资料仍可用于普通登录检查，不扩大为真实发布或其他平台的账号验收。
 
 ### 受控矩阵结果
 

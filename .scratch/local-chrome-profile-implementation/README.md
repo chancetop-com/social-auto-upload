@@ -107,3 +107,7 @@
 - 2026-11-17：[24 已解决](./issues/24-clarify-no-publish-output.md) 明确 Rednote、TikTok、小红书视频/图文 no-publish 成功摘要；本地及托管统一说明素材上传、检查完成且未点击发布，历史日志原文保留。305 项离线与 18 项真实浏览器受控 DOM 检查通过；未操作真实账号或额外上传。验证结果见票据 Comments。
 
 - 2026-11-17：[23 已解决](./issues/23-instagram-account-ui-compatibility.md)。按实际语义兼容普通号直接编辑器与 creator 帖子子菜单，保留 Humanizer；移除导航位置猜测，分离推进/提交动作并加强发布就绪判定。101 项相关离线、新增 19 个受控场景、33 项既有浏览器及最终 5 项就绪子集通过；21 切换后当前真实 creator 视频/图文 no-publish 均首次退出 0/prepared、Share 前停止。普通号本次仅受控证据，见 [23 验证记录](./research/23-instagram-account-ui.md)。
+
+## 用户追加实施结果
+
+- [21：浏览器种类首层布局与资料搬迁](./issues/21-browser-kind-first-layout.md)已完成；四个原始 Profile 保留 inode 安全移动，四项普通 Chrome 有头 check 均 valid/0。未知旧父目录 `.DS_Store` 保留，历史 19/20 路径不改写；[新布局验证记录](./research/21-layout-validation.md)另存实际证据。

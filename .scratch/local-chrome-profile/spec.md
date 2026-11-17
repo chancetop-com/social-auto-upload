@@ -265,6 +265,8 @@ Source: [决策地图](./map.md)
 
 目录顺序以第 3 节和[实施票 21](../local-chrome-profile-implementation/issues/21-browser-kind-first-layout.md)为准，覆盖原平台/别名/种类顺序。四个原仓库已认证 Profile 在代码就绪并集成后，持有旧、新占用保护，核对归属与 singleton 状态，以不覆盖目标的同种类移动保留资料；不 reset、不重新登录、不读取 Cookie/History 内容。正常默认 Chrome 有头 check 四个账号后记录新路径；历史 19/20 执行记录不改写。临时搬迁实现随后删除，日常命令不保留旧布局探测或回退。
 
+21 已完成实际搬迁与四项普通 Chrome 有头 check，均为 valid/0；四份资料保留 inode，原 conf.py 不变，临时搬迁程序已删除。未知旧 Instagram `.DS_Store` 按要求保留；完整证据见[21 验证记录](../local-chrome-profile-implementation/research/21-layout-validation.md)。
+
 ## 2026-11-17 追加要求：明确 no-publish 成功摘要（24）
 
 用户指出 Rednote、TikTok、小红书的 `prepared (not published)` 摘要容易误解；三个平台的视频与图文在媒体上传、编辑及发布就绪检查成功返回后，统一输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。保留视频路径或图片数量信息，失败/登录失效不输出成功摘要。

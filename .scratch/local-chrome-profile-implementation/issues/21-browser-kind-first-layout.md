@@ -4,19 +4,19 @@
 
 **Blocked by:** [19：一次性迁移](./19-one-time-legacy-migration.md)（已完成）。基于 20 已验证基线 `a61628c`，与 22、23、24 可并行；最终 20 收口等待这些追加要求。
 
-**Status:** claimed
+**Status:** resolved
 
 **依据：** 最新用户目录层级要求覆盖原规格的旧顺序；其余 Profile、安全、托管和发布契约继续有效。
 
 - [x] 共享取得、会话、reset 统一采用 browser-kind/platform/raw-account 顺序；目录名保留原始别名，不归一化，不按真实账号绑定。
 - [x] 归属元数据、同 Profile 非等待跨进程锁、别名碰撞、外部 browser/singleton 防护、reset 部分失败隔离全部保持；锁和重建标记位于可删除的账号数据目录之外，内部文件名不占用有效别名空间。
-- [ ] 审核所有硬编码路径，包括二维码、测试、受控浏览器脚本、当前文档及规格；历史真实执行记录保留当时路径，并追加本次搬迁记录。
+- [x] 审核所有硬编码路径，包括二维码、测试、受控浏览器脚本、当前文档及规格；历史真实执行记录保留当时路径，并追加本次搬迁记录。
 - [x] 先 TDD 完成共享行为和路径断言，跨进程及受影响真实 Chrome/Chromium 持久化检查；代码就绪提交后先通知 root 集成新运行路径，再进行真实资料搬迁。
-- [ ] 实际搬迁只针对原仓库内已验证归属且未被占用的 Profile，先清点；旧、新目标都受 guard 保护，不覆盖或合并目标、不复制到另一 browser kind、不读取 Cookie/History 内容、不清 singleton 或杀外部进程。
-- [ ] 已有四个账号的资料保留在原仓库，使用 rename 等安全移动完成新布局；不通过 reset 或重新登录替代搬迁，不删除未知资料或历史结果。
-- [ ] 四个迁移后的默认 Chrome 有头正常 check 真实通过，证据准确记录新路径和结果。只因路径变化不重复无关素材上传。
-- [ ] 一次性旧布局搬迁程序和专用检测/兼容入口实际移除，日常命令只使用新布局；无永久双路径兼容。
-- [ ] 更新本票、索引、规格和当前运行文档；完成实际搬迁与核验后才能 resolved。原 conf.py 不变。
+- [x] 实际搬迁只针对原仓库内已验证归属且未被占用的 Profile，先清点；旧、新目标都受 guard 保护，不覆盖或合并目标、不复制到另一 browser kind、不读取 Cookie/History 内容、不清 singleton 或杀外部进程。
+- [x] 已有四个账号的资料保留在原仓库，使用 rename 等安全移动完成新布局；不通过 reset 或重新登录替代搬迁，不删除未知资料或历史结果。
+- [x] 四个迁移后的默认 Chrome 有头正常 check 真实通过，证据准确记录新路径和结果。只因路径变化不重复无关素材上传。
+- [x] 一次性旧布局搬迁程序和专用检测/兼容入口实际移除，日常命令只使用新布局；无永久双路径兼容。
+- [x] 更新本票、索引、规格和当前运行文档；完成实际搬迁与核验后才能 resolved。原 conf.py 不变。
 
 ## Comments
 
@@ -30,3 +30,12 @@
 - sandbox 外相同 `*profile*.py` 集合 352/352 通过（610.800s）；另补 TikTok local-mode/session 12 项通过。已合入 integration `6e6e416`（22、24），并通过 post-merge 121 项共享与三平台 CLI 回归。新路径、managed-only 通用入口及新的 no-publish 文案共同生效。
 
 - 串行 browser smoke 8/8 通过：Chrome/Chromium × channel/custom executable × headed/headless；Cookie/localStorage 重开持久化、匿名隔离、新路径、叶子无项目元数据、每行末尾重新取得 guard 全通过，无关闭超时。详见[21 验证记录](../research/21-layout-validation.md)。
+
+- 代码检查点 `6f831fd` 集成至原仓库 `3455f1f` 后，root 明确 GO；四份原始 Profile 在旧/新 guard 保护下安全移动，移动前后与 check 后 inode 相同。四个正常默认 Chrome headed check 均返回 valid/0，无重置或重新登录。每个 Profile 的 guard 已重新取得/释放，临时搬迁程序和临时配置 stat 记录已删除。原配置 stat 完全相同，历史结果未访问/改写。未知 Instagram `.DS_Store` 与旧父目录保留；四个精确旧账号数据目标均不存在。
+- 合入最新 integration `3455f1f` 是 fast-forward，代码树与已验证检查点相同；最终提交仅补充真实搬迁、四项 check、未知文件保留和临时程序删除证据。没有新的源代码变更需要重复浏览器测试。
+
+## Answer
+
+已完成浏览器种类首层布局、外置归属/guard/重建隔离、所有当前路径与独立平台说明同步。旧布局没有常驻兼容入口。原仓库四份已认证资料通过独占、归属与 native singleton 检查后，以拒绝覆盖的原子 rename 移动至 `browser_profiles/chrome/<platform>/<raw_account>`；四次普通 headed Chrome check 全通过，未 reset、重新登录或额外上传。保留未知 `.DS_Store` 与历史证据，原 conf.py 不变；一次性搬迁实现已删除。
+
+验证与实际边界见[21 布局验证及搬迁记录](../research/21-layout-validation.md)和[搬迁事件](../research/21-relocation-events.jsonl)：352 项 Profile 回归、post-merge 121 项共享/CLI 回归、8 配置真实隔离浏览器矩阵、4 个真实账号 check。没有未解决阻塞。
