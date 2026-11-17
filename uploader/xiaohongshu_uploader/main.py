@@ -6,7 +6,6 @@ import inspect
 import json
 import os
 import re
-import tempfile
 import time
 from collections import Counter
 from datetime import datetime
@@ -19,16 +18,16 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+import conf
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
-from utils.base_social_media import set_init_script
 from utils.blocked import BlockedKind
 from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
-from utils.browser_session import log_local_session_ready
+from utils.local_browser_session import local_browser_session
+from utils.local_browser import resolve_local_browser
 from utils.browser_session import provider_label
 from utils.browser_time import page_wall_clock
 from utils.controls import read_switch_state
@@ -43,7 +42,7 @@ from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, UsageError
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.text_validation import validate_single_line
@@ -96,8 +95,6 @@ XHS_CONTENT_TYPES = tuple(XHS_CONTENT_TYPE_LABELS) + tuple(
 
 XHS_LOGIN_CHECK_SETTLE_MS = 3_000
 
-# 本地模式唯一的零网络前置：会话 cookie 名称（spec §3 U9 A）。
-XHS_SESSION_COOKIE_NAME = "galaxy_creator_session_id"
 # 检查发布页的观测窗口：导航 30s + 静置 3s（探测失败是退出 1，不是失效）。
 XHS_PROBE_NAVIGATION_TIMEOUT_MS = 30_000
 XHS_PROBE_SETTLE_MS = XHS_LOGIN_CHECK_SETTLE_MS
@@ -467,13 +464,10 @@ XHS_NOTE_ADD_IMAGE_INPUT_CANDIDATES = (
     Candidate('.img-list .top input[type="file"][multiple]'),
 )
 
-# Golden local-mode browser options.  ``sau_commands/xiaohongshu.py`` passes the
-# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
-# drift.  Geolocation is a local-only context option: the Multilogin branch must
-# never call ``grant_permissions`` (spec §8).
+# Historical options retained solely for managed-mode ignored-option diagnostics.
+# Local sessions use only the resolved persistent-browser launch options.
 XHS_LAUNCH_KWARGS = {"channel": "chromium"}
-# 本地模式固定中文：创作后台的按钮/弹窗/placeholder 都是中文选择器。
-# 托管模式不会应用 context_kwargs，Profile 界面必须由人工保持中文。
+# Managed mode reports these as ignored; it never applies them to its Profile.
 XHS_CONTEXT_KWARGS = {
     "permissions": ["geolocation"],
     "locale": "zh-CN",
@@ -1292,23 +1286,6 @@ def _multiset_difference(after, before) -> list[str]:
     return new_values
 
 
-async def _xhs_user_agent(browser) -> str:
-    """返回不带 ``HeadlessChrome`` 标记的浏览器 UA。
-
-    小红书创作者中心的 SSO 会直接拒绝无头 Chromium 默认 UA：即使 cookie
-    完全有效，所有请求也会被重定向到 ``/login``（``service-ticket`` 返回
-    704 您已登出）。这里读取浏览器真实 UA 并把 ``HeadlessChrome`` 换成
-    ``Chrome``，让无头模式与有头模式使用同一套 UA。
-    """
-    probe_context = await browser.new_context()
-    try:
-        probe_page = await probe_context.new_page()
-        user_agent = await probe_page.evaluate("() => navigator.userAgent")
-    finally:
-        await close_browser_resources(context=probe_context)
-    return user_agent.replace("HeadlessChrome", "Chrome")
-
-
 def _anchor_hit_line(step: str, resolved: Resolved, page: Page) -> str:
     """命中日志的唯一格式：环节 / 候选种类 / 选择器 / URL。"""
     url = str(getattr(page, "url", "") or "")
@@ -1441,6 +1418,14 @@ async def _extract_xhs_qrcode_src(
     return qrcode_src
 
 
+def _cleanup_login_qrcode(path):
+    try:
+        return remove_qrcode_file(path)
+    except Exception as error:
+        xiaohongshu_logger.warning(_msg("⚠️", f"临时二维码清理失败（保留原结果）: {error}"))
+        return False
+
+
 async def _save_xhs_qrcode(
     page: Page,
     account_file: str,
@@ -1459,7 +1444,7 @@ async def _save_xhs_qrcode(
         await qrcode_img.screenshot(path=str(qrcode_path))
 
     if previous_qrcode_path and previous_qrcode_path != qrcode_path:
-        if remove_qrcode_file(previous_qrcode_path):
+        if _cleanup_login_qrcode(previous_qrcode_path):
             xiaohongshu_logger.info(_msg("🧹", f"临时二维码文件已清理: {previous_qrcode_path}"))
 
     xiaohongshu_logger.info(_msg("🖼️", f"二维码已经准备好啦，已保存到: {qrcode_path}"))
@@ -1473,76 +1458,15 @@ async def _save_xhs_qrcode(
         "image_path": str(qrcode_path),
         "image_data_url": qrcode_src,
     }
-    await _emit_qrcode_callback(qrcode_callback, qrcode_info)
+    try:
+        await _emit_qrcode_callback(qrcode_callback, qrcode_info)
+    except BaseException:
+        _cleanup_login_qrcode(qrcode_path)
+        raise
     return qrcode_info
 
 
-def _local_login_required() -> LoginRequiredError:
-    """本地会话前置失败的唯一错误形状（退出 10，未启动浏览器）。"""
-    return LoginRequiredError(
-        _blocked_message("login", "local", publish_attempted=False),
-        reason="login",
-        publish_attempted=False,
-    )
-
-
-async def local_session_preflight(account_file) -> None:
-    """零网络本地前置：账号文件存在 + 会话 cookie 存在 + 未过期。
-
-    ``expires <= 0`` 表示会话 cookie / 过期时间未知，按规格放行。任何读取
-    失败都视为「无法证明会话存在」→ ``LoginRequiredError``，绝不启动浏览器。
-    """
-    path = Path(str(account_file))
-    if not path.is_file():
-        raise _local_login_required()
-
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raise _local_login_required() from None
-
-    cookies = state.get("cookies") if isinstance(state, dict) else None
-    if not isinstance(cookies, list):
-        raise _local_login_required()
-
-    session_cookie = None
-    for cookie in cookies:
-        if isinstance(cookie, dict) and cookie.get("name") == XHS_SESSION_COOKIE_NAME:
-            session_cookie = cookie
-            break
-    if session_cookie is None:
-        raise _local_login_required()
-
-    expires = session_cookie.get("expires")
-    try:
-        expiry = float(expires) if expires is not None else 0.0
-    except (TypeError, ValueError):
-        expiry = 0.0
-    if expiry > 0 and expiry <= time.time():
-        raise _local_login_required()
-
-
-async def save_storage_state_atomic(context: BrowserContext, account_file) -> None:
-    """把当前 context 的 storage_state 原子写回账号文件（temp + replace）。"""
-    state = await context.storage_state()
-    target = Path(str(account_file))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_path = tempfile.mkstemp(
-        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(state, handle, ensure_ascii=False)
-        os.replace(temp_path, target)
-    except BaseException:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
-
-
-async def probe_session(context: BrowserContext) -> tuple[str, str]:
+async def probe_session(context: BrowserContext, *, close_page=True) -> tuple[str, str]:
     """发布页唯一观测（check 与登录后复核共用）。
 
     一次 ``new_page`` → 导航发布页 → 静置 → 分类器 → 上传入口 ``attached``
@@ -1606,139 +1530,127 @@ async def probe_session(context: BrowserContext) -> tuple[str, str]:
             "小红书发布页检查失败：未找到上传入口（页面结构异常）"
         )
     finally:
-        await close_browser_resources(page=page)
+        # Local persistent sessions close all owned pages within their bounded
+        # context teardown. Preserve the managed probe's existing page lifecycle.
+        if close_page:
+            await close_browser_resources(page=page)
+
+
+def _account_alias(account_file, account_name=None):
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    # Positional filenames remain name-only compatibility; never inspect a file.
+    name = Path(str(account_file)).name
+    if name.endswith(".json"):
+        return name[:-5].removeprefix("xiaohongshu_")
+    return str(account_file)
 
 
 async def xiaohongshu_setup(
-    account_file,
-    handle=False,
-    return_detail=False,
-    qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    account_file=None, handle=False, return_detail=False, qrcode_callback=None,
+    headless=None, *, account_name=None, local_browser=None,
 ):
-    # 登录命令总是允许重新扫码；不再用网络探测决定是否跳过。
     if handle:
-        xiaohongshu_logger.info(_msg("🖼️", "准备打开浏览器扫码登录小红书"))
         result = await xiaohongshu_cookie_gen(
-            account_file,
-            qrcode_callback=qrcode_callback,
-            headless=headless,
+            account_file, qrcode_callback=qrcode_callback, headless=headless,
+            account_name=account_name, local_browser=local_browser,
         )
         return result if return_detail else result["success"]
 
-    try:
-        await local_session_preflight(account_file)
-    except LoginRequiredError:
-        result = _build_login_result(
-            False, "cookie_invalid", "cookie文件不存在或已失效", account_file
-        )
-        return result if return_detail else False
+    async def check(context):
+        kind, evidence = await probe_session(context, close_page=False)
+        if kind != "valid":
+            raise LoginRequiredError(
+                _blocked_message(kind, "local", publish_attempted=False),
+                reason=kind, publish_attempted=False,
+            )
+        result = _build_login_result(True, "valid", "Profile 登录有效", account_name or account_file, current_url=evidence)
+        return result if return_detail else True
 
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
-    return result if return_detail else True
+    account = _account_alias(account_file, account_name)
+    async with async_playwright() as playwright:
+        async with local_browser_session(
+            playwright, platform="xiaohongshu", account=account,
+            headless=headless, local_browser=local_browser,
+        ) as owned:
+            return await check(owned.context)
 
 
 async def xiaohongshu_cookie_gen(
-    account_file,
-    qrcode_callback=None,
-    poll_interval: int = 3,
-    max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    account_file=None, qrcode_callback=None, poll_interval: int = 3,
+    max_checks: int = 100, headless=None, *, account_name=None, local_browser=None,
 ):
-    if headless:
+    """Guide QR login in the selected Profile; the browser persists its state."""
+    account = _account_alias(account_file, account_name)
+    config = resolve_local_browser(headless=headless, local_browser=local_browser)
+    if config.headless:
         xiaohongshu_logger.info(_msg("🖼️", "小红书登录将以无头模式运行，小人会输出终端二维码并保存本地二维码图片"))
-
-    account_path = Path(account_file)
-    account_path.parent.mkdir(parents=True, exist_ok=True)
-
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=headless, channel="chromium")
-        context = await browser.new_context(
-            user_agent=await _xhs_user_agent(browser),
-            **XHS_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-        qrcode_path = None
-        qrcode_info = None
-        result = _build_login_result(False, "failed", "小红书登录失败", account_file)
-        try:
-            page = await context.new_page()
-            await page.goto(_build_xhs_creator_url("/login"))
-            await Humanizer(page).after_navigate()
-            qrcode_info = await _save_xhs_qrcode(page, account_file, qrcode_callback=qrcode_callback)
-            qrcode_path = Path(qrcode_info["image_path"])
-            xiaohongshu_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
-
-            for _ in range(max_checks):
-                # 扫码完成判据只有分类器：返回 None 即离开登录/验证页。
-                if await classify_blocked(page) is None:
-                    await asyncio.sleep(XHS_LOGIN_SUCCESS_SETTLE_SECONDS)
-                    kind, evidence = await probe_session(context)
-                    if kind == "valid":
-                        await save_storage_state_atomic(context, account_file)
+        async with local_browser_session(
+            playwright, platform="xiaohongshu", account=account,
+            configuration=config, create=True,
+        ) as session:
+            context = session.context
+            # Profile ownership has validated the raw alias before path use.
+            profile_path = Path(conf.BASE_DIR) / "browser_profiles" / "xiaohongshu" / account / config.kind
+            qrcode_path = None
+            try:
+                page = await context.new_page()
+                await page.goto(_build_xhs_creator_url("/login"))
+                await Humanizer(page).after_navigate()
+                qrcode_info = await _save_xhs_qrcode(
+                    page, str(profile_path / "login"), qrcode_callback=qrcode_callback,
+                )
+                qrcode_path = Path(qrcode_info["image_path"])
+                xiaohongshu_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
+                for _ in range(max_checks):
+                    if await classify_blocked(page) is None:
+                        await asyncio.sleep(XHS_LOGIN_SUCCESS_SETTLE_SECONDS)
+                        kind, evidence = await probe_session(context, close_page=False)
+                        if kind != "valid":
+                            raise LoginRequiredError(
+                                _blocked_message(kind, "local", publish_attempted=False),
+                                reason=kind, publish_attempted=False,
+                            )
                         xiaohongshu_logger.success(_msg("🥳", "小红书扫码登录成功，小人开心收工"))
-                        result = _build_login_result(
-                            True,
-                            "success",
-                            "小红书扫码登录成功",
-                            account_file,
-                            qrcode_info,
-                            evidence or page.url,
-                        )
-                    else:
-                        result = _build_login_result(
-                            False,
-                            "cookie_invalid",
-                            "小红书扫码流程结束，但发布页复核未通过",
-                            account_file,
-                            qrcode_info,
-                            evidence or page.url,
-                        )
-                    return result
-
-                await asyncio.sleep(poll_interval)
-
-            result = _build_login_result(
-                False,
-                "timeout",
-                "等待小红书扫码登录超时",
-                account_file,
-                qrcode_info,
-                page.url,
-            )
-        except Exception as exc:
-            result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
-        finally:
-            if remove_qrcode_file(qrcode_path):
-                xiaohongshu_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
-                xiaohongshu_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
-        return result
+                        return _build_login_result(True, "success", "小红书扫码登录成功", str(profile_path), qrcode_info, evidence)
+                    await asyncio.sleep(poll_interval)
+                kind = await classify_blocked(page) or "login"
+                raise LoginRequiredError(
+                    _blocked_message(kind, "local", publish_attempted=False),
+                    reason=kind, publish_attempted=False,
+                )
+            finally:
+                if _cleanup_login_qrcode(qrcode_path):
+                    xiaohongshu_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
 
 
 class XiaoHongShuBaseUploader(BaseVideoUploader):
     def __init__(
         self,
         publish_date: datetime | int,
-        account_file,
+        account_file=None,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         original_declaration: bool | None = None,
         content_type: str | None = None,
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
         no_publish: bool = False,
+        account_name=None,
+        local_browser=None,
     ):
         self.publish_date = publish_date
         self.account_file = None if account_file is None else str(account_file)
         self.publish_strategy = publish_strategy
         self.debug = debug
-        self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = headless
+        self.account_name = account_name
+        self.local_browser = local_browser
         # 两项声明默认都不操作页面：None / "" 表示保持平台默认。
         self.original_declaration = original_declaration
         self.content_type = content_type
@@ -1748,10 +1660,6 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         self.no_publish = no_publish
 
     async def validate_base_args(self, *, check_cookie: bool = True):
-        if check_cookie:
-            # 唯一的本地前置：零网络，失败 = 退出 10 且不启动浏览器。
-            await local_session_preflight(self.account_file)
-
         if self.publish_strategy not in {
             XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
             XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
@@ -2694,18 +2602,20 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         file_path,
         tags,
         publish_date: datetime | int,
-        account_file,
+        account_file=None,
         thumbnail_path=None,
         desc: str | None = None,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         original_declaration: bool | None = None,
         content_type: str | None = None,
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
         no_publish: bool = False,
+        account_name=None,
+        local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -2719,6 +2629,8 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
             shoot_location=shoot_location,
             shoot_date=shoot_date,
             no_publish=no_publish,
+            account_name=account_name,
+            local_browser=local_browser,
         )
         self.title = title
         self.file_path = file_path
@@ -2982,41 +2894,18 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         xiaohongshu_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        await self.validate_upload_args(check_cookie=False)
         if session is not None:
-            await self.validate_upload_args(check_cookie=False)
             await self.upload_in(session)
             return
-
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
-
-        xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
-        await self.validate_upload_args()
-        xiaohongshu_logger.info(_msg("🥳", "上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, **XHS_LAUNCH_KWARGS)
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            user_agent=await _xhs_user_agent(browser),
-            **XHS_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-        log_local_session_ready(
-            headless=self.headless, account_file=self.account_file
-        )
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            try:
-                await save_storage_state_atomic(context, self.account_file)
-                xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
-            except Exception as error:
-                xiaohongshu_logger.warning(
-                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
-                )
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        async with local_browser_session(
+            playwright, platform="xiaohongshu",
+            account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as owned:
+            await self.upload_in(owned)
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
@@ -3040,18 +2929,20 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         note,
         tags,
         publish_date: datetime | int,
-        account_file,
+        account_file=None,
         title: str | None = None,
         desc: str | None = None,
         publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         original_declaration: bool | None = None,
         content_type: str | None = None,
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
         no_publish: bool = False,
+        account_name=None,
+        local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -3065,6 +2956,8 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
             shoot_location=shoot_location,
             shoot_date=shoot_date,
             no_publish=no_publish,
+            account_name=account_name,
+            local_browser=local_browser,
         )
         self.image_paths = image_paths
         self.note = note or ""
@@ -3196,41 +3089,18 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         xiaohongshu_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        await self.validate_upload_args(check_cookie=False)
         if session is not None:
-            await self.validate_upload_args(check_cookie=False)
             await self.upload_in(session)
             return
-
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
-
-        xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
-        await self.validate_upload_args()
-        xiaohongshu_logger.info(_msg("🥳", "图文上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, **XHS_LAUNCH_KWARGS)
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            user_agent=await _xhs_user_agent(browser),
-            **XHS_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-        log_local_session_ready(
-            headless=self.headless, account_file=self.account_file
-        )
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            try:
-                await save_storage_state_atomic(context, self.account_file)
-                xiaohongshu_logger.success(_msg("🥳", "cookie 更新完毕"))
-            except Exception as error:
-                xiaohongshu_logger.warning(
-                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
-                )
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        async with local_browser_session(
+            playwright, platform="xiaohongshu",
+            account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as owned:
+            await self.upload_in(owned)
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()

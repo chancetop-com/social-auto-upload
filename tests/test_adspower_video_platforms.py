@@ -107,7 +107,7 @@ class VideoPlatformCoverageTests(unittest.TestCase):
             login_patch,
             patch.object(
                 module,
-                "local_browser_session" if module is tiktok else "resolve_account_file",
+                "local_browser_session" if module in (tiktok, xiaohongshu) else "resolve_account_file",
                 new=MagicMock(
                     side_effect=AssertionError(
                         "managed mode must not acquire any local browser identity"

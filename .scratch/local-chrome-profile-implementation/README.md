@@ -69,3 +69,5 @@
 ## 交付记录
 
 - 2026-11-17：[01 已解决](./issues/01-profile-ownership-and-reset.md)。第一批四平台开放显式重建，共享 Profile 归属/跨进程占用已交付；20 项所有权/重建测试和 213 项相关回归通过。当前只改变重建入口，浏览器持久化会话及其实际浏览器验证由 02 继续交付，其余平台按上述阻塞关系接入。
+
+- 2026-11-17：[05 已解决](./issues/05-xiaohongshu-persistent-profile.md)。小红书全部正式本地动作与直接 uploader 已接入持久化 Profile；324 项平台回归、165 项相关/跨平台回归、7 项真实动态 DOM 测试通过，另有 4/4 受控 no_viewport 浏览器流程。证据见 [05 记录](./research/05-browser-validation.md)。未操作真实账号，平台真实 no-publish 留给 20。

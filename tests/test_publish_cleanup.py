@@ -16,8 +16,6 @@ from utils.errors import LoginRequiredError, PublishResultUnknownError
 LOCAL_UPLOADS = (
     ("rednote", "RednoteVideo"),
     ("rednote", "RednoteNote"),
-    ("xiaohongshu", "XiaoHongShuVideo"),
-    ("xiaohongshu", "XiaoHongShuNote"),
     ("ks", "KSVideo"),
     ("ks", "KSNote"),
     ("tencent", "TencentVideo"),
@@ -29,6 +27,7 @@ LOCAL_UPLOADS = (
     ("douyin", "DouYinVideo"),
     ("douyin", "DouYinNote"),
     ("youtube", "YouTubeVideo"),
+    # Xiaohongshu persistent outcomes: test_xhs_profile_cli.
     # TikTok persistent-context outcomes are covered by test_tiktok_profile_cli.
 )
 

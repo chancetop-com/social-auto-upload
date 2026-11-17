@@ -16,22 +16,18 @@ from uploader.xiaohongshu_uploader.main import (
     XiaoHongShuNote,
     XiaoHongShuVideo,
     _blocked_message,
-    _xhs_user_agent as xiaohongshu_user_agent,
     format_tag_cap_warning,
-    local_session_preflight,
     probe_session,
-    save_storage_state_atomic,
     xiaohongshu_setup,
 )
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_image_files,
     parse_tags,
-    resolve_account_file,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -44,10 +40,9 @@ from sau_commands.browser import (
 )
 from sau_commands.arguments import single_line_value
 from utils.text_validation import validate_single_line
-from utils.browser_cleanup import close_browser_resources
-from utils.base_social_media import set_init_script
 from utils.browser_session import browser_session
-from utils.browser_session import log_local_session_ready
+from utils.local_browser_session import local_browser_session
+from utils.local_browser import resolve_headless
 from utils.errors import LoginRequiredError, UsageError
 
 CONTENT_TYPE_CHOICES = tuple(XHS_CONTENT_TYPES)
@@ -169,7 +164,7 @@ def register(platform_parsers):
     for action_name in ("login", "check"):
         action_parser = xiaohongshu_actions.add_parser(action_name, help=f"Xiaohongshu {action_name}")
         action_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
-        add_runtime_flags(action_parser)
+        add_local_runtime_flags(action_parser)
         if action_name == "check":
             add_browser_flags(action_parser)
 
@@ -183,7 +178,7 @@ def register(platform_parsers):
     add_not_before_flag(xiaohongshu_upload_video_parser)
     xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     _add_declaration_flags(xiaohongshu_upload_video_parser)
-    add_runtime_flags(xiaohongshu_upload_video_parser)
+    add_local_runtime_flags(xiaohongshu_upload_video_parser)
     add_browser_flags(xiaohongshu_upload_video_parser)
 
     xiaohongshu_upload_note_parser = xiaohongshu_actions.add_parser("upload-note", help="Upload one note to Xiaohongshu")
@@ -195,7 +190,7 @@ def register(platform_parsers):
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(xiaohongshu_upload_note_parser)
     _add_declaration_flags(xiaohongshu_upload_note_parser)
-    add_runtime_flags(xiaohongshu_upload_note_parser)
+    add_local_runtime_flags(xiaohongshu_upload_note_parser)
     add_browser_flags(xiaohongshu_upload_note_parser)
 
 
@@ -210,7 +205,7 @@ class XiaohongshuVideoUploadRequest:
     thumbnail_file: Path | None = None
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = False
-    headless: bool = False
+    headless: bool | None = None
     original_declaration: bool | None = None
     content_type: str | None = None
     repost_source: str | None = None
@@ -218,6 +213,7 @@ class XiaohongshuVideoUploadRequest:
     shoot_date: str | None = None
     no_publish: bool = False
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
 @dataclass(slots=True)
@@ -230,7 +226,7 @@ class XiaohongshuNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = False
-    headless: bool = False
+    headless: bool | None = None
     original_declaration: bool | None = None
     content_type: str | None = None
     repost_source: str | None = None
@@ -238,43 +234,28 @@ class XiaohongshuNoteUploadRequest:
     shoot_date: str | None = None
     no_publish: bool = False
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
-async def login_xiaohongshu_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("xiaohongshu", account_name)
-    return await xiaohongshu_setup(str(account_file), handle=True, return_detail=True, headless=headless)
+async def login_xiaohongshu_account(account_name: str, headless=None, local_browser=None) -> dict:
+    return await xiaohongshu_setup(account_name=account_name, handle=True,
+                                  return_detail=True, headless=headless,
+                                  local_browser=local_browser)
 
 
 async def check_xiaohongshu_account(
-    account_name: str, *, headless: bool = False
+    account_name: str, *, headless=None, local_browser=None
 ) -> bool:
-    """本地 `check`：零网络前置 → 一次发布页观测 → 成功才原子写回。"""
-    account_file = resolve_account_file("xiaohongshu", account_name)
-    await local_session_preflight(str(account_file))
-
+    """Observe the publishing page in the selected persistent Profile."""
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            headless=headless, **XHS_LAUNCH_KWARGS
-        )
-        context = None
-        try:
-            context = await browser.new_context(
-                storage_state=str(account_file),
-                user_agent=await xiaohongshu_user_agent(browser),
-                **XHS_CONTEXT_KWARGS,
-            )
-            if XHS_INIT_SCRIPT:
-                context = await set_init_script(context)
-            log_local_session_ready(
-                headless=headless, account_file=str(account_file)
-            )
-            kind, _evidence = await probe_session(context)
+        async with local_browser_session(
+            playwright, platform="xiaohongshu", account=account_name,
+            headless=headless, local_browser=local_browser,
+        ) as session:
+            kind, _evidence = await probe_session(session.context, close_page=False)
             if kind != "valid":
                 raise _probe_login_error(kind, "local")
-            await save_storage_state_atomic(context, str(account_file))
             return True
-        finally:
-            await close_browser_resources(context=context, browser=browser)
 
 
 def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) -> XiaoHongShuVideo:
@@ -295,6 +276,8 @@ def _build_video_uploader(request: XiaohongshuVideoUploadRequest, account_file) 
         shoot_location=request.shoot_location,
         shoot_date=request.shoot_date,
         no_publish=request.no_publish,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -318,6 +301,8 @@ def _build_note_uploader(request: XiaohongshuNoteUploadRequest, account_file) ->
         shoot_location=request.shoot_location,
         shoot_date=request.shoot_date,
         no_publish=request.no_publish,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -360,7 +345,7 @@ async def upload_xiaohongshu_video(
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=XHS_LAUNCH_KWARGS,
@@ -371,10 +356,9 @@ async def upload_xiaohongshu_video(
                 await app.xiaohongshu_upload_video(session=session)
         return None
 
-    account_file = resolve_account_file("xiaohongshu", request.account_name)
-    app = _build_video_uploader(request, str(account_file))
+    app = _build_video_uploader(request, None)
     await app.main()
-    return account_file
+    return None
 
 
 async def upload_xiaohongshu_note(
@@ -389,7 +373,7 @@ async def upload_xiaohongshu_note(
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=XHS_LAUNCH_KWARGS,
@@ -400,10 +384,9 @@ async def upload_xiaohongshu_note(
                 await app.xiaohongshu_upload_note(session=session)
         return None
 
-    account_file = resolve_account_file("xiaohongshu", request.account_name)
-    app = _build_note_uploader(request, str(account_file))
+    app = _build_note_uploader(request, None)
     await app.main()
-    return account_file
+    return None
 
 
 async def run(args):
@@ -413,7 +396,7 @@ async def run(args):
     if args.action == "login":
         reject_managed_login("xiaohongshu", args)
         require_local_account(args)
-        result = await login_xiaohongshu_account(args.account, headless=args.headless)
+        result = await login_xiaohongshu_account(args.account, headless=args.headless, local_browser=getattr(args, "local_browser", None))
         if not result["success"]:
             raise RuntimeError(result["message"])
         print(f"Xiaohongshu login flow completed: {result['account_file']}")
@@ -441,7 +424,7 @@ async def run(args):
             try:
                 await _check_managed_xiaohongshu(
                     target,
-                    headless=getattr(args, "headless", False),
+                    headless=resolve_headless(getattr(args, "headless", None)),
                     ignored_keys=ignored_keys,
                 )
             except Exception:
@@ -453,7 +436,8 @@ async def run(args):
         try:
             is_valid = await check_xiaohongshu_account(
                 account_label,
-                headless=getattr(args, "headless", False),
+                headless=getattr(args, "headless", None),
+                local_browser=getattr(args, "local_browser", None),
             )
         except Exception:
             print("invalid")
@@ -480,6 +464,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=getattr(args, "local_browser", None),
             original_declaration=original_declaration,
             content_type=content_type,
             repost_source=repost_source,
@@ -508,6 +493,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=getattr(args, "local_browser", None),
             original_declaration=original_declaration,
             content_type=content_type,
             repost_source=repost_source,

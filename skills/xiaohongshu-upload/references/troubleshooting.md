@@ -23,15 +23,15 @@ uv run sau xiaohongshu --help
 uv pip install -e .
 ```
 
-## cookie 无效或已过期
+## Profile 缺失或登录态失效
 
-先检查 cookie 状态：
+使用同一别名与浏览器种类检查：
 
 ```bash
 sau xiaohongshu check --account <account>
 ```
 
-如果无效，就重新登录：
+退出 `10` 且未尝试提交时重新登录；人机验证先完成验证。网络/结构错误为 `1`，先排查故障，不按失效反复扫码。提交后带 `publish_attempted=true` 或退出 `9` 时先核对笔记是否已存在。
 
 ```bash
 sau xiaohongshu login --account <account>
@@ -76,3 +76,7 @@ YYYY-MM-DDTHH:MM:00Z
 ```
 
 如果不需要定时发布，去掉 `--schedule` 即可改为立即发布。
+
+## 浏览器与 Profile 故障
+
+启动日志标明 source、browser_kind、headless 和 Profile 路径。只修复该来源，不自动改成另一浏览器或模式。占用时先结束拥有它的任务/浏览器；不删除锁或强制接管。只有用户明确要求丢弃该 Profile 时执行 `reset-profile --account <account> --browser-kind chrome|chromium`；旧 Cookie 文件既不恢复也不自动删除。
