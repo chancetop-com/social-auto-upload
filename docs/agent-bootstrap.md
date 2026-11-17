@@ -74,7 +74,7 @@
    - `sau kuaishou --help`
    - `sau xiaohongshu --help`
    - `sau bilibili --help`
-10. TikTok、Rednote 已使用持久化 Profile：默认系统 Chrome；先确认选择来源。Chrome 由用户按官方方式安装；显式 Chromium 使用项目固定 Patchright 的完整浏览器（`uv run patchright install --no-shell chromium`）。保留已有 conf.py；显式 headed/headless 优先于 LOCAL_CHROME_HEADLESS，未配置默认有头。登录使用 `sau tiktok login --account <alias> --headed` 或 `sau rednote login --account <alias> --headed`，交互完成后同配置 check；Profile/明确未登录退出 10，运行故障退出 1。仅 login 引导登录，真实发布前回归显式传 --no-publish；不要导入旧 Cookie 或自动重发。其他平台保留各自现有运行方式。
+10. TikTok、Rednote、Instagram 已使用持久化 Profile：默认系统 Chrome；先确认选择来源。Chrome 由用户按官方方式安装；显式 Chromium 使用项目固定 Patchright 的完整浏览器（`uv run patchright install --no-shell chromium`）。保留已有 conf.py；显式 headed/headless 优先于 LOCAL_CHROME_HEADLESS，未配置默认有头。登录使用 `sau tiktok login --account <alias> --headed` 或 `sau rednote login --account <alias> --headed`，交互完成后同配置 check；Profile/明确未登录退出 10，运行故障退出 1。仅 login 引导登录，真实发布前回归显式传 --no-publish；不要导入旧 Cookie 或自动重发。其他平台保留各自现有运行方式。
 11. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了
@@ -153,3 +153,5 @@
 - `xiaohongshu`
 
 这样比给用户准备四套平台 prompt 更稳，也更容易维护。
+
+Instagram 已迁移全部本地动作：按安装说明准备所选 Chrome/Chromium，保留已有 conf.py。先 `sau instagram login --account <alias> --headed`，等待消息入口与当前身份验证完成，再同配置 check；浏览器自动保存 Profile，无旧 Cookie 导入/导出。视频/图文回归显式 `--no-publish`，只有结果 prepared 表示到达 Share 前。verify/delete 在托管环境下仍要求原始本地账号并保留代理；原作者核验有效，不执行真实删除来验收。需要清空时显式 reset-profile 指定种类；安装成功、浏览器可启动和账号已登录分别报告。

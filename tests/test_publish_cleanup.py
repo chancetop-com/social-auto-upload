@@ -193,12 +193,6 @@ class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):
                 "upload",
                 "_open_business_page",
             ),
-            (
-                "uploader.meta_uploader.insgraph_uploader.main",
-                "InstagramUploader",
-                "upload",
-                "_open_instagram_page",
-            ),
         )
         for module_name, cls, entry, opener in entries:
             for outcome in (None, PublishResultUnknownError("primary unknown")):

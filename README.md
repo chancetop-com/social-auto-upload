@@ -230,7 +230,9 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 - 不支持：Docker / 跨机 / Linux 无桌面、Bilibili、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
 - TikTok 本地模式已使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器的真实隔离验证已通过，真实平台 no-publish 回归留待最终迁移验收；其他平台仍按各自迁移阶段运行。
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
-- 托管模式只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号和 Instagram 的本地 `.identity.json` / 用户 ID 比对在托管模式下不执行，账号错配风险由调度侧承担。
+- Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/instagram/<原始别名>/<chrome|chromium>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文离线验证已覆盖 `--no-publish` 停止点；真实账号回归由最终迁移验收执行。
+
+- 托管模式只验证“已登录”，Profile 即身份；知乎、雪球、大鱼号的本地 `.identity.json` / 用户 ID 比对在托管模式下不执行，账号错配风险由调度侧承担。
 - 已知限制：命令级登录检测已是 provider-aware 文案；但部分平台在上传过程中遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留。
 
 完整参数、平台支持范围、部署前提与安全说明见 [CLI 使用说明的托管浏览器模式](./docs/CLI.md#托管浏览器模式通用)；MLX 与 AdsPower 分别见 [Multilogin X 模式](./docs/CLI.md#multilogin-x-模式) 和 [AdsPower 模式](./docs/CLI.md#adspower-模式)。

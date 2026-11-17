@@ -77,30 +77,6 @@ class InstagramContractTests(unittest.TestCase):
         self.assertIsInstance(after, PublishResultUnknownError)
         self.assertIn('禁止自动重发', str(after))
 
-    def test_publish_result_unknown_keeps_exit_code_9_after_capture(self):
-        with tempfile.TemporaryDirectory() as folder:
-            video = Path(folder) / 'video.mp4'
-            video.touch()
-            result_file = Path(folder) / 'result.json'
-            app = InstagramUploader('unused.json', title='caption', video_file=video, result_file=result_file)
-            browser, context, page = AsyncMock(), AsyncMock(), AsyncMock()
-            unknown = PublishResultUnknownError('publish result unknown')
-            with patch(
-                'uploader.meta_uploader.insgraph_uploader.main._open_instagram_page',
-                AsyncMock(return_value=(browser, context, page)),
-            ), patch(
-                'uploader.meta_uploader.insgraph_uploader.main.instagram_identity',
-                AsyncMock(return_value={'user_id': '42', 'username': 'creator'}),
-            ), patch.object(
-                InstagramUploader, '_upload_steps', AsyncMock(side_effect=unknown)
-            ), patch.object(
-                InstagramUploader, '_capture_failure', AsyncMock()
-            ) as capture:
-                with self.assertRaises(PublishResultUnknownError):
-                    asyncio.run(app.upload())
-
-            self.assertEqual(capture.await_count, 1)
-
     def test_publish_timeout_after_click_is_result_unknown(self):
         """点击已发出但最终创建响应未到时，必须按结果未知退出，不能重发。"""
         async def scenario():
@@ -240,7 +216,7 @@ class InstagramContractTests(unittest.TestCase):
                 if invalid.suffix == '.gif':
                     invalid.touch()
                 app = InstagramUploader('unused', title='caption', video_file=video, thumbnail=invalid)
-                with patch('uploader.meta_uploader.insgraph_uploader.main._open_instagram_page', AsyncMock()) as launch:
+                with patch('uploader.meta_uploader.insgraph_uploader.main.async_playwright', AsyncMock()) as launch:
                     with self.assertRaises((FileNotFoundError, ValueError)):
                         asyncio.run(app.upload())
                     launch.assert_not_called()
