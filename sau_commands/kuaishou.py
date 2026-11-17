@@ -19,11 +19,10 @@ from uploader.ks_uploader.main import (
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_image_files,
     parse_tags,
-    resolve_account_file,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -35,17 +34,20 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     kuaishou_parser = platform_parsers.add_parser("kuaishou", help="Kuaishou operations")
     kuaishou_actions = kuaishou_parser.add_subparsers(dest="action", required=True)
+    add_reset_profile_action(kuaishou_actions)
 
     for action_name in ("login", "check"):
         action_parser = kuaishou_actions.add_parser(action_name, help=f"Kuaishou {action_name}")
         action_parser.add_argument("--account", required=False, help="Kuaishou user-defined account_name")
-        add_runtime_flags(action_parser)
+        add_local_runtime_flags(action_parser)
         if action_name == "check":
             add_browser_flags(action_parser)
 
@@ -59,7 +61,7 @@ def register(platform_parsers):
     add_not_before_flag(kuaishou_upload_video_parser)
     kuaishou_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
     kuaishou_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
-    add_runtime_flags(kuaishou_upload_video_parser)
+    add_local_runtime_flags(kuaishou_upload_video_parser)
     add_browser_flags(kuaishou_upload_video_parser)
 
     kuaishou_upload_note_parser = kuaishou_actions.add_parser("upload-note", help="Upload one note to Kuaishou")
@@ -70,7 +72,7 @@ def register(platform_parsers):
     kuaishou_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     kuaishou_upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(kuaishou_upload_note_parser)
-    add_runtime_flags(kuaishou_upload_note_parser)
+    add_local_runtime_flags(kuaishou_upload_note_parser)
     add_browser_flags(kuaishou_upload_note_parser)
 
 
@@ -85,9 +87,10 @@ class KuaishouVideoUploadRequest:
     thumbnail_file: Path | None = None
     publish_strategy: str = KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
     collection_name: str | None = None
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
 @dataclass(slots=True)
@@ -100,20 +103,18 @@ class KuaishouNoteUploadRequest:
     publish_date: datetime | int
     publish_strategy: str = KUAISHOU_PUBLISH_STRATEGY_IMMEDIATE
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
-async def login_kuaishou_account(account_name: str, headless: bool = True) -> dict:
-    account_file = resolve_account_file("kuaishou", account_name)
-    return await ks_setup(str(account_file), handle=True, return_detail=True, headless=headless)
+async def login_kuaishou_account(account_name, headless=None, *, local_browser=None):
+    return await ks_setup(account_name=account_name, handle=True, return_detail=True,
+                          headless=headless, local_browser=local_browser)
 
 
-async def check_kuaishou_account(account_name: str) -> bool:
-    account_file = resolve_account_file("kuaishou", account_name)
-    if not account_file.exists():
-        return False
-    return await kuaishou_cookie_auth(str(account_file))
+async def check_kuaishou_account(account_name, headless=None, *, local_browser=None):
+    return await kuaishou_cookie_auth(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
 def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> KSVideo:
@@ -128,6 +129,8 @@ def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> 
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
         collection_name=request.collection_name,
     )
     app.publish_not_before = request.publish_not_before
@@ -145,6 +148,8 @@ def _build_note_uploader(request: KuaishouNoteUploadRequest, account_file) -> KS
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -160,7 +165,7 @@ async def upload_kuaishou_video(request: KuaishouVideoUploadRequest, *, target=N
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=KUAISHOU_LAUNCH_KWARGS,
@@ -172,16 +177,9 @@ async def upload_kuaishou_video(request: KuaishouVideoUploadRequest, *, target=N
                 await app.main(session=session)
         return None
 
-    account_file = resolve_account_file("kuaishou", request.account_name)
-    is_ready = await ks_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
-        )
-
-    app = _build_video_uploader(request, str(account_file))
+    app = _build_video_uploader(request, None)
     await app.main()
-    return account_file
+    return None
 
 
 async def upload_kuaishou_note(request: KuaishouNoteUploadRequest, *, target=None) -> Path | None:
@@ -190,7 +188,7 @@ async def upload_kuaishou_note(request: KuaishouNoteUploadRequest, *, target=Non
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=KUAISHOU_LAUNCH_KWARGS,
@@ -202,27 +200,24 @@ async def upload_kuaishou_note(request: KuaishouNoteUploadRequest, *, target=Non
                 await app.main(session=session)
         return None
 
-    account_file = resolve_account_file("kuaishou", request.account_name)
-    is_ready = await ks_setup(str(account_file), handle=False)
-    if not is_ready:
-        raise RuntimeError(
-            f"Kuaishou cookie is missing or expired: {account_file}. Run `sau kuaishou login --account {request.account_name}` first."
-        )
-
-    app = _build_note_uploader(request, str(account_file))
+    app = _build_note_uploader(request, None)
     await app.main()
-    return account_file
+    return None
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
+    args.headless = resolve_headless(getattr(args, "headless", None))
+    local_browser = getattr(args, "local_browser", None)
     if args.action == "login":
         reject_managed_login("kuaishou", args)
         require_local_account(args)
-        result = await login_kuaishou_account(args.account, headless=args.headless)
+        result = await login_kuaishou_account(args.account, headless=args.headless, local_browser=local_browser)
         if not result["success"]:
             raise RuntimeError(result["message"])
-        print(f"Kuaishou login flow completed: {result['account_file']}")
+        print(f"Kuaishou login flow completed: {result['account_name']}")
         return 0
 
     target = resolve_managed_provider(args)
@@ -243,7 +238,7 @@ async def run(args):
             print("valid")
             return 0
 
-        is_valid = await check_kuaishou_account(account_label)
+        is_valid = await check_kuaishou_account(args.account, headless=args.headless, local_browser=local_browser)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -261,6 +256,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=local_browser,
             collection_name=args.collection,
             publish_not_before=args.not_before,
         )
@@ -279,6 +275,7 @@ async def run(args):
             publish_strategy=publish_strategy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=local_browser,
             publish_not_before=args.not_before,
         )
         await upload_kuaishou_note(request, target=target)

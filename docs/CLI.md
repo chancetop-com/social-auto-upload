@@ -70,7 +70,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube 的 login/check/upload-video 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
+目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手 开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube 的 login/check/upload-video 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -208,7 +208,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
 | 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
 | 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 |
-| `--headless` | TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 读取 LOCAL_CHROME_HEADLESS，缺省 False；其他平台仍 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
+| `--headless` | TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手 读取 LOCAL_CHROME_HEADLESS，缺省 False；其他平台仍 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
 | `--headed` | False（等价默认） | False（等价默认） | False（等价默认），V2 编码 `"0"` |
 | `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower |
 | `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
@@ -238,7 +238,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -332,7 +332,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
@@ -399,7 +399,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
 - `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
+- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
 - 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
@@ -505,6 +505,14 @@ sau kuaishou check --account <account_name>
 sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 运动,训练
 sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
+
+快手 login/check/upload-video/upload-note 及直接 uploader 已统一使用 `browser_profiles/kuaishou/<原始别名>/<chrome|chromium>/`；仅 login 创建资料并引导扫码，预检与发布共用同一会话和占用。旧 JSON 不再读取、导出或自动迁移；别名可重新登录不同账号，两种浏览器各自独立。
+
+默认系统 Chrome、有头。显式 `--headed` / `--headless` > `LOCAL_CHROME_HEADLESS` > False；`LOCAL_CHROME_PATH` 优先并按真实产品选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome。只需安装所选来源（Chromium 使用 `uv run patchright install --no-shell chromium`），失败不回退；不增加 stealth、UA、语言或固定 viewport。
+
+缺少 Profile、明确未登录或验证退出 `10`（验证保留 `reason=verification`），网络/权限/页面结构故障退出 `1`。提交后保留 `publish_attempted=true`；结果未知 `9` 禁止自动重发。视频封面、合集、原生定时与视频/图文的 `--not-before` 保留。快手没有 `--no-publish`；本次仅离线与受控 DOM 验证，不代表真实账号验收。
+
+重建用 `sau kuaishou reset-profile --account <account_name> --browser-kind chrome`（或 chromium），无需 browser binary，拒绝占用，只清空选定资料；重建后先 login，不重跑旧发布。MLX/AdsPower 保持原路由、参数日志和所有权，仅采用新 headless 来源，忽略本地 browser/path；托管拒绝 login/reset-profile。
 
 ## 小红书 CLI 子命令
 
@@ -963,7 +971,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、快手 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 

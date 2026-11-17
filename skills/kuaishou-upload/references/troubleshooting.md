@@ -23,15 +23,15 @@ uv run sau kuaishou --help
 uv pip install -e .
 ```
 
-## cookie 无效或已过期
+## Profile 缺失或登录已失效
 
-先检查 cookie 状态：
+先用同一 browser/headless 配置检查登录：
 
 ```bash
 sau kuaishou check --account <account>
 ```
 
-如果无效，就重新登录：
+退出 10 时安排重新登录；reason=verification 时先在所选 Profile 完成人机验证：
 
 ```bash
 sau kuaishou login --account <account>
@@ -83,3 +83,9 @@ YYYY-MM-DDTHH:MM:00Z
 ```
 
 如果不需要定时发布，去掉 `--schedule` 即可改为立即发布。
+
+## 故障与提交结果
+
+退出 `1` 的导航、HTTP/权限或页面结构故障先排查原错，不把它当作过期。收到 `publish_attempted=true` 或退出 `9` 时先核查已发布作品，禁止自动重发。清理警告不改变已有发布结果。
+
+同一 Profile 占用时结束本次任务，等待原使用者退出；不杀进程、不自动清锁。只有明确重建请求才执行 `sau kuaishou reset-profile --account <account> --browser-kind chrome`（或 chromium），无需 binary。重建失败可重跑明确目标，成功后先 login；历史结果保留，旧任务不自动恢复。
