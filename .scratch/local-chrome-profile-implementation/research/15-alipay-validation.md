@@ -1,6 +1,6 @@
 # 15 — Alipay persistent Profile validation
 
-Date: 2026-11-17. Worktree: `/private/tmp/sau-local-profile-15`. Source baseline `b8be345`; latest integrated baseline during this record: `25e0f0f` (Weibo and Hupu). `conf.__file__` and `conf.BASE_DIR` were verified to bind the worker, not the user's main checkout. Tests override BASE_DIR with isolated temporary directories.
+Date: 2026-11-17. Worktree: `/private/tmp/sau-local-profile-15`. Source baseline `b8be345`; latest integrated baseline: `2b14c06` (Weibo, Hupu and the TikTok lifecycle follow-up), merged into this ticket as `d91ef18`. `conf.__file__` and `conf.BASE_DIR` were verified to bind the worker, not the user's main checkout. Tests override BASE_DIR with isolated temporary directories.
 
 ## Delivered boundaries
 
@@ -34,10 +34,12 @@ Further checks cover optional settings absent, custom-path classification and fa
 Interpreter: `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python`; cwd always the assigned worktree.
 
 ```sh
-python -m unittest tests.test_alipay_profiles tests.test_mlx_alipay_weibo tests.test_alipay_humanize tests.test_publish_cleanup tests.test_local_profile tests.test_local_browser_session tests.test_browser_session tests.test_adspower_video_platforms tests.test_adspower_platform_contract tests.test_sau_browser_cli tests.test_multilogin_cli tests.test_adspower_cli tests.test_adspower_browser_session tests.test_weibo_profiles -q
+python -m unittest tests.test_alipay_profiles tests.test_mlx_alipay_weibo tests.test_alipay_humanize tests.test_publish_cleanup tests.test_local_profile tests.test_local_browser_session tests.test_browser_session tests.test_adspower_video_platforms tests.test_adspower_platform_contract tests.test_sau_browser_cli tests.test_multilogin_cli tests.test_adspower_cli tests.test_adspower_browser_session tests.test_weibo_profiles tests.test_hupu_profiles tests.test_tiktok_profile_cli tests.test_tiktok_login_terminal -q
 ```
 
-After merging Weibo: **303 passed in 11.313s**. The Alipay-specific CLI matrix contains **22 passing tests**, including not-before. Earlier platform/managed/cleanup regressions passed 108, then 278 tests; obsolete Alipay JSON/double-close assertions were replaced by persistent-session boundary checks. Shared lists and AdsPower guards include both migrated Weibo and Alipay.
+Final cumulative run after merging `2b14c06`: **340 passed in 16.443s**. The Hupu-inclusive run first exposed two stale AdsPower test guards against the removed `hupu.resolve_account_file`; the shared migrated-platform guard now targets `hupu_setup`, preserving all Weibo/Alipay entries. No Hupu runtime change was needed.
+
+After merging Weibo alone: **303 passed in 11.313s**. The Alipay-specific CLI matrix contains **22 passing tests**, including not-before. Earlier platform/managed/cleanup regressions passed 108, then 278 tests; obsolete Alipay JSON/double-close assertions were replaced by persistent-session boundary checks. Shared lists and AdsPower guards include both migrated Weibo and Alipay.
 
 ## Real controlled browser evidence
 

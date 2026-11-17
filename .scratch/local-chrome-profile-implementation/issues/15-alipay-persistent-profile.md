@@ -4,24 +4,24 @@
 
 **Blocked by:** [09：抖音全流程接入](./09-douyin-persistent-profile.md)；[10：快手全流程接入](./10-kuaishou-persistent-profile.md)；[11：视频号正式流程接入](./11-tencent-persistent-profile.md)；[12：百家号正式流程接入](./12-baijiahao-persistent-profile.md)
 
-**Status:** claimed
+**Status:** resolved
 
 **批次：** 第四批
 
 **依据：** [原始规格](../../local-chrome-profile/spec.md)；[实施顺序与共同约束](../README.md)。
 
-- [ ] 完成本票范围内所有已注册正式动作及可达独立启动、内部预检和直接 uploader 调用的接入，预检与业务复用同一 Browser session 和 Profile 占用；注入会话的业务不另开同目录或自行关闭会话。同步开放本平台 reset-profile，保持 01 的精确目标、无需 binary、占用防护和部分失败契约。
-- [ ] 正式 CLI 与直接调用采用 02 的来源和 headless 优先级，区分未提供与显式 False；默认 Chrome 有头，允许 Chromium 与自定义路径。只使用所选来源及按实际种类隔离的持久化 Profile，no_viewport，失败不回退；切换同种路径/模式复用资料，未选浏览器无需安装。
-- [ ] Profile 是唯一登录态来源，删除本平台正式路径的旧 JSON 存在检查、Cookie 预检、storage_state 恢复/导出及旧身份门槛。只有 login 引导登录；缺少 Profile、明确未登录或业务中登录失效退出 10，结束本次业务；探测、页面、权限或必需字段故障退出 1，人机验证保留 reason=verification 与补救提示。正常命令不承担 19 的一次性迁移。
-- [ ] 允许同别名重新登录不同真实账号及两种浏览器使用不同账号，不新增永久绑定、跨 Profile 身份同步或仅为防换号的比较；原有显式请求目标与历史作品证据继续校验，历史结果不改写或删除。
-- [ ] 覆盖支付宝生活号正式登录、检查和发布，连同独立 cookie_auth/setup 与上传启动链；移除旧 Cookie 恢复、写回和固定无头检查。
-- [ ] 保留二维码生成/回调、正向登录锚点及实际业务交互；登录页或登录 iframe 的证据与网络、5xx、超时、异常结构区分，不能把所有检查异常折叠成 invalid。
-- [ ] 本地流程不引入影响生活号微应用渲染的 stealth；离线覆盖正常登录证据、登录跳转/iframe、页面故障、业务 setup 失败、会话复用及结果保护，并验证受影响的窗口/覆盖层交互。
-- [ ] 本地移除项目增加的 stealth、UA/请求头、自动化掩饰、固定 viewport、额外最大化、locale/语言和无业务依据的权限；保留 Patchright 默认、必要业务脚本、二维码、现有代理、超时、人类化交互、响应监听、发布预算、not-before 及结果文件，不修改界面语言。
-- [ ] 初始化、正常完成、异常、取消、超时与登录失效按所有权有界清理，取消继续传播，失败不回滚或重建 Profile。已有业务错误、成功、发布结果未知（9）及 publish_attempted 不被清理覆盖；提交后登录/验证异常保留原语义，不自动恢复旧任务或重发。
-- [ ] 本平台 MLX/AdsPower 仅采用新 headless 来源；忽略本地浏览器选择/路径且不额外报错或警告，不访问本地安装、Profile、锁或旧资料。保留原动作路由、login 限制、provider 参数/日志、CDP 所有权、停止/断开与限流退出 11；尚未迁移的平台保持旧行为。
-- [ ] 从正式 CLI dispatch 经真实配置解析和共享编排，复用浏览器/平台/provider 边界替身完成相关离线回归；覆盖本票动作、配置传播、旧文件无关、换号、登录分类、重建、资源所有权和提交结果保护，不把 session 整体替换成 parser 测试。直接调用只补缺口，共享能力变化时补跑受影响的跨进程/真实浏览器检查。
-- [ ] 同步本平台 CLI/平台 skill、配置及登录说明、Agent Bootstrap 和运行依赖说明；只在本平台接入后更新其行为描述，保留未迁移平台的准确说明。交付记录列出覆盖入口、验证命令/实际结果、未迁移平台和未执行项，离线结果不表述为真实平台验收。
+- [x] 完成本票范围内所有已注册正式动作及可达独立启动、内部预检和直接 uploader 调用的接入，预检与业务复用同一 Browser session 和 Profile 占用；注入会话的业务不另开同目录或自行关闭会话。同步开放本平台 reset-profile，保持 01 的精确目标、无需 binary、占用防护和部分失败契约。
+- [x] 正式 CLI 与直接调用采用 02 的来源和 headless 优先级，区分未提供与显式 False；默认 Chrome 有头，允许 Chromium 与自定义路径。只使用所选来源及按实际种类隔离的持久化 Profile，no_viewport，失败不回退；切换同种路径/模式复用资料，未选浏览器无需安装。
+- [x] Profile 是唯一登录态来源，删除本平台正式路径的旧 JSON 存在检查、Cookie 预检、storage_state 恢复/导出及旧身份门槛。只有 login 引导登录；缺少 Profile、明确未登录或业务中登录失效退出 10，结束本次业务；探测、页面、权限或必需字段故障退出 1，人机验证保留 reason=verification 与补救提示。正常命令不承担 19 的一次性迁移。
+- [x] 允许同别名重新登录不同真实账号及两种浏览器使用不同账号，不新增永久绑定、跨 Profile 身份同步或仅为防换号的比较；原有显式请求目标与历史作品证据继续校验，历史结果不改写或删除。
+- [x] 覆盖支付宝生活号正式登录、检查和发布，连同独立 cookie_auth/setup 与上传启动链；移除旧 Cookie 恢复、写回和固定无头检查。
+- [x] 保留二维码生成/回调、正向登录锚点及实际业务交互；登录页或登录 iframe 的证据与网络、5xx、超时、异常结构区分，不能把所有检查异常折叠成 invalid。
+- [x] 本地流程不引入影响生活号微应用渲染的 stealth；离线覆盖正常登录证据、登录跳转/iframe、页面故障、业务 setup 失败、会话复用及结果保护，并验证受影响的窗口/覆盖层交互。
+- [x] 本地移除项目增加的 stealth、UA/请求头、自动化掩饰、固定 viewport、额外最大化、locale/语言和无业务依据的权限；保留 Patchright 默认、必要业务脚本、二维码、现有代理、超时、人类化交互、响应监听、发布预算、not-before 及结果文件，不修改界面语言。
+- [x] 初始化、正常完成、异常、取消、超时与登录失效按所有权有界清理，取消继续传播，失败不回滚或重建 Profile。已有业务错误、成功、发布结果未知（9）及 publish_attempted 不被清理覆盖；提交后登录/验证异常保留原语义，不自动恢复旧任务或重发。
+- [x] 本平台 MLX/AdsPower 仅采用新 headless 来源；忽略本地浏览器选择/路径且不额外报错或警告，不访问本地安装、Profile、锁或旧资料。保留原动作路由、login 限制、provider 参数/日志、CDP 所有权、停止/断开与限流退出 11；尚未迁移的平台保持旧行为。
+- [x] 从正式 CLI dispatch 经真实配置解析和共享编排，复用浏览器/平台/provider 边界替身完成相关离线回归；覆盖本票动作、配置传播、旧文件无关、换号、登录分类、重建、资源所有权和提交结果保护，不把 session 整体替换成 parser 测试。直接调用只补缺口，共享能力变化时补跑受影响的跨进程/真实浏览器检查。
+- [x] 同步本平台 CLI/平台 skill、配置及登录说明、Agent Bootstrap 和运行依赖说明；只在本平台接入后更新其行为描述，保留未迁移平台的准确说明。交付记录列出覆盖入口、验证命令/实际结果、未迁移平台和未执行项，离线结果不表述为真实平台验收。
 
 ## Comments
 
@@ -29,3 +29,11 @@
 
 - TDD red/green covered persistent login/check, one-session upload, iframe/verification phase, HTTP fault precedence, required cover/collection faults, QR cleanup, and single-dispatch/result-unknown protections. See [validation evidence](../research/15-alipay-validation.md) for actual red observations and commands.
 - Merged integration `fb9be5d` into the ticket branch as `5ca6e01`, preserving Weibo/Alipay shared test and documentation unions. At that merge, 303 related offline tests passed; controlled real Chrome headed and full Chromium headless DOM flows passed in 83.224s after the final interaction safeguards. No real account operation was performed.
+
+- Final integration `2b14c06` (including Hupu and TikTok lifecycle follow-up) is an ancestor of this branch. The Hupu-inclusive run revealed two stale shared AdsPower fixture guards; updated their migrated-platform union to `hupu_setup` without changing Hupu runtime code. Final related offline result: **340 passed in 16.443s**. `git diff --check` passed.
+
+## Answer
+
+支付宝生活号全部正式本地动作与可达直接调用已使用独立持久化 Profile，预检与上传共用会话/占用；reset-profile 已开放。保留 QR/内容创作正向证据、qiankun 无 stealth、自然窗口交互和原有托管路线；严格区分登录/验证与故障，保留提交阶段并防止本地重复发布/重复质量放行。默认/显式浏览器配置、清理所有权、旧 JSON 无关、直接调用、provider 隔离和 not-before 均有边界回归。文档、skill、Bootstrap、配置和依赖说明已同步并合并其他已交付平台列表。
+
+[验证记录](../research/15-alipay-validation.md)：340 项相关离线检查通过；真实 Chrome 有头与完整 Chromium 无头受控 DOM 两配置通过，最终 83.224s。未操作真实账号或发布/删除作品，受控 DOM 不冒充支付宝服务验收；无本票阻塞。旧资料一次性作业仍属于 19，四平台真实 no-publish 属于 20。
