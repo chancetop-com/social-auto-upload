@@ -44,3 +44,9 @@ PYTHONPATH=/private/tmp/sau-local-profile-05 /Users/chancetio/Desktop/Web/social
 ## 未执行范围
 
 真实小红书账号 login/check 和真实素材 no-publish 回归留给票 20；旧资料的一次性迁移与删除留给票 19。本票没有外部账号操作、真实提交、作品删除或技能源市场发布。其他平台按各自票据推进，未全局切换尚未迁移的平台。
+
+## 最终离线/集成结果
+
+- `python -m unittest discover -s tests -p 'test_xhs*.py' -q`：324 passed（20.855s，含隔离 DOM 浏览器测试）。
+- 平台 uploader、MLX/Kuaishou、cleanup/review、AdsPower、CLI、Profile、配置和 persistent-session 联合套件：165 passed（22.996s）。完整模块清单在 [票据 Comments](../issues/05-xiaohongshu-persistent-profile.md#comments)。
+- 合并 integration `6d0ead1`（含 TikTok ambiguity 修正与 Instagram 04）后，XHS/Instagram 公共 CLI、ambiguity、cleanup/review、AdsPower 与 CLI 契约：90 passed（3.354s）。共用文档已合并三平台状态，其他平台保持原行为。

@@ -46,3 +46,4 @@
 - 尚未迁移平台保持各自既有行为；Rednote/Instagram 由同批 03/04 独立推进，第二至第五批依赖仍按实施计划执行。
 
 - 合并 integration `9120889` 后，`tests.test_xhs_profile_cli tests.test_publish_ambiguity` **24 tests passed**（0.977 秒），确认票 02 的 TikTok fixture 修复。随后合并 Instagram 票 04 的 `6d0ead1`，文档按三平台已迁移合并，保留 Instagram verify/delete 本地例外。
+- `6d0ead1` 合并后的最终检查：`python -m unittest tests.test_xhs_profile_cli tests.test_publish_ambiguity tests.test_publish_cleanup tests.test_review_regressions tests.test_adspower_video_platforms tests.test_adspower_platform_contract tests.test_sau_browser_cli tests.test_instagram_profile_cli -q`（同上 interpreter/cwd）**90 tests passed**（3.354 秒）。工作树 clean，integration 是本分支祖先；source 实现提交 `5608b55`。
