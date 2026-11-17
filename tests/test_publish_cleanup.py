@@ -186,12 +186,6 @@ class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):
                 "upload",
                 "_open_facebook_page",
             ),
-            (
-                "uploader.meta_uploader.facebook_page_uploader.main",
-                "MetaBusinessUploader",
-                "upload",
-                "_open_business_page",
-            ),
         )
         for module_name, cls, entry, opener in entries:
             for outcome in (None, PublishResultUnknownError("primary unknown")):

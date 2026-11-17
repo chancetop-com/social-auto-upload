@@ -19,11 +19,10 @@ from uploader.meta_uploader.facebook_page_uploader.posts import meta_post_action
 from sau_commands.arguments import (
     SCHEDULE_HELP_ZH,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_image_files,
     parse_tags,
-    resolve_account_file,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -36,6 +35,8 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
 
 def register(platform_parsers):
@@ -45,6 +46,7 @@ def register(platform_parsers):
     ):
         meta_parser = platform_parsers.add_parser(meta_platform, help=meta_help)
         meta_actions = meta_parser.add_subparsers(dest="action", required=True)
+        add_reset_profile_action(meta_actions)
         if meta_platform == "facebook-page":
             for action in ("verify", "delete"):
                 post_parser = meta_actions.add_parser(action, help="按编号核对原作品" if action == "verify" else "核对编号后删除：定时作品永久删除，已发布作品移至垃圾箱")
@@ -56,17 +58,15 @@ def register(platform_parsers):
                 post_parser.add_argument("--scheduled", action="store_true", help="在已定时列表查询或取消定时作品")
                 post_parser.add_argument("--result", type=Path)
                 post_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
-                add_runtime_flags(post_parser)
-                post_parser.set_defaults(headless=False)
+                add_local_runtime_flags(post_parser)
         for action_name in ("login", "check"):
             action_parser = meta_actions.add_parser(action_name, help=f"{meta_platform} {action_name}")
             action_parser.add_argument("--account", required=False, help="Meta account name")
             action_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
             if action_name == "login":
-                add_runtime_flags(action_parser)
-                action_parser.set_defaults(headless=False)
+                add_local_runtime_flags(action_parser)
             else:
-                add_runtime_flags(action_parser)
+                add_local_runtime_flags(action_parser)
                 add_browser_flags(action_parser)
 
         upload_video_parser = meta_actions.add_parser("upload-video", help=f"Upload a video to {meta_platform}")
@@ -80,9 +80,8 @@ def register(platform_parsers):
         upload_video_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_video_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_not_before_flag(upload_video_parser)
-        add_runtime_flags(upload_video_parser)
+        add_local_runtime_flags(upload_video_parser)
         add_browser_flags(upload_video_parser)
-        upload_video_parser.set_defaults(headless=False)
 
         upload_note_parser = meta_actions.add_parser("upload-note", help=f"Upload images to {meta_platform}")
         upload_note_parser.add_argument("--account", required=False)
@@ -95,9 +94,8 @@ def register(platform_parsers):
         upload_note_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
         upload_note_parser.add_argument("--result", type=Path, help="保存内容编号和发布结果 JSON")
         add_not_before_flag(upload_note_parser)
-        add_runtime_flags(upload_note_parser)
+        add_local_runtime_flags(upload_note_parser)
         add_browser_flags(upload_note_parser)
-        upload_note_parser.set_defaults(headless=False)
 
 
 @dataclass(slots=True)
@@ -113,25 +111,22 @@ class MetaUploadRequest:
     page_name: str | None = None
     proxy: str | None = FACEBOOK_PAGE_PROXY
     debug: bool = True
-    headless: bool = False
+    headless: bool | None = None
+    local_browser: str | None = None
     result_file: Path | None = None
     publish_not_before: datetime | None = None
 
 
-async def login_meta_account(platform: str, account_name: str, *, headless: bool = False, proxy: str | None = FACEBOOK_PAGE_PROXY) -> dict:
-    account_file = resolve_account_file(platform, account_name)
-    return await meta_setup(
-        account_file,
-        handle=True,
-        return_detail=True,
-        headless=headless,
-        proxy=proxy,
-    )
+async def login_meta_account(platform: str, account_name: str, *, headless=None,
+                             proxy=FACEBOOK_PAGE_PROXY, local_browser=None) -> dict:
+    return await meta_setup(account_name=account_name, handle=True, return_detail=True,
+                            headless=headless, proxy=proxy, local_browser=local_browser)
 
 
-async def check_meta_account(platform: str, account_name: str, *, proxy: str | None = FACEBOOK_PAGE_PROXY) -> bool:
-    account_file = resolve_account_file(platform, account_name)
-    return await meta_cookie_auth(account_file, proxy=proxy)
+async def check_meta_account(platform: str, account_name: str, *, proxy=FACEBOOK_PAGE_PROXY,
+                             headless=None, local_browser=None) -> bool:
+    return await meta_cookie_auth(account_name=account_name, proxy=proxy,
+                                  headless=headless, local_browser=local_browser)
 
 
 def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUploader:
@@ -148,6 +143,8 @@ def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUpl
         proxy=request.proxy,
         headless=request.headless,
         result_file=request.result_file,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
     )
     app.publish_not_before = request.publish_not_before
     return app
@@ -165,7 +162,7 @@ async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dic
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
@@ -176,31 +173,26 @@ async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dic
                     _raise_login_required(request.platform, target)
                 return await app.upload(session=session)
 
-    account_file = resolve_account_file(request.platform, request.account_name)
-    if not await meta_cookie_auth(account_file, proxy=request.proxy):
-        raise RuntimeError(
-            f"{request.platform} Business Suite 登录态不存在或已失效: {account_file}. "
-            f"请先执行 `sau {request.platform} login --account {request.account_name}`。"
-        )
-    app = _build_uploader(request, account_file)
-    return await app.upload()
+    return await _build_uploader(request, None).upload()
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
     if args.action == "login":
         reject_managed_login(args.platform, args)
         require_local_account(args)
-        result = await login_meta_account(args.platform, args.account, headless=args.headless, proxy=args.proxy)
+        result = await login_meta_account(args.platform, args.account, headless=args.headless, proxy=args.proxy, local_browser=getattr(args, "local_browser", None))
         if not result["success"]:
             raise RuntimeError(result.get("message", f"{args.platform} login failed"))
-        print(f"{args.platform} login flow completed: {result['account_file']}")
+        print(f"{args.platform} login flow completed: {result['account']}")
         return 0
 
     if args.platform == "facebook-page" and args.action in {"verify", "delete"}:
         require_account(args)
         result = await meta_post_action(
-            resolve_account_file(args.platform, args.account), page_id=args.page_id, page_name=args.page,
+            account_name=args.account, local_browser=getattr(args, "local_browser", None), page_id=args.page_id, page_name=args.page,
             content_id=args.content_id, expected_text=args.expected_text, scheduled=args.scheduled,
             delete=args.action == "delete", proxy=args.proxy, headless=args.headless,
         )
@@ -219,7 +211,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=args.headless,
+                    headless=resolve_headless(args.headless),
                     managed=target,
                     launch_kwargs=FACEBOOK_PAGE_LAUNCH_KWARGS,
                     context_kwargs=FACEBOOK_PAGE_CONTEXT_KWARGS,
@@ -231,7 +223,7 @@ async def run(args):
             print("valid")
             return 0
 
-        is_valid = await check_meta_account(args.platform, account_label, proxy=args.proxy)
+        is_valid = await check_meta_account(args.platform, args.account, proxy=args.proxy, headless=args.headless, local_browser=getattr(args, "local_browser", None))
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -250,6 +242,7 @@ async def run(args):
             proxy=args.proxy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=getattr(args, "local_browser", None),
             publish_not_before=args.not_before,
         )
         result = await upload_meta_content(request, target=target)

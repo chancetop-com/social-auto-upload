@@ -4,7 +4,7 @@
 
 **Blocked by:** [03：Rednote 全流程接入](./03-rednote-persistent-profile.md)；[04：Instagram 全流程与作品管理接入](./04-instagram-persistent-profile.md)；[05：小红书全流程接入](./05-xiaohongshu-persistent-profile.md)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **批次：** 第二批
 

@@ -169,7 +169,7 @@ sau douyin check --account creator
 
 Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；新 Profile 的真实账号验收留待最终回归。见 [Rednote 说明](./docs/rednote.md)。
 
-TikTok、Rednote、Instagram、小红书还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
+TikTok、Rednote、Instagram、小红书、Facebook Page还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
 
 #### 指定发布时刻（可选）
 
@@ -304,6 +304,8 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 ```
 
 知乎的 `--account` 是本地会话别名，不要求和展示名一致；登录时程序直接读取页面当前身份并保存绑定信息。
+
+Facebook Page 的全部本地动作已接入持久化 Profile：`browser_profiles/facebook-page/<原始别名>/<chrome|chromium>`，与 Facebook 隔离，多个 Page 目标复用同一个登录 Profile。配置优先级与 TikTok 相同，保留代理、定时、作品证据及结果文件；旧 JSON 不再读写。显式目标/历史作品不匹配仍拒绝，verify/delete 在托管环境下仍走本地。本次只做离线与受控 DOM 验证，未登录真实账号、发布或删除作品。
 
 Facebook、Facebook Page 和 Instagram 默认使用系统网络直连。网络环境需要代理时，给对应命令显式添加 `--proxy "代理地址"`，或设置 `SAU_FACEBOOK_PROXY`、`SAU_FACEBOOK_PAGE_PROXY`、`SAU_INSTAGRAM_PROXY`；传 `--proxy ""` 可忽略环境变量并直连。
 

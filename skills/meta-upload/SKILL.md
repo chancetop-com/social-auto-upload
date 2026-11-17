@@ -14,10 +14,16 @@ summary: 发布 Facebook Page 视频或图文，并管理排期。
 
 默认不配置代理，浏览器按系统网络直连；网络环境需要代理时显式传 `--proxy` 或设置 `SAU_FACEBOOK_PAGE_PROXY`。
 
-先登录并保存账号别名：
+本地 login/check/视频/图文/verify/delete 使用 `browser_profiles/facebook-page/<原始别名>/<chrome|chromium>/`。一个登录 Profile 可管理多个 Page，`--page` 是发布目标，不能作为账号目录；资料与 `facebook` 隔离。别名可重新登录另一真实账号，原作品仍须核对 Page、编号和配文。
+
+先准备所选浏览器，再登录：默认系统 Chrome、有头；保留已有 `LOCAL_CHROME_HEADLESS` 配置，显式 `--headed` / `--headless` 优先。`LOCAL_CHROME_PATH` 覆盖来源并按实际产品种类选 Profile；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。Chrome 按官方方式安装；完整 Chromium 可用 `uv run patchright install --no-shell chromium`。只要求选定来源，失败不切换。保留当前语言、浏览器窗口和本地代理。
+
+只有 login 引导登录；登录成功并关闭后以同配置 check。缺少 Profile、明确未登录或验证退出 `10`，验证先人工完成；网络、权限和页面故障退出 `1`。正常命令不读写、导入或删除旧 Cookie JSON。只需清空选定资料时运行 `sau facebook-page reset-profile --account creator --browser-kind chrome`（或 `chromium`）；命令无需浏览器，拒绝占用目标，保留另一种类、Facebook 资料和历史结果，不恢复旧发布任务。
+
+先登录并检查：
 
 ```powershell
-sau facebook-page login --account creator
+sau facebook-page login --account creator --headed
 sau facebook-page check --account creator
 sau facebook-page upload-note --account creator --page "我的 Page" --images images/1.jpg --title "标题" --note "正文" --result .local/page-result.json
 sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
@@ -36,6 +42,8 @@ sau facebook-page delete --account creator --page "我的 Page" --page-id "Page�
 
 `--scheduled` 选择定时列表；删除会取消排期并永久移除，返回 `deleted`。管理已发布作品时不加它，当前平台会移至垃圾箱，返回 `trashed`，30 天后自动删除；未接入 Page 垃圾箱提前永久删除。已定时作品实际发布后编号可能变化，需使用已发布列表中的编号。
 
+提交后登录/验证异常保留 `publish_attempted=true`；结果未知退出 `9`，先核查原作品，再决定后续操作。托管限流退出 `11`。本平台尚无 `--no-publish`，以上上传/删除命令会实际提交；本次持久化接入验证仅使用离线替身和受控页面。
+
 只覆盖已加载的近期列表，不保证自动查找全部历史作品。同文案不能唯一定位、Page 或编号不符时不删除。删除后超时或浏览器断开时先核对原记录，不自动重删；本地素材保留。完整参数以 `sau facebook-page upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。
 
 ## 托管浏览器模式（可选）
@@ -44,7 +52,7 @@ sau facebook-page delete --account creator --page "我的 Page" --page-id "Page�
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
-- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 托管 check/上传的身份由 `profile_id` 决定，`--account` 不决定本地资料；`login` 和 reset-profile 拒绝。请先在对应桌面应用中登录。headless 使用上述优先级，完全忽略本地浏览器选择和路径；verify/delete 仍要求原始 `--account`，使用本地 Profile、代理和运行配置。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ## 示例脚本
