@@ -74,3 +74,5 @@
 
 - 2026-11-17：[04 已解决](./issues/04-instagram-persistent-profile.md)。Instagram 六项动作及直接调用接入持久化 Profile，包含本地 proxy、provider 环境下仍本地的 verify/delete、当前会话身份和原作品作者核验。219 项最终离线/所有权回归及 62 项受影响浏览器夹具回归通过；另完成 141 项 Instagram 功能/受控 DOM 回归。本票未操作真实账号，真实 no-publish 与旧资料作业仍由 20/19 执行。
 - 2026-11-17：[05 已解决](./issues/05-xiaohongshu-persistent-profile.md)。小红书全部正式本地动作与直接 uploader 已接入持久化 Profile；324 项平台回归、165 项相关/跨平台回归、7 项真实动态 DOM 测试通过，另有 4/4 受控 no_viewport 浏览器流程。证据见 [05 记录](./research/05-browser-validation.md)。未操作真实账号，平台真实 no-publish 留给 20。
+
+- 2026-11-17：[06 已解决](./issues/06-youtube-persistent-profile.md)。YouTube login/check/upload-video/reset-profile 与直接调用使用持久化 Profile；合入 04 测试修复后 273 项相关回归及完整 Chromium 自然窗口合成 DOM 实测通过，保留托管与上传结果契约。[06 验证记录](./research/06-youtube-validation.md) 区分实际合成浏览器检查与未执行的真实账号动作。
