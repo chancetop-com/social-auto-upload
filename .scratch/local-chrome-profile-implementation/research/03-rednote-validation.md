@@ -43,7 +43,7 @@ PYTHONPATH=. /Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-u
 PYTHONPATH=. /Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_rednote_options -q
 ```
 
-**18 tests，全部通过**。在沙箱外运行完整 `channel="chromium"`、headless、`no_viewport=True` 的真实浏览器 DOM；所有网页为合成 HTML，外部请求全部阻断。覆盖自然窗口、滚动长表单/固定底栏遮挡、声明弹窗、封面及话题回读。初次沙箱内运行因系统浏览器进程权限产生 18 个 TargetClosedError；改在沙箱外执行。自然 viewport 首轮发现清理 Cookie JSON 时误删了话题解析的 json import；恢复后通过，再以完整 Chromium 通道复验通过。
+**18 tests，全部通过（40.510s）**。在沙箱外运行完整 `channel="chromium"`、headless、`no_viewport=True` 的真实浏览器 DOM；所有网页为合成 HTML，外部请求全部阻断。覆盖自然窗口、滚动长表单/固定底栏遮挡、声明弹窗、封面及话题回读。初次沙箱内运行因系统浏览器进程权限产生 18 个 TargetClosedError；改在沙箱外执行。自然 viewport 首轮发现清理 Cookie JSON 时误删了话题解析的 json import；恢复后通过，再以完整 Chromium 通道复验通过。
 
 `git diff --check` 通过。后续集成合并后的受影响检查另记于票据 Comments。
 
@@ -52,3 +52,9 @@ PYTHONPATH=. /Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-u
 这是离线 CLI/session 回归和隔离浏览器 DOM 验证，不是真实 Rednote 平台验收。新 Profile 的真实 login/check、视频/图文 no-publish 由票 20 执行；不把 2026-11-16 旧 Cookie/context 账号记录当作新 Profile 登录证据。
 
 本票仅迁移 Rednote；此前完成 TikTok，其余平台按分批票执行。没有新 API、一次性迁移工具、跨账号同步或永久真实账号绑定。文档同步了 Rednote CLI、独立 skill 及其随包引用、配置、安装、Bootstrap 和术语。
+
+## 最新集成复验
+
+已合并集成 `6d0ead1`（此前也合并 `9120889`）；Rednote 分支合并提交 `85e2b00`。共享文档按三个已迁移平台累加，保留 Instagram 本地作品动作例外和双方测试改动。
+
+上述离线命令追加 `tests.test_publish_ambiguity` 后，**161 tests 全通过（4.375s）**；另执行 `python -m unittest tests.test_instagram_profile_cli -q`，**14 tests 全通过（0.596s）**。共享生产能力没有变化，Rednote 真实 DOM 18 项结果仍适用。集成时已完成平台为 TikTok、Rednote、Instagram；小红书及后续平台由各自票继续交付。

@@ -31,6 +31,8 @@
 - 2026-11-17: 152 项相关离线回归通过（3.941s）；18 项真实完整 Chromium 合成 DOM 回归在自然 viewport 下通过（40.510s）。首次沙箱内浏览器权限失败已改用隔离沙箱外执行；话题 JSON parser import 回归已修复并复验。没有真实账号操作。
 - 2026-11-17: 旧 JSON/UA/临时 context 路径删除；本地页交由 persistent context 有界清理，避免独立 page.close 卡住生命周期。托管 probe 默认清理、忽略项日志、客户端/所有权与限流保留。共享 01/02 实现未改动，不重复无关跨进程和配置浏览器矩阵。
 
+- 2026-11-17: 提交 `1432316` 后先后合并集成 `9120889` 和 `6d0ead1`（合并提交 `85e2b00`）。冲突仅在共享交付列表、术语和 CLI/安装文档，按 TikTok、Rednote、Instagram 三平台已迁移状态合并，保留 Instagram 作品动作例外。合并后原 152 项加 publish ambiguity 为 **161 tests 全通过（4.375s）**；另跑 **14 项 Instagram Profile CLI 全通过（0.596s）**。工作树差异检查通过，无共享生产 API 改动。
+
 ## Answer
 
 Rednote 已完整接入独立持久化 Profile：login/check/视频/图文及直接 setup/uploader 均按新来源/headless 优先级运行，内部预检与业务共用会话和锁。Profile 是唯一登录态；旧 JSON 不参与读写或清理，允许别名重登，两种实际浏览器分别隔离。no-publish 离线证明真实传到上传、编辑、ARM 就绪后停止；取消、清理错误、未知结果及提交后登录/验证保留原语义。
