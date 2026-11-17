@@ -4,9 +4,8 @@ import asyncio
 import importlib
 import inspect
 import io
-import os
 import unittest
-from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -19,60 +18,6 @@ from utils.topic_candidates import click_topic_candidate
 
 
 class AccountCheckCleanupTests(unittest.TestCase):
-    def test_check_preserves_exit_code_and_output_after_cleanup_failure(self):
-        for platform in ("rednote",):
-            command = importlib.import_module(f"sau_commands.{platform}")
-            module = importlib.import_module(f"uploader.{platform}_uploader.main")
-            for probe, expected in (("valid", 0), ("login", 10), ("verification", 10)):
-                for failure in ("page", "context", "browser", "both", "save"):
-                    with self.subTest(platform=platform, probe=probe, failure=failure):
-                        page = SimpleNamespace(
-                            url=f"https://creator.{platform}.com/publish/publish",
-                            goto=AsyncMock(return_value=SimpleNamespace(status=200)),
-                            wait_for_timeout=AsyncMock(),
-                            locator=lambda selector: SimpleNamespace(count=AsyncMock(return_value=1)),
-                            close=AsyncMock(side_effect=RuntimeError("page close") if failure == "page" else None),
-                        )
-                        context = SimpleNamespace(
-                            new_page=AsyncMock(return_value=page),
-                            close=AsyncMock(side_effect=RuntimeError("context close")
-                                            if failure in {"context", "both", "save"} else None),
-                        )
-                        browser = SimpleNamespace(
-                            new_context=AsyncMock(return_value=context),
-                            close=AsyncMock(side_effect=RuntimeError("browser close")
-                                            if failure in {"browser", "both", "save"} else None),
-                        )
-
-                        @asynccontextmanager
-                        async def playwright(browser=browser):
-                            yield SimpleNamespace(chromium=SimpleNamespace(
-                                launch=AsyncMock(return_value=browser),
-                            ))
-
-                        output = io.StringIO()
-                        save = AsyncMock(side_effect=OSError("save failed") if failure == "save" else None)
-                        with (
-                            patch.dict(os.environ, {"MLX_API_TOKEN": "", "ADSPOWER_API_KEY": ""}),
-                            patch.object(command, "async_playwright", playwright),
-                            patch.object(command, "resolve_account_file", return_value="unused.json"),
-                            patch.object(command, "local_session_preflight", AsyncMock()),
-                            patch.object(command, f"{platform}_user_agent", AsyncMock(return_value="test")),
-                            patch.object(command, "set_init_script", AsyncMock(return_value=context)),
-                            patch.object(command, "log_local_session_ready"),
-                            patch.object(module, "classify_blocked", AsyncMock(return_value=None if probe == "valid" else probe)),
-                            patch.object(command, "save_storage_state_atomic", save),
-                            redirect_stdout(output), redirect_stderr(io.StringIO()),
-                        ):
-                            code = sau_cli.main([platform, "check", "--account", "test"])
-                        wanted = 1 if failure == "save" and probe == "valid" else expected
-                        self.assertEqual(code, wanted)
-                        self.assertEqual(output.getvalue().strip(), "valid" if wanted == 0 else "invalid")
-                        context.close.assert_awaited_once()
-                        browser.close.assert_awaited_once()
-                        page.close.assert_awaited_once()
-                        self.assertEqual(save.await_count, int(probe == "valid"))
-
     def test_cli_rejects_single_line_controls_before_dispatch(self):
         actions = {
             "rednote": ("upload-video", "upload-note"),
@@ -113,22 +58,6 @@ class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
                     await getattr(module, name)(playwright, Path("unused.json"), proxy=None, headless=True)
                 self.assertIs(caught.exception, original)
                 browser.close.assert_awaited_once()
-
-    async def test_user_agent_probe_preserves_value_and_original_error(self):
-        for platform, function in (("rednote", "_rednote_user_agent"),):
-            module = importlib.import_module(f"uploader.{platform}_uploader.main")
-            for original in (None, ValueError("UA unavailable")):
-                with self.subTest(platform=platform, failing=bool(original)):
-                    page = SimpleNamespace(evaluate=AsyncMock(return_value="HeadlessChrome/test", side_effect=original))
-                    context = SimpleNamespace(new_page=AsyncMock(return_value=page), close=AsyncMock(side_effect=RuntimeError("close failed")))
-                    browser = SimpleNamespace(new_context=AsyncMock(return_value=context))
-                    if original:
-                        with self.assertRaises(ValueError) as caught:
-                            await getattr(module, function)(browser)
-                        self.assertIs(caught.exception, original)
-                    else:
-                        self.assertEqual(await getattr(module, function)(browser), "Chrome/test")
-                    context.close.assert_awaited_once()
 
     async def test_alipay_tags_and_douyin_product_title_cannot_send_navigation_keys(self):
         from sau_commands.alipay import upload_alipay_video

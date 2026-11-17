@@ -34,7 +34,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()
         for name, value in [('BASE_DIR', self.root), ('LOCAL_CHROME_PATH', ''), ('LOCAL_BROWSER', 'chrome'), ('LOCAL_CHROME_HEADLESS', True)]:
-            self.stack.enter_context(patch.object(conf, name, value))
+            self.stack.enter_context(patch.object(conf, name, value, create=True))
         self.stack.enter_context(patch.dict(os.environ, {'MLX_API_TOKEN': '', 'ADSPOWER_API_KEY': '', 'HUMANIZE': '0'}))
         self.pw = FakePlaywright()
         self.context = ProfileContext()

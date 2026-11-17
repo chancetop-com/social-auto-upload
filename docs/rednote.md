@@ -13,13 +13,15 @@ sau rednote check --account creator
 
 有头登录保留网页默认的短信入口，用户也可以切到扫码；等待命令显示登录成功后再关闭窗口。无头登录 `--headless` 输出二维码。CLI 的测试浏览器和日常 Chrome 是不同会话，日常 Chrome 已登录不代表 CLI 已登录。
 
-本地会话保存到 `cookies/rednote_creator.json`；与同名 `xiaohongshu` 账号隔离，二维码与日志也使用 Rednote 命名。实测 Rednote 使用 `.rednote.com` 下的 `web_session` / `id_token`，没有小红书的 `galaxy_creator_session_id`。本地预检要求目标创作域存在未过期、非空的 `web_session`；通过发布页上传入口确认有效后才原子写回会话。
+本地身份只保存在 `browser_profiles/rednote/<原始别名>/<chrome|chromium>` 的专用持久化 Profile，与日常浏览器、小红书及另一浏览器种类隔离。默认系统 Chrome、有头、自然窗口尺寸；`--local-browser chromium` 选择项目 Patchright 配套的完整 Chromium，`LOCAL_CHROME_PATH` 覆盖选择。显式 `--headed` / `--headless` 优先于 `conf.py` 的 `LOCAL_CHROME_HEADLESS`，未配置时为有头；保留已有配置。登录、检查、内部预检和发布采用同一来源与 Profile。仅需安装实际选择的浏览器，安装见 [运行环境](./install.md#4-按所选浏览器准备运行环境)。
 
-## 英文环境
+普通命令不读取、导入、导出或删除旧 Cookie JSON。只有 `login` 引导登录；缺少 Profile、明确未登录或人机验证退出 `10`，网络、页面结构或浏览器故障退出 `1`。登录有效性由发布页上传入口确认；目录存在不代表已登录。账号别名可以重新登录其他真实账号，两种浏览器也可以使用不同账号。
 
-本地浏览器使用 `locale=en-US` 和 `Accept-Language: en-US,en;q=0.9`。这控制网页语言环境，不改变操作系统或浏览器菜单的语言，也不保证服务器返回英文页面。
+同 Profile 从启动、预检、业务到关闭全程独占；占用立即失败，不抢占手动浏览器。显式重建 `sau rednote reset-profile --account creator --browser-kind chrome` 只清空该种类资料，无需浏览器安装，保留另一种类和历史结果；之后需重新 login，不自动续跑发布。
 
-实际 `en-US` context 仍返回中文后台；所检查的官方发布资源也直接使用这些中文文案。标题、正文、登录、声明入口、原创开关、定时和确认按钮采用结构定位，删除无必要的文本兜底。当前只有缺少稳定标识的声明选项和封面上传页签使用已观察的中文名称。若出现实际英文页面，先取证；确需文本才按真实英文、中文排序，不自行翻译或添加猜测候选。
+## 浏览器与页面语言
+
+本地沿用浏览器/Profile 的语言和窗口，不添加 stealth、UA、请求头、locale 或定位权限，不修改页面语言。2026-11-16 旧英文 context 的实测仍返回中文后台；现有结构定位和已经观察的中文声明/封面文案继续使用。遇到不支持的页面布局应按步骤取证；不猜译文或自动切换语言。
 
 ## 发布前验证
 
@@ -41,7 +43,7 @@ sau rednote upload-note --account creator \
 
 设置 `MLX_API_TOKEN` 后，`check` 和两种上传命令使用 `--folder-id <folder> --profile-id <profile>`。设置 `ADSPOWER_API_KEY` 后只需 `--profile-id <profile>`。两种凭据不能同时设置。
 
-托管模式沿用 Profile 自身语言和登录态，不覆盖指纹、不读写本地 cookie；请在 Profile 中使用英文环境登录 Rednote 后运行。`login` 命令仅用于本地模式。
+托管模式沿用 Profile 自身语言和登录态，不覆盖指纹、不读写本地 cookie；请在 Profile 中使用英文环境登录 Rednote 后运行。`login` 命令仅用于本地模式。托管仅采用上述 headless 优先级，忽略本地浏览器选择和路径，不访问本地 Profile。
 
 ## 域名与退出码
 
@@ -51,8 +53,10 @@ sau rednote upload-note --account creator \
 
 ## 验收进度
 
+2026-11-17 持久化 Profile 接入已完成离线 CLI/session 回归；自然 viewport 的合成页面交互另有浏览器测试。新的真实账号 login/check/no-publish 验收属于最终收口票 20，本票没有操作真实账号。下面的实际账号记录来自 2026-11-16 旧 Cookie/context 路径，不代表新 Profile 已登录。
+
 - 已核实官方域名、登录后视频/图文入口及 `input.upload-input` 结构。
-- 离线测试覆盖命令分发、账号/域名隔离、英文 context、托管会话、干跑不派发发布、发布结果的创作域检查。
+- 离线测试覆盖配置优先级、Profile/域名隔离、托管会话、干跑不派发发布、发布结果的创作域检查及清理保护。
 - 已完成真实账号的本地有头登录，并在新的无头英文 context 中执行 `check` 返回 `valid`。
 - 两张中性测试图片已完成真实 `upload-note --no-publish`：逐张上传、英文标题/正文、发布按钮就绪，退出 `0`，没有点击发布。
 - 3 秒中性测试视频已完成真实 `upload-video --no-publish`：上传处理、英文标题/正文、发布按钮就绪，退出 `0`，没有点击发布。

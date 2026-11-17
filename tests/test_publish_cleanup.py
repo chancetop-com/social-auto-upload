@@ -14,8 +14,6 @@ from utils.browser_session import _local_session
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 
 LOCAL_UPLOADS = (
-    ("rednote", "RednoteVideo"),
-    ("rednote", "RednoteNote"),
     ("ks", "KSVideo"),
     ("ks", "KSNote"),
     ("tencent", "TencentVideo"),
@@ -70,7 +68,6 @@ class LocalFixture:
                 ("_new_stealth_page", self.page),
                 ("_new_local_context", self.context),
                 ("_xhs_user_agent", "fixture"),
-                ("_rednote_user_agent", "fixture"),
             ):
                 if hasattr(module, name):
                     stack.enter_context(
@@ -171,33 +168,8 @@ class PublishCleanupTests(unittest.IsolatedAsyncioTestCase):
                 fixture.browser.close.assert_awaited_once()
 
 
-class CleanupCliTests(unittest.TestCase):
-    def test_close_failures_keep_exit_codes_and_login_machine_signal(self):
-        for outcome, expected in (
-            (None, 0),
-            (PublishResultUnknownError("unknown"), 9),
-            (LoginRequiredError("login", publish_attempted=True), 10),
-        ):
-            with self.subTest(exit=expected):
-                fixture = LocalFixture(
-                    context_error=RuntimeError("context cleanup"),
-                    browser_error=RuntimeError("browser cleanup"),
-                )
-
-                async def dispatch(_args, fixture=fixture, outcome=outcome):
-                    await fixture.upload("rednote", "RednoteVideo", outcome)
-                    return 0
-
-                with (
-                    patch.object(sau_cli, "dispatch", dispatch),
-                    patch.object(sau_cli, "credentials_conflict", return_value=False),
-                    redirect_stderr(io.StringIO()) as stderr,
-                ):
-                    result = sau_cli.main(["rednote", "check", "--account", "fixture"])
-                self.assertEqual(result, expected)
-                self.assertEqual(
-                    "publish_attempted=true" in stderr.getvalue(), expected == 10
-                )
+# Rednote cleanup and CLI outcomes now run through real persistent sessions in
+# tests.test_rednote_profile_cli.
 
 
 class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):

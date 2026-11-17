@@ -21,9 +21,10 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.dict(os.environ, {"HUMANIZE": "0"}))
         playwright = await async_playwright().start()
         self.addAsyncCleanup(playwright.stop)
-        browser = await playwright.chromium.launch(headless=True)
+        browser = await playwright.chromium.launch(headless=True, channel="chromium")
         self.addAsyncCleanup(browser.close)
-        self.page = await browser.new_page()
+        self.page = await browser.new_page(no_viewport=True)
+        self.assertIsNone(self.page.viewport_size)
         await self.page.route("**/*", lambda route: route.abort())
         self.app = rednote.RednoteVideo(
             title="test",
