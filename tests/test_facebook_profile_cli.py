@@ -398,6 +398,30 @@ class FacebookProfileCliTests(unittest.TestCase):
         self.assertFalse(self.pw.chromium.persistent_calls)
         self.assertFalse((self.root / 'browser_profiles').exists())
 
+    def test_managed_uploads_borrow_provider_context_and_ignore_local_sources(self):
+        from tests.fakes import FakeManagedProvider, FakeBrowser
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        for mode in ('multilogin','adspower'):
+            for action, option, filename in [('upload-video','--file','video.mp4'), ('upload-note','--images','photo.png')]:
+                with self.subTest(mode=mode, action=action):
+                    path = self.root / filename; path.touch()
+                    context, provider = Context(), FakeManagedProvider(mode=mode)
+                    context.page_type = ComposerPage
+                    browser = FakeBrowser([context])
+                    self.pw.chromium.queue_connect_browser(browser)
+                    with patch.object(facebook,'resolve_managed_provider',return_value=provider), patch.object(conf,'LOCAL_CHROME_PATH',[]), patch.object(conf,'LOCAL_BROWSER',[],create=True):
+                        code, _, err = self.run_cli(action,'--account','Creator',option,str(path),'--title','caption','--headed','--local-browser','ignored')
+                    self.assertEqual(code,0,err)
+                    self.assertEqual(provider.start_calls,[False])
+                    self.assertEqual(provider.stop_calls,1)
+                    self.assertEqual(context.pages[-1].submit_clicks,1)
+                    self.assertFalse(context.closed)
+                    self.assertFalse(context.storage_state_calls)
+                    self.assertFalse(browser.new_context_calls)
+        self.assertFalse(self.pw.chromium.persistent_calls)
+        self.assertFalse(self.pw.chromium.launch_calls)
+        self.assertFalse((self.root/'browser_profiles').exists())
+
     def test_configuration_selection_failure_occupancy_and_reset_without_binary(self):
         self.profile()
         self.profile('chromium')
