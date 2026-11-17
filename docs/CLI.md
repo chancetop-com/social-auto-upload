@@ -5,7 +5,7 @@
 - `douyin`
 - `kuaishou`
 - `xiaohongshu`
-- `rednote`：小红书国际版的独立初始适配，默认英文浏览器环境；见 [Rednote 使用说明](./rednote.md)
+- `rednote`：小红书国际版的独立适配，保留当前浏览器与站点语言；见 [Rednote 使用说明](./rednote.md)
 - `bilibili`
 - `tencent`
 - `baijiahao`
@@ -60,17 +60,13 @@ sau xueqiu --help
 sau zhihu --help
 ```
 
-## 安装 patchright 浏览器
+## 按需准备浏览器
 
-Windows 下推荐先指定镜像，再安装 Chromium：
-
-```powershell
-$env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
-```
+所有正式本地浏览器平台默认使用系统 Chrome，由用户按 [Google 官方指引](https://www.google.com/chrome/)安装。显式选择 Chromium 时，在项目环境执行 `uv run patchright install chromium`，可加 `--no-shell` 省去不用的 shell；只有 headless shell 不满足运行要求。兼容自定义 binary 通过 `LOCAL_CHROME_PATH` 选择，只要求实际来源，失败不回退。基础安装和 help 不检查浏览器，托管动作不要求本地 Chrome/Chromium。Linux 系统依赖、Xvfb 与两条独立 CI 路线见[安装说明](./install.md#可选-ci-环境两条独立路线)。
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书、抖音、快手的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube、视频号、百家号、微博、虎扑、支付宝生活号的 login/check/upload-video 与直接调用也已接入；大鱼号、知乎的 login/check/视频/文章/verify 与直接调用也已接入；雪球的 login/check/文章/verify 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
+目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 开放此命令；Bilibili 不提供。TikTok、小红书、抖音、快手的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube、视频号、百家号、微博、虎扑、支付宝生活号的 login/check/upload-video 与直接调用也已接入；大鱼号、知乎的 login/check/视频/文章/verify 与直接调用也已接入；雪球的 login/check/文章/verify 与直接调用也已接入。Rednote 的 login/check/视频/图文及直接调用同样接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -238,7 +234,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -923,7 +919,7 @@ sau tiktok upload-video \
 - 别名是管理名称，可登录不同真实账号；Chrome / Chromium 隔离，同种类改路径、版本或 headless 复用资料。跨种类不复制凭据；另一个种类未登录需单独 login。
 - 持有 Profile 独占权直到业务和关闭结束；占用时立即失败，不抢占外部浏览器。正常关闭只关闭 persistent context；关闭故障独立告警，保持成功/未知/主异常，取消继续传播。重建不恢复任务或自动重发。
 - TikTok 本地持久化路径不再注入 stealth、UA、请求头、语言参数或固定 viewport。现有选择器仍依赖支持的页面布局；自动化不会切换语言。
-- 本地与托管共用 15 分钟发布预算；提交后登录/验证错误保留 `publish_attempted=true`。2026-11-17 已完成隔离浏览器矩阵与离线回归；持久化 Profile 的真实平台 login/no-publish 验收留待最终收口。此前 Cookie 路径验收不作为新 Profile 的登录证据。
+- 本地与托管共用 15 分钟发布预算；提交后登录/验证错误保留 `publish_attempted=true`。离线、隔离浏览器矩阵与四平台真实 login/no-publish 的证据分列于[最终验收记录](../.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。此前 Cookie 路径验收不作为当前 Profile 的登录证据。
 - `--no-publish`：上传、标题/正文/话题、全部发布选项、封面与 `--schedule` 完成后，等待发布按钮可点击（`post_video_button` / `Post` / `Schedule`，窗口 `min(60s, 剩余预算)`）即停止，不点击发布，也不等待 `--not-before`；成功退出 `0`，就绪超时退出 `1`。
 - 未注册的子命令仍由 argparse 退出 `2`。
 
@@ -1008,12 +1004,12 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`。
 
 补充：
 
 - `--headless` 只在确实不需要界面时显式传；默认可见窗口更便于人工处理验证码和核对发布结果
-- 未迁移平台的 `conf.LOCAL_CHROME_HEADLESS` 只影响直接调用 uploader；已迁移平台 CLI 同样读取它
+- 正式浏览器平台的 CLI 和直接调用均读取 `conf.LOCAL_CHROME_HEADLESS`；显式参数优先，升级保留已有 True
 
 ## 视频上传参数
 

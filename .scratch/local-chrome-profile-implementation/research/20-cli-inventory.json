@@ -1,0 +1,151 @@
+{
+  "date": "2026-11-17",
+  "browser_platform_count": 17,
+  "browser_action_count": 87,
+  "total_action_count": 93,
+  "verified_flags": {
+    "reset-profile": [
+      "--account",
+      "--browser-kind"
+    ],
+    "other_browser_actions": [
+      "--account",
+      "--local-browser",
+      "--headed",
+      "--headless"
+    ]
+  },
+  "registered_actions": {
+    "article": [
+      "themes",
+      "setup",
+      "render"
+    ],
+    "douyin": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ],
+    "kuaishou": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ],
+    "xiaohongshu": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ],
+    "rednote": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ],
+    "bilibili": [
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "tencent": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "alipay": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "weibo": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "hupu": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "facebook": [
+      "reset-profile",
+      "verify",
+      "delete",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ],
+    "facebook-page": [
+      "reset-profile",
+      "verify",
+      "delete",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ],
+    "instagram": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note",
+      "verify",
+      "delete"
+    ],
+    "youtube": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "baijiahao": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video"
+    ],
+    "dayu": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-article",
+      "verify"
+    ],
+    "xueqiu": [
+      "reset-profile",
+      "login",
+      "check",
+      "verify",
+      "upload-article"
+    ],
+    "zhihu": [
+      "reset-profile",
+      "login",
+      "check",
+      "verify",
+      "upload-article",
+      "upload-video"
+    ],
+    "tiktok": [
+      "reset-profile",
+      "login",
+      "check",
+      "upload-video",
+      "upload-note"
+    ]
+  }
+}

@@ -50,4 +50,4 @@ sau rednote upload-note --account creator \
 
 托管模式由 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 二选一启用；MLX 需要 `--folder-id` 与 `--profile-id`，AdsPower 需要 `--profile-id`。先在 Profile 人工登录，CLI `login` 仅用于本地。托管模式忽略 `--account`、保留 Profile 设置、不读写本地 cookie。
 
-旧 Cookie/context 路径曾验收本地登录、扫码和发布前选项；新持久化 Profile 已完成离线回归，真实账号验收留待最终回归。实际英文后台、真实托管 Profile 及最终提交仍待验收。
+持久化 Profile 已完成离线回归，以及系统 Chrome 有头的真实 login、正常关闭重开 check、视频和图文 no-publish 验证。真实上传在 ARM 就绪后、发布按钮前停止，可能留下临时素材或草稿；这不证明最终提交。实际英文后台、真实托管 Profile 及最终提交仍未验收。

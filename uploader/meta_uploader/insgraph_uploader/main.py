@@ -66,6 +66,10 @@ INSTAGRAM_MEDIA_INPUT = 'input[type="file"]'
 INSTAGRAM_PRIMARY_ACTION_NAME = re.compile(
     r'^(Next|Share|Post|下一步|分享|发布)$', re.IGNORECASE
 )
+# Local creator UI observed 2026-11-17 uses 继续 in the crop/edit steps.
+INSTAGRAM_LOCAL_PRIMARY_ACTION_NAME = re.compile(
+    r'^(Next|Share|Post|下一步|继续|分享|发布)$', re.IGNORECASE
+)
 # 可选提示的明确关闭文案；未命中时退回对话框最后一个按钮。
 PROMPT_DISMISS_TEXT = re.compile(
     r'^(Not Now|Not now|Later|OK|Got it|Continue|以后再说|稍后|暂不|知道了|好的|关闭|取消)$',
@@ -190,9 +194,10 @@ async def _composer_heading(dialog: Locator) -> Locator:
     return dialog.get_by_role('heading')
 
 
-async def _primary_action(dialog: Locator) -> Locator:
+async def _primary_action(dialog: Locator, *, local: bool = False) -> Locator:
     """返回向导主动作：只按可访问名（Next/Share/中文）定位，不使用 hash 类名。"""
-    return dialog.get_by_role('button', name=INSTAGRAM_PRIMARY_ACTION_NAME)
+    name = INSTAGRAM_LOCAL_PRIMARY_ACTION_NAME if local else INSTAGRAM_PRIMARY_ACTION_NAME
+    return dialog.get_by_role('button', name=name)
 
 
 async def _caption_editor(dialog: Locator) -> Locator:
@@ -673,6 +678,7 @@ class InstagramUploader:
         # 创建弹窗可能被延迟出现的通知提示遮挡：轮询期间主动关闭已知提示，
         # 直到素材入口真的可操作；只有超时才报错，不添加固定等待。
         deadline = time.monotonic() + budget.clamp_ms(30_000) / 1000
+        post_menu_selected = False
         while True:
             if await notifications.count():
                 await self._dismiss_prompt(
@@ -681,6 +687,14 @@ class InstagramUploader:
             file_input = await _media_input(dialog)
             if await file_input.count():
                 break
+            if not getattr(self, '_managed', False) and not post_menu_selected:
+                # Observed 2026-11-17: the local Chinese creator navigation
+                # opens a Post / Live / Ad submenu before the media dialog.
+                # Match its actual icon label, never a positional menu item.
+                post_entry = page.locator('a[href="#"]:has(svg[aria-label="帖子"])')
+                if await reject_ambiguous(post_entry, 'Instagram 创建菜单帖子入口'):
+                    await humanizer.click(post_entry)
+                    post_menu_selected = True
             if time.monotonic() >= deadline:
                 raise RuntimeError(
                     'Instagram 创建弹窗未出现素材入口（可能被未知弹窗遮挡）'
@@ -703,7 +717,7 @@ class InstagramUploader:
                 has=page.locator('img[src*="reels_nux"]'))
             await self._dismiss_prompt(page, reels_intro, humanizer=humanizer)
         # 裁剪标题栏主动作实际出现，才可推进；上传失败或未知弹窗阻断会保留现场并报错。
-        action = await _primary_action(dialog)
+        action = await _primary_action(dialog, local=not getattr(self, '_managed', False))
         await expect(action).to_have_count(
             1, timeout=budget.clamp_ms(60_000)
         )
@@ -754,7 +768,7 @@ class InstagramUploader:
                 1, timeout=budget.clamp_ms(30_000)
             )
             previous = await heading.inner_text()
-            action = await _primary_action(dialog)
+            action = await _primary_action(dialog, local=not getattr(self, '_managed', False))
             await expect(action).to_have_count(
                 1, timeout=budget.clamp_ms(30_000)
             )
@@ -950,7 +964,7 @@ class InstagramUploader:
             # 未请求时保持既有 stage（legacy 失败证据不变）。
             self.stage = 'options'
         await self._apply_options(page, budget=budget)
-        action = await _primary_action(dialog)
+        action = await _primary_action(dialog, local=not getattr(self, '_managed', False))
         if self.no_publish:
             # 干跑：上传、配文与全部选项已完成后停在 Share 前；跳过
             # --not-before，不注册响应监听，也不进入结果观察循环。

@@ -106,6 +106,39 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.assertFalse((self.root / 'cookies').exists())
         self.assertEqual(list(self.root.rglob('*.png')), [])
 
+    def test_login_accepts_existing_authenticated_redirect_without_a_qr_box(self):
+        from tests.fakes_clock import FakeClock
+        self.profile()
+        # The real creator site redirects an authenticated /login navigation
+        # straight to its workspace, so there is no login box to wait for.
+        class AuthenticatedPage(_ProbePage):
+            def locator(self, selector):
+                if selector == xhs.XHS_LOGIN_BOX_SELECTOR:
+                    return FakeLocator('absent login box', count=0,
+                        wait_error=TimeoutError('login box is absent after authenticated redirect'))
+                return super().locator(selector)
+        self.context.page_factory = AuthenticatedPage
+        with FakeClock().patch(xhs):
+            code, _, err = self.cli('login', '--account', 'creator', '--headed')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.pw.chromium.persistent_calls), 1)
+        self.assertTrue(self.context.closed)
+        self.assertEqual(list(self.root.rglob('*.png')), [])
+
+    def test_login_without_qr_still_requires_positive_evidence_and_classifies_verification(self):
+        from tests.fakes_clock import FakeClock
+        for url, code, diagnostic in [
+            ('https://creator.xiaohongshu.com/home', 1, '页面结构异常'),
+            ('https://creator.xiaohongshu.com/website-login/captcha', 10, '验证'),
+        ]:
+            with self.subTest(url=url):
+                self.context.page_factory = lambda: _ProbePage(final_url=url, anchor_count=0)
+                with FakeClock().patch(xhs), patch.object(xhs, 'XHS_PROBE_ANCHOR_WINDOW_SECONDS', 0):
+                    actual, _, err = self.cli('login', '--account', 'creator', '--headed')
+                self.assertEqual(actual, code, err)
+                self.assertIn(diagnostic, err)
+                self.assertTrue(self.context.closed)
+
     def test_video_and_note_no_publish_reach_actual_arm_in_one_owned_session(self):
         from tests.fakes_clock import FakeClock
         import uploader.publish_timeout as timeout
@@ -125,6 +158,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 with FakeClock().patch(xhs, timeout, dom):
                     code, out, err = self.cli(action, '--account', 'creator', '--title', 'Title', '--headed', '--no-publish', *flags)
                 self.assertEqual(code, 0, err)
+                self.assertIn('prepared (not published)', out)
                 self.assertEqual(len(self.pw.chromium.persistent_calls) - before, 1)
                 self.assertFalse(self.pw.chromium.persistent_calls[-1]['headless'])
                 self.assertEqual(page.locator(xhs.XHS_UPLOAD_INPUT_SELECTOR).files, [str(file)] if action == 'upload-video' else [[str(file)]])
@@ -309,6 +343,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
             finally:
                 logger.remove(sink)
             self.assertEqual(code, 0, err)
+            self.assertIn('upload submitted:', out)
             self.assertEqual(provider.start_calls, [False])
             self.assertEqual(provider.stop_calls, 1)
             self.assertFalse(context.closed)

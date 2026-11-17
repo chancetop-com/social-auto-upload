@@ -15,7 +15,8 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+import conf
+from conf import BASE_DIR
 from uploader.base_video import BaseVideoUploader
 from utils.base_social_media import set_init_script
 from utils.browser_cleanup import close_browser_resources, save_upload_session
@@ -32,6 +33,10 @@ from utils.humanize import (
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
+# Historical managed hints and unregistered note defaults remain compatible
+# with existing conf.py files that omit optional browser settings.
+LOCAL_CHROME_PATH = getattr(conf, "LOCAL_CHROME_PATH", "")
+LOCAL_CHROME_HEADLESS = getattr(conf, "LOCAL_CHROME_HEADLESS", False)
 TENCENT_HOME_URL = "https://channels.weixin.qq.com/platform"
 TENCENT_UPLOAD_URL = "https://channels.weixin.qq.com/platform/post/create"
 TENCENT_MANAGE_URL = "https://channels.weixin.qq.com/platform/post/list"

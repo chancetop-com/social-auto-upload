@@ -20,7 +20,7 @@ summary: 使用独立 Rednote Profile 完成登录、检查及发布流程。
 
 默认系统 Chrome、有头且自然窗口；`--local-browser chromium` 选择配套完整 Chromium，`LOCAL_CHROME_PATH` 优先。显式 headed/headless 优先于 `LOCAL_CHROME_HEADLESS`，缺省为 False，保留已有配置。只准备选定来源，失败不自动切换。占用立即退出 1。明确要求清空时运行 `sau rednote reset-profile --account <name> --browser-kind chrome|chromium`，只清空指定种类，之后重新 login；无需安装浏览器，不自动恢复发布。
 
-本地保留浏览器/Profile 语言，不添加 stealth、UA、请求头或 locale 覆盖，不自动切换语言。沿用小红书的人类化流程，只按实际页面差异调整；能用结构定位就不加文本兜底。确需文本时，只有取证后的英文、中文文案才可以按此顺序使用，不自行翻译。历史 Cookie/context 路径下封面、声明、话题、定时和扫码已实测；新持久化 Profile 的真实账号验收留待最终回归，不把历史记录当作当前登录证据。来源声明必须回读媒体名称或拍摄日期/地点；地点参数使用候选的完整名称，遇到重名停止。图文及 12 秒视频的原创开启已通过；当前页面在视频不足 10 秒或来源转载时禁用原创，不应误判成账号没有权限。纯英文界面和托管 Profile 仍待实际样本。显式封面/声明失败会停止。遇到控件缺失应记录现场差异，不能声称已发布。
+本地保留浏览器/Profile 语言，不添加 stealth、UA、请求头或 locale 覆盖，不自动切换语言。沿用小红书的人类化流程，只按实际页面差异调整；能用结构定位就不加文本兜底。确需文本时，只有取证后的英文、中文文案才可以按此顺序使用，不自行翻译。历史 Cookie/context 路径下封面、声明、话题、定时和扫码已实测；当前持久化 Profile 通过 login、正常关闭后同配置 check 和显式 no-publish 分别核验，不把历史记录当作当前登录证据。来源声明必须回读媒体名称或拍摄日期/地点；地点参数使用候选的完整名称，遇到重名停止。图文及 12 秒视频的原创开启已通过；当前页面在视频不足 10 秒或来源转载时禁用原创，不应误判成账号没有权限。纯英文界面和托管 Profile 仍待实际样本。显式封面/声明失败会停止。遇到控件缺失应记录现场差异，不能声称已发布。
 
 托管模式：设置 `MLX_API_TOKEN` 后使用 `--folder-id` 和 `--profile-id`；设置 `ADSPOWER_API_KEY` 后仅使用 `--profile-id`。使用其中一种凭据，并在对应 Profile 人工登录；CLI `login` 仅支持本地模式。托管模式只采用同一 headless 优先级；忽略本地浏览器选择/路径，不访问本地 Profile 或 cookie，保留托管 Profile 设置。
 

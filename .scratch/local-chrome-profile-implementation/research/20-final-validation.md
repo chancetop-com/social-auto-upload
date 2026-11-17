@@ -1,0 +1,103 @@
+# 20：原定范围最终验证记录
+
+日期：2026-11-17，Darwin arm64。实施基线：`1c8220b`，工作分支 `codex/local-profile-20`。本记录分别列出离线替身、真实浏览器合成页面和真实平台证据。
+
+**交付状态：原定 20 票范围的实现、文档及实际验收已落实；整体任务尚未完成。** 实测结束后，用户新增要求把 Profile 改为 `browser_profiles/<chrome|chromium>/<platform>/<account>`，并删除历史 TikTok Firefox 入口、未注册 TencentNote、旧 generic local session 及无剩余依赖的 stealth 资源/打包/测试。这两项由后续实施处理；本提交未移动任何真实 Profile、未改变布局、未实施这些删除，也不把原方案的资源保留结论当作新要求的完成证据。新布局仍须安全移动四份真实 Profile 并重开检查，最后再进行独立代码审查。父规格保留未完成状态。
+
+## 正式入口与资源审计
+
+由实际 `sau_cli.build_parser()` 导出的 [入口清单](./20-cli-inventory.json) 包含 17 个浏览器平台、87 个注册浏览器动作（含 17 个 reset），另有 Bilibili/article 的 6 个动作，共 93 个。所有普通浏览器动作都有 account/local-browser/headless/headed，所有 reset 都有 account/browser-kind。清单证明注册覆盖，不代表真实平台执行。
+
+逐个追踪 login、独立 check、内部预检、视频/图文/文章、已注册 verify/delete 到共享 `local_browser_session`：所有正式本地获取均为持久化 context，真实 local 模式，不导入/恢复/导出旧 storage-state JSON；业务沿用当前 session，托管分支仍由原 provider 管理。覆盖平台为 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球。
+
+审计保留的边界：
+
+- Bilibili biliup 与其独立账号 JSON、二进制运行/下载链仍有正式调用；article renderer 资源仍服务正式文章处理。
+- 托管调用的既有 hint dictionaries、ignored-option 日志和 TikTok managed `?lang=en` 探测 URL 保留；本地不向 context 注入 viewport、UA、locale、headers、geolocation 或 stealth。原有业务代理和限定 origin 的剪贴板授权仍保留。
+- Dayu/Xueqiu 的 cookie-shaped 路径仅定位历史结果文件，不恢复账号。当前身份与历史作品作者核验保留。
+- Dayu 匿名公开验证从当前 browser 创建无 storage-state 的独立 context，以有界清理结束，主 Profile/锁仍属于外层。
+- Dayu preview.close 仅走 managed 分支；Xueqiu auxiliary.close 也仅走 managed 分支。替身边界设为永不返回时，本地完整路径仍正常返回和清理；托管相同等待风险已存在于基线 `47cc185`，未在本票扩大修改范围。
+- 在**原定审计范围**中，历史 Firefox TikTok、未注册 TencentNote 和 generic local compatibility 分支仍调用旧资源，因此当时未删除 stealth。用户随后已明确授权移除这些调用方与资源，此项现为后续待办，不能再据此宣称它们需要永久保留。
+
+[19 实际迁移/移除记录](./19-migration-execution.md) 已落实四份旧资料迁移、8 次正向探测、8 次严格正常关闭、四份精确旧 JSON 删除及全部临时代码/测试移除。当前正式代码没有新增一次性迁移入口、重启复验、清理重试或停用分支。相关公共入口测试证明旧 JSON 再出现也被忽略、普通 login 只获取一次 session。四份真实 Profile 一直保留于原仓库。
+
+## 原定范围的修复与文档
+
+1. 公共 `sau_cli --help` 在仅有 `BASE_DIR` 的配置下曾因 optional browser constants 的强制 import 失败。百家号、快手、微博、视频号改用兼容缺省；不改变已有 managed 默认值。
+2. 三个集成 fixture 分别依赖不存在的 LOCAL_BROWSER、用户 HEADLESS=False 假设；改为明确隔离配置，生产配置未改。
+3. 小红书已登录 Profile 会把 `/login` 重定向到工作台；原实现无条件等待 QR 导致真实登录验收失败。现在仅识别为登录页时取 QR，但仍须实际正向 publish-page probe 才返回成功。缺少 QR 本身不代表成功，未知页面与验证页仍分别保持故障/登录所需分类；新 QR 登录回调与清理仍有覆盖。
+4. Instagram 本机实际中文界面在 Create 后出现“帖子/直播视频/广告”子菜单，裁剪步骤主动作是“继续”。依据实际截图/DOM，为 local 添加明确的帖子 icon 入口和继续名称；保留原 managed 选择器与路由。素材上传、配文、编辑和 no-publish 停止点完整执行。
+5. TikTok/小红书 local no-publish 的 CLI 曾输出 submitted；现在明确输出 prepared (not published)。Rednote 已如此，Instagram 结果已是 prepared。managed 与真正提交时的既有输出及 exit/result 契约不变。
+
+README、CLI、安装/更新、agent bootstrap、配置样例、术语、技能分发和受影响独立 skill 已收口为 17 平台 Profile 模式。基础安装无浏览器下载/检查 hook。浏览器仅按实际来源准备；保留已有 `HEADLESS=True`，显式 CLI 可以覆盖。文档依据既有研究完整列出 Ubuntu 24.04 x64 Google 官方 amd64 DEB 与固定 Patchright 配套完整 Chromium 两条可选 CI 路线，包含系统依赖、Xvfb、缓存/版本一致性、自定义 binary 复用和可选 `--no-shell`。**未执行这些 Linux 安装示例，没有新增 workflow 或 CI 系统，也没有自动安装/更新 Google Chrome。**
+
+## 离线证据
+
+测试使用原仓库 `.venv/bin/python`，cwd/源码为工作树，测试临时根与真实账号数据隔离。完整集成第一次因工作树缺 article renderer 的 npm 依赖出现 1 failure/12 errors；随后用 ignored node_modules symlink 复用已有原仓库依赖，重新完整运行通过。未以跳过受影响测试消除该故障。
+
+| 范围 | 实际结果 |
+| --- | --- |
+| optional config 公共 CLI 回归 | 先复现 ImportError，修复后 1/1 通过 |
+| 三个 integrated fixture | 先复现 2 failures/1 error，修复后 3/3 通过 |
+| 首次实际上传前的四平台停止保护回归 | 124/124 通过，3.213s；逐条核对 8 个动作参数传递和停止分支 |
+| 集成离线集合 | 收集 2,122；选中 2,030，2,028 通过、2 个原有 opt-in provider smoke 跳过，153.855s；另 92 项真实浏览器测试按已有记录单独验证 |
+| 小红书已认证 login | 先复现 QR 等待失败，17 项通过；补充无 QR 但无正向证据不能成功及验证分类 |
+| local 停止输出 | 先复现误报 submitted，34 项通过；最终集合还断言 managed 原输出不变 |
+| Instagram 子菜单与继续 | 各先有视频/图文失败，再分别 16 项、51 项通过 |
+| 最后受影响集合 | 274/274 通过，18.825s，包含上述新用例、TikTok no-publish/选项、XHS probe/submit/blocked、Instagram 与 managed Meta，以及公共最小配置 |
+
+最后集合曾因把 managed upload 输出断言放在 managed check 用例中产生一次测试自身失败（check 实际输出 valid），移到真实 upload 用例后完整 274 项通过。该修复没有改生产代码。
+
+集成命令使用机器上的 `/private/tmp/sau-local-profile-notes/run-integrated-offline.py`：标准 unittest discover，仅分离基线 80 个已识别的真实浏览器测试和 12 个新增 `*_profile_dom` 测试，写明 selected/deferred manifest，不替换会话或 skip 失败。它不是项目运行入口。最后受影响命令为：
+
+```sh
+/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest \
+  tests.test_tiktok_profile_cli tests.test_tiktok_no_publish tests.test_tiktok_note_cli tests.test_mlx_tiktok \
+  tests.test_xhs_profile_cli tests.test_xhs_session tests.test_xhs_submit tests.test_xhs_blocked \
+  tests.test_instagram_profile_cli tests.test_mlx_meta tests.test_cli_minimal_config -q
+```
+
+集成全量在本票最后四个真实问题回归用例加入前完成；后续修改由上面的最终受影响集合覆盖，没有将不同运行次数简单相加成唯一测试总数。verify/delete、提交后异常、结果未知、提交次数和 cleanup 结果保留由相应离线测试覆盖，未用真实作品验证。
+
+各批原始证据仍分别保留，相关平台用例也进入本次集成集合：第一批 [01](../issues/01-profile-ownership-and-reset.md)、[02](./02-browser-validation.md)、[03](./03-rednote-validation.md)、[04](../issues/04-instagram-persistent-profile.md)、[05](./05-browser-validation.md)；第二批 [06](./06-youtube-validation.md)、[07](./07-facebook-validation.md)、[08](./08-facebook-page-validation.md)；第三批 [09](./09-douyin-validation.md)、[10](./10-kuaishou-validation.md)、[11](./11-tencent-validation.md)、[12](./12-baijiahao-validation.md)；第四批 [13](./13-browser-validation.md)、[14](./14-hupu-validation.md)、[15](./15-alipay-validation.md)；第五批 [16](./16-dayu-validation.md)、[17](./17-zhihu-validation.md)、[18](./18-xueqiu-validation.md)。
+
+## 真实浏览器、受控页面
+
+[02 的 8 组合实测](./02-browser-validation.md) 已覆盖系统 Chrome 157.0.8103.79、Patchright 1.64.4 对应完整 Chromium revision 1248 / Chrome for Testing 156.0.8078.4：channel/custom 各有头与无头，正常关闭重开后 Cookie/localStorage 持久化、匿名 context 隔离、匿名关闭后主页面仍可用全部通过。本票没有修改共享浏览器来源/会话/占用能力，未无理由重跑全矩阵。Windows/Linux 原生实测仍未执行。
+
+本票额外执行真实 Chrome、合成 DOM 的 Instagram 回归：`tests.test_instagram_uploader tests.test_instagram_no_publish` 共 33 项通过，163.403s。最后 local 继续修复后又执行受影响的 composer/media-input 和全部 no-publish 用例，共 6 项通过，50.661s。它们使用隔离测试页面，不是实际账号成功证据。浏览器启动经本机 sandbox escalation；没有安装新浏览器。
+
+## 四平台实际验收
+
+数据根为原仓库 `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload`，源码为工作树 `/private/tmp/sau-local-profile-20`。机器外部 harness `/private/tmp/sau-local-profile-notes/run20_live.py` 只做源码/原配置/数据根绑定和命令 allowlist，然后调用真实 `sau_cli.main(argv)`；它未提交到项目、不是永久迁移入口。原 `conf.py` 未修改，已有 `HEADLESS=True` 被每条命令的 `--headed` 显式覆盖；LOCAL_BROWSER 缺省且无 custom path，实际为 `channel=chrome`、157.0.8103.79、headless=False、no_viewport=True。没有 provider 环境。
+
+本轮**实际使用的历史路径**相对于原仓库分别为 `browser_profiles/tiktok/lukechen/chrome`、`browser_profiles/rednote/rednote/chrome`、`browser_profiles/instagram/luke/chrome`、`browser_profiles/xiaohongshu/180/chrome`。后续 kind-first 搬迁须另附执行记录，不改写这些已发生的路径。
+
+每个平台普通 login 正常退出后，独立进程重开相同 Profile 执行 check；然后视频、图文分别通过正式 CLI。账号别名和获批素材是用户已有数据。每条上传显式 `--no-publish`，所有阶段完整命令、开始/结束 UTC 与退出码在 [实际事件记录](./20-live-events.jsonl)。命令模板（对下表四个平台/别名逐个运行）：
+
+```text
+<python> <harness> <platform> login --account <alias> --headed
+<python> <harness> <platform> check --account <alias> --headed
+<python> <harness> <platform> upload-video --account <alias> --headed --file <original>/videos/demo.mp4 --title Profile验收 --no-publish
+<python> <harness> <platform> upload-note --account <alias> --headed --images <original>/videos/demo.png --title Profile验收 --no-publish
+```
+
+| 平台/别名 | login 成功 UTC | 独立 check 成功 UTC | 视频成功 UTC | 图文成功 UTC | 实际停止点 |
+| --- | --- | --- | --- | --- | --- |
+| TikTok / lukechen | 11:04:54 | 11:05:38 | 11:06:23 | 11:06:56 | 素材/内容及发布就绪检查完成，发布按钮前停止，未点击发布 |
+| Rednote / rednote | 11:06:41 | 11:07:15 | 11:08:07 | 11:09:12 | ARM 就绪，发布按钮前停止，未点击发布 |
+| Instagram / luke | 11:07:59 | 11:08:26 | 11:15:42 | 11:16:31 | 素材/裁剪/编辑/配文完成，Share 前停止，结果 prepared |
+| 小红书 / 180 | 11:10:43 | 11:11:26 | 11:12:08 | 11:13:24 | ARM 就绪，发布按钮前停止，未点击发布 |
+
+表中全部退出码 0，正常关闭，没有 cleanup 警告。TikTok 普通 login 在已有认证状态下由 Agent 向 TTY 输入 Enter 触发真实正向探测；没有伪造探测结果或要求用户重复登录。
+
+保留的实际失败及其处理：
+
+- 小红书首次 login 于 11:07:47 退出 1，已登录重定向后仍等 login-box。修复与离线证明后，普通 login/reopen check 和两次 no-publish 全部通过。
+- Instagram 首次 video 于 11:09:37 退出 1，Create 的帖子子菜单未进入；第二次于 11:13:58 退出 1，素材已上传但裁剪继续按钮未匹配。两次均在提交前，保留 not_submitted 结果和实际截图/DOM，先 TDD 修复后第三次 video 与 note 成功。
+- 首次 Instagram 失败的结果最初因 cwd 相对路径写进工作树 `.local`；harness 随后绑定 cwd 到原仓库，并把这一条结果及其引用证据无覆盖移回原仓库。Profile 从未创建在工作树；所有实测结果现在位于原仓库 `.local`。
+- TikTok 两次成功运行发生在 truthful stdout 修复之前，实际日志已有“发布就绪，--no-publish 停在发布按钮前（未点击发布）”，末行旧文案仍是 submitted。记录保留原样，未把旧文案伪装成重跑后的输出；修复后的 prepared 与 managed 原输出均由最终公共 CLI 测试证明。
+
+真实页面截图/HTML与账号结果保留在原仓库 ignored `.local`，未提交个人页面或凭据。原始机器日志在 `/private/tmp/sau-local-profile-notes/20-*.log`；本记录与 JSONL 保留可审阅的命令、失败原因与最终结果。未实际提交发布、未删除作品、未为验证作品管理创建帖子。
+
+**证据边界：** 素材确实上传，平台可能保留临时素材或草稿。成功只证明提交前流程，不证明真正发布、not-before 等待、发布后验证或防封禁。其他平台/托管不新增真实账号验收。实测完成且新要求到达后停止了所有账号操作；进程检查没有剩余 live harness 或使用 browser_profiles 的 Chrome。四份原仓库 Profile 必须在后续布局迁移和工作树删除后继续保留。

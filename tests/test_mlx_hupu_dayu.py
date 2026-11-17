@@ -383,6 +383,7 @@ class HupuCliTests(unittest.TestCase):
 
     def test_check_local_passes_effective_configuration(self):
         with (
+            patch('conf.LOCAL_CHROME_HEADLESS', False, create=True),
             patch.object(
                 hupu_command, "check_hupu_account", new=AsyncMock(return_value=True)
             ) as legacy,

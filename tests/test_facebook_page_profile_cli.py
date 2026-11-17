@@ -282,8 +282,8 @@ class FacebookPageProfileCliTests(unittest.TestCase):
             self.assertEqual(self.run_cli('check','--account','Creator','--local-browser','chromium')[0],0)
         self.assertEqual(self.pw.chromium.persistent_calls[-1]['user_data_dir'],custom['user_data_dir'])
         self.profile()
-        with patch.object(conf,'LOCAL_BROWSER','chrome',create=True):
-            del conf.LOCAL_BROWSER
+        with patch.dict(conf.__dict__):
+            conf.__dict__.pop('LOCAL_BROWSER', None)
             self.assertEqual(self.run_cli('check','--account','Creator')[0],0)
         self.pw.chromium.launch_error = OSError('selected browser unavailable')
         code, _, err = self.run_cli('check','--account','Creator')

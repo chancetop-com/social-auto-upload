@@ -18,7 +18,7 @@ from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError as PWTimeoutError, async_playwright
 
-from conf import LOCAL_CHROME_PATH
+import conf
 from uploader.base_video import BaseVideoUploader
 from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
@@ -34,6 +34,7 @@ from utils.login_qrcode import build_login_qrcode_path, decode_qrcode_from_path,
 
 
 BAIJIAHAO_LOGIN_URL = "https://baijiahao.baidu.com/builder/theme/bjh/login"
+LOCAL_CHROME_PATH = getattr(conf, "LOCAL_CHROME_PATH", "")
 BAIJIAHAO_HOME_URL = "https://baijiahao.baidu.com/builder/rc/home"
 BAIJIAHAO_PUBLISH_URL = "https://baijiahao.baidu.com/builder/rc/edit?type=videoV2"
 # 发布成功后跳转到的 URL 前缀

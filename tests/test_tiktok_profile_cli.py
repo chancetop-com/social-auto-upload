@@ -327,8 +327,9 @@ class TikTokProfileCliTests(unittest.TestCase):
         image.write_bytes(b'image fixture')
         self.profile()
         with patch.dict(os.environ, {'HUMANIZE': '0'}):
-            code, _, err = self.run_cli('upload-note', '--account', 'creator', '--images', str(image), '--title', 'A title', '--note', 'A description', '--no-publish', '--headed')
+            code, out, err = self.run_cli('upload-note', '--account', 'creator', '--images', str(image), '--title', 'A title', '--note', 'A description', '--no-publish', '--headed')
         self.assertEqual(code, 0, err)
+        self.assertIn('prepared (not published)', out)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 1)
         self.assertEqual(page.input_files, [str(image)])
         self.assertEqual(page.title_text, 'A title')
@@ -342,8 +343,9 @@ class TikTokProfileCliTests(unittest.TestCase):
         video = self.root / 'video.mp4'; video.write_bytes(b'video fixture')
         self.profile()
         with patch.dict(os.environ, {'HUMANIZE': '0'}):
-            code, _, err = self.run_cli('upload-video', '--account', 'creator', '--file', str(video), '--title', 'Video caption', '--no-publish')
+            code, out, err = self.run_cli('upload-video', '--account', 'creator', '--file', str(video), '--title', 'Video caption', '--no-publish')
         self.assertEqual(code, 0, err)
+        self.assertIn('prepared (not published)', out)
         self.assertEqual(page.input_files, [str(video)])
         self.assertEqual(page.caption_text, 'Video caption')
         self.assertEqual(page.publish_clicks, 0)
@@ -419,10 +421,11 @@ class TikTokProfileCliTests(unittest.TestCase):
         sink = logger.add(logs, format='{message}')
         try:
             with patch.object(tiktok, 'resolve_managed_provider', return_value=provider), patch.object(conf, 'LOCAL_CHROME_PATH', []), patch.dict(os.environ, {'HUMANIZE':'0'}):
-                code, _, err = self.run_cli('upload-note', '--account', 'creator', '--images', str(image), '--no-publish', '--local-browser', 'ignored')
+                code, out, err = self.run_cli('upload-note', '--account', 'creator', '--images', str(image), '--no-publish', '--local-browser', 'ignored')
         finally:
             logger.remove(sink)
         self.assertEqual(code, 0, err)
+        self.assertIn('upload submitted:', out)
         self.assertEqual(context.created_pages[0].url, 'https://www.tiktok.com/tiktokstudio/upload?lang=en')
         self.assertIn('ignored=context_kwargs', logs.getvalue())
         self.assertNotIn('launch_kwargs', logs.getvalue())

@@ -29,7 +29,7 @@ from patchright.async_api import (
     async_playwright,
 )
 
-from conf import LOCAL_CHROME_PATH
+import conf
 from uploader.base_video import BaseVideoUploader
 from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
@@ -44,6 +44,7 @@ from utils.login_qrcode import build_login_qrcode_path
 
 
 WEIBO_HOME_URL = "https://weibo.com/"
+LOCAL_CHROME_PATH = getattr(conf, "LOCAL_CHROME_PATH", "")
 WEIBO_LOGIN_URL = "https://weibo.com/newlogin?tabtype=weibo&gid=102803&openLoginLayer=0&url=https://weibo.com/"
 # 微博 passport 扫码登录页（直接跳这里，绕过首页 popup）
 WEIBO_PASSPORT_QR_URL = "https://passport.weibo.com/sso/signin?entry=miniblog&source=miniblog&url=https%3A%2F%2Fweibo.com%2F"
