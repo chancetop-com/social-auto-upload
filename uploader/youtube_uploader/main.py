@@ -5,11 +5,10 @@ Unlike the other platforms here, YouTube also offers an official Data API. We de
 use browser automation instead, because videos uploaded through an *unaudited* API project
 are force-locked to private and cannot be made public without passing Google's compliance
 audit (which is impractical for personal/single-channel use). Browser automation has no such
-restriction and can publish public videos right away, and it matches the cookie-based pattern
-used by every other uploader in this project.
+restriction and can publish public videos right away.
 
 Login is interactive (Google account, no QR code): the browser opens, the user signs in, and
-the storage_state is saved. Reuse it afterwards for fully unattended uploads.
+the dedicated persistent browser Profile retains the session for later uploads.
 """
 import asyncio
 import re
@@ -19,11 +18,11 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
-from utils.base_social_media import set_init_script
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, UsageError
+from utils.local_browser_session import local_browser_session
 from utils.humanize import (
     DEFAULT_PROFILE,
     MAYBE_DISPATCHED,
@@ -59,9 +58,8 @@ HASHTAG_CANDIDATE_TIMEOUT_MS = 1500
 #: 一段 `#` 话题：`#` 后到空白 / 下一个 `#` 之前。
 _HASHTAG_RE = re.compile(r"#[^\s#]+")
 
-# Golden local-mode browser options.  ``sau_commands/youtube.py`` passes the
-# same values to ``browser_session`` in Multilogin mode, where they are ignored:
-# the Profile decides the exit IP and fingerprint.
+# Historical managed-session hints are retained for identical ignored-option logs.
+# Local sessions use local_context_kwargs() and the shared native browser resolver.
 YOUTUBE_LAUNCH_KWARGS = {
     "channel": "chrome",
     "proxy": {"server": YT_PROXY} if YT_PROXY else None,
@@ -91,8 +89,7 @@ def _msg(emoji: str, text: str) -> str:
 def _raise_if_login_required(page: Page) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this.  Local mode keeps its historical
-    ``RuntimeError`` (or timeout) behaviour untouched.
+    Only the managed branch calls this; its existing provider contract is preserved.
     """
     url = str(getattr(page, "url", "") or "").lower()
     if not url:
@@ -104,38 +101,42 @@ def _raise_if_login_required(page: Page) -> None:
         )
 
 
-def _build_login_result(success, status, message, account_file, current_url=""):
-    return {
-        "success": success,
-        "status": status,
-        "message": message,
-        "account_file": str(account_file),
-        "current_url": current_url,
-    }
+def _raise_if_local_login_required(page, *, publish_attempted=False):
+    url = str(getattr(page, "url", "") or "").lower()
+    if not any(marker in url for marker in _LOGIN_URL_MARKERS):
+        return
+    verification = any(marker in url for marker in ("captcha", "challenge", "two-factor", "2fa", "verify"))
+    remedy = "请在所选 Profile 完成人机验证 (reason=verification)" if verification else "请运行 sau youtube login"
+    stage = "；发布可能已提交，请先核查作品，禁止自动重发" if publish_attempted else ""
+    raise LoginRequiredError(f"YouTube 需要登录或验证；{remedy}{stage}。",
+                             reason="verification" if verification else "login",
+                             publish_attempted=publish_attempted)
 
 
-async def cookie_auth(account_file) -> bool:
-    """登录态是否仍有效：带 cookie 打开 Studio，没被踢到 Google 登录页且进入了频道页即有效。"""
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True, channel="chrome")
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(STUDIO_URL, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
-            url = page.url
-            if "accounts.google.com" in url or "/signin" in url.lower():
-                return False
-            return "/channel/" in url
-        except Exception:
-            return False
-        finally:
-            await close_browser_resources(browser=browser)
+def _account_alias(account_file=None, account_name=None):
+    """Legacy positional names identify an alias only; no old file is opened."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.startswith("youtube_") and name.endswith(".json"):
+        return name[len("youtube_"):-len(".json")]
+    return str(account_file)
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to YouTube Studio.
+def local_context_kwargs():
+    return {"proxy": {"server": YT_PROXY}} if YT_PROXY else {}
+
+
+async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
+    """Compatibility entry point: checks only the selected persistent Profile."""
+    return await youtube_setup(account_file, account_name=account_name,
+                               headless=headless, local_browser=local_browser)
+
+
+async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
+    """Check YouTube Studio; persistent local contexts own their operation pages.
 
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Explicit
     sign-in, consent and account-chooser pages return ``False``; network
@@ -152,7 +153,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             timeout=YOUTUBE_LOGIN_CHECK_TIMEOUT_MS,
         )
         status = getattr(response, "status", None)
-        if isinstance(status, int) and status >= 500:
+        if isinstance(status, int) and status >= (500 if managed else 400):
             raise RuntimeError(f"YouTube 登录状态检查失败：HTTP {status}")
 
         wait_for_timeout = getattr(page, "wait_for_timeout", None)
@@ -163,6 +164,9 @@ async def is_logged_in(context: BrowserContext) -> bool:
         lowered = current_url.lower()
         if not current_url:
             raise RuntimeError("YouTube 登录状态检查失败：页面 URL 为空")
+
+        if not managed:
+            _raise_if_local_login_required(page)
 
         # Explicit sign-in / consent / account chooser pages.
         if any(
@@ -194,47 +198,45 @@ async def is_logged_in(context: BrowserContext) -> bool:
             )
         return True
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
-async def youtube_cookie_gen(account_file, headless: bool = False):
-    """交互式登录：开浏览器让用户登录 Google/YouTube，进入频道页后保存 storage_state。"""
+async def youtube_cookie_gen(account_file=None, headless=None, *, account_name=None, local_browser=None):
+    """Interactive Google login in the selected persistent Profile."""
+    return await youtube_setup(account_file, handle=True, return_detail=True,
+                               headless=headless, account_name=account_name,
+                               local_browser=local_browser)
+
+
+async def youtube_setup(account_file=None, handle=False, return_detail=False, headless=None,
+                        *, account_name=None, local_browser=None):
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        # 登录必须显形，让用户输账号密码/二步验证
-        browser = await playwright.chromium.launch(headless=False, channel="chrome")
-        context = await browser.new_context()
-        context = await set_init_script(context)
-        page = await context.new_page()
-        await page.goto(STUDIO_URL, wait_until="domcontentloaded")
-        youtube_logger.info(_msg("🔐", "请在弹出的浏览器里登录 Google / YouTube 账号，登录后会自动保存"))
-        ok = False
-        for _ in range(600):  # 最多等 10 分钟
-            if "/channel/" in page.url:
-                await page.wait_for_timeout(2000)  # 让 cookie 落定
-                ok = True
-                break
-            await asyncio.sleep(1)
-        if ok:
-            await context.storage_state(path=account_file)
-            youtube_logger.success(_msg("✅", f"YouTube 登录态已保存: {account_file}"))
-        else:
-            youtube_logger.error(_msg("😵", "等待登录超时，未保存登录态"))
-        await browser.close()
-        return _build_login_result(ok, "logged_in" if ok else "timeout",
-                                   "登录成功" if ok else "登录超时", account_file, page.url)
-
-
-async def youtube_setup(account_file, handle: bool = False, return_detail: bool = False, headless: bool = False):
-    """校验登录态，失效且 handle=True 时拉起交互式登录。"""
-    if not Path(account_file).exists() or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "登录态不存在或已失效", account_file)
-            return result if return_detail else False
-        youtube_logger.info(_msg("🥹", "YouTube 登录态不存在或失效，准备打开浏览器登录"))
-        result = await youtube_cookie_gen(account_file, headless=headless)
-        return result if return_detail else result["success"]
-    result = _build_login_result(True, "cookie_valid", "登录态有效", account_file)
-    return result if return_detail else True
+        async with local_browser_session(
+            playwright, platform="youtube", account=account, create=handle,
+            headless=headless, local_browser=local_browser,
+            context_kwargs=local_context_kwargs(),
+        ) as session:
+            if handle:
+                page = await session.context.new_page()
+                response = await page.goto(STUDIO_URL, wait_until="domcontentloaded",
+                                           timeout=YOUTUBE_LOGIN_CHECK_TIMEOUT_MS)
+                status = getattr(response, "status", None)
+                if isinstance(status, int) and status >= 400:
+                    raise RuntimeError(f"YouTube 登录页面失败：HTTP {status}")
+                youtube_logger.info("请在浏览器里登录 Google / YouTube 账号；Profile 将保存登录态")
+                for _ in range(600):
+                    if "studio.youtube.com/channel/" in str(page.url):
+                        break
+                    await asyncio.sleep(1)
+                else:
+                    raise LoginRequiredError("YouTube 登录超时；请重新运行 sau youtube login。")
+            if not await is_logged_in(session.context, managed=False):
+                raise LoginRequiredError("YouTube 登录态失效；请运行 sau youtube login。")
+            result = {"success": True, "status": "logged_in", "message": "登录成功",
+                      "account_name": account}
+            return result if return_detail else True
 
 
 async def _dismiss_autocomplete(
@@ -435,7 +437,8 @@ class YouTubeVideo(BaseVideoUploader):
 
     def __init__(self, title, file_path, tags, account_file, *,
                  description="", thumbnail_path=None, playlist=None,
-                 visibility="public", debug=False, headless=False):
+                 visibility="public", debug=False, headless=None,
+                 account_name=None, local_browser=None):
         self.title = title
         self.file_path = str(file_path)
         self.tags = tags or []
@@ -446,6 +449,8 @@ class YouTubeVideo(BaseVideoUploader):
         self.visibility = visibility if visibility in VISIBILITY else "public"
         self.debug = debug
         self.headless = headless
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.publish_date = 0
 
     def set_publish_date(self, publish_date) -> None:
@@ -459,27 +464,14 @@ class YouTubeVideo(BaseVideoUploader):
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **YOUTUBE_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **YOUTUBE_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-
-        try:
-            page = await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            await save_upload_session(context, self.account_file)
-            if page is not None:
-                try:
-                    await page.wait_for_timeout(2000)
-                except Exception as error:
-                    youtube_logger.warning(f"Post-upload pause failed; preserving upload result: {error}")
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        async with local_browser_session(
+            playwright, platform="youtube", account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+            context_kwargs=local_context_kwargs(),
+        ) as active:
+            if not await is_logged_in(active.context, managed=False):
+                raise LoginRequiredError("YouTube 登录态失效；请运行 sau youtube login。")
+            await self.upload_in(active)
 
     async def upload_in(self, session: BrowserSession) -> Page:
         self.start_publish_budget()
@@ -489,15 +481,29 @@ class YouTubeVideo(BaseVideoUploader):
         self._humanizer(page)
 
         youtube_logger.info(_msg("🎬", f"开始上传: {Path(self.file_path).name}"))
-        await page.goto(UPLOAD_URL, wait_until="domcontentloaded")
-        await page.wait_for_timeout(3000)
         multilogin = session.managed
-        if multilogin:
-            _raise_if_login_required(page)
-        if "accounts.google.com" in page.url or "signin" in page.url.lower():
-            raise RuntimeError("YouTube 登录态失效，请重新执行 login")
+        self._local_profile_upload = not multilogin
+        self._publish_attempted = False
+        try:
+            response = await page.goto(UPLOAD_URL, wait_until="domcontentloaded")
+            await page.wait_for_timeout(3000)
+            if multilogin:
+                _raise_if_login_required(page)
+            else:
+                status = getattr(response, "status", None)
+                if isinstance(status, int) and status >= 400:
+                    raise RuntimeError(f"YouTube 上传页面失败：HTTP {status}")
+                _raise_if_local_login_required(page)
+            await self._upload_video_on_page(page, multilogin=multilogin)
+        except LoginRequiredError:
+            raise
+        except Exception as error:
+            if not multilogin:
+                _raise_if_local_login_required(page, publish_attempted=self._publish_attempted)
+                if self._publish_attempted:
+                    raise self.publish_budget.timeout_error(True) from error
+            raise
 
-        await self._upload_video_on_page(page, multilogin=multilogin)
         return page
 
     def _humanizer(self, page: Page) -> Humanizer:
@@ -549,6 +555,8 @@ class YouTubeVideo(BaseVideoUploader):
         await file_input.set_input_files(self.file_path)
         if multilogin:
             _raise_if_login_required(page)
+        elif getattr(self, "_local_profile_upload", False):
+            _raise_if_local_login_required(page)
 
         # 2) 等详情对话框
         await page.locator("#title-textarea").wait_for(
@@ -649,6 +657,9 @@ class YouTubeVideo(BaseVideoUploader):
         if multilogin:
             _raise_if_login_required(page)
 
+        if getattr(self, "_local_profile_upload", False):
+            _raise_if_local_login_required(page)
+
         # 11) 发布
         await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
@@ -664,13 +675,17 @@ class YouTubeVideo(BaseVideoUploader):
             )
         except Exception as exc:
             if maybe_dispatched(exc):
+                self._publish_attempted = True
                 # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
                 raise budget.timeout_error(True) from exc
             raise
         if not published:
             raise RuntimeError("未找到 YouTube 发布按钮，未提交发布")
         else:
+            self._publish_attempted = True
             await page.wait_for_timeout(4000)
+            if getattr(self, "_local_profile_upload", False):
+                _raise_if_local_login_required(page, publish_attempted=True)
             video_url = ""
             try:
                 link = page.locator("a[href*='youtu.be'], a[href*='watch?v=']").first
