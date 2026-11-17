@@ -14,6 +14,7 @@ from patchright.async_api import async_playwright
 
 from conf import BASE_DIR
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -153,14 +154,8 @@ def _build_login_result(success: bool, status: str, message: str, account_file: 
 
 
 def _account_name(account_file=None, account_name=None):
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("抖音本地模式需要账号别名 account_name")
-    name = Path(str(account_file)).name
-    if name.startswith("douyin_") and name.endswith(".json"):
-        return name[len("douyin_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="douyin",
+                               missing_message='抖音本地模式需要账号别名 account_name')
 
 
 async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None, session=None):

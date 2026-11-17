@@ -8,6 +8,7 @@ from pathlib import Path
 
 from patchright.async_api import async_playwright
 
+from sau_commands.output import NO_PUBLISH_SUCCESS
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     SCHEDULE_HELP,
@@ -566,7 +567,7 @@ async def run(args):
         await _upload_note(request, target)
         if request.no_publish:
             print(f"TikTok note upload: {len(request.image_files)} images")
-            print("素材已上传，发布前检查已通过；已停止，未点击发布按钮。")
+            print(NO_PUBLISH_SUCCESS)
         else:
             print(f"TikTok note upload submitted: {len(request.image_files)} images")
         return 0
@@ -590,7 +591,7 @@ async def run(args):
         await _upload_video(request, target)
         if request.no_publish:
             print(f"TikTok video upload: {request.video_file}")
-            print("素材已上传，发布前检查已通过；已停止，未点击发布按钮。")
+            print(NO_PUBLISH_SUCCESS)
         else:
             print(f"TikTok video upload submitted: {request.video_file}")
         return 0

@@ -802,7 +802,6 @@ class AlipayCliTests(unittest.TestCase):
         self.assertFalse(kwargs["init_script"])
         probe.assert_awaited_once_with(session.context)
         fake_app.alipay_upload_video.assert_awaited_once_with(session=session)
-        self.assertIsNone(builder.call_args.args[1])
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
 
@@ -1106,7 +1105,6 @@ class WeiboCliTests(unittest.TestCase):
         self.assertFalse(kwargs["init_script"])
         probe.assert_awaited_once_with(session.context)
         fake_app.main.assert_awaited_once_with(session=session)
-        self.assertIsNone(builder.call_args.args[1])
 
     def test_upload_logged_out_returns_10_and_skips_upload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

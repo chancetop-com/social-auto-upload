@@ -87,13 +87,13 @@ async def check_weibo_account(account_name, headless=None, *, local_browser=None
 
 
 def _build_weibo_uploader(
-    request: WeiboVideoUploadRequest, account_file: str | None
+    request: WeiboVideoUploadRequest
 ) -> WeiBoVideo:
     app = WeiBoVideo(
         title=request.title,
         file_path=str(request.video_file),
         tags=request.tags,
-        account_file=account_file,
+        account_file=None,
         account_name=request.account_name,
         local_browser=request.local_browser,
         desc=request.description,
@@ -115,7 +115,7 @@ async def upload_weibo_video(
 ) -> None:
     validate_single_line(request.title)
     if target is not None:
-        app = _build_weibo_uploader(request, None)
+        app = _build_weibo_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -132,7 +132,7 @@ async def upload_weibo_video(
                 await app.main(session=session)
         return None
 
-    app = _build_weibo_uploader(request, None)
+    app = _build_weibo_uploader(request)
     await app.main()
     return None
 

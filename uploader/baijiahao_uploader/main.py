@@ -20,11 +20,12 @@ from patchright.async_api import BrowserContext, Page, Playwright, TimeoutError 
 
 import conf
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.errors import LoginRequiredError, PageCheckError, PublishResultUnknownError
 from utils.local_browser import resolve_local_browser
 from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
@@ -215,15 +216,7 @@ async def _grab_qr(page: Page, account_file: str) -> dict:
 
 
 def _account_alias(account_file=None, account_name=None):
-    """An old positional filename names an alias only; its contents are unused."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("baijiahao_") and name.endswith(".json"):
-        return name[len("baijiahao_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="baijiahao")
 
 
 async def baijiahao_cookie_gen(account_file=None, qrcode_callback=None, poll_interval=3,
@@ -316,6 +309,8 @@ async def is_logged_in(context: BrowserContext, *, managed=True, account=None) -
             "百家号登录状态检查失败：未找到账号/发布控件等已登录标记"
             "（页面结构异常）"
         )
+    except PageCheckError:
+        raise
     except Exception:
         if not managed:
             try:
@@ -333,7 +328,7 @@ async def is_logged_in(context: BrowserContext, *, managed=True, account=None) -
 def _check_local_response(response):
     status = getattr(response, "status", None)
     if isinstance(status, int) and status >= 400:
-        raise RuntimeError(f"百家号页面请求失败：HTTP {status}")
+        raise PageCheckError(f"百家号页面请求失败：HTTP {status}")
 
 
 async def _local_visible(locator):
@@ -341,10 +336,14 @@ async def _local_visible(locator):
 
 
 async def _local_login_reason(page):
-    url = str(page.url).lower()
-    if any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa")):
+    url = urlsplit(str(page.url))
+    host, path = (url.hostname or "").lower(), url.path.lower()
+    if url.scheme not in ("http", "https") or host not in (
+            "baijiahao.baidu.com", "passport.baidu.com"):
+        return None
+    if any(marker in path for marker in ("captcha", "verify", "two-factor", "2fa")):
         return "verification"
-    login_url = any(marker in url for marker in BAIJIAHAO_LOGIN_URL_MARKERS)
+    login_url = host == "passport.baidu.com" or "login" in path
     try:
         if await _local_visible(page.locator('text="百度安全验证"').first):
             return "verification"
@@ -381,11 +380,11 @@ async def _local_page_authenticated(page, *, account=None):
     if reason == "login":
         return False
     if urlsplit(str(page.url)).hostname != "baijiahao.baidu.com":
-        raise RuntimeError(f"百家号登录检查失败：意外页面 {page.url}")
+        raise PageCheckError(f"百家号登录检查失败：意外页面 {page.url}")
     for selector in BAIJIAHAO_BUSINESS_ANCHOR_SELECTORS:
         if await _local_visible(page.locator(selector).first):
             return True
-    raise RuntimeError("百家号登录检查失败：缺少已登录业务控件（页面结构异常）")
+    raise PageCheckError("百家号登录检查失败：缺少已登录业务控件（页面结构异常）")
 
 
 async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
@@ -581,7 +580,7 @@ class BaiJiaHaoVideo(BaseVideoUploader):
         page = await session.context.new_page()
         try:
             await self._upload_page(page, multilogin=session.managed)
-        except (LoginRequiredError, PublishResultUnknownError):
+        except (LoginRequiredError, PageCheckError, PublishResultUnknownError):
             raise
         except Exception:
             if self._local_profile_upload:

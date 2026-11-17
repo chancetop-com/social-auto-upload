@@ -17,10 +17,11 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 import conf
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementMissingError, ElementUnusableError
-from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -100,15 +101,7 @@ def _build_launch_kwargs(headless: bool) -> dict:
 
 
 def _account_alias(account_file=None, account_name=None):
-    """The old positional filename supplies only its alias, never login state."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("hupu_") and name.endswith(".json"):
-        return name[len("hupu_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="hupu")
 
 
 # Managed-only ignored options retain the historical provider startup logs.

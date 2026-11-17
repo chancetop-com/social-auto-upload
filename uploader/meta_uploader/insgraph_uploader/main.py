@@ -47,6 +47,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     validate_publish_options,
 )
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
@@ -455,15 +456,7 @@ async def instagram_cookie_auth(account_file=None, *, account_name=None, proxy=N
 
 
 def _account_alias(account_file=None, account_name=None):
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        from utils.errors import UsageError
-        raise UsageError('本地调用需要 account_name 账号别名。')
-    name = Path(str(account_file)).name
-    if name.startswith('instagram_') and name.endswith('.json'):
-        return name[len('instagram_'):-len('.json')]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="instagram")
 
 
 async def instagram_setup(account_file=None, *, handle=False, proxy=None, headless=None,

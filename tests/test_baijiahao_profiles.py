@@ -164,6 +164,27 @@ class BaijiahaoProfilesTests(unittest.TestCase):
         self.context.next_page = BackendPage(error=TimeoutError('redirect during navigation'), url='https://passport.baidu.com/login')
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 10)
 
+    def test_unrelated_origin_or_query_is_not_platform_authentication(self):
+        self.profile()
+        for url, login, verification, expected in [
+            ('https://proxy.example/login', False, False, 1),
+            ('https://proxy.example/verify', False, False, 1),
+            ('https://proxy.example/interstitial', True, False, 1),
+            ('https://proxy.example/interstitial', False, True, 1),
+            ('https://passport.baidu.com.proxy.example/login', True, False, 1),
+            ('https://proxy.example/?next=https://passport.baidu.com/login', False, False, 1),
+            ('https://baijiahao.baidu.com/builder/rc/home?next=login&message=verify', False, False, 0),
+        ]:
+            for action in ('check', 'upload-video') if expected == 1 else ('check',):
+                with self.subTest(url=url, login=login, verification=verification, action=action):
+                    self.context.next_page = BackendPage(url=url, login=login, verification=verification)
+                    result = (self.cli('check', '--account', 'Creator')
+                              if action == 'check' else self.upload())
+                    self.assertEqual(result[0], expected, result)
+                    if expected == 1:
+                        self.assertIn('意外页面', result[2])
+                    self.assertNotIn('reason=verification', result[2])
+
     def test_upload_post_submit_login_preserves_attempt_and_cleanup_failure(self):
         self.profile()
         page = UploadPage()
@@ -193,6 +214,52 @@ class BaijiahaoProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('cover permission denied', result[2])
         self.assertEqual(page.selectors[uploader.PUBLISH_BUTTON_SELECTOR].click_count, 0)
+
+    def test_http_fault_with_auth_markers_preserves_reason_before_publish(self):
+        self.profile()
+        for action in ('check', 'upload-preflight', 'upload-page'):
+            for status in (403, 503):
+                for reason in ('login', 'verification'):
+                    with self.subTest(action=action, status=status, reason=reason):
+                        page = UploadPage()
+                        goto = page.goto
+                        navigations = 0
+                        async def navigate(url, **kwargs):
+                            nonlocal navigations
+                            navigations += 1
+                            if action != 'upload-page' or navigations > 1:
+                                page.status = status
+                                page.login = reason == 'login'
+                                page.verification = reason == 'verification'
+                            return await goto(url, **kwargs)
+                        page.goto = navigate
+                        self.context.next_page = page
+                        result = (self.cli('check', '--account', 'Creator')
+                                  if action == 'check' else self.upload())
+                        self.assertEqual(result[0], 1, result)
+                        self.assertIn(f'HTTP {status}', result[2])
+                        self.assertEqual(page.selectors[uploader.PUBLISH_BUTTON_SELECTOR].click_count, 0)
+                        self.assertTrue(self.context.closed)
+
+    def test_foreign_auth_redirect_after_submit_keeps_unknown_result(self):
+        self.profile()
+        for route in ('login', 'verify'):
+            with self.subTest(route=route):
+                page = UploadPage()
+                submit = page.selectors[uploader.PUBLISH_BUTTON_SELECTOR]
+                async def click(**_):
+                    submit.click_count += 1
+                    page.url = f'https://proxy.example/{route}'
+                    page.login = True
+                    raise TimeoutError('foreign redirect during submission')
+                submit.click = click
+                self.context.next_page = page
+                with patch.object(uploader.asyncio, 'sleep', new=AsyncMock()):
+                    result = self.upload()
+                self.assertEqual(result[0], 9, result)
+                self.assertNotIn('reason=verification', result[2])
+                self.assertEqual(submit.click_count, 1)
+                self.assertTrue(self.context.closed)
 
     def test_defaults_overrides_browser_isolation_and_absent_optional_settings(self):
         with patch.object(conf, 'LOCAL_CHROME_HEADLESS', True):

@@ -20,10 +20,11 @@ from patchright.async_api import (
 
 import conf
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.local_browser_session import local_browser_session
 from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
@@ -232,24 +233,22 @@ async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
 
 
 def _account_alias(account_file=None, account_name=None):
-    """Legacy positional paths identify an alias only; no old state is accessed."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("支付宝本地模式需要 account_name 账号别名")
-    name = Path(str(account_file)).name
-    if name.startswith("alipay_") and name.endswith(".json"):
-        return name[len("alipay_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="alipay",
+                               missing_message='支付宝本地模式需要 account_name 账号别名')
 
 
 async def _raise_if_local_login_required(page, *, publish_attempted=False):
-    url = str(page.url).lower()
-    verification = any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa"))
+    url = urlsplit(str(page.url))
+    host, path = (url.hostname or "").lower(), url.path.lower()
+    if url.scheme not in ("http", "https") or host not in (
+            "c.alipay.com", "auth.alipay.com", "captcha.alipay.com"):
+        return
+    verification = host == "captcha.alipay.com" or any(
+        marker in path for marker in ("captcha", "verify", "two-factor", "2fa"))
     if verification:
         raise LoginRequiredError("支付宝需要人机验证 reason=verification；请先完成验证后重试。",
                                  reason="verification", publish_attempted=publish_attempted)
-    if (urlsplit(url).hostname == "auth.alipay.com" or "login" in url
+    if (host == "auth.alipay.com" or "login" in path
             or await page.locator('iframe[title="login"]').count()):
         raise LoginRequiredError("支付宝未登录；请运行 sau alipay login --account <账号别名>。",
                                  publish_attempted=publish_attempted)

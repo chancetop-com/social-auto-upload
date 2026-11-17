@@ -39,6 +39,6 @@ sau weibo upload-video --account creator --file videos/demo.mp4 --title "标题"
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，check/upload-video 使用 provider Profile，其登录态和出口 IP 由 provider 决定。本地浏览器选择/路径忽略，仅采用相同 headless 优先级。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
-- AdsPower：`--profile-id` 必填（对应 AdsPower user_id），`--folder-id` 忽略；使用本机付费版 V2 Local API。
+- AdsPower：`--profile-id` 必填（对应 AdsPower user_id），`--folder-id` 忽略。
 - `--account` 被忽略，日志标签采用 profile_id；login/reset-profile 拒绝，请先在对应桌面应用登录 Profile。
-- 同时设置两种凭据为用法错误。只停止本次启动的 Profile；请求过于频繁退出 `11`，由调用方退避，不自动重试或发布。
+- 使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。

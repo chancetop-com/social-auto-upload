@@ -31,11 +31,12 @@ from patchright.async_api import (
 
 import conf
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.text_validation import validate_single_line
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.errors import LoginRequiredError, PageCheckError, PublishResultUnknownError
 from utils.local_browser import resolve_headless, resolve_local_browser
 from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer, maybe_dispatched
@@ -182,6 +183,8 @@ async def is_logged_in(context: BrowserContext, *, managed=True, account=None) -
         raise RuntimeError(
             "微博登录状态检查失败：未找到头像/feed 等已登录信号（页面结构异常）"
         )
+    except PageCheckError:
+        raise
     except Exception:
         if not managed:
             try:
@@ -197,15 +200,7 @@ async def is_logged_in(context: BrowserContext, *, managed=True, account=None) -
 
 
 def _account_alias(account_file=None, account_name=None):
-    """A legacy positional filename supplies an alias only, never stored state."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("weibo_") and name.endswith(".json"):
-        return name[len("weibo_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="weibo")
 
 
 async def _grab_qr(page: Page, account_file: str) -> dict:
@@ -269,7 +264,7 @@ async def _grab_qr(page: Page, account_file: str) -> dict:
 def _check_local_response(response):
     status = getattr(response, "status", None)
     if isinstance(status, int) and status >= 400:
-        raise RuntimeError(f"微博登录状态检查失败：HTTP {status}")
+        raise PageCheckError(f"微博登录状态检查失败：HTTP {status}")
 
 
 async def _local_visible(locator):
@@ -316,11 +311,11 @@ async def _local_page_authenticated(page, *, account=None):
     if reason == "login":
         return False
     if urlsplit(str(page.url)).hostname not in ("weibo.com", "www.weibo.com"):
-        raise RuntimeError(f"微博登录检查失败：意外页面 {page.url}")
+        raise PageCheckError(f"微博登录检查失败：意外页面 {page.url}")
     for selector in WEIBO_LOGIN_POSITIVE_SELECTORS:
         if await _local_visible(page.locator(selector).first):
             return True
-    raise RuntimeError("微博登录检查失败：缺少已登录头像/feed 信号（页面结构异常）")
+    raise PageCheckError("微博登录检查失败：缺少已登录头像/feed 信号（页面结构异常）")
 
 
 async def weibo_cookie_gen(account_file=None, qrcode_callback=None, poll_interval=3,
@@ -461,6 +456,8 @@ class WeiBoVideo(BaseVideoUploader):
         self._active_page = None
         try:
             await self._upload_session(session)
+        except PageCheckError:
+            raise
         except Exception as error:
             if self._local_profile_upload and self._active_page is not None:
                 try:

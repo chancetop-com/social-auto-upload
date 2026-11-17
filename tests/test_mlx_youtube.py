@@ -513,7 +513,6 @@ class YouTubeMlxCliTests(unittest.TestCase):
         fake_app.set_publish_date.assert_called_once_with(0)
         fake_app.main.assert_awaited_once_with(session=session)
         builder.assert_called_once()
-        self.assertIsNone(builder.call_args.args[1])
         resolve_account.assert_not_called()
         setup.assert_not_awaited()
 

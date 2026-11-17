@@ -87,13 +87,13 @@ async def check_alipay_account(account_name, headless=None, *, local_browser=Non
 
 
 def _build_alipay_uploader(
-    request: AlipayVideoUploadRequest, account_file: str | None
+    request: AlipayVideoUploadRequest
 ) -> AlipayVideo:
     app = AlipayVideo(
         title=request.title,
         file_path=str(request.video_file),
         tags=request.tags,
-        account_file=account_file,
+        account_file=None,
         desc=request.description,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         collection_name=request.collection_name,
@@ -115,7 +115,7 @@ async def upload_alipay_video(
 ) -> Path | None:
     format_title_with_tags(request.title, request.tags)
     if target is not None:
-        app = _build_alipay_uploader(request, None)
+        app = _build_alipay_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -133,7 +133,7 @@ async def upload_alipay_video(
                 await app.alipay_upload_video(session=session)
         return None
 
-    app = _build_alipay_uploader(request, None)
+    app = _build_alipay_uploader(request)
     await app.main()
     return None
 

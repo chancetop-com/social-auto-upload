@@ -20,6 +20,7 @@ from uploader.rednote_uploader.main import (
     probe_session,
     rednote_setup,
 )
+from sau_commands.output import NO_PUBLISH_SUCCESS
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     SCHEDULE_HELP,
@@ -261,14 +262,14 @@ async def check_rednote_account(
             return True
 
 
-def _build_video_uploader(request: RednoteVideoUploadRequest, account_file) -> RednoteVideo:
+def _build_video_uploader(request: RednoteVideoUploadRequest) -> RednoteVideo:
     app = RednoteVideo(
         title=request.title,
         file_path=str(request.video_file),
         desc=request.description,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=account_file,
+        account_file=None,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
@@ -285,7 +286,7 @@ def _build_video_uploader(request: RednoteVideoUploadRequest, account_file) -> R
     return app
 
 
-def _build_note_uploader(request: RednoteNoteUploadRequest, account_file) -> RednoteNote:
+def _build_note_uploader(request: RednoteNoteUploadRequest) -> RednoteNote:
     app = RednoteNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
@@ -293,7 +294,7 @@ def _build_note_uploader(request: RednoteNoteUploadRequest, account_file) -> Red
         note=request.note,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=account_file,
+        account_file=None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
@@ -342,7 +343,7 @@ async def upload_rednote_video(
 ) -> None:
     validate_single_line(request.title)
     if target is not None:
-        app = _build_video_uploader(request, None)
+        app = _build_video_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -357,7 +358,7 @@ async def upload_rednote_video(
                 await app.rednote_upload_video(session=session)
         return None
 
-    app = _build_video_uploader(request, None)
+    app = _build_video_uploader(request)
     await app.main()
     return None
 
@@ -370,7 +371,7 @@ async def upload_rednote_note(
 ) -> None:
     validate_single_line(request.title)
     if target is not None:
-        app = _build_note_uploader(request, None)
+        app = _build_note_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -385,7 +386,7 @@ async def upload_rednote_note(
                 await app.rednote_upload_note(session=session)
         return None
 
-    app = _build_note_uploader(request, None)
+    app = _build_note_uploader(request)
     await app.main()
     return None
 
@@ -483,7 +484,7 @@ async def run(args):
         )
         if request.no_publish:
             print(f"Rednote video upload: {request.video_file}")
-            print("素材已上传，发布前检查已通过；已停止，未点击发布按钮。")
+            print(NO_PUBLISH_SUCCESS)
         else:
             print(f"Rednote video upload submitted: {request.video_file}")
         return 0
@@ -516,7 +517,7 @@ async def run(args):
         )
         if request.no_publish:
             print(f"Rednote note upload: {len(request.image_files)} images")
-            print("素材已上传，发布前检查已通过；已停止，未点击发布按钮。")
+            print(NO_PUBLISH_SUCCESS)
         else:
             print(f"Rednote note upload submitted: {len(request.image_files)} images")
         return 0

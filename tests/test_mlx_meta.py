@@ -1107,7 +1107,6 @@ class FacebookPageCliTests(_CliBase):
                 side_effect=publish_error,
             )
             builder = MagicMock(return_value=fake_app)
-            resolve_account = MagicMock()
             cookie_auth = AsyncMock()
 
             argv = [
@@ -1128,13 +1127,11 @@ class FacebookPageCliTests(_CliBase):
             with patches[0], patches[1], patches[2], patch.object(
                 facebook_page_command, "_build_uploader", new=builder
             ), patch.object(
-                facebook_page_command, "resolve_account_file", new=resolve_account, create=True
-            ), patch.object(
                 facebook_page_command, "meta_cookie_auth", new=cookie_auth
             ):
                 code, out, err = self._run(argv)
 
-        return code, out, err, builder, fake_app, factory, playwright_cm, session_cm, resolve_account, cookie_auth, probe
+        return code, out, err, builder, fake_app, factory, playwright_cm, session_cm, cookie_auth, probe
 
     def test_upload_video_and_note_mlx_use_none_account(self):
         for action in ("upload-video", "upload-note"):
@@ -1148,7 +1145,6 @@ class FacebookPageCliTests(_CliBase):
                     factory,
                     p_cm,
                     s_cm,
-                    resolve_account,
                     cookie_auth,
                     probe,
                 ) = self._upload(action, True)
@@ -1159,15 +1155,13 @@ class FacebookPageCliTests(_CliBase):
                     factory.call_args.kwargs["launch_kwargs"],
                     FACEBOOK_PAGE_LAUNCH_KWARGS,
                 )
-                self.assertIsNone(builder.call_args.args[1])
                 fake_app.upload.assert_awaited_once_with(session=s_cm.value)
                 probe.assert_awaited_once()
-                resolve_account.assert_not_called()
                 cookie_auth.assert_not_awaited()
                 self._assert_session_once(p_cm, s_cm)
 
     def test_upload_mlx_logged_out_is_10(self):
-        code, _, err, builder, fake_app, _, p_cm, s_cm, _, _, probe = self._upload(
+        code, _, err, builder, fake_app, _, p_cm, s_cm, _, probe = self._upload(
             "upload-video", False
         )
         self.assertEqual(code, 10)
@@ -1278,7 +1272,6 @@ class InstagramCliTests(_CliBase):
                 side_effect=publish_error,
             )
             builder = MagicMock(return_value=fake_app)
-            resolve_account = MagicMock()
             logger = MagicMock()
 
             argv = [
@@ -1299,8 +1292,6 @@ class InstagramCliTests(_CliBase):
             with patches[0], patches[1], patches[2], patch.object(
                 instagram_command, "_build_uploader", new=builder
             ), patch.object(
-                instagram_command, "resolve_account_file", new=resolve_account, create=True
-            ), patch.object(
                 instagram_command, "logger", new=logger
             ):
                 code, out, err = self._run(argv)
@@ -1314,7 +1305,6 @@ class InstagramCliTests(_CliBase):
             factory,
             playwright_cm,
             session_cm,
-            resolve_account,
             logger,
             probe,
         )
@@ -1331,7 +1321,6 @@ class InstagramCliTests(_CliBase):
                     factory,
                     p_cm,
                     s_cm,
-                    resolve_account,
                     logger,
                     probe,
                 ) = self._upload(action, True)
@@ -1342,17 +1331,15 @@ class InstagramCliTests(_CliBase):
                     factory.call_args.kwargs["launch_kwargs"],
                     INSTAGRAM_LAUNCH_KWARGS,
                 )
-                self.assertIsNone(builder.call_args.args[1])
                 fake_app.upload.assert_awaited_once_with(session=s_cm.value)
                 probe.assert_awaited_once()
-                resolve_account.assert_not_called()
                 logger.info.assert_called_once()
                 self.assertIn("账号一致性未校验", logger.info.call_args.args[0])
                 self.assertIn("profile-23", logger.info.call_args.args)
                 self._assert_session_once(p_cm, s_cm)
 
     def test_upload_mlx_logged_out_is_10_without_identity_log(self):
-        code, _, err, builder, fake_app, _, p_cm, s_cm, _, logger, probe = self._upload(
+        code, _, err, builder, fake_app, _, p_cm, s_cm, logger, probe = self._upload(
             "upload-video", False
         )
         self.assertEqual(code, 10)

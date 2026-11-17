@@ -37,5 +37,5 @@ sau tencent upload-video --account creator --file videos/demo.mp4 --title "标�
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
 - 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
-- 托管忽略本地来源/路径，只采用相同 headless 优先级；reset-profile 拒绝。退出 11 时退避，不自动重试。
-- 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+- 托管忽略本地来源/路径，只采用相同 headless 优先级；reset-profile 拒绝。
+- 使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。

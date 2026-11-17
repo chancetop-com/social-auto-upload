@@ -206,6 +206,32 @@ class WeiboProfilesTests(unittest.TestCase):
         self.context.next_page = BackendPage(error=TimeoutError('redirect during navigation'), url='https://passport.weibo.com/login')
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 10)
 
+    def test_http_fault_with_auth_markers_preserves_reason_before_publish(self):
+        self.profile()
+        for action in ('check', 'upload-preflight', 'upload-page'):
+            for status in (403, 503):
+                for reason in ('login', 'verification'):
+                    with self.subTest(action=action, status=status, reason=reason):
+                        page = UploadPage()
+                        goto = page.goto
+                        navigations = 0
+                        async def navigate(url, **kwargs):
+                            nonlocal navigations
+                            navigations += 1
+                            if action != 'upload-page' or navigations > 1:
+                                page.status = status
+                                page.login = reason == 'login'
+                                page.verification = reason == 'verification'
+                            return await goto(url, **kwargs)
+                        page.goto = navigate
+                        self.context.next_page = page
+                        result = (self.cli('check', '--account', 'Creator')
+                                  if action == 'check' else self.upload())
+                        self.assertEqual(result[0], 1, result)
+                        self.assertIn(f'HTTP {status}', result[2])
+                        self.assertEqual(page.submit.click_count, 0)
+                        self.assertTrue(self.context.closed)
+
     def test_defaults_overrides_browser_isolation_and_absent_optional_settings(self):
         with patch.object(conf, 'LOCAL_CHROME_HEADLESS', True):
             self.assertEqual(self.cli('login', '--account', 'Creator', '--headed')[0], 0)
@@ -256,6 +282,19 @@ class WeiboProfilesTests(unittest.TestCase):
         self.assertEqual(old.read_text(), 'old login state')
         self.assertEqual(history.read_text(), 'historical work')
         self.assertFalse(self.pw.chromium.persistent_calls)
+
+    def test_legacy_filename_translation_preserves_raw_explicit_aliases(self):
+        for account_file, account_name, selected in [
+            ('/absent/weibo_Creator.json', None, 'Creator'),
+            ('Other.json', None, 'Other.json'),
+            ('/absent/weibo_Other.json', 'Raw_Case.json', 'Raw_Case.json'),
+        ]:
+            with self.subTest(account_file=account_file, account_name=account_name):
+                self.profile(account=selected)
+                self.assertTrue(asyncio.run(uploader.cookie_auth(
+                    account_file, account_name=account_name)))
+                self.assertEqual(Path(self.pw.chromium.persistent_calls[-1]['user_data_dir']).name,
+                                 selected)
 
     def test_direct_setup_probe_and_uploader_use_alias_and_explicit_false(self):
         with patch.object(conf, 'LOCAL_CHROME_HEADLESS', True):

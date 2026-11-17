@@ -225,9 +225,9 @@ async def check_instagram_account(account_name: str, *, proxy: str | None = INST
     return await instagram_cookie_auth(account_name=account_name, proxy=proxy, headless=headless, local_browser=local_browser)
 
 
-def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramUploader:
+def _build_uploader(request: InstagramUploadRequest) -> InstagramUploader:
     app = InstagramUploader(
-        account_file,
+        None,
         title=request.title,
         description=request.description,
         tags=request.tags,
@@ -257,7 +257,7 @@ async def upload_instagram_content(
         # No cookie path, no .identity.json read, no account-id comparison:
         # the Profile is the identity.  ``--proxy`` / the environment proxy are
         # not forwarded either; the Profile owns the egress IP.
-        app = _build_uploader(replace(request, proxy=None), None)
+        app = _build_uploader(replace(request, proxy=None))
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -276,7 +276,7 @@ async def upload_instagram_content(
                 )
                 return await app.upload(session=session)
 
-    app = _build_uploader(request, None)
+    app = _build_uploader(request)
     return await app.upload()
 
 

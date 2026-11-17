@@ -21,6 +21,7 @@ from patchright.async_api import (
 )
 
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
@@ -219,15 +220,7 @@ async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
 
 
 def _account_alias(account_file=None, account_name=None):
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        from utils.errors import UsageError
-        raise UsageError('本地调用需要 account_name 账号别名。')
-    name = Path(str(account_file)).name
-    if name.startswith('facebook-page_') and name.endswith('.json'):
-        return name[len('facebook-page_'):-len('.json')]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="facebook-page")
 
 
 async def meta_cookie_auth(account_file=None, *, account_name=None, proxy=None,

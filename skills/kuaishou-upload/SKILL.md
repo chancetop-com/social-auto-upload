@@ -77,8 +77,8 @@ login/check/视频/图文统一使用 `browser_profiles/<chrome|chromium>/kuaish
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
 - 两种模式下 `--account` 被忽略（仅记录在启动日志 ignored 列）；身份和结果标签使用 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
-- 托管仅采用上述 headless 来源，忽略本地 browser/path，不访问本地 Profile；只停止本次启动的 Profile。两个凭据同时设置退出 `1`；请求限流退出 `11`，交给调度层退避，CLI 不重试。
-- MLX / AdsPower 需与 CLI 同机、桌面客户端和本地 API 可用；AdsPower 需付费版与 Chromium Profile。提前在对应应用登录并完成验证。
+- 托管仅采用上述 headless 来源，忽略本地 browser/path，不访问本地 Profile。
+- 使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。
 
 ## 参考文档
 

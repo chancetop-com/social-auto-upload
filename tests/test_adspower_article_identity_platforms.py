@@ -186,7 +186,6 @@ class MetaManagedProxyTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         request = builder.call_args.args[0]
         self.assertIsNone(request.proxy)
-        self.assertIsNone(builder.call_args.args[1])
 
     def test_instagram_managed_upload_does_not_forward_proxy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,7 +221,6 @@ class MetaManagedProxyTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         request = builder.call_args.args[0]
         self.assertIsNone(request.proxy)
-        self.assertIsNone(builder.call_args.args[1])
 
 
 class _SeamHarness:
@@ -254,18 +252,6 @@ class _SeamHarness:
         stack.enter_context(
             patch.object(
                 module, "is_logged_in", new=AsyncMock(return_value=logged_in)
-            )
-        )
-        stack.enter_context(
-            patch.object(
-                module,
-                "resolve_account_file",
-                create=True,
-                new=MagicMock(
-                    side_effect=AssertionError(
-                        "managed mode must not build a cookie path"
-                    )
-                ),
             )
         )
         stack.enter_context(
@@ -781,116 +767,8 @@ class InstagramUploaderIdentityTests(unittest.TestCase):
 
 
 class LocalOnlyActionTests(unittest.TestCase):
-    """verify/delete stay local even when AdsPower is active."""
+    """Required-account validation; full works flows are in the Profile suites."""
 
-    def _assert_local_helper(self, module, argv, helper_attr):
-        helper = AsyncMock(return_value={})
-        resolve = MagicMock(return_value=Path("/tmp/local-cookie.json"))
-        managed = MagicMock(side_effect=AssertionError("managed provider used"))
-        stack = ExitStack()
-        stack.enter_context(patch.object(module, helper_attr, new=helper))
-        stack.enter_context(
-            patch.object(module, "resolve_account_file", new=resolve, create=True)
-        )
-        stack.enter_context(
-            patch.object(module, "resolve_managed_provider", new=managed)
-        )
-        stack.enter_context(
-            patch.object(
-                module,
-                "browser_session",
-                new=MagicMock(side_effect=AssertionError("session used")),
-            )
-        )
-        with stack:
-            code, out, err = _run(argv)
-
-        self.assertEqual(code, 0, err)
-        helper.assert_awaited_once()
-        if module in (instagram_command, facebook_command, facebook_page_command, zhihu_command, xueqiu_command):
-            self.assertEqual(helper.await_args.kwargs['account_name'], 'creator')
-            resolve.assert_not_called()
-        else:
-            self.assertEqual(helper.await_args.args[0], Path("/tmp/local-cookie.json"))
-            resolve.assert_called_once()
-        managed.assert_not_called()
-
-    def test_facebook_verify_and_delete_are_local(self):
-        base = [
-            "--account",
-            "creator",
-            "--post-url",
-            "url",
-            "--owner-id",
-            "1",
-            "--expected-text",
-            "text",
-        ]
-        self._assert_local_helper(
-            facebook_command, ["facebook", "verify"] + base, "facebook_post_action"
-        )
-        self._assert_local_helper(
-            facebook_command, ["facebook", "delete"] + base, "facebook_post_action"
-        )
-
-    def test_facebook_page_verify_and_delete_are_local(self):
-        base = [
-            "--account",
-            "creator",
-            "--page-id",
-            "1",
-            "--page",
-            "Page",
-            "--content-id",
-            "c",
-            "--expected-text",
-            "text",
-        ]
-        self._assert_local_helper(
-            facebook_page_command,
-            ["facebook-page", "verify"] + base,
-            "meta_post_action",
-        )
-        self._assert_local_helper(
-            facebook_page_command,
-            ["facebook-page", "delete"] + base,
-            "meta_post_action",
-        )
-
-    def test_instagram_verify_and_delete_are_local(self):
-        base = [
-            "--account",
-            "creator",
-            "--post-url",
-            "url",
-            "--expected-text",
-            "text",
-        ]
-        self._assert_local_helper(
-            instagram_command,
-            ["instagram", "verify"] + base,
-            "instagram_post_action",
-        )
-        self._assert_local_helper(
-            instagram_command,
-            ["instagram", "delete"] + base,
-            "instagram_post_action",
-        )
-
-    def test_zhihu_and_xueqiu_verify_are_local(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            result = Path(tmp) / "result.json"
-            result.write_text("{}", encoding="utf-8")
-            self._assert_local_helper(
-                zhihu_command,
-                ["zhihu", "verify", "--account", "creator", "--result", str(result)],
-                "verify_zhihu_result",
-            )
-            self._assert_local_helper(
-                xueqiu_command,
-                ["xueqiu", "verify", "--account", "creator", "--result", str(result)],
-                "verify_xueqiu_result",
-            )
 
     def test_all_local_actions_still_require_account_under_adspower(self):
         with tempfile.TemporaryDirectory() as tmp:

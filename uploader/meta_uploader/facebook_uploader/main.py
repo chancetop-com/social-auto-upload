@@ -14,9 +14,10 @@ from pathlib import Path
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError
 from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -132,14 +133,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
 
 
 def _account_alias(account_file=None, account_name=None):
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("facebook_") and name.endswith(".json"):
-        return name[len("facebook_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="facebook")
 
 
 async def _local_login_guard(page, *, publish_attempted=False):

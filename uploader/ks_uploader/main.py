@@ -16,6 +16,7 @@ from patchright.async_api import async_playwright
 
 import conf
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
@@ -394,15 +395,7 @@ async def _is_ks_login_page_gone(page: Page) -> bool:
 
 
 def _account_alias(account_file=None, account_name=None):
-    """Legacy positional paths identify aliases only; their files are never read."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("kuaishou_") and name.endswith(".json"):
-        return name[len("kuaishou_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="kuaishou")
 
 
 async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):

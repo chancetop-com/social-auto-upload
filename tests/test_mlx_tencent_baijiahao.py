@@ -735,16 +735,12 @@ class _UploadCliCase(_RunHelpers):
     def _upload_patches(self, app, probe):
         self.builder_mock = MagicMock(return_value=app)
         self.session_factory = MagicMock(return_value=self.session_cm)
-        self.resolve_account_mock = MagicMock()
         self.setup_mock = AsyncMock()
         return (
             patch.object(self.module, "async_playwright", lambda: _AsyncCM(object())),
             patch.object(self.module, "browser_session", new=self.session_factory),
             patch.object(self.module, "is_logged_in", new=probe),
             patch.object(self.module, self.builder_name, new=self.builder_mock),
-            (patch("utils.local_browser_session.resolve_local_browser", new=self.resolve_account_mock)
-             if self.module in (tencent_command, baijiahao_command) else
-             patch.object(self.module, "resolve_account_file", new=self.resolve_account_mock)),
             patch.object(self.module, self.setup_name, new=self.setup_mock),
         )
 
@@ -757,7 +753,7 @@ class _UploadCliCase(_RunHelpers):
             probe = AsyncMock(return_value=True)
             patches = self._upload_patches(app, probe)
 
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
                 code, out, _ = self._run(self._upload_args(tmp_dir))
 
         self.assertEqual(code, 0)
@@ -772,7 +768,6 @@ class _UploadCliCase(_RunHelpers):
         self.assertEqual(kwargs["context_kwargs"], self.context_kwargs)
         self.assertFalse(kwargs["init_script"])
         probe.assert_awaited_once_with(session.context)
-        self.resolve_account_mock.assert_not_called()
         self.setup_mock.assert_not_awaited()
         self.assertEqual(self.session_cm.enter_calls, 1)
         self.assertEqual(self.session_cm.exit_calls, 1)
@@ -784,7 +779,7 @@ class _UploadCliCase(_RunHelpers):
             setattr(app, self.entry_name, AsyncMock())
             patches = self._upload_patches(app, AsyncMock(return_value=False))
 
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
                 code, out, _ = self._run(self._upload_args(tmp_dir))
 
         self.assertEqual(code, 10)
@@ -800,7 +795,7 @@ class _UploadCliCase(_RunHelpers):
             setattr(app, self.entry_name, AsyncMock(side_effect=RuntimeError("publish failed")))
             patches = self._upload_patches(app, AsyncMock(return_value=True))
 
-            with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
                 code, _, err = self._run(self._upload_args(tmp_dir))
 
         self.assertEqual(code, 1)

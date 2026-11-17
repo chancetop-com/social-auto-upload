@@ -114,7 +114,7 @@ login/check/视频/图文都复用 `browser_profiles/<种类>/xiaohongshu/<别�
 - `2`：参数错误。
 - `10`：Profile 缺失或明确未登录；`reason=verification` 时先人工完成验证。提交后 stderr 带 `publish_attempted=true`，先核对笔记再决定是否重跑。
 - `9`：提交结果未知，禁止自动重发。
-- `11`：托管请求过于频繁，交给调用方退避。
+使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。
 
 ### 重建指定本地 Profile
 

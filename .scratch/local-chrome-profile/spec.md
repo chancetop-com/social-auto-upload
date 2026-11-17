@@ -286,3 +286,12 @@ Source: [决策地图](./map.md)
 累计离线、真实受控浏览器、实际平台证据分列于 [20 最终验证](../local-chrome-profile-implementation/research/20-final-validation.md)。最后从隔离工作树运行 2,025 项离线测试：2,023 passed、2 个原有 opt-in provider smoke skipped，0 failures/errors；98 个真实浏览器用例分列使用已完成的各票证据。原四平台 login/关闭重开 check 与八个 no-publish 流程、21 搬迁后四个 check、23 当前 creator 两个受影响 no-publish 复验全部落实；普通 Instagram 本次仅受控 DOM，未扩大为另一个真实账号成功。没有实际发布或删除作品；素材可能留下临时资料/草稿。19/20 的历史路径与原日志不改写，21 另存搬迁记录，用户配置和真实 Profile 保留。
 
 本规格 resolved 表示实施与上述约定验收完成。**最终独立两轴代码审查仍由 root 后续执行；此状态不声称审查、审查发现的后续修复或最终工作树清理已完成。** 未执行的 Linux CI/Windows 原生浏览器、实际发布/发布后观察及真实 managed 服务仍按既定边界说明，不以安装示例或替身测试冒充。
+
+
+## 最终独立审查与修复补充（2026-11-17）
+
+两轴独立审查已针对 `47cc1850..cc23b9d3` 完成；[Spec 原始报告和修复证据](../local-chrome-profile-implementation/research/final-review-spec.md)列出并处理 2 项 P2，[Standards 原始报告和处置](../local-chrome-profile-implementation/research/final-review-standards.md)列出并处理 3 项 P3 与 3 项可选建议。已确诊 HTTP/页面故障保留退出 1 和原因；本地认证 URL/DOM 推断限定于平台认可来源，外站 login/verify 不再误报退出 10。合法认证、提交后 attempted/unknown、托管契约与原始别名兼容保留。
+
+同一新的隔离修复实施者完成公共 CLI RED/GREEN 和最终累计离线验证：2,031 项 / 126.637s，2,029 passed、2 个既有 opt-in 服务 skip，0 failures/errors；相同 98 个真实浏览器用例继续引用既有独立执行证据，无额外真实账号或上传操作。原两轴审查者已独立复核候选 `e1ed1b6` 并关闭全部发现：Spec 的 13 个公共边界方法 / 1.470s 全通过；Standards 的 17 适配器 / 2,210 个别名组合无差异，14 个 builder 转换等价且 26 个公共构造签名未变。复核原文已追加在上述两个报告。
+
+**独立审查、修复及候选复核完成；集成合并与 root 的最终工作树清理仍待执行。** 本补充更新此前“独立审查待执行”的进度，不改写历史验收事实，也不扩大普通 Instagram 的受控证据范围。

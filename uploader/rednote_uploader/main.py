@@ -28,6 +28,7 @@ from patchright.async_api import async_playwright
 
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.local_account import local_account_alias
 from utils.blocked import BlockedKind
 from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
@@ -47,7 +48,7 @@ from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError
 from utils.local_browser import resolve_headless
 from utils.local_browser_session import local_browser_session
 from utils.humanize import MAYBE_DISPATCHED
@@ -1463,15 +1464,7 @@ async def probe_session(context: BrowserContext, *, close_page: bool = True) -> 
 
 
 def _account_alias(account_file=None, account_name=None):
-    """Translate legacy positional names without accessing their old state files."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.endswith(".json"):
-        return name[:-5].removeprefix("rednote_")
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="rednote", allow_unprefixed_json=True)
 
 
 async def rednote_setup(

@@ -21,6 +21,7 @@ from patchright.async_api import async_playwright
 import conf
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.local_account import local_account_alias
 from utils.blocked import BlockedKind
 from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
@@ -42,7 +43,7 @@ from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.text_validation import validate_single_line
@@ -1537,15 +1538,7 @@ async def probe_session(context: BrowserContext, *, close_page=True) -> tuple[st
 
 
 def _account_alias(account_file, account_name=None):
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    # Positional filenames remain name-only compatibility; never inspect a file.
-    name = Path(str(account_file)).name
-    if name.endswith(".json"):
-        return name[:-5].removeprefix("xiaohongshu_")
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="xiaohongshu", allow_unprefixed_json=True)
 
 
 async def xiaohongshu_setup(

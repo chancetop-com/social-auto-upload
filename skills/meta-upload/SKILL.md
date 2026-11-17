@@ -42,7 +42,7 @@ sau facebook-page delete --account creator --page "我的 Page" --page-id "Page�
 
 `--scheduled` 选择定时列表；删除会取消排期并永久移除，返回 `deleted`。管理已发布作品时不加它，当前平台会移至垃圾箱，返回 `trashed`，30 天后自动删除；未接入 Page 垃圾箱提前永久删除。已定时作品实际发布后编号可能变化，需使用已发布列表中的编号。
 
-提交后登录/验证异常保留 `publish_attempted=true`；结果未知退出 `9`，先核查原作品，再决定后续操作。托管限流退出 `11`。本平台尚无 `--no-publish`，以上上传/删除命令会实际提交；本次持久化接入验证仅使用离线替身和受控页面。
+提交后登录/验证异常保留 `publish_attempted=true`；结果未知退出 `9`，先核查原作品，再决定后续操作。本平台尚无 `--no-publish`，以上上传/删除命令会实际提交；本次持久化接入验证仅使用离线替身和受控页面。
 
 只覆盖已加载的近期列表，不保证自动查找全部历史作品。同文案不能唯一定位、Page 或编号不符时不删除。删除后超时或浏览器断开时先核对原记录，不自动重删；本地素材保留。完整参数以 `sau facebook-page upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。
 
@@ -53,7 +53,7 @@ sau facebook-page delete --account creator --page "我的 Page" --page-id "Page�
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
 - 托管 check/上传的身份由 `profile_id` 决定，`--account` 不决定本地资料；`login` 和 reset-profile 拒绝。请先在对应桌面应用中登录。headless 使用上述优先级，完全忽略本地浏览器选择和路径；verify/delete 仍要求原始 `--account`，使用本地 Profile、代理和运行配置。
-- 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+- 使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。
 
 ## 示例脚本
 

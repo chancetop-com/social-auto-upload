@@ -7,8 +7,9 @@ from urllib.parse import urlsplit
 from patchright.async_api import BrowserContext, Page, async_playwright, expect
 
 from uploader.zhihu_uploader.constants import ZHIHU_CREATOR_URL
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError
 from utils.local_browser_session import local_browser_session
 
 
@@ -69,15 +70,8 @@ async def read_zhihu_identity(page: Page, *, timeout: int = 30000, strict=False)
 
 
 def account_alias(account_file=None, account_name=None):
-    """Legacy positional paths identify an alias only; no old file is accessed."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("知乎本地模式需要 account_name 账号别名")
-    name = Path(str(account_file)).name
-    if name.startswith("zhihu_") and name.endswith(".json"):
-        return name[len("zhihu_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="zhihu",
+                               missing_message='知乎本地模式需要 account_name 账号别名')
 
 
 async def login_zhihu_account(account_file=None, timeout: int = 600, *,

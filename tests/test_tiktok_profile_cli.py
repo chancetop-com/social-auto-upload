@@ -94,6 +94,15 @@ class TikTokProfileCliTests(unittest.TestCase):
     def profile(self, kind='chrome'):
         with acquire_local_profile('tiktok', 'creator', kind, create=True): pass
 
+    def test_direct_check_accepts_unprefixed_legacy_json_name(self):
+        import asyncio
+        from uploader.tk_uploader import main_chrome as uploader
+        self.stack.enter_context(patch.object(uploader, 'async_playwright', lambda: _AsyncCM(self.pw)))
+        self.profile()
+        self.assertTrue(asyncio.run(uploader.cookie_auth('/absent/creator.json')))
+        self.assertEqual(Path(self.pw.chromium.persistent_calls[-1]['user_data_dir']).name, 'creator')
+        self.assertFalse(self.context.storage_state_calls)
+
     def test_reappearing_legacy_file_is_untouched_and_login_does_not_restart(self):
         with terminal_enter():
             code, _, err = self.run_cli('login', '--account', 'creator', '--headed')
