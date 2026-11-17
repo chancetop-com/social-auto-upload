@@ -1,9 +1,10 @@
 """Formal TikTok dispatch with real config/Profile/session orchestration."""
+import asyncio
 import io
 import os
 import tempfile
 import unittest
-from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,22 @@ from sau_commands import tiktok
 from tests.fakes import FakeContext, FakePlaywright
 from tests.test_mlx_tiktok import _AsyncCM
 from utils.local_profile import acquire_local_profile
+
+
+@contextmanager
+def terminal_enter():
+    """Supply Enter at the OS input boundary used by local manual login."""
+    if os.name == 'nt':
+        with patch('sys.stdin.isatty', return_value=True), patch('msvcrt.kbhit', return_value=True), patch('msvcrt.getwche', return_value='\r'):
+            yield
+        return
+    reader, writer = os.pipe()
+    try:
+        os.write(writer, b'\n')
+    finally:
+        os.close(writer)
+    with os.fdopen(reader) as terminal, patch.object(terminal, 'isatty', return_value=True), patch('sys.stdin', terminal):
+        yield
 
 
 class ProbeLocator:
@@ -97,6 +114,129 @@ class TikTokProfileCliTests(unittest.TestCase):
         self.assertFalse(self.pw.chromium.persistent_calls)
         self.assertFalse((self.root / 'cookies').exists())
 
+    def test_check_finishes_when_page_close_would_hang(self):
+        self.profile()
+
+        async def hanging_close(page):
+            await asyncio.Future()
+
+        async def scenario():
+            args = sau_cli.build_parser().parse_args(['tiktok', 'check', '--account', 'creator'])
+            task = asyncio.create_task(sau_cli.dispatch(args))
+            try:
+                done, _ = await asyncio.wait({task}, timeout=0.2)
+                self.assertIn(task, done, 'check must reach its owning context cleanup')
+                self.assertEqual(await task, 0)
+                self.assertTrue(self.context.closed)
+                with acquire_local_profile('tiktok', 'creator', 'chrome') as profile:
+                    self.assertTrue(profile.exists)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+        with patch.object(ProbePage, 'close', hanging_close):
+            asyncio.run(scenario())
+
+    def test_login_finishes_when_page_close_would_hang(self):
+        async def hanging_close(page):
+            await asyncio.Future()
+
+        async def scenario():
+            args = sau_cli.build_parser().parse_args(['tiktok', 'login', '--account', 'creator'])
+            task = asyncio.create_task(sau_cli.dispatch(args))
+            try:
+                done, _ = await asyncio.wait({task}, timeout=0.2)
+                self.assertIn(task, done, 'login must reach its owning context cleanup')
+                self.assertEqual(await task, 0)
+                self.assertTrue(self.context.closed)
+                with acquire_local_profile('tiktok', 'creator', 'chrome') as profile:
+                    self.assertTrue(profile.exists)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+        with patch.object(ProbePage, 'close', hanging_close), terminal_enter():
+            asyncio.run(scenario())
+
+    def test_cancelled_check_and_login_close_context_and_release_profile(self):
+        self.profile()
+
+        async def scenario(action):
+            navigating = asyncio.Event()
+
+            async def waiting_navigation(page, *args, **kwargs):
+                navigating.set()
+                await asyncio.Future()
+
+            async def hanging_close(page):
+                await asyncio.Future()
+
+            args = sau_cli.build_parser().parse_args(['tiktok', action, '--account', 'creator'])
+            with patch.object(ProbePage, 'goto', waiting_navigation), patch.object(ProbePage, 'close', hanging_close):
+                task = asyncio.create_task(sau_cli.dispatch(args))
+                try:
+                    await asyncio.wait_for(navigating.wait(), timeout=1)
+                    task.cancel()
+                    done, _ = await asyncio.wait({task}, timeout=0.2)
+                    self.assertIn(task, done, 'cancellation must reach context cleanup')
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                    self.assertTrue(self.context.closed)
+                    with acquire_local_profile('tiktok', 'creator', 'chrome') as profile:
+                        self.assertTrue(profile.exists)
+                finally:
+                    if not task.done():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+
+        for action in ['check', 'login']:
+            with self.subTest(action=action), patch('sys.stdin.isatty', return_value=True):
+                self.context.closed = False
+                asyncio.run(scenario(action))
+
+    def test_windows_console_input_allows_enter_eof_and_cancellation(self):
+        from types import SimpleNamespace
+
+        async def scenario(character):
+            reading = asyncio.Event()
+
+            def key_available():
+                reading.set()
+                return character is not None
+
+            console = SimpleNamespace(kbhit=key_available, getwche=lambda: character)
+            args = sau_cli.build_parser().parse_args(['tiktok', 'login', '--account', 'creator'])
+            with patch.dict('sys.modules', {'msvcrt': console}), patch('sys.platform', 'win32'), patch('sys.stdin.isatty', return_value=True):
+                task = asyncio.create_task(sau_cli.dispatch(args))
+                try:
+                    await asyncio.wait_for(reading.wait(), timeout=1)
+                    if character is None:
+                        task.cancel()
+                    done, _ = await asyncio.wait({task}, timeout=0.2)
+                    self.assertIn(task, done)
+                    if character is None:
+                        with self.assertRaises(asyncio.CancelledError):
+                            await task
+                    elif character == '\x1a':
+                        with self.assertRaisesRegex(RuntimeError, '无法读取终端输入'):
+                            await task
+                    else:
+                        self.assertEqual(await task, 0)
+                    self.assertTrue(self.context.closed)
+                    with acquire_local_profile('tiktok', 'creator', 'chrome') as profile:
+                        self.assertTrue(profile.exists)
+                finally:
+                    if not task.done():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+
+        for character in ['\r', '\x1a', None]:
+            with self.subTest(character=character):
+                self.context.closed = False
+                asyncio.run(scenario(character))
+
     def test_local_verification_and_network_errors_are_distinct(self):
         self.profile()
         for state, expected in [('login', 10), ('network', 1), ('unknown', 1), ('verification', 10)]:
@@ -120,9 +260,8 @@ class TikTokProfileCliTests(unittest.TestCase):
             self.assertTrue(self.context.closed)
 
     def test_login_uses_requested_mode_once_and_allows_alias_relogin(self):
-        from uploader.tk_uploader import main_chrome
-        with patch.object(main_chrome.sys.stdin, 'isatty', return_value=True), patch('builtins.input', return_value=''):
-            for extra in [[], ['--headed'], ['--headless']]:
+        for extra in [[], ['--headed'], ['--headless']]:
+            with terminal_enter():
                 code, _, err = self.run_cli('login', '--account', 'creator', *extra)
                 self.assertEqual(code, 0, err)
         self.assertEqual([c['headless'] for c in self.pw.chromium.persistent_calls], [True, False, True])
