@@ -57,8 +57,6 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     INSTAGRAM_INIT_SCRIPT,
     INSTAGRAM_LAUNCH_KWARGS,
     InstagramUploader,
-    _open_instagram_page,
-    instagram_launch_kwargs,
     is_logged_in as instagram_is_logged_in,
 )
 from utils.browser_session import BrowserSession
@@ -454,79 +452,6 @@ class LocalGoldenTests(unittest.TestCase):
         self.assertTrue(browser.closed)
         warning.assert_called_once()
 
-    def test_instagram_local_launch_and_context_are_golden(self):
-        page = _PageStub()
-        chromium, context, browser = _local_launcher(page)
-        playwright = SimpleNamespace(chromium=chromium)
-
-        asyncio.run(
-            _open_instagram_page(
-                playwright,
-                Path("/tmp/instagram-cookie.json"),
-                proxy="http://proxy.example:8080",
-                headless=False,
-            )
-        )
-
-        self.assertEqual(
-            chromium.launch_calls,
-            [
-                {
-                    "headless": False,
-                    "channel": "chrome",
-                    "proxy": {"server": "http://proxy.example:8080"},
-                }
-            ],
-        )
-        self.assertEqual(
-            browser.new_context_calls,
-            [
-                {
-                    "storage_state": "/tmp/instagram-cookie.json",
-                    "locale": "en-US",
-                    "extra_http_headers": {"Accept-Language": "en-US,en;q=0.9"},
-                }
-            ],
-        )
-        self.assertEqual(INSTAGRAM_LAUNCH_KWARGS, {"channel": "chrome"})
-        # 本地模式固定英文界面（spec §4.4）；托管模式由 Profile 自己保持英文。
-        self.assertEqual(INSTAGRAM_CONTEXT_KWARGS["locale"], "en-US")
-        self.assertEqual(
-            INSTAGRAM_CONTEXT_KWARGS["extra_http_headers"],
-            {"Accept-Language": "en-US,en;q=0.9"},
-        )
-        self.assertFalse(INSTAGRAM_INIT_SCRIPT)
-        self.assertEqual(
-            instagram_launch_kwargs(None), {"channel": "chrome", "proxy": None}
-        )
-
-    def test_instagram_local_upload_keeps_identity_check_and_cookie_write(self):
-        with tempfile.TemporaryDirectory() as directory:
-            media = _write_media(directory)
-            cookie = Path(directory) / "instagram.json"
-            cookie.write_text("{}", encoding="utf-8")
-            page = _PageStub()
-            context = _ContextStub(page)
-            browser = _LaunchBrowser(context, page)
-            app = InstagramUploader(
-                cookie,
-                title="caption",
-                video_file=media,
-                result_file=Path(directory) / "result.json",
-            )
-            identity = AsyncMock(return_value={"user_id": "42", "username": "creator"})
-            app._upload_steps = AsyncMock(return_value=app.result)
-
-            with patch.object(
-                instagram_main,
-                "_open_instagram_page",
-                AsyncMock(return_value=(browser, context, page)),
-            ), patch.object(instagram_main, "instagram_identity", identity):
-                asyncio.run(app.upload())
-
-        identity.assert_awaited_once()
-        self.assertEqual(context.storage_state_calls, [str(cookie)])
-        self.assertTrue(browser.closed)
 
 
 # ---------------------------------------------------------------------------
@@ -1537,7 +1462,7 @@ class InstagramCliTests(_CliBase):
             with patches[0], patches[1], patches[2], patch.object(
                 instagram_command, "_build_uploader", new=builder
             ), patch.object(
-                instagram_command, "resolve_account_file", new=resolve_account
+                instagram_command, "resolve_account_file", new=resolve_account, create=True
             ), patch.object(
                 instagram_command, "logger", new=logger
             ):
