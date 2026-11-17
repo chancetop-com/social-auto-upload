@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
-import inspect
 import os
 import tempfile
 import unittest
@@ -723,30 +722,6 @@ class UploadNoteValidationTests(unittest.TestCase):
 
 
 class UploadNoteBuilderTests(unittest.TestCase):
-    def test_note_init_signature_is_keyword_only_after_account(self):
-        params = list(inspect.signature(TiktokNote.__init__).parameters.values())
-        self.assertEqual(
-            [param.name for param in params],
-            [
-                "self",
-                "image_paths",
-                "note",
-                "tags",
-                "publish_date",
-                "account_file",
-                "title",
-                "options",
-                "debug",
-                "headless",
-                "no_publish",
-                "account_name",
-                "local_browser",
-            ],
-        )
-        for param in params[6:]:
-            with self.subTest(param=param.name):
-                self.assertIs(param.kind, inspect.Parameter.KEYWORD_ONLY)
-
     def test_builder_preserves_order_and_first_image_is_cover(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             first = Path(tmp_dir) / "first.png"

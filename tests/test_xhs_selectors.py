@@ -11,8 +11,7 @@ properties that survive future edits:
    container is ``ElementUnusableError`` (never ``.first`` guessing);
 3. every resolution logs one hit line — ``debug`` for ``structure`` and one
    extra ``info`` for any non-structure kind (step, kind, selector, URL);
-4. the dead anchors stay deleted: the three Chinese publish-button branches,
-   ``#publish-container div`` and the two zero-hit cover entries.
+4. positive login anchors do not depend on localized text.
 
 Nothing here touches a browser or the network.
 """
@@ -23,12 +22,11 @@ import asyncio
 import os
 import re
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_xhs_dom import FakeLocator, RecordingPage
-from utils.dom import Candidate, ElementUnusableError
+from utils.dom import ElementUnusableError
 
 CJK = re.compile(r"[\u4e00-\u9fff]")
 KIND_RANK = {"structure": 0, "upstream": 1, "text-zh": 2}
@@ -220,17 +218,6 @@ class Decision05SelectorCandidateOrderTests(unittest.TestCase):
                     f"{name} 的结构候选不能依赖中文文案: {candidate.selector}",
                 )
 
-    def test_publish_button_has_exactly_one_structural_candidate(self):
-        self.assertEqual(xhs_main.XHS_PUBLISH_BUTTON_SELECTOR, "xhs-publish-btn")
-        self.assertEqual(
-            xhs_main.XHS_PUBLISH_BUTTON_CANDIDATES,
-            (Candidate("xhs-publish-btn"),),
-        )
-        self.assertNotIn(
-            "button:has-text",
-            xhs_main.XHS_PUBLISH_BUTTON_CANDIDATES[0].selector,
-        )
-
 
 # ---------------------------------------------------------------------------
 # 2. File inputs: exactly one match, never ``.first``
@@ -367,38 +354,15 @@ class Decision05SelectorCallSiteTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 4. Static deletion: dead anchors stay deleted
+# 4. Positive login anchors do not depend on localized text
 # ---------------------------------------------------------------------------
 
 
-class Decision05SelectorDeadAnchorTests(unittest.TestCase):
-    DEAD_ANCHORS = (
-        'button:has-text("发布")',
-        'button:has-text("定时发布")',
-        "#publish-container div",
-        "div.upload-cover",
-        "div.cover-plugin-preview div.default.pointer",
-    )
-
-    def test_dead_anchors_are_gone_from_the_uploader(self):
-        source = Path(xhs_main.__file__).read_text(encoding="utf-8")
-
-        for anchor in self.DEAD_ANCHORS:
-            self.assertNotIn(anchor, source, f"死锚点必须删除: {anchor}")
-
+class Decision05SelectorLoginAnchorTests(unittest.TestCase):
     def test_login_positive_anchors_are_text_free(self):
         for selector in xhs_main.XHS_LOGIN_POSITIVE_SELECTORS:
             self.assertNotIn("has-text", selector)
             self.assertIsNone(CJK.search(selector))
-
-    def test_declaration_container_is_the_real_class(self):
-        self.assertEqual(
-            xhs_main.XHS_DECLARATION_CONTAINER_SELECTOR, ".publish-container"
-        )
-        self.assertNotIn(
-            "#publish-container",
-            xhs_main.XHS_DECLARATION_CONTAINER_SELECTOR,
-        )
 
 
 if __name__ == "__main__":

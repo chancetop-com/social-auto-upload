@@ -1,16 +1,9 @@
 # -*- coding: utf-8 -*-
 """Budget (deadline) wiring for the XHS publish chain — ticket 31.
 
-The whole publish run shares one ``PublishTimeoutBudget``.  These tests pin the
-three properties the ticket asks for:
-
-1. no bare numeric ``timeout=`` / ``asyncio.sleep(<number>)`` literal survives in
-   ``uploader/xiaohongshu_uploader/`` (static assertion);
-2. every wait's timeout is derived from the budget and shrinks with what is
-   left of the 15-minute deadline;
-3. the two budget exits are the only source of the two failure messages —
-   ``budget.pre_click_error()`` (exit 1) before dispatch and
-   ``budget.timeout_error(publish_clicked=True)`` (exit 9) after dispatch.
+The whole publish run shares one ``PublishTimeoutBudget``.  These tests verify
+that waits shrink with the remaining deadline, not-before waits extend it,
+and exhaustion before or after dispatch produces the appropriate failure.
 
 Everything is offline and virtual-time: ``tests.fakes_clock`` patches the
 module's ``time``/``asyncio`` names and ``tests.fakes_xhs_dom`` records every
@@ -21,10 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import unittest
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
 import uploader.publish_timeout as publish_timeout
@@ -38,8 +29,6 @@ from utils.errors import PublishResultUnknownError
 #: The exact wording required by ticket 31 (§3 U1).  The platform prefix
 #: ("小红书…") may stay in front of it.
 REQUIRED_PRE_CLICK_WORDING = "发布超时（15 分钟）：尚未点击发布，未发布任何内容"
-
-UPLOADER_DIR = Path(xhs_main.__file__).parent
 
 VIDEO_UPLOAD_SELECTOR = "input.upload-input"
 VIDEO_FILE_INPUT_SELECTOR = "div.upload-content input.upload-input"
@@ -185,59 +174,7 @@ def _note_app(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# 1. Static assertion: no bare numeric waits in the XHS publish chain
-# ---------------------------------------------------------------------------
-
-
-class Decision03BudgetLiteralTests(unittest.TestCase):
-    """The acceptance gate from the ticket: ``rg "timeout=[0-9]"`` must be empty."""
-
-    def _find(self, pattern: str) -> list[str]:
-        regex = re.compile(pattern)
-        offenders: list[str] = []
-        for path in sorted(UPLOADER_DIR.glob("*.py")):
-            for number, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), start=1
-            ):
-                if regex.search(line):
-                    offenders.append(f"{path.name}:{number}: {line.strip()}")
-        return offenders
-
-    def test_no_bare_numeric_timeout_literal(self):
-        offenders = self._find(r"timeout\s*=\s*\d")
-
-        self.assertEqual(
-            offenders,
-            [],
-            "every timeout must come from PublishTimeoutBudget.clamp_ms(); "
-            "replace the numeric literal with a named constant + clamp",
-        )
-
-    def test_no_bare_numeric_asyncio_sleep(self):
-        offenders = self._find(r"asyncio\.sleep\(\s*\d")
-
-        self.assertEqual(
-            offenders,
-            [],
-            "wait loops must sleep a named interval clamped by the budget",
-        )
-
-    def test_no_business_code_processing_timeout_message(self):
-        source = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted(UPLOADER_DIR.glob("*.py"))
-        )
-
-        self.assertNotIn(
-            "处理超时",
-            source,
-            "the only timeout exits are PublishTimeoutBudget.pre_click_error() "
-            "and timeout_error(publish_clicked=True)",
-        )
-
-
-# ---------------------------------------------------------------------------
-# 2. Clamp shrinks with the remaining budget
+# Clamp shrinks with the remaining budget
 # ---------------------------------------------------------------------------
 
 

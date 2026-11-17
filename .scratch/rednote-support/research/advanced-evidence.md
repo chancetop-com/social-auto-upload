@@ -19,7 +19,7 @@
 
 不使用自行翻译的英文别名，不用列表索引猜测选项。若以后获得实际英文页面，先记录结构与文案；确需文本时才按已验证英文、中文的顺序添加。
 
-原始 DOM、截图和资源保存在 git 忽略的 `.local/rednote-acceptance/`，不把账号页面、签名素材 URL 或大体积 bundle 加入仓库。可复跑的诊断入口是本目录的 `capture_dry_run.py`，强制要求 `--no-publish`。
+原始 DOM、截图和资源保存在 git 忽略的 `.local/rednote-acceptance/`，不把账号页面、签名素材 URL 或大体积 bundle 加入仓库。2026-11-17 清理了本轮本地验收使用的三个一次性脚本（`capture_dry_run.py`、`inspect_source_dialogs.py`、`verify_declaration_variants.py`）；脚本可从 Git 历史恢复。本记录和正式回归测试保留，后续验收通过正式 CLI 的 `--no-publish` 入口执行。
 
 自主拍摄和转载弹窗均已在实际账号打开取证：`.d-modal.self-shooting-contain`、`.address-input input`、`.date-picker input`，确认按钮使用 `.dialog-footer button.bg-red`。取消和确认都带 `custom-button`，不能仅用这个公共 class。只检查弹窗，没有填写或确认虚构来源。
 

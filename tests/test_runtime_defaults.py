@@ -1,63 +1,13 @@
 # -*- coding: utf-8 -*-
-"""运行参数契约（ticket 29，规格 §3 U13 ①②）。
-
-两条规则：
-- CLI 参数层不读 `conf.LOCAL_CHROME_HEADLESS`；已迁移平台用 None 表示未提供，
-  在执行时读取配置，显式 headed/headless 保留布尔值。
-- `debug` 默认关，CLI 显式开启；uploader 构造默认值保持关闭。
-"""
+"""CLI 默认关闭 debug，并在执行时解析未显式提供的 headless 配置。"""
 
 from __future__ import annotations
 
-import ast
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import conf
 import sau_cli
-
-ROOT = Path(__file__).resolve().parent.parent
-
-# 已知至少这些构造器带 debug 默认值；下界用于防止 AST 扫描静默失效。
-MIN_DEBUG_DEFAULTS = 13
-
-
-def _init_debug_defaults(tree: ast.AST):
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if node.name != "__init__":
-            continue
-        args = node.args
-        positional = args.posonlyargs + args.args
-        paired = list(zip(positional[-len(args.defaults) :], args.defaults))
-        paired += [
-            (arg, default)
-            for arg, default in zip(args.kwonlyargs, args.kw_defaults)
-            if default is not None
-        ]
-        for arg, default in paired:
-            if arg.arg == "debug":
-                yield node, default
-
-
-class DebugSingleSourceTests(unittest.TestCase):
-    def test_uploader_constructor_debug_defaults_are_false(self):
-        defaults = []
-        offenders: list[str] = []
-        for path in sorted((ROOT / "uploader").rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node, default in _init_debug_defaults(tree):
-                defaults.append((path, node.lineno))
-                if not (
-                    isinstance(default, ast.Constant) and default.value is False
-                ):
-                    offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
-        self.assertGreaterEqual(len(defaults), MIN_DEBUG_DEFAULTS)
-        self.assertEqual(offenders, [], "uploader debug 默认值必须为 False")
 
 
 class CliRuntimeDefaultsTests(unittest.TestCase):

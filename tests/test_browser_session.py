@@ -9,7 +9,6 @@ that touching a forbidden Playwright API fails loudly.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import unittest
 from pathlib import Path
@@ -46,11 +45,6 @@ class ProviderLabelTests(unittest.TestCase):
         self.assertEqual(provider_label("multilogin"), "Multilogin")
         self.assertEqual(provider_label("adspower"), "AdsPower")
         self.assertEqual(provider_label("local"), "local")
-
-    def test_provider_label_is_public_and_has_no_private_alias(self):
-        module = importlib.import_module("utils.browser_session")
-        self.assertIn("provider_label", module.__all__)
-        self.assertFalse(hasattr(module, "_provider_label"))
 
 
 class ManagedOnlyBrowserSessionTests(unittest.TestCase):

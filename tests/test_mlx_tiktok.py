@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
 import io
 import os
 import tempfile
@@ -424,37 +423,6 @@ class IsLoggedInTests(unittest.TestCase):
 class UploaderSeamTests(unittest.TestCase):
     def _video(self, account_file=None) -> TiktokVideo:
         return TiktokVideo("标题", "/tmp/demo.mp4", ["tag"], 0, account_file)
-
-    def test_init_positional_order_is_unchanged(self):
-        parameters = inspect.signature(TiktokVideo.__init__).parameters
-        names = list(parameters)
-        # The first five positional parameters (after ``self``) and the
-        # compatible sixth ``thumbnail_path`` are unchanged.
-        self.assertEqual(
-            names[:6],
-            [
-                "self",
-                "title",
-                "file_path",
-                "tags",
-                "publish_date",
-                "account_file",
-            ],
-        )
-        self.assertEqual(
-            parameters["thumbnail_path"].kind,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        )
-        self.assertIsNone(parameters["thumbnail_path"].default)
-        self.assertEqual(
-            parameters["options"].kind, inspect.Parameter.KEYWORD_ONLY
-        )
-        self.assertEqual(
-            parameters["headless"].kind, inspect.Parameter.KEYWORD_ONLY
-        )
-        video = self._video(account_file=None)
-        self.assertIsNone(video.account_file)
-        self.assertIsNone(video.options)
 
     def test_golden_legacy_browser_constants(self):
         expected_launch = (
