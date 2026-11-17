@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from patchright.async_api import async_playwright
 
 from uploader.meta_uploader.insgraph_uploader import posts
+from utils.browser_session import BrowserSession
 
 POST_URL = 'https://www.instagram.com/p/ABC/'
 OWNER_ID = '42'
@@ -42,6 +43,7 @@ def _post_page_html(
   <meta property="al:ios:url" content="instagram://media?id=123">
 </head>
 <body>
+<a href="/direct/inbox/">Inbox</a><a href="/creator/"><span aria-selected="false"><img></span></a>
 <main><article>{EXPECTED_TEXT}</article></main>
 <div role="button" aria-haspopup="dialog" id="more" onclick="openMenu()">
   <svg width="24" height="24"><circle cx="12" cy="12" r="2.5"></circle></svg>
@@ -121,31 +123,13 @@ class InstagramPostDeleteTests(unittest.TestCase):
             context = await browser.new_context()
             page = await context.new_page()
             try:
-                await page.route('https://www.instagram.com/**', route)
+                await context.route('https://www.instagram.com/**', route)
+                await context.add_cookies([{'name':'ds_user_id','value':OWNER_ID,'domain':'.instagram.com','path':'/'}])
                 with tempfile.TemporaryDirectory() as folder:
                     folder = Path(folder)
                     # 产品会把失败证据写到相对路径 .local/；切到临时目录，避免污染仓库。
                     with contextlib.chdir(folder):
-                        browser_handle = MagicMock()
-                        browser_handle.close = AsyncMock()
                         with (
-                            patch.object(
-                                posts,
-                                '_open_instagram_page',
-                                AsyncMock(
-                                    return_value=(browser_handle, context, page)
-                                ),
-                            ),
-                            patch.object(
-                                posts,
-                                'instagram_identity',
-                                AsyncMock(
-                                    return_value={
-                                        'user_id': OWNER_ID,
-                                        'username': 'creator',
-                                    }
-                                ),
-                            ),
                             # 缩短等待窗口：失败用例不必等生产默认超时。
                             patch.object(posts, '_MENU_TIMEOUT_MS', 1_000),
                             patch.object(posts, '_CONFIRM_TIMEOUT_MS', 2_000),
@@ -155,7 +139,7 @@ class InstagramPostDeleteTests(unittest.TestCase):
                         ):
                             try:
                                 result = await posts.instagram_post_action(
-                                    folder / 'account.json',
+                                    session=BrowserSession(browser=browser, context=context, mode='local'),
                                     post_url=POST_URL,
                                     expected_text=EXPECTED_TEXT,
                                     delete=True,
@@ -164,6 +148,7 @@ class InstagramPostDeleteTests(unittest.TestCase):
                                 error = None
                             except RuntimeError as captured:
                                 result, error = None, captured
+                    page = context.pages[-1]
                     clicked = await page.locator('body').get_attribute(
                         'data-clicked'
                     )

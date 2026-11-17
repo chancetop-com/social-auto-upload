@@ -10,7 +10,7 @@ summary: 发布 Instagram Reels、单图或轮播，并核验作品。
 
 # Instagram 独立网页发布
 
-调用现有 CLI，不自行实现浏览器上传。使用工程 Patchright Chrome 和独立 Instagram 会话，不使用 Business Suite 的绑定入口。默认可见浏览器，未配置代理时按系统网络直连；需要代理时显式使用 `--proxy` 或设置 `SAU_INSTAGRAM_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。
+调用现有 CLI，不自行实现浏览器上传。使用 Patchright 与项目专用持久化 Profile，不使用 Business Suite 的绑定入口。默认选择系统 Chrome、有头；已有 `conf.py` 的 `LOCAL_CHROME_HEADLESS` 仍生效，显式 `--headed` / `--headless` 优先。未配置代理时按系统网络直连；需要代理时显式使用 `--proxy` 或设置 `SAU_INSTAGRAM_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。
 
 ```powershell
 sau instagram login --account creator
@@ -21,7 +21,11 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
 
-账号文件保存为 `cookies/instagram_creator.json`。密码和验证由用户在工程浏览器输入。上传流程会自动跳过首次通知提示、确认 Reels 介绍，没有提示则继续。登录验证仍由用户完成；未知弹窗或提示关闭失败须报告，不能宣称上传成功。
+所有本地动作复用 `browser_profiles/instagram/<原始别名>/<chrome|chromium>/`。别名可以重新登录其他真实账号，Chrome 与 Chromium 各自独立；正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 `login` 创建 Profile 并等待人工登录/验证；其他动作缺少 Profile、明确未登录或需要验证退出 `10`，网络/页面/必需字段故障退出 `1`，结束本次动作。
+
+安装保留项目固定 Patchright。系统 Chrome 由用户按官方方式安装；需要配套 Chromium 时运行 `uv run patchright install --no-shell chromium` 并传 `--local-browser chromium`。`conf.py` 中非空 `LOCAL_CHROME_PATH` 优先于命令行种类与 `LOCAL_BROWSER`；只要求选定来源，失败不回退。浏览器保留原生窗口和语言。重建明确指定一个种类：`sau instagram reset-profile --account creator --browser-kind chrome`；无需 binary，保留另一种类、历史结果与旧文件，之后重新 login。
+
+视频/图文验收显式传 `--no-publish`，上传素材、编辑和检查就绪后停在 Share 前，结果为 `prepared`；可能留下草稿，不证明真实发布成功。上传流程会自动跳过首次通知提示、确认 Reels 介绍，没有提示则继续。登录验证仍由用户完成；未知弹窗或提示关闭失败须报告，不能宣称上传成功。
 
 视频支持 MP4/MOV，照片支持 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际处理取决于平台。多图按输入顺序发布轮播，单图和两图轮播已实测。标题、正文、标签合计最多 2200 字符；超过时退出 `2`，且静态校验都在启动浏览器前完成。当前账号独立网页版的照片/Reels 表单及高级设置没有定时入口，当前 CLI 仅支持立即发布；不能把定时任务转换成立即发布。
 
@@ -38,7 +42,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 协作者、Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。四项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 记录 `location`、`alt_text`、`comments`、`ai_generated` 的 `requested` / `applied` / `status`（必要时含 `reason`）。
 
-选择器只在 **English 界面 + Personal 账号**验证过，中文标签为未验证回退，专业账号未验证。本地模式固定 `locale=en-US`；托管模式需把 Profile 界面保持 English（账号语言设为中文时 Instagram 仍可能渲染中文）。四项能力已在真实账号真发验收通过（2026-11-10，English UI / Personal / 本地 cookie）：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags` 发布后回读一致，均已删除。`--not-before`、`--proxy`、`--headless`、中文界面、专业账号与托管模式仍未验收，不得据此宣称支持。
+选择器只在 **English 界面 + Personal 账号**验证过，中文标签为未验证回退，专业账号未验证。本地模式保留 Profile/站点语言；托管模式需把 Profile 界面保持 English（账号语言设为中文时 Instagram 仍可能渲染中文）。四项能力已在真实账号真发验收通过（2026-11-10，English UI / Personal / 本地 cookie）：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags` 发布后回读一致，均已删除。`--not-before`、`--proxy`、`--headless`、中文界面、专业账号与托管模式仍未验收，不得据此宣称支持。
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 
@@ -49,17 +53,18 @@ sau instagram verify --account creator --post-url "原作品链接" --expected-t
 sau instagram delete --account creator --post-url "原作品链接" --expected-text "原作品中的准确文字" --result .local/instagram-delete.json
 ```
 
-结果未知但没有链接时，先在同一账号主页按素材、配文和发布时间找原作品，复制链接再运行 `verify`；未找到不证明失败，不重复上传。链接支持 `/p/编号/`、`/reel/编号/` 和带作者名的形式。核对登录用户、作者、作品编号和正文后才允许删除。删除返回 `deleted`，作品进入“最近删除”；批量删除和提前永久清空不在范围内。本地素材不会删除。`deletion_unknown` 须先查询原作品和“最近删除”，不重复提交删除。
+结果未知但没有链接时，先在同一账号主页按素材、配文和发布时间找原作品，复制链接再运行 `verify`；未找到不证明失败，不重复上传。链接支持 `/p/编号/`、`/reel/编号/` 和带作者名的形式。按当前会话取得有效用户 ID，核对原作品作者、编号和正文后才允许删除；换号不会重新解释历史结果。删除返回 `deleted`，作品进入“最近删除”；批量删除和提前永久清空不在范围内。本地素材不会删除。`deletion_unknown` 须先查询原作品和“最近删除”，不重复提交删除。
 
 完整参数和能力边界以 `sau instagram upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。失败时根据结果文件中的错误及本地证据分析；不得把账号状态、截图或页面记录提交到 Git。
 
 ## 托管浏览器模式（可选）
 
-设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。`verify` / `delete` 仍为本地模式。
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。`verify` / `delete` 仍为本地模式，必须提供原始 `--account`，继续使用本地来源/headless/代理配置。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
-- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 对上述托管 check/上传动作，`--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 托管 headless 同样采用显式参数 > `LOCAL_CHROME_HEADLESS` > `False`；忽略本地来源及路径，不触碰本地 Profile。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ## 示例脚本

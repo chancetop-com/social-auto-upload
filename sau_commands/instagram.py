@@ -25,11 +25,10 @@ from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_image_files,
     parse_tags,
-    resolve_account_file,
 )
 from sau_commands.browser import (
     add_browser_flags,
@@ -42,6 +41,7 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
 
 
 def register(platform_parsers):
@@ -54,10 +54,9 @@ def register(platform_parsers):
         action_parser.add_argument("--account", required=False)
         action_parser.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
         if action_name == "login":
-            add_runtime_flags(action_parser)
-            action_parser.set_defaults(headless=False)
+            add_local_runtime_flags(action_parser)
         else:
-            add_runtime_flags(action_parser)
+            add_local_runtime_flags(action_parser)
             add_browser_flags(action_parser)
     instagram_video = instagram_actions.add_parser("upload-video", help="向 Instagram 发布视频/Reel")
     instagram_video.add_argument("--account", required=False)
@@ -71,9 +70,8 @@ def register(platform_parsers):
     add_not_before_flag(instagram_video)
     _add_no_publish_flag(instagram_video)
     _add_instagram_option_flags(instagram_video, include_alt_text=False)
-    add_runtime_flags(instagram_video)
+    add_local_runtime_flags(instagram_video)
     add_browser_flags(instagram_video)
-    instagram_video.set_defaults(headless=False)
     instagram_note = instagram_actions.add_parser("upload-note", help="向 Instagram 发布图片或轮播")
     instagram_note.add_argument("--account", required=False)
     instagram_note.add_argument("--images", required=True, nargs="+", type=existing_file_path)
@@ -85,9 +83,8 @@ def register(platform_parsers):
     add_not_before_flag(instagram_note)
     _add_no_publish_flag(instagram_note)
     _add_instagram_option_flags(instagram_note, include_alt_text=True)
-    add_runtime_flags(instagram_note)
+    add_local_runtime_flags(instagram_note)
     add_browser_flags(instagram_note)
-    instagram_note.set_defaults(headless=False)
     for action_name in ("verify", "delete"):
         action_parser = instagram_actions.add_parser(action_name, help="核对 Instagram 原作品" if action_name == "verify" else "核对后将 Instagram 原作品移至最近删除")
         action_parser.add_argument("--account", required=False)
@@ -95,8 +92,7 @@ def register(platform_parsers):
         action_parser.add_argument("--expected-text", required=True)
         action_parser.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
         action_parser.add_argument("--result", type=Path)
-        add_runtime_flags(action_parser)
-        action_parser.set_defaults(headless=False)
+        add_local_runtime_flags(action_parser)
 
 
 def _add_no_publish_flag(parser) -> None:
@@ -177,11 +173,12 @@ class InstagramUploadRequest:
     image_files: list[Path] | None = None
     thumbnail: Path | None = None
     proxy: str | None = INSTAGRAM_PROXY
-    headless: bool = False
+    headless: bool | None = None
     result_file: Path | None = None
     publish_not_before: datetime | None = None
     options: InstagramPublishOptions | None = None
     no_publish: bool = False
+    local_browser: str | None = None
 
 
 def _build_publish_options(args) -> InstagramPublishOptions | None:
@@ -219,14 +216,13 @@ def validate_instagram_publish_request(request: InstagramUploadRequest) -> None:
     )
 
 
-async def login_instagram_account(account_name: str, *, headless: bool = False, proxy: str | None = INSTAGRAM_PROXY) -> dict:
-    account_file = resolve_account_file("instagram", account_name)
-    return await instagram_setup(account_file, handle=True, return_detail=True, headless=headless, proxy=proxy)
+async def login_instagram_account(account_name: str, *, headless=None, proxy=INSTAGRAM_PROXY, local_browser=None) -> dict:
+    return await instagram_setup(account_name=account_name, handle=True, return_detail=True,
+                                 headless=headless, proxy=proxy, local_browser=local_browser)
 
 
-async def check_instagram_account(account_name: str, *, proxy: str | None = INSTAGRAM_PROXY) -> bool:
-    account_file = resolve_account_file("instagram", account_name)
-    return await instagram_cookie_auth(account_file, proxy=proxy)
+async def check_instagram_account(account_name: str, *, proxy: str | None = INSTAGRAM_PROXY, headless=None, local_browser=None) -> bool:
+    return await instagram_cookie_auth(account_name=account_name, proxy=proxy, headless=headless, local_browser=local_browser)
 
 
 def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramUploader:
@@ -240,6 +236,8 @@ def _build_uploader(request: InstagramUploadRequest, account_file) -> InstagramU
         thumbnail=request.thumbnail,
         proxy=request.proxy,
         headless=request.headless,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
         result_file=request.result_file,
         options=request.options,
         no_publish=request.no_publish,
@@ -263,7 +261,7 @@ async def upload_instagram_content(
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
-                headless=request.headless,
+                headless=resolve_headless(request.headless),
                 account_file=None,
                 managed=target,
                 launch_kwargs=INSTAGRAM_LAUNCH_KWARGS,
@@ -278,8 +276,7 @@ async def upload_instagram_content(
                 )
                 return await app.upload(session=session)
 
-    account_file = resolve_account_file("instagram", request.account_name)
-    app = _build_uploader(request, account_file)
+    app = _build_uploader(request, None)
     return await app.upload()
 
 
@@ -290,16 +287,17 @@ async def run(args):
     if args.action == "login":
         reject_managed_login("instagram", args)
         require_local_account(args)
-        result = await login_instagram_account(args.account, headless=args.headless, proxy=args.proxy)
+        result = await login_instagram_account(args.account, headless=args.headless, proxy=args.proxy, local_browser=getattr(args, "local_browser", None))
         if not result["success"]:
             raise RuntimeError(result.get("message", "Instagram login failed"))
-        print(f"Instagram login flow completed: {result['account_file']}")
+        print(f"Instagram login flow completed: Profile {args.account}")
         return 0
 
     if args.action in {"verify", "delete"}:
         require_account(args)
         result = await instagram_post_action(
-            resolve_account_file("instagram", args.account),
+            account_name=args.account,
+            local_browser=getattr(args, "local_browser", None),
             post_url=args.post_url,
             expected_text=args.expected_text,
             delete=args.action == "delete",
@@ -319,7 +317,7 @@ async def run(args):
             async with async_playwright() as playwright:
                 async with browser_session(
                     playwright,
-                    headless=args.headless,
+                    headless=resolve_headless(args.headless),
                     managed=target,
                     launch_kwargs=INSTAGRAM_LAUNCH_KWARGS,
                     context_kwargs=INSTAGRAM_CONTEXT_KWARGS,
@@ -335,7 +333,7 @@ async def run(args):
             print("valid")
             return 0
 
-        is_valid = await check_instagram_account(account_label, proxy=args.proxy)
+        is_valid = await check_instagram_account(account_label, proxy=args.proxy, headless=args.headless, local_browser=getattr(args, "local_browser", None))
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -350,6 +348,7 @@ async def run(args):
             thumbnail=args.thumbnail if args.action == "upload-video" else None,
             proxy=args.proxy,
             headless=args.headless,
+            local_browser=getattr(args, "local_browser", None),
             result_file=args.result,
             publish_not_before=args.not_before,
             options=_build_publish_options(args),

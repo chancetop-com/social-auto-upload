@@ -69,3 +69,5 @@
 ## 交付记录
 
 - 2026-11-17：[01 已解决](./issues/01-profile-ownership-and-reset.md)。第一批四平台开放显式重建，共享 Profile 归属/跨进程占用已交付；20 项所有权/重建测试和 213 项相关回归通过。当前只改变重建入口，浏览器持久化会话及其实际浏览器验证由 02 继续交付，其余平台按上述阻塞关系接入。
+
+- 2026-11-17：[04 已解决](./issues/04-instagram-persistent-profile.md)。Instagram 六项动作及直接调用接入持久化 Profile，包含本地 proxy、provider 环境下仍本地的 verify/delete、当前会话身份和原作品作者核验。219 项最终离线/所有权回归及 62 项受影响浏览器夹具回归通过；另完成 141 项 Instagram 功能/受控 DOM 回归。本票未操作真实账号，真实 no-publish 与旧资料作业仍由 20/19 执行。
