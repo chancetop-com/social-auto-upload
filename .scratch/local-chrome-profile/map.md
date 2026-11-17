@@ -58,6 +58,8 @@ Status: resolved
 
 ## Decisions so far
 
+- 2026-11-17 实施收口：[20 累计验证](../local-chrome-profile-implementation/research/20-final-validation.md)确认原迁移与用户追加 21–24 已落实，父规格/实施索引 resolved。当前 kind-first 布局、授权旧代码/stealth 删除、Instagram 两种界面与 Humanizer、三平台 local/managed no-publish 明确停止摘要以父规格最新追加条款为准，覆盖早期相应限制。历史实际路径和原日志保留；最终独立两轴代码审查仍由 root 后续执行，本地图不冒充审查结果。
+
 <!-- 每项结论的完整细节仅保存在对应已关闭决策票中；此处仅记录摘要与链接。 -->
 
 - [本地 Profile 的身份与旧登录态迁移](./issues/01-profile-identity-and-migration.md)：按浏览器种类、平台和原始账号使用可读专用目录，一次性迁移中重新登录并复验后删除对应旧 Cookie JSON，统一已迁移本地流程的登录态来源与状态规则。
