@@ -11,6 +11,7 @@ import conf
 from patchright.async_api import async_playwright
 from utils.local_browser_session import local_browser_session
 from utils.local_browser import resolve_local_browser
+from utils.local_profile import acquire_local_profile
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -33,6 +34,9 @@ async def main():
                             config=resolve_local_browser(headless=headless,local_browser=kind)
                             assert config.kind==kind,(path,config)
                             async with local_browser_session(pw,platform='tiktok',account='isolated-smoke',create=True,profile_root=root,configuration=config) as session:
+                                expected = Path(root).resolve() / kind / 'tiktok' / 'isolated-smoke'
+                                assert expected.is_dir()
+                                assert not (expected / '.sau-owner.json').exists()
                                 page=await session.context.new_page(); await page.goto(url)
                                 token=f'{kind}-{headless}-{bool(path)}'
                                 await page.evaluate('(v) => {localStorage.setItem("persist",v); document.cookie="persist="+v+"; max-age=3600; path=/"}',token)
@@ -51,6 +55,10 @@ async def main():
                                 page=await session.context.new_page(); await page.goto(url)
                                 assert await page.evaluate('localStorage.getItem("persist")')==token
                                 assert await page.evaluate('document.cookie')=='persist='+token
+                            # Even the final matrix row must prove browser cleanup
+                            # released both project ownership and native singleton state.
+                            with acquire_local_profile('tiktok', 'isolated-smoke', kind, root=root) as profile:
+                                assert profile.exists
                             record={'kind':kind,'headless':headless,'source':config.source,'version':version,'persistence':True,'anonymous_isolation':True}
                             results.append(record); print(json.dumps(record),flush=True)
     finally:

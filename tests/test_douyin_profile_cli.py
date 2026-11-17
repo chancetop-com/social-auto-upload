@@ -130,7 +130,7 @@ class DouyinProfileCliTests(unittest.TestCase):
         code,_,err = self.run_cli('check','--account','Creator')
         self.assertEqual(code,0,err)
         self.assertEqual(self.pw.chromium.persistent_calls,[{
-            'user_data_dir':str(self.root/'browser_profiles/douyin/Creator/chrome'),
+            'user_data_dir':str(self.root/'browser_profiles/chrome/douyin/Creator'),
             'channel':'chrome','headless':True,'no_viewport':True}])
         self.assertEqual(old.read_text(),'broken')
         self.assertFalse(self.context.add_init_script_calls)
@@ -194,7 +194,7 @@ class DouyinProfileCliTests(unittest.TestCase):
         self.assertEqual(len(calls),3)
         self.assertEqual([c['headless'] for c in calls],[True,False,True])
         self.assertEqual(calls[0]['user_data_dir'],calls[1]['user_data_dir'])
-        self.assertTrue(calls[2]['user_data_dir'].endswith('/Creator/chromium'))
+        self.assertTrue(calls[2]['user_data_dir'].endswith('/chromium/douyin/Creator'))
         self.assertFalse((self.root/'cookies').exists())
         self.assertFalse(self.context.storage_state_calls)
 

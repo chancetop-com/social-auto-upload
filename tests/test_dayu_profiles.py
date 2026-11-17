@@ -95,7 +95,7 @@ class DayuProfilesTests(unittest.TestCase):
         self.context.next_page = BackendPage(name='Different account', wmid='b' * 32)
         self.assertEqual(self.cli('login', '--account', 'Creator')[0], 0)
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 0)
-        self.assertEqual(self.pw.chromium.persistent_calls, [dict(user_data_dir=str(self.root / 'browser_profiles/dayu/Creator/chrome'), channel='chrome', headless=False, no_viewport=True)] * 3)
+        self.assertEqual(self.pw.chromium.persistent_calls, [dict(user_data_dir=str(self.root / 'browser_profiles/chrome/dayu/Creator'), channel='chrome', headless=False, no_viewport=True)] * 3)
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse(self.context.add_init_script_calls)
         self.assertEqual(old.read_text(), 'invalid cookie')
@@ -281,7 +281,7 @@ class DayuProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('executable_path=', result[2])
         self.assertEqual(len(self.pw.chromium.persistent_calls), 2)
-        self.assertTrue(all(call['user_data_dir'].endswith('/chromium') for call in self.pw.chromium.persistent_calls))
+        self.assertTrue(all(call['user_data_dir'].endswith('/chromium/dayu/Creator') for call in self.pw.chromium.persistent_calls))
 
     def test_reset_exact_profile_without_binary_and_protects_lease_history_and_old_state(self):
         chrome, chromium = self.profile(), self.profile('chromium')
@@ -435,7 +435,7 @@ class DayuProfilesTests(unittest.TestCase):
         with patch.dict(os.environ,{'ADSPOWER_API_KEY':'test-only-token'}):
             result = self.cli('verify','--account',' Creator ','--content-id','work-1')
         self.assertEqual(result[0],0,result)
-        self.assertTrue(self.pw.chromium.persistent_calls[-1]['user_data_dir'].endswith('/dayu/ Creator /chrome'))
+        self.assertTrue(self.pw.chromium.persistent_calls[-1]['user_data_dir'].endswith('/chrome/dayu/ Creator '))
         self.assertFalse(self.pw.chromium.connect_calls)
 
     def test_anonymous_hung_close_cannot_hang_outer_session(self):

@@ -12,7 +12,7 @@ summary: 使用 sau tiktok 在本地模式或托管浏览器模式（MLX / AdsPo
 
 TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI：
 
-- **本地模式**（默认）：不设置托管凭据，使用专用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器保存完整状态，旧 Cookie JSON 不读写或自动清理。
+- **本地模式**（默认）：不设置托管凭据，使用专用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器保存完整状态，旧 Cookie JSON 不读写或自动清理。
 - **Multilogin X（MLX）模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`。
 - **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`（映射 AdsPower `user_id`）；`--folder-id` 忽略。
 

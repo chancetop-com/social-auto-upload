@@ -103,7 +103,7 @@ class YouTubeProfilesTests(unittest.TestCase):
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 0)
         calls = self.playwright.chromium.persistent_calls
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0], {'user_data_dir': str(self.root / 'browser_profiles/youtube/Creator/chrome'), 'channel': 'chrome', 'headless': False, 'no_viewport': True})
+        self.assertEqual(calls[0], {'user_data_dir': str(self.root / 'browser_profiles/chrome/youtube/Creator'), 'channel': 'chrome', 'headless': False, 'no_viewport': True})
         self.assertEqual(calls[0], calls[1])
         self.assertTrue(self.context.closed)
         self.assertFalse(self.context.storage_state_calls)
@@ -189,7 +189,7 @@ class YouTubeProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('executable_path=', result[2])
         self.assertEqual(len(self.playwright.chromium.persistent_calls), 2)
-        self.assertTrue(all(call['user_data_dir'].endswith('/chromium') for call in self.playwright.chromium.persistent_calls))
+        self.assertTrue(all(call['user_data_dir'].endswith('/chromium/youtube/Creator') for call in self.playwright.chromium.persistent_calls))
 
     def test_reset_is_exact_and_requires_no_browser_and_rejects_active_profile(self):
         chrome, chromium = self.profile(), self.profile('chromium')

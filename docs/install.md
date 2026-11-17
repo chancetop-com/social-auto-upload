@@ -141,7 +141,7 @@ sau douyin upload-note --account <account_name> --images videos/demo1.png videos
 sau douyin upload-note --account <account_name> --images videos/demo1.png videos/demo2.png --title "图文标题" --note $noteText --tags 'tag1,tag2' --bgm '音乐名称'
 ``` 
 
-抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/douyin/<原始别名>/<chrome|chromium>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
+抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/<chrome|chromium>/douyin/<原始别名>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
 
 只有 login 引导扫码或验证；缺少 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。同别名可以重新登录另一真实账号，Chrome 与 Chromium 各自隔离。发布中遇到验证即结束本次任务；提交后退出 `10` 会附 `publish_attempted=true`，退出 `9` 表示结果未知，都先核对作品再决定重试。重建使用 `sau douyin reset-profile --account creator --browser-kind chrome`，无需 binary，拒绝占用，保留另一浏览器及历史结果；不会自动恢复发布任务。抖音没有 `--no-publish`，环境验证使用离线或受控页面，不能以真实提交验收。
 
@@ -274,19 +274,19 @@ sau bilibili upload-video
 
 ### 百家号持久化登录
 
-按上方说明只准备所选浏览器，保留已有 `conf.py`。执行 `sau baijiahao login --account creator --headed`，扫码或完成人工验证，正常关闭后执行同配置 `sau baijiahao check --account creator`。Profile 位于 `browser_profiles/baijiahao/creator/<chrome|chromium>`，旧 Cookie JSON 不再用于登录。两类浏览器各自登录，别名允许换号；显式 `reset-profile --account creator --browser-kind chrome` 只重建一个 Profile，无需启动浏览器。视频要求横版封面；百家号没有 no-publish 开关，安装/窗口验收使用隔离受控页面，避免提交真实作品。
+按上方说明只准备所选浏览器，保留已有 `conf.py`。执行 `sau baijiahao login --account creator --headed`，扫码或完成人工验证，正常关闭后执行同配置 `sau baijiahao check --account creator`。Profile 位于 `browser_profiles/<chrome|chromium>/baijiahao/creator`，旧 Cookie JSON 不再用于登录。两类浏览器各自登录，别名允许换号；显式 `reset-profile --account creator --browser-kind chrome` 只重建一个 Profile，无需启动浏览器。视频要求横版封面；百家号没有 no-publish 开关，安装/窗口验收使用隔离受控页面，避免提交真实作品。
 
 ### 微博持久化登录
 
-保留已有 `conf.py`；按上文准备所选系统 Chrome、完整 Chromium（`uv run patchright install --no-shell chromium`）或自定义路径。先 `sau weibo login --account creator --headed`，按需扫码/完成人工验证，正常关闭后以同配置 `sau weibo check --account creator`。Profile 位于 `browser_profiles/weibo/creator/<chrome|chromium>`；默认有头，显式参数优先于配置，不导入旧 JSON。别名可换号，两类浏览器各自登录。重建使用 `sau weibo reset-profile --account creator --browser-kind chrome`，不需 binary，拒绝占用，仅清空明确目标。发布要求封面，没有 no-publish 开关；安装、浏览器启动和账号登录分别验证，窗口回归只用隔离受控页面。
+保留已有 `conf.py`；按上文准备所选系统 Chrome、完整 Chromium（`uv run patchright install --no-shell chromium`）或自定义路径。先 `sau weibo login --account creator --headed`，按需扫码/完成人工验证，正常关闭后以同配置 `sau weibo check --account creator`。Profile 位于 `browser_profiles/<chrome|chromium>/weibo/creator`；默认有头，显式参数优先于配置，不导入旧 JSON。别名可换号，两类浏览器各自登录。重建使用 `sau weibo reset-profile --account creator --browser-kind chrome`，不需 binary，拒绝占用，仅清空明确目标。发布要求封面，没有 no-publish 开关；安装、浏览器启动和账号登录分别验证，窗口回归只用隔离受控页面。
 
 ### 虎扑 Profile 登录
 
-只准备所选系统 Chrome、完整 Chromium 或自定义路径，保留已有 conf.py；默认 Chrome 有头，显式 headed/headless 优先于配置。执行 `sau hupu login --account creator --headed` 完成 QQ 扫码或人工验证，正常关闭后同配置 `sau hupu check --account creator`。资料位于 `browser_profiles/hupu/creator/<chrome|chromium>`，旧 JSON 不参与；两种浏览器各自登录，账号别名允许换号。`sau hupu reset-profile --account creator --browser-kind chrome` 只重建该 Profile，无需安装 binary。Hupu 无 no-publish，安装与窗口验收使用隔离合成页面，不提交真实视频。
+只准备所选系统 Chrome、完整 Chromium 或自定义路径，保留已有 conf.py；默认 Chrome 有头，显式 headed/headless 优先于配置。执行 `sau hupu login --account creator --headed` 完成 QQ 扫码或人工验证，正常关闭后同配置 `sau hupu check --account creator`。资料位于 `browser_profiles/<chrome|chromium>/hupu/creator`，旧 JSON 不参与；两种浏览器各自登录，账号别名允许换号。`sau hupu reset-profile --account creator --browser-kind chrome` 只重建该 Profile，无需安装 binary。Hupu 无 no-publish，安装与窗口验收使用隔离合成页面，不提交真实视频。
 
 ### 支付宝生活号持久化登录
 
-保留现有 conf.py，只准备所选 Chrome/完整 Chromium 或自定义浏览器。执行 `sau alipay login --account creator --headed` 扫码，正常关闭后同配置 `sau alipay check --account creator`；Profile 位于 `browser_profiles/alipay/creator/<chrome|chromium>`，旧 Cookie 不导入/导出。内容创作入口必须可见，登录 iframe 是未登录证据，网络/HTTP/权限/结构故障单独报错。两种浏览器独立登录，别名允许换号；重建时显式指定 browser-kind，无需浏览器安装。生活号无 no-publish 开关，使用受控页面验收安装和窗口交互。
+保留现有 conf.py，只准备所选 Chrome/完整 Chromium 或自定义浏览器。执行 `sau alipay login --account creator --headed` 扫码，正常关闭后同配置 `sau alipay check --account creator`；Profile 位于 `browser_profiles/<chrome|chromium>/alipay/creator`，旧 Cookie 不导入/导出。内容创作入口必须可见，登录 iframe 是未登录证据，网络/HTTP/权限/结构故障单独报错。两种浏览器独立登录，别名允许换号；重建时显式指定 browser-kind，无需浏览器安装。生活号无 no-publish 开关，使用受控页面验收安装和窗口交互。
 
 ### 知乎持久化登录
 

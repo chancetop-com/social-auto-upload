@@ -14,7 +14,7 @@ summary: 发布 Facebook Page 视频或图文，并管理排期。
 
 默认不配置代理，浏览器按系统网络直连；网络环境需要代理时显式传 `--proxy` 或设置 `SAU_FACEBOOK_PAGE_PROXY`。
 
-本地 login/check/视频/图文/verify/delete 使用 `browser_profiles/facebook-page/<原始别名>/<chrome|chromium>/`。一个登录 Profile 可管理多个 Page，`--page` 是发布目标，不能作为账号目录；资料与 `facebook` 隔离。别名可重新登录另一真实账号，原作品仍须核对 Page、编号和配文。
+本地 login/check/视频/图文/verify/delete 使用 `browser_profiles/<chrome|chromium>/facebook-page/<原始别名>/`。一个登录 Profile 可管理多个 Page，`--page` 是发布目标，不能作为账号目录；资料与 `facebook` 隔离。别名可重新登录另一真实账号，原作品仍须核对 Page、编号和配文。
 
 先准备所选浏览器，再登录：默认系统 Chrome、有头；保留已有 `LOCAL_CHROME_HEADLESS` 配置，显式 `--headed` / `--headless` 优先。`LOCAL_CHROME_PATH` 覆盖来源并按实际产品种类选 Profile；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。Chrome 按官方方式安装；完整 Chromium 可用 `uv run patchright install --no-shell chromium`。只要求选定来源，失败不切换。保留当前语言、浏览器窗口和本地代理。
 

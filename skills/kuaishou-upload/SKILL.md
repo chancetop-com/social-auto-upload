@@ -62,7 +62,7 @@ summary: 使用 sau 登录快手并发布视频或图文。
 
 ## 本地 Profile
 
-login/check/视频/图文统一使用 `browser_profiles/kuaishou/<原始别名>/<chrome|chromium>/`。只有 login 创建资料并引导扫码；Profile 是唯一登录态来源，旧 JSON 不读取、写回或自动迁移。一个别名可重新登录其他真实账号；两种浏览器独立，同一 Profile 同时仅一个任务使用。
+login/check/视频/图文统一使用 `browser_profiles/<chrome|chromium>/kuaishou/<原始别名>/`。只有 login 创建资料并引导扫码；Profile 是唯一登录态来源，旧 JSON 不读取、写回或自动迁移。一个别名可重新登录其他真实账号；两种浏览器独立，同一 Profile 同时仅一个任务使用。
 
 默认系统 Chrome、有头；显式 `--headless` / `--headed` > `LOCAL_CHROME_HEADLESS` > False。`LOCAL_CHROME_PATH` 优先并按真实产品选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome。只安装所选来源，失败不回退；保留已有配置、当前语言和自然窗口。完整 Chromium 安装方式见运行前提。
 

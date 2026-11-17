@@ -24,7 +24,7 @@ sau weibo check --account creator
 sau weibo upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "简介" --tags 微博,测试 --thumbnail covers/demo.png
 ```
 
-只有 login 创建 Profile 并引导扫码/验证。生成二维码时展示图片供用户扫码；正常关闭后同配置 check。资料位于 `browser_profiles/weibo/<原始别名>/<chrome|chromium>`，浏览器自动保存；旧 Cookie JSON 不读取、导入、写回或自动清理。命令可用、浏览器可启动、账号已登录分别报告。
+只有 login 创建 Profile 并引导扫码/验证。生成二维码时展示图片供用户扫码；正常关闭后同配置 check。资料位于 `browser_profiles/<chrome|chromium>/weibo/<原始别名>`，浏览器自动保存；旧 Cookie JSON 不读取、导入、写回或自动清理。命令可用、浏览器可启动、账号已登录分别报告。
 
 ## 发布与恢复
 

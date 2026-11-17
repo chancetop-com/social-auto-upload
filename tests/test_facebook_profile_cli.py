@@ -195,7 +195,7 @@ class FacebookProfileCliTests(unittest.TestCase):
         code, _, err = self.run_cli('check', '--account', 'Creator', '--proxy', 'http://localhost:7890')
         self.assertEqual(code, 0, err)
         self.assertEqual(self.pw.chromium.persistent_calls, [{
-            'user_data_dir': str(self.root / 'browser_profiles/facebook/Creator/chrome'),
+            'user_data_dir': str(self.root / 'browser_profiles/chrome/facebook/Creator'),
             'channel':'chrome', 'headless':True, 'no_viewport':True,
             'proxy':{'server':'http://localhost:7890'},
         }])
@@ -213,14 +213,14 @@ class FacebookProfileCliTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual([c['headless'] for c in calls], [True, False, True])
         self.assertEqual(calls[0]['user_data_dir'], calls[1]['user_data_dir'])
-        self.assertTrue(calls[2]['user_data_dir'].endswith('/chromium'))
+        self.assertTrue(calls[2]['user_data_dir'].endswith('/chromium/facebook/Creator'))
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse((self.root / 'cookies').exists())
         code, _, err = self.run_cli('reset-profile', '--account', 'Creator', '--browser-kind', 'chrome')
         self.assertEqual(code, 0, err)
-        self.assertFalse((self.root / 'browser_profiles/facebook/Creator/chrome').exists())
-        self.assertTrue((self.root / 'browser_profiles/facebook/Creator/chromium').exists())
-        self.assertTrue((self.root / 'browser_profiles/facebook-page/Creator/chrome').exists())
+        self.assertFalse((self.root / 'browser_profiles/chrome/facebook/Creator').exists())
+        self.assertTrue((self.root / 'browser_profiles/chromium/facebook/Creator').exists())
+        self.assertTrue((self.root / 'browser_profiles/chrome/facebook-page/Creator').exists())
 
     def test_check_classifies_missing_login_verification_and_page_failures(self):
         self.assertEqual(self.run_cli('check', '--account', 'Creator')[0], 10)
@@ -299,7 +299,7 @@ class FacebookProfileCliTests(unittest.TestCase):
                 self.assertEqual(self.run_cli('verify', *argv[2:])[0], 2)
         self.assertFalse(self.context.storage_state_calls)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 4)
-        self.assertTrue(all(c['user_data_dir'].endswith('/facebook/Creator/chromium') for c in self.pw.chromium.persistent_calls))
+        self.assertTrue(all(c['user_data_dir'].endswith('/chromium/facebook/Creator') for c in self.pw.chromium.persistent_calls))
         self.context.user_id = '77'
         self.assertEqual(self.run_cli('delete', *argv)[0], 1)
         self.assertEqual(self.context.pages[-1].delete_clicks, 0)

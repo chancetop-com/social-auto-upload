@@ -158,13 +158,13 @@
 
 Instagram 已迁移全部本地动作：按安装说明准备所选 Chrome/Chromium，保留已有 conf.py。先 `sau instagram login --account <alias> --headed`，等待消息入口与当前身份验证完成，再同配置 check；浏览器自动保存 Profile，无旧 Cookie 导入/导出。视频/图文回归显式 `--no-publish`，只有结果 prepared 表示到达 Share 前。verify/delete 在托管环境下仍要求原始本地账号并保留代理；原作者核验有效，不执行真实删除来验收。需要清空时显式 reset-profile 指定种类；安装成功、浏览器可启动和账号已登录分别报告。
 
-Facebook 已迁移 login/check/视频/图文/verify/delete：使用项目专用 `browser_profiles/facebook/<原始别名>/<chrome|chromium>`，与 Facebook Page 完全隔离。保留 conf.py；按所选 Chrome/完整 Chromium/自定义路径安装，显式 headed/headless 覆盖配置，未配置默认有头。先 `sau facebook login --account <alias> --headed`，正常关闭后同配置 check；旧 JSON 不读写。verify/delete 在托管环境下仍用本地原始别名，继续核对 owner-id、原作者、作品 ID 和正文；验证使用离线替身，不执行真实删除。Facebook 没有 no-publish 开关，受控 DOM 回归不等于真实账号发布验收。只有 login 引导登录；退出 10 安排人工登录/验证，提交后先核对作品，退出 9 禁止自动重发。显式 reset-profile 只重建指定资料，不能据此重新提交旧任务。
+Facebook 已迁移 login/check/视频/图文/verify/delete：使用项目专用 `browser_profiles/<chrome|chromium>/facebook/<原始别名>`，与 Facebook Page 完全隔离。保留 conf.py；按所选 Chrome/完整 Chromium/自定义路径安装，显式 headed/headless 覆盖配置，未配置默认有头。先 `sau facebook login --account <alias> --headed`，正常关闭后同配置 check；旧 JSON 不读写。verify/delete 在托管环境下仍用本地原始别名，继续核对 owner-id、原作者、作品 ID 和正文；验证使用离线替身，不执行真实删除。Facebook 没有 no-publish 开关，受控 DOM 回归不等于真实账号发布验收。只有 login 引导登录；退出 10 安排人工登录/验证，提交后先核对作品，退出 9 禁止自动重发。显式 reset-profile 只重建指定资料，不能据此重新提交旧任务。
 
 快手环境准备：读取 `skills/kuaishou-upload/SKILL.md` 的本地 Profile 契约，按所选来源安装浏览器，保留已有配置；执行 `sau kuaishou login --account <alias> --headed` 扫码后同配置 check。只有 login 引导登录，旧 JSON 不参与；快手没有 --no-publish，未有真实发布任务时用离线/受控页面验证。重建明确指定 --browser-kind，不借重建重新提交旧任务。
 
 视频号的 login/check/upload-video 已迁移：按 `skills/tencent-upload/SKILL.md` 准备所选 Chrome/完整 Chromium，保留 conf.py。先 `sau tencent login --account <alias> --headed` 扫码，正常关闭后同配置 check；仅 login 引导登录，旧 JSON 不导入。视频预检和业务共用 Profile。明确未登录/验证退出 10，运行故障退出 1，提交后先核查作品；退出 9 禁止自动重发。该平台无 --no-publish，不以真实发布或保存草稿验收，使用离线替身/受控 DOM。需要重建时显式指定 reset-profile 的 browser-kind。
 
-抖音已迁移 login/check/视频/图文：保留 conf.py，准备所选系统 Chrome、完整 Chromium 或自定义路径；先 `sau douyin login --account <alias> --headed`，正常关闭后同配置 check。Profile 路径为 `browser_profiles/douyin/<原始别名>/<chrome|chromium>`，旧 JSON 不参与，默认/显式 headless 与其他已迁移平台一致。只有 login 处理扫码/验证，发布中退出 10 安排人工恢复；提交后先核对作品，9 禁止自动重发。没有 no-publish 开关，未获真实发布任务时只做离线/受控 DOM 验证。显式 reset-profile 仅清空选定种类，无需浏览器安装。
+抖音已迁移 login/check/视频/图文：保留 conf.py，准备所选系统 Chrome、完整 Chromium 或自定义路径；先 `sau douyin login --account <alias> --headed`，正常关闭后同配置 check。Profile 路径为 `browser_profiles/<chrome|chromium>/douyin/<原始别名>`，旧 JSON 不参与，默认/显式 headless 与其他已迁移平台一致。只有 login 处理扫码/验证，发布中退出 10 安排人工恢复；提交后先核对作品，9 禁止自动重发。没有 no-publish 开关，未获真实发布任务时只做离线/受控 DOM 验证。显式 reset-profile 仅清空选定种类，无需浏览器安装。
 
 百家号已接入本地持久化 Profile：保留已有 conf.py，按实际选择准备系统 Chrome、完整 Chromium（`uv run patchright install --no-shell chromium`）或自定义路径。显式 headed/headless 优先于配置，未配置默认有头。先 `sau baijiahao login --account <alias> --headed` 完成扫码或验证，正常关闭后同配置 check；只认后台业务控件，旧 JSON 不导入/导出。视频必须提供 `--thumbnail`，可选合集和 not-before；无 `--no-publish` 或 `--schedule`，验收使用离线/受控 DOM，不提交真实视频。缺少 Profile/登录或验证退出 10，其他运行故障退出 1；提交后保留 publish_attempted，退出 9 先核对作品，不自动重发。重建必须显式 `reset-profile --account <alias> --browser-kind chrome|chromium`，只清空该种类，不影响历史作品证据。
 

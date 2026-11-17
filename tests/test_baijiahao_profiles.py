@@ -120,7 +120,7 @@ class BaijiahaoProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 0, result)
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 0)
         calls = self.pw.chromium.persistent_calls
-        self.assertEqual(calls, [dict(user_data_dir=str(self.root / 'browser_profiles/baijiahao/Creator/chrome'), channel='chrome', headless=False, no_viewport=True)] * 2)
+        self.assertEqual(calls, [dict(user_data_dir=str(self.root / 'browser_profiles/chrome/baijiahao/Creator'), channel='chrome', headless=False, no_viewport=True)] * 2)
         self.assertTrue(self.context.closed)
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse(self.context.add_init_script_calls)
@@ -227,7 +227,7 @@ class BaijiahaoProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('executable_path=', result[2])
         self.assertEqual(len(self.pw.chromium.persistent_calls), 2)
-        self.assertTrue(all(call['user_data_dir'].endswith('/chromium') for call in self.pw.chromium.persistent_calls))
+        self.assertTrue(all(call['user_data_dir'].endswith('/chromium/baijiahao/Creator') for call in self.pw.chromium.persistent_calls))
 
     def test_reset_exact_profile_without_binary_and_protects_lease_history_and_old_state(self):
         chrome, chromium = self.profile(), self.profile('chromium')

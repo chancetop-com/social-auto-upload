@@ -20,7 +20,7 @@ sau tencent upload-video --account creator --file videos/demo.mp4 --title "标�
 
 视频号仅支持视频发布。可选参数包括 `--schedule "YYYY-MM-DDTHH:MM:00Z"`、`--draft`、`--collection`、`--short-title`、`--category`、`--thumbnail-landscape` 和 `--thumbnail-portrait`。`--thumbnail` 是竖版封面的兼容参数。合集必须已存在。
 
-本地资料为 `browser_profiles/tencent/<原始别名>/<chrome|chromium>`；login/check/视频及内部预检共用选定 Profile，旧 Cookie JSON 不读写、不导入或自动删除。仅 login 创建资料并等待扫码；生成二维码时直接展示图片。登录后正常关闭，再同配置 check；安装成功和浏览器可启动不证明平台已登录。
+本地资料为 `browser_profiles/<chrome|chromium>/tencent/<原始别名>`；login/check/视频及内部预检共用选定 Profile，旧 Cookie JSON 不读写、不导入或自动删除。仅 login 创建资料并等待扫码；生成二维码时直接展示图片。登录后正常关闭，再同配置 check；安装成功和浏览器可启动不证明平台已登录。
 
 保留用户 `conf.py`。默认系统 Chrome、有头；Chrome 由用户安装，完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`；`LOCAL_CHROME_PATH` 覆盖来源并按真实种类隔离 Profile。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False；只要求选定来源，失败不回退，不固定 viewport 或修改语言。
 

@@ -23,7 +23,7 @@ class LocalProfileHelpersTests(unittest.TestCase):
             with acquire_local_profile('tiktok', 'creator', 'chrome', create=True): pass
             self.assertTrue(asyncio.run(tk_main.cookie_auth('/does-not-exist/tiktok_creator.json', headless=False)))
             self.assertEqual(len(pw.chromium.persistent_calls), 1)
-            self.assertTrue(pw.chromium.persistent_calls[0]['user_data_dir'].endswith('/tiktok/creator/chrome'))
+            self.assertTrue(pw.chromium.persistent_calls[0]['user_data_dir'].endswith('/chrome/tiktok/creator'))
             self.assertFalse(context.storage_state_calls)
             self.assertFalse((Path(root) / 'cookies').exists())
 

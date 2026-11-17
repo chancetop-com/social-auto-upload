@@ -87,11 +87,11 @@ Assignee: Codex（本会话）
 
 ### 身份映射
 
-- 使用项目专用的 `browser_profiles/`；不使用或改写用户日常 Chrome 的个人资料。账号目录仍按 `<平台>/<账号名>/` 定位，账号目录内的最终浏览器目录划分由[本地 Profile 的生命周期与并发占用](./03-profile-lifecycle-and-concurrency.md)细化。整个根目录不纳入版本控制，忽略规则已在生命周期会话按用户要求落实。
+- 使用项目专用的 `browser_profiles/`；不使用或改写用户日常 Chrome 的个人资料。账号目录按 `<chrome|chromium>/<平台>/<账号名>/` 定位，最终浏览器目录划分由[本地 Profile 的生命周期与并发占用](./03-profile-lifecycle-and-concurrency.md)细化。整个根目录不纳入版本控制，忽略规则已在生命周期会话按用户要求落实。
 - 平台取现有正式 CLI 的标准平台名，账号取 `--account` 原值。同一平台、同一账号、同一浏览器种类的登录、检查、发布、验证及其他正式本地浏览器入口必须定位到同一 Profile；种类选择与切换规则以生命周期票为准。
 - 目录直接显示账号名，不使用哈希，不自动裁剪、改大小写、做 Unicode 归一化或替换/转义字符。中文等正常名称保留；账号必须是单个安全目录名，拒绝空白名称、路径分隔符、`.`、`..` 等会改变路径含义的输入。文件系统不支持时明确报错，不能悄悄换名字。
 - 用元数据记录平台和原始账号标签，核对已有目录归属；文件系统把不同大小写或 Unicode 写法映射到同一路径时，原始标签不符即报冲突，不自动合并。目录解析还须保持在项目专用根目录内。
-- 不同平台或账号各自隔离。Facebook 与 Facebook Page 保留不同账号目录，例如 `browser_profiles/facebook/main/` 与 `browser_profiles/facebook-page/main/`，其中的浏览器 Profile 也互相隔离。Facebook Page 的 `--page` 是发布目标；同一登录账号管理多个 Page 时复用其所选种类的 Page Profile。
+- 不同平台或账号各自隔离。Facebook 与 Facebook Page 保留不同账号目录，例如 `browser_profiles/chrome/facebook/main/` 与 `browser_profiles/chrome/facebook-page/main/`，其中的浏览器 Profile 也互相隔离。Facebook Page 的 `--page` 是发布目标；同一登录账号管理多个 Page 时复用其所选种类的 Page Profile。
 - 账号标签是账号别名，不固定对应平台真实账号；换号、登录失效及旧身份资料的退出规则以[账号别名与登录态校验](./05-account-binding-migration.md)为准。
 
 ### 登录态与其他状态
@@ -126,3 +126,7 @@ Assignee: Codex（本会话）
 - 真实发布后的 `publish_attempted`、结果未知及禁止自动重发契约保持不变。清理旧 JSON 不是发布重试条件；不能因本地 Profile 的状态看似恢复而重新提交。
 - MLX / AdsPower 的启动、连接、Profile、登录态及退出行为不变；Bilibili 不参与迁移。
 - 本票只记录决策，不实现迁移或删除实际账号文件。后续由[本地 Profile 的生命周期与并发占用](./03-profile-lifecycle-and-concurrency.md)处理占用、关闭、异常退出与恢复，由[账号别名与登录态校验](./05-account-binding-migration.md)处理平台身份例外，再由[分批接入的共享边界与平台例外](./04-platform-integration-boundaries.md)收敛分批实施规则。
+
+### 2026-11-17 — 目录顺序追加修正
+
+用户最新要求与[当前规格](../spec.md#3-profile-定位元数据与别名)覆盖旧目录顺序：`browser_profiles/<chrome|chromium>/<platform>/<raw_account>`。账号叶子是浏览器数据目录；归属、锁与重建标记位于账号数据之外且不占用合法别名空间。Comments 的旧顺序保留为历史。

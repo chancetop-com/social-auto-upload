@@ -255,10 +255,10 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 - 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到平台后台（如 TikTok Studio → Content/Posts）按标题、素材与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核。两者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
 - 不支持：Docker / 跨机 / Linux 无桌面、Bilibili、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
-- TikTok 本地模式已使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器隔离与四平台真实 no-publish 的证据和边界见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
-- 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止，可能留下草稿；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
+- TikTok 本地模式已使用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器隔离与四平台真实 no-publish 的证据和边界见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
+- 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/<chrome|chromium>/xiaohongshu/<原始别名>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止，可能留下草稿；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
-- Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/instagram/<原始别名>/<chrome|chromium>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文回归显式使用 `--no-publish`，结果 `prepared` 只证明到达 Share 前；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
+- Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/<chrome|chromium>/instagram/<原始别名>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文回归显式使用 `--no-publish`，结果 `prepared` 只证明到达 Share 前；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 
 - 托管模式只验证“已登录”，Profile 即身份；各平台本地作品所需的身份比对在托管发布模式下不执行，账号错配风险由调度侧承担。
 - 已知限制：命令级登录检测已是 provider-aware 文案；但部分平台在上传过程中遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留。
@@ -332,7 +332,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 知乎的 `--account` 是本地 Profile 别名，可以重新登录其他真实账号；名称/头像只作为当次信息和作品结果证据，历史结果核验仍要求原作品账号。
 
-Facebook Page 的全部本地动作已接入持久化 Profile：`browser_profiles/facebook-page/<原始别名>/<chrome|chromium>`，与 Facebook 隔离，多个 Page 目标复用同一个登录 Profile。配置优先级与 TikTok 相同，保留代理、定时、作品证据及结果文件；旧 JSON 不再读写。显式目标/历史作品不匹配仍拒绝，verify/delete 在托管环境下仍走本地。本次只做离线与受控 DOM 验证，未登录真实账号、发布或删除作品。
+Facebook Page 的全部本地动作已接入持久化 Profile：`browser_profiles/<chrome|chromium>/facebook-page/<原始别名>`，与 Facebook 隔离，多个 Page 目标复用同一个登录 Profile。配置优先级与 TikTok 相同，保留代理、定时、作品证据及结果文件；旧 JSON 不再读写。显式目标/历史作品不匹配仍拒绝，verify/delete 在托管环境下仍走本地。本次只做离线与受控 DOM 验证，未登录真实账号、发布或删除作品。
 
 Facebook、Facebook Page 和 Instagram 默认使用系统网络直连。网络环境需要代理时，给对应命令显式添加 `--proxy "代理地址"`，或设置 `SAU_FACEBOOK_PROXY`、`SAU_FACEBOOK_PAGE_PROXY`、`SAU_INSTAGRAM_PROXY`；传 `--proxy ""` 可忽略环境变量并直连。
 

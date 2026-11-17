@@ -75,11 +75,11 @@ sau instagram reset-profile --account "creator" --browser-kind chrome
 sau xiaohongshu reset-profile --account "creator" --browser-kind chrome
 ```
 
-`--account` 和 `--browser-kind chrome|chromium` 都必须显式提供。目标是 `browser_profiles/<平台>/<原始别名>/<种类>/`，与日常浏览器资料隔离；整个资料根不纳入版本控制。别名保留空格、大小写和 Unicode 原值，拒绝空白、路径分隔符及点目录；文件系统等价路径不能合并不同别名。此命令只按 `--browser-kind` 选择目标，忽略 `LOCAL_BROWSER` / `LOCAL_CHROME_PATH` 与安装状态，不需要安装或启动浏览器。
+`--account` 和 `--browser-kind chrome|chromium` 都必须显式提供。目标是 `browser_profiles/<种类>/<平台>/<原始别名>/`，与日常浏览器资料隔离；整个资料根不纳入版本控制。别名保留空格、大小写和 Unicode 原值，拒绝空白、路径分隔符及点目录；文件系统等价路径不能合并不同别名。此命令只按 `--browser-kind` 选择目标，忽略 `LOCAL_BROWSER` / `LOCAL_CHROME_PATH` 与安装状态，不需要安装或启动浏览器。
 
-显式执行即表示清除意图，不另行确认或备份。只清空选定的浏览器叶子目录及其重建状态，保留父级别名归属、另一种类、其他账号、历史结果和旧 Cookie/身份文件。目标不存在也返回 `0`，显示目标并提示先 login；重建不会自动登录或恢复发布任务，也不是重新提交旧任务的依据。
+显式执行即表示清除意图，不另行确认或备份。只清空选定种类/平台下的账号叶子目录及其重建状态，保留外置别名归属、另一种类、其他账号、历史结果和旧 Cookie/身份文件。目标不存在也返回 `0`，显示目标并提示先 login；重建不会自动登录或恢复发布任务，也不是重新提交旧任务的依据。
 
-同一 Profile 被项目进程占用时立即失败；不同别名和同别名的两种浏览器可以并行。目录归属缺失、损坏、冲突、越界/链接，或浏览器 singleton 状态表明占用或无法安全确认时退出 `1`。项目不会自动删 singleton、终止外部浏览器或接管外部会话。项目锁文件里的 PID/时间只用于诊断，残留文件本身不会阻止使用。
+同一 Profile 被项目进程占用时立即失败；不同别名和同别名的两种浏览器可以并行。目录归属缺失、损坏、冲突、越界/链接，或浏览器 singleton 状态表明占用或无法安全确认时退出 `1`。项目不会自动删 singleton、终止外部浏览器或接管外部会话。归属记录、锁与重建标记位于账号数据外的 `.guards/<kind>/<platform>/<原始别名>/`；账号目录下没有项目必需的内部文件，`.sau-owner.json`、`profile.lock` 等也可作为合法别名。项目锁文件里的 PID/时间只用于诊断，残留文件本身不会阻止使用。
 
 部分删除失败返回 `1` 并标记重建未完成，后续会话拒绝使用残缺资料；修复权限等实际故障后重跑同一显式命令。用法错误返回 `2`。设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 时拒绝重建，不调用 provider；两种凭据同时设置仍按原冲突规则返回 `1`。
 
@@ -470,7 +470,7 @@ sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎�
 sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎视频标题" --originality original --show-options
 ```
 
-知乎 login/check/upload-article/upload-video/verify/reset-profile 和直接调用使用 `browser_profiles/zhihu/<原始别名>/<chrome|chromium>/`。默认系统 Chrome 有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False。只准备所选浏览器，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 安装。
+知乎 login/check/upload-article/upload-video/verify/reset-profile 和直接调用使用 `browser_profiles/<chrome|chromium>/zhihu/<原始别名>/`。默认系统 Chrome 有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False。只准备所选浏览器，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 安装。
 
 `--account` 是资料别名，同别名允许重新登录其他账号，两种浏览器可登录不同账号。只有 login 引导登录；先 `sau zhihu login --account creator --headed`，正常关闭后同配置 check。旧 Cookie JSON 和身份旁文件不读写或清理；页头 name/avatar_path 仅用于当前操作，并非永久 ID。历史结果仍保存在 `cookies/zhihu_results`；verify 比对结果记录的原账号证据与标题，换号不会改写历史身份。
 
@@ -488,7 +488,7 @@ sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎�
 
 ## 抖音 CLI 子命令
 
-抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/douyin/<原始别名>/<chrome|chromium>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
+抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/<chrome|chromium>/douyin/<原始别名>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
 
 只有 login 引导扫码或验证；缺少 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。同别名可以重新登录另一真实账号，Chrome 与 Chromium 各自隔离。发布中遇到验证即结束本次任务；提交后退出 `10` 会附 `publish_attempted=true`，退出 `9` 表示结果未知，都先核对作品再决定重试。重建使用 `sau douyin reset-profile --account creator --browser-kind chrome`，无需 binary，拒绝占用，保留另一浏览器及历史结果；不会自动恢复发布任务。抖音没有 `--no-publish`，环境验证使用离线或受控页面，不能以真实提交验收。
 
@@ -511,7 +511,7 @@ sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --titl
 sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-快手 login/check/upload-video/upload-note 及直接 uploader 已统一使用 `browser_profiles/kuaishou/<原始别名>/<chrome|chromium>/`；仅 login 创建资料并引导扫码，预检与发布共用同一会话和占用。旧 JSON 不再读取、导出或自动迁移；别名可重新登录不同账号，两种浏览器各自独立。
+快手 login/check/upload-video/upload-note 及直接 uploader 已统一使用 `browser_profiles/<chrome|chromium>/kuaishou/<原始别名>/`；仅 login 创建资料并引导扫码，预检与发布共用同一会话和占用。旧 JSON 不再读取、导出或自动迁移；别名可重新登录不同账号，两种浏览器各自独立。
 
 默认系统 Chrome、有头。显式 `--headed` / `--headless` > `LOCAL_CHROME_HEADLESS` > False；`LOCAL_CHROME_PATH` 优先并按真实产品选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome。只需安装所选来源（Chromium 使用 `uv run patchright install --no-shell chromium`），失败不回退；不增加 stealth、UA、语言或固定 viewport。
 
@@ -530,7 +530,7 @@ sau xiaohongshu upload-note --account <account_name> --images videos/1.png video
 
 Rednote 使用独立命令 `sau rednote`，持久化 Profile 与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
 
-小红书 login/check/视频/图文统一使用 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>/`。默认系统 Chrome、有头；已有 `LOCAL_CHROME_HEADLESS=True` 仍生效。显式 `--headed` / `--headless` 优先于配置；自定义 `LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`，无配置默认 Chrome。只要求选定来源，失败不切换。
+小红书 login/check/视频/图文统一使用 `browser_profiles/<chrome|chromium>/xiaohongshu/<原始别名>/`。默认系统 Chrome、有头；已有 `LOCAL_CHROME_HEADLESS=True` 仍生效。显式 `--headed` / `--headless` 优先于配置；自定义 `LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`，无配置默认 Chrome。只要求选定来源，失败不切换。
 
 仅 login 创建资料并引导扫码；check 与发布缺少 Profile 或明确未登录退出 `10`，网络/页面结构故障退出 `1`，验证保留 `reason=verification`。可在同别名重新登录另一真实账号，两种浏览器各自独立。旧 Cookie JSON 不再读取、写回或自动清理。重建使用 `sau xiaohongshu reset-profile --account <account_name> --browser-kind chrome|chromium`。
 
@@ -644,7 +644,7 @@ sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --draft
 ```
 
-视频号的 login/check/upload-video 与直接 uploader 已使用 `browser_profiles/tencent/<原始别名>/<chrome|chromium>/`。只有 login 创建 Profile 并等待扫码；内部预检和视频上传持有同一会话和占用权，不读写或删除旧 Cookie JSON。保留扫码 iframe/二维码回调、合集、双比例封面、短标题、草稿、原生定时和 `--not-before`。
+视频号的 login/check/upload-video 与直接 uploader 已使用 `browser_profiles/<chrome|chromium>/tencent/<原始别名>/`。只有 login 创建 Profile 并等待扫码；内部预检和视频上传持有同一会话和占用权，不读写或删除旧 Cookie JSON。保留扫码 iframe/二维码回调、合集、双比例封面、短标题、草稿、原生定时和 `--not-before`。
 
 默认系统 Chrome、有头；显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`，`LOCAL_CHROME_PATH` 覆盖来源并按真实产品种类隔离资料。显式 `--headed` / `--headless` > `LOCAL_CHROME_HEADLESS` > `False`。只需准备选定浏览器，失败不回退；不注入 stealth、固定 viewport 或修改语言。
 
@@ -662,7 +662,7 @@ sau baijiahao upload-video --account <account_name> --file videos/demo.mp4 --thu
 
 百家号支持 login、check、upload-video 与 reset-profile。视频必须传横版封面 `--thumbnail`，可用 `--collection` 选择已有合集；保留 `--not-before` 客户端发布闸门与 15 分钟发布预算，当前不支持原生 `--schedule` 或 `--no-publish`。
 
-全部本地入口和直接 uploader 复用 `browser_profiles/baijiahao/<原始别名>/<chrome|chromium>`。默认系统 Chrome、有头；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。`LOCAL_CHROME_PATH` 非空时优先并按实际浏览器种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。只安装所选来源，失败不回退；保留当前语言与自然窗口，不授予无业务需要的地理位置权限。
+全部本地入口和直接 uploader 复用 `browser_profiles/<chrome|chromium>/baijiahao/<原始别名>`。默认系统 Chrome、有头；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。`LOCAL_CHROME_PATH` 非空时优先并按实际浏览器种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。只安装所选来源，失败不回退；保留当前语言与自然窗口，不授予无业务需要的地理位置权限。
 
 只有 login 引导扫码/人工验证；正常关闭后同配置 check，登录成功要求正向后台业务控件。旧 JSON 不读取、导入、导出或自动删除；别名不绑定真实账号，Chrome/Chromium 可登录不同账号。缺少 Profile、明确未登录或验证退出 `10`，验证保留 `reason=verification`；网络、页面结构、权限及必要字段故障退出 `1`。提交后登录/验证仍带 `publish_attempted=true`；结果未知退出 `9`，先核对作品，禁止自动重发。
 
@@ -678,7 +678,7 @@ sau alipay upload-video --account <account_name> --file videos/demo.mp4 --title 
 
 支付宝生活号支持 login/check/upload-video/reset-profile，视频可传 `--thumbnail` 与 `--collection`。保留 `--not-before` 和发布预算；无图文、`--schedule` 或 `--no-publish`。先完成生活号内容创作权限开通，只有 login 引导扫码并保留二维码回调；check 以内容创作入口作正向证据。
 
-本地正式入口、内部预检和直接 uploader 共用 `browser_profiles/alipay/<原始别名>/<chrome|chromium>`。默认 Chrome 有头；只安装所选来源，完整 Chromium 可用 `uv run patchright install --no-shell chromium`。`LOCAL_CHROME_PATH` 优先并按实际种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。保留现有 conf.py，失败不回退；无固定 viewport、地理位置权限或 stealth，保持 qiankun 微应用正常渲染。
+本地正式入口、内部预检和直接 uploader 共用 `browser_profiles/<chrome|chromium>/alipay/<原始别名>`。默认 Chrome 有头；只安装所选来源，完整 Chromium 可用 `uv run patchright install --no-shell chromium`。`LOCAL_CHROME_PATH` 优先并按实际种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。保留现有 conf.py，失败不回退；无固定 viewport、地理位置权限或 stealth，保持 qiankun 微应用正常渲染。
 
 旧 JSON 不读写、不迁移；别名允许换号，两种浏览器独立登录。缺少 Profile、登录页/iframe 或验证退出 10；验证保留 reason=verification，网络、HTTP、超时、结构或权限故障退出 1。提交后登录错误保留 publish_attempted=true，先核查作品；观察失败退出 9，禁止自动重发，本地不会因 AIGC 信号再次点击发布。
 
@@ -697,7 +697,7 @@ YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维�
 
 YouTube 本地模式默认系统 Chrome、有头，已有 `LOCAL_CHROME_HEADLESS=True` 保留；显式 `--headed`/`--headless` 优先。`LOCAL_CHROME_PATH` 非空时优先使用并识别实际种类；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。只要求所选浏览器可用，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。
 
-登录、检查和上传只使用 `browser_profiles/youtube/<原始别名>/<chrome|chromium>/`；别名可换号，两种浏览器可分别登录不同账号，上传使用当前频道。旧 JSON 不读取、导出或删除；`YT_PROXY` 对本地三项动作一致生效。保留当前界面语言和自然窗口，不注入 stealth/UA。只有 login 等待人工登录；其他动作缺 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。
+登录、检查和上传只使用 `browser_profiles/<chrome|chromium>/youtube/<原始别名>/`；别名可换号，两种浏览器可分别登录不同账号，上传使用当前频道。旧 JSON 不读取、导出或删除；`YT_PROXY` 对本地三项动作一致生效。保留当前界面语言和自然窗口，不注入 stealth/UA。只有 login 等待人工登录；其他动作缺 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。
 
 ```bash
 sau youtube check --account creator --local-browser chromium --headless
@@ -720,7 +720,7 @@ sau facebook-page upload-note --account creator --page "我的 Page" --images im
 sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
 
-Facebook 全部本地动作复用 `browser_profiles/facebook/<原始别名>/<chrome|chromium>`，与 `facebook-page` 隔离。默认系统 Chrome、有头；显式 `--local-browser chromium` 使用配套完整 Chromium，`LOCAL_CHROME_PATH` 优先于种类选择。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留已有配置。启动失败不回退，不固定 viewport、不修改语言；只需安装所选来源。先 `sau facebook login --account creator --headed`，正常关闭后同配置 check；旧 JSON 不读取、导入或导出。别名可重新登录其他账号，两类浏览器可登录不同账号。缺少 Profile 或明确未登录退出 10，验证挑战保留 verification 提示；页面/权限/网络异常退出 1。重建用 `sau facebook reset-profile --account creator --browser-kind chrome`，无需浏览器 binary，只清空指定资料；重建不是重发旧任务的许可。
+Facebook 全部本地动作复用 `browser_profiles/<chrome|chromium>/facebook/<原始别名>`，与 `facebook-page` 隔离。默认系统 Chrome、有头；显式 `--local-browser chromium` 使用配套完整 Chromium，`LOCAL_CHROME_PATH` 优先于种类选择。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留已有配置。启动失败不回退，不固定 viewport、不修改语言；只需安装所选来源。先 `sau facebook login --account creator --headed`，正常关闭后同配置 check；旧 JSON 不读取、导入或导出。别名可重新登录其他账号，两类浏览器可登录不同账号。缺少 Profile 或明确未登录退出 10，验证挑战保留 verification 提示；页面/权限/网络异常退出 1。重建用 `sau facebook reset-profile --account creator --browser-kind chrome`，无需浏览器 binary，只清空指定资料；重建不是重发旧任务的许可。
 
 个人主页支持视频、图片及正文立即发布，目前未接入个人主页定时。Page 视频和图文支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，填写前按浏览器时区换算，要求至少提前 2 小时；不传即立即提交。当前实现核对页面日期/时间及原作品列表安排。`--page` 应填写准确 Page 名称。
 
@@ -744,7 +744,7 @@ Page 的 `--scheduled` 选择定时列表，删除会取消排期并永久移除
 
 所有删除动作先核对作者或 Page、原作品编号和正文。正文相同且无法唯一定位时明确失败。当前查询覆盖列表已加载的近期作品，不保证自动翻页检索全部历史作品。删除之后重新查询服务器列表；若结果未知，先查询，不自动重删。删除远端作品不会删除本地素材。
 
-Facebook Page 的 login/check/视频/图文/verify/delete 和直接 uploader 已使用 `browser_profiles/facebook-page/<原始别名>/<chrome|chromium>/`。多个 `--page` 目标复用同一登录 Profile，与 `facebook` 隔离。仅 login 创建资料并等待人工登录；别名可以换号，历史结果不会因此改写，作品查询仍须匹配原 Page、内容编号和配文。
+Facebook Page 的 login/check/视频/图文/verify/delete 和直接 uploader 已使用 `browser_profiles/<chrome|chromium>/facebook-page/<原始别名>/`。多个 `--page` 目标复用同一登录 Profile，与 `facebook` 隔离。仅 login 创建资料并等待人工登录；别名可以换号，历史结果不会因此改写，作品查询仍须匹配原 Page、内容编号和配文。
 
 默认 Chrome 有头；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。`LOCAL_CHROME_PATH` 优先并按实际产品种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；只要求选定来源，使用 no_viewport、保留当前语言和代理，失败不回退。旧 JSON 不再读写或自动迁移。缺少 Profile、未登录/验证退出 `10`，网络、权限和页面结构故障退出 `1`；提交后仍保留 `publish_attempted=true`，结果未知 `9` 不重发。verify/delete 在有托管凭据时仍用原始本地别名。重建：`sau facebook-page reset-profile --account creator --browser-kind chrome`。
 
@@ -766,7 +766,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 `--no-publish`：素材上传、配文/话题、全部发布选项完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，只记录平台/标题/选项，不写 `content_id`/`post_id`/`post_url`。
 
-`login` 在同一个持久化 context 中等待人工登录和必要验证，资料由浏览器保存在 `browser_profiles/instagram/<原始别名>/<chrome|chromium>/`；`check`、视频/图文和作品操作复用同目录。当前会话须有正向登录证据和有效 `ds_user_id`，别名不绑定真实账号，两种浏览器可以登录不同账号。正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 login 引导登录；其他动作缺少 Profile、明确未登录/验证退出 `10`，探测、网络、页面和必需字段故障退出 `1`。`check` 不代替发布权限检查。
+`login` 在同一个持久化 context 中等待人工登录和必要验证，资料由浏览器保存在 `browser_profiles/<chrome|chromium>/instagram/<原始别名>/`；`check`、视频/图文和作品操作复用同目录。当前会话须有正向登录证据和有效 `ds_user_id`，别名不绑定真实账号，两种浏览器可以登录不同账号。正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 login 引导登录；其他动作缺少 Profile、明确未登录/验证退出 `10`，探测、网络、页面和必需字段故障退出 `1`。`check` 不代替发布权限检查。
 
 所有本地入口和直接 uploader 统一采用 `LOCAL_CHROME_PATH` > 显式 `--local-browser` > `LOCAL_BROWSER` > Chrome；headless 为显式参数/布尔值 > `LOCAL_CHROME_HEADLESS` > False。注入的 session 由调用方关闭。`reset-profile --account creator --browser-kind chrome` 只清空指定种类且无需 binary；之后重新 login。
 
@@ -846,7 +846,7 @@ sau weibo upload-video --account <account_name> --file videos/demo.mp4 --title "
 
 微博支持 login、check、upload-video 与 reset-profile；标题最多 30 个字，必须提供 `--thumbnail`（不超过 5 MB），可用 `--collection` 选择或新建合集。保留 `--not-before` 与 15 分钟发布预算；不支持图文、原生 `--schedule` 或 `--no-publish`。
 
-全部本地入口和直接 uploader 使用 `browser_profiles/weibo/<原始别名>/<chrome|chromium>`。默认系统 Chrome、有头、自然窗口；发布时滚动到按钮，关闭残留弹层并校验落点，不固定大 viewport 或最大化。`LOCAL_CHROME_PATH` 优先，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless 或直接布尔值 > `LOCAL_CHROME_HEADLESS` > False。只准备所选来源，失败不回退，保留当前语言。
+全部本地入口和直接 uploader 使用 `browser_profiles/<chrome|chromium>/weibo/<原始别名>`。默认系统 Chrome、有头、自然窗口；发布时滚动到按钮，关闭残留弹层并校验落点，不固定大 viewport 或最大化。`LOCAL_CHROME_PATH` 优先，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless 或直接布尔值 > `LOCAL_CHROME_HEADLESS` > False。只准备所选来源，失败不回退，保留当前语言。
 
 只有 login 创建资料并引导扫码/验证；正常关闭后同配置 check。缺少 Profile、明确未登录或验证退出 `10`（验证保留 `reason=verification`），网络、页面、权限和运行故障退出 `1`。同别名可换真实账号，两类浏览器可各自登录；旧 Cookie JSON 不读取、写回、导入或自动清理。业务中失效即结束，提交后保留 `publish_attempted=true`；退出 `9` 先核对作品，禁止自动重发。
 
@@ -862,7 +862,7 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 虎扑支持 login、check、upload-video 和 reset-profile；标题为 4–40 字，封面可选。保留 `--not-before` 和 15 分钟发布预算；不支持图文、原生 `--schedule` 或 `--no-publish`。
 
-本地登录、检查、预检、发布与直接 uploader 共用 `browser_profiles/hupu/<原始别名>/<chrome|chromium>`。默认系统 Chrome、有头；显式 `--headed` / `--headless` 优先于 `LOCAL_CHROME_HEADLESS`，未配置默认 False。`LOCAL_CHROME_PATH` 优先于 `--local-browser chrome|chromium`、`LOCAL_BROWSER`（默认 chrome）；只准备所选来源，Chromium 使用 `uv run patchright install --no-shell chromium`。失败不回退。
+本地登录、检查、预检、发布与直接 uploader 共用 `browser_profiles/<chrome|chromium>/hupu/<原始别名>`。默认系统 Chrome、有头；显式 `--headed` / `--headless` 优先于 `LOCAL_CHROME_HEADLESS`，未配置默认 False。`LOCAL_CHROME_PATH` 优先于 `--local-browser chrome|chromium`、`LOCAL_BROWSER`（默认 chrome）；只准备所选来源，Chromium 使用 `uv run patchright install --no-shell chromium`。失败不回退。
 
 先 `sau hupu login --account <account_name> --headed`，在同一 Profile 内完成 QQ 扫码或人工登录，关闭后同配置 check。QQ iframe/popup 和临时二维码保留；不再覆盖 UA、webdriver、语言或 viewport，不为这些设置替换 context。账号别名不绑定真实账号，Chrome 与 Chromium 可登录不同账号；旧 JSON 不导入、读写或自动删除。只有 login 引导登录，check/发布不等待重新登录后继续任务。缺少 Profile/明确未登录或验证退出 10（验证保留 reason=verification）；网络、页面、权限和必需字段故障退出 1。
 
@@ -872,7 +872,7 @@ sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "�
 
 TikTok 支持本地与两种托管子模式：
 
-- **本地模式**（默认）：不设置托管凭据，使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 的专用持久化 Profile；`--account` 必填，`--folder-id` / `--profile-id` 忽略。默认系统 Chrome、有头，保留当前语言与自然窗口尺寸。
+- **本地模式**（默认）：不设置托管凭据，使用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>` 的专用持久化 Profile；`--account` 必填，`--folder-id` / `--profile-id` 忽略。默认系统 Chrome、有头，保留当前语言与自然窗口尺寸。
 - **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**（小红书须为中文）。
 - **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`；`--folder-id` 忽略；Profile 界面须为 **English (US)**（小红书须为中文）。
 
@@ -1070,7 +1070,7 @@ Bilibili 额外要求：
 
 ## 雪球 CLI 本地 Profile
 
-`login`、`check`、`upload-article`、`verify` 和直接 uploader 使用 `browser_profiles/xueqiu/<原始别名>/<chrome|chromium>`。默认系统 Chrome 有头；`LOCAL_CHROME_PATH` 优先并识别实际种类，否则显式 `--local-browser` > `LOCAL_BROWSER` > chrome。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False；只准备所选来源，失败不回退。旧 JSON/身份旁文件不参与，别名允许换号；`--expected-name`、历史作品作者和本次受理作品主体仍核验。
+`login`、`check`、`upload-article`、`verify` 和直接 uploader 使用 `browser_profiles/<chrome|chromium>/xueqiu/<原始别名>`。默认系统 Chrome 有头；`LOCAL_CHROME_PATH` 优先并识别实际种类，否则显式 `--local-browser` > `LOCAL_BROWSER` > chrome。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False；只准备所选来源，失败不回退。旧 JSON/身份旁文件不参与，别名允许换号；`--expected-name`、历史作品作者和本次受理作品主体仍核验。
 
 先 `sau xueqiu login --account creator --headed`，正常关闭后同配置 check。文章默认真实发表，验收用 `--prepare-only` 可停止在预览（可能留下远端草稿）。缺少 Profile/登录/验证退出 10，验证保留 reason，其他运行故障退出 1；提交后保留 publish_attempted，结果未知 9 先核查原作品。`verify` 在托管环境下仍走本地。结果路径继续为 `cookies/xueqiu_results/`。
 

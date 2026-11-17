@@ -25,7 +25,7 @@ sau kuaishou login --account creator --headed
 sau kuaishou check --account creator --headed
 ```
 
-登录态存于 `browser_profiles/kuaishou/creator/chrome/`；旧 Cookie JSON 不读取或导出。登录生成的二维码图片是临时文件，应在登录等待期间展示给用户扫码。只有 login 创建资料并引导登录。安装成功、浏览器能启动和平台已登录分别验证；help 或离线测试不是登录成功证据。
+登录态存于 `browser_profiles/chrome/kuaishou/creator/`；旧 Cookie JSON 不读取或导出。登录生成的二维码图片是临时文件，应在登录等待期间展示给用户扫码。只有 login 创建资料并引导登录。安装成功、浏览器能启动和平台已登录分别验证；help 或离线测试不是登录成功证据。
 
 ## PATH 回退
 
