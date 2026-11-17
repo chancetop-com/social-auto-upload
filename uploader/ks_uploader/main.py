@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 import inspect
-import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -14,15 +14,14 @@ from patchright.async_api import Playwright
 from patchright.async_api import TimeoutError as PWTimeoutError
 from patchright.async_api import async_playwright
 
-from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
-from utils.base_social_media import set_init_script
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError
-from utils.files_times import get_absolute_path
+from utils.errors import LoginRequiredError, UsageError
+from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from utils.login_qrcode import build_login_qrcode_path
@@ -55,10 +54,8 @@ KUAISHOU_LOGIN_INVALID_TIMEOUT_MS = 3_000
 KUAISHOU_COVER_INPUT_PROBE_TIMEOUT_MS = 2_000
 KUAISHOU_COVER_CHOOSER_TIMEOUT_MS = 10_000
 
-# Golden local-mode browser options.  ``sau_commands/kuaishou.py`` passes the
-# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
-# drift.  A Multilogin Profile decides the browser; the local executable/channel
-# is silently ignored by ``browser_session`` (spec §8).
+# Preserve the historical ignored-option metadata for managed sessions.
+# Local sessions obtain their effective source from resolve_local_browser.
 def _build_ks_launch_kwargs(executable_path: str | None = None) -> dict:
     executable = LOCAL_CHROME_PATH if executable_path is None else executable_path
     if executable:
@@ -224,8 +221,7 @@ async def _is_ks_cookie_invalid(page: Page, timeout: int = 5000) -> bool:
 def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this; the local branch keeps its historical
-    retry-until-timeout behaviour untouched.  ``publish_attempted`` must be true
+    Managed branches keep their existing diagnostics. ``publish_attempted`` must be true
     when the redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
@@ -239,8 +235,23 @@ def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> 
         )
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to Kuaishou.
+def _raise_if_local_login_required(page, *, publish_attempted=False, verification_only=False):
+    url = str(getattr(page, "url", "") or "").lower()
+    verification = any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa", "challenge"))
+    if not verification and (verification_only or ("passport.kuaishou.com" not in url and "login" not in url)):
+        return
+    remedy = "请在所选 Profile 完成人机验证 (reason=verification)" if verification else "请运行 sau kuaishou login"
+    stage = "；发布可能已提交，请先核查作品，禁止自动重发" if publish_attempted else ""
+    raise LoginRequiredError(f"快手需要登录或验证；{remedy}{stage}。",
+                             reason="verification" if verification else "login",
+                             publish_attempted=publish_attempted)
+
+
+async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
+    """Probe the current Profile without changing its stored state.
+
+    Local pages belong to their persistent context's bounded lifecycle; managed
+    probes retain the historical per-page cleanup and classification.
 
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  A clear login
     page, the "立即登录" anchor, or the institution intro page returns ``False``;
@@ -258,13 +269,15 @@ async def is_logged_in(context: BrowserContext) -> bool:
             timeout=KUAISHOU_LOGIN_CHECK_TIMEOUT_MS,
         )
         status = getattr(response, "status", None)
-        if isinstance(status, int) and status >= 500:
+        if isinstance(status, int) and status >= (500 if managed else 400):
             raise RuntimeError(f"快手登录状态检查失败：HTTP {status}")
 
         wait_for_timeout = getattr(page, "wait_for_timeout", None)
         if wait_for_timeout is not None:
             await wait_for_timeout(KUAISHOU_LOGIN_CHECK_SETTLE_MS)
 
+        if not managed:
+            _raise_if_local_login_required(page)
         current_url = str(getattr(page, "url", "") or "")
         if "passport.kuaishou.com" in current_url:
             return False
@@ -275,7 +288,7 @@ async def is_logged_in(context: BrowserContext) -> bool:
             )
 
         login_btn = page.get_by_text("立即登录")
-        if await login_btn.count() > 0:
+        if await login_btn.count() > 0 and (managed or await login_btn.is_visible()):
             return False
 
         # Positive proof: the upload button exists only for a logged-in session.
@@ -285,9 +298,13 @@ async def is_logged_in(context: BrowserContext) -> bool:
                 state="visible", timeout=KUAISHOU_LOGIN_BUTTON_TIMEOUT_MS
             )
         except Exception as exc:
-            if await _is_ks_cookie_invalid(
-                page, timeout=KUAISHOU_LOGIN_INVALID_TIMEOUT_MS
-            ):
+            if managed:
+                invalid = await _is_ks_cookie_invalid(page, timeout=KUAISHOU_LOGIN_INVALID_TIMEOUT_MS)
+            else:
+                _raise_if_local_login_required(page)
+                intro = page.locator(KUAISHOU_COOKIE_INVALID_SELECTOR)
+                invalid = await intro.count() > 0 and await intro.is_visible()
+            if invalid:
                 return False
             raise RuntimeError(
                 "快手登录状态检查失败：无法确认登录状态"
@@ -295,8 +312,13 @@ async def is_logged_in(context: BrowserContext) -> bool:
             ) from exc
 
         return True
+    except Exception:
+        if not managed:
+            _raise_if_local_login_required(page)
+        raise
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
 async def _extract_ks_qrcode_src(page: Page) -> str:
@@ -368,154 +390,106 @@ async def _is_ks_login_page_gone(page: Page) -> bool:
         return True
 
 
-async def cookie_auth(account_file):
+def _account_alias(account_file=None, account_name=None):
+    """Legacy positional paths identify aliases only; their files are never read."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.startswith("kuaishou_") and name.endswith(".json"):
+        return name[len("kuaishou_"):-len(".json")]
+    return str(account_file)
+
+
+async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
+    """Check the selected persistent Profile; compatibility name only."""
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        if LOCAL_CHROME_PATH:
-            browser = await playwright.chromium.launch(headless=True, executable_path=LOCAL_CHROME_PATH)
-        else:
-            browser = await playwright.chromium.launch(headless=True, channel="chromium")
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-            await page.goto(KUAISHOU_UPLOAD_URL)
-            await page.wait_for_timeout(3000)
-
-            # 检查是否被重定向到登录页
-            if "passport.kuaishou.com" in page.url:
-                kuaishou_logger.info(_msg("🥹", "cookie 已失效（跳到登录页）"))
-                return False
-
-            # 检查是否停留在介绍页（未登录状态显示"立即登录"按钮）
-            login_btn = page.get_by_text("立即登录")
-            if await login_btn.count() > 0:
-                kuaishou_logger.info(_msg("🥹", "cookie 已失效（介绍页）"))
-                return False
-
-            # 正向证明：上传按钮存在 = 真正已登录
-            try:
-                upload_btn = page.locator("button[class^='_upload-btn']")
-                await upload_btn.wait_for(state="visible", timeout=10000)
-                kuaishou_logger.success(_msg("🥳", "cookie 有效"))
-                return True
-            except Exception:
-                # 兜底：旧版检测（"机构服务"元素出现在未登录介绍页）
-                if await _is_ks_cookie_invalid(page):
-                    kuaishou_logger.info(_msg("🥹", "cookie 已失效（机构服务页）"))
-                    return False
-                # 都没命中：保守判定为失效，避免假阳性
-                kuaishou_logger.warning(_msg("😵", "无法确认 cookie 有效性，按失效处理"))
-                return False
-        except Exception as exc:
-            kuaishou_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await close_browser_resources(browser=browser)
+        async with local_browser_session(playwright, platform="kuaishou", account=account,
+                                         headless=headless, local_browser=local_browser) as session:
+            if not await is_logged_in(session.context, managed=False):
+                raise LoginRequiredError("快手登录态失效；请运行 sau kuaishou login。")
+            return True
 
 
-async def ks_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS, cdp_url: str | None = None):
-    account_file = get_absolute_path(account_file, "ks_uploader")
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie文件不存在或已失效", account_file)
-            return result if return_detail else False
-        kuaishou_logger.info(_msg("🥹", "cookie 失效了，准备重新登录快手创作者平台"))
-        result = await get_ks_cookie(account_file, qrcode_callback=qrcode_callback, headless=headless, cdp_url=cdp_url)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
-    return result if return_detail else True
-
-
-async def get_ks_cookie(
-    account_file,
-    qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
-    poll_interval: int = 3,
-    max_checks: int = 100,
-    cdp_url: str | None = None,
-):
-    if headless:
-        kuaishou_logger.info(_msg("🖼️", "快手登录将以无头模式运行，小人会输出终端二维码并保存本地二维码图片"))
-
+async def ks_setup(account_file=None, handle=False, return_detail=False, qrcode_callback=None,
+                   headless=None, cdp_url=None, *, account_name=None, local_browser=None):
+    account = _account_alias(account_file, account_name)
+    if cdp_url:
+        raise UsageError("快手 login 使用本地 Profile；不支持外部 CDP 登录。")
     async with async_playwright() as playwright:
-        if cdp_url:
-            browser = await playwright.chromium.connect_over_cdp(cdp_url)
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            should_close_context = False
-        else:
-            if LOCAL_CHROME_PATH:
-                browser = await playwright.chromium.launch(headless=headless, executable_path=LOCAL_CHROME_PATH)
-            else:
-                browser = await playwright.chromium.launch(headless=headless, channel="chromium")
-            context = await browser.new_context()
-            should_close_context = True
-        context = await set_init_script(context)
-        qrcode_path = None
-        qrcode_info = None
-        result = _build_login_result(False, "failed", "快手登录失败", account_file)
-        try:
-            page = await context.new_page()
-            await page.goto(KUAISHOU_LOGIN_URL)
-            kuaishou_logger.info(_msg("🧍", "请在浏览器里扫码登录快手，小人正在耐心等待"))
+        async with local_browser_session(playwright, platform="kuaishou", account=account,
+                                         create=handle, headless=headless,
+                                         local_browser=local_browser) as session:
+            login_detail = {}
+            if handle:
+                login_detail = await _login_in(session, account, qrcode_callback=qrcode_callback)
+            if not await is_logged_in(session.context, managed=False):
+                raise LoginRequiredError("快手登录态失效；请运行 sau kuaishou login。")
+            result = _build_login_result(True, "logged_in", "快手登录成功", account,
+                                         login_detail.get("qrcode"), login_detail.get("current_url", ""))
+            result["account_name"] = account
+            return result if return_detail else True
 
-            qrcode_info = await _save_ks_qrcode(page, account_file, qrcode_callback=qrcode_callback)
-            qrcode_path = Path(qrcode_info["image_path"])
 
-            for _ in range(max_checks):
-                if page.url.startswith(KUAISHOU_UPLOAD_URL) or await _is_ks_login_page_gone(page):
-                    await context.storage_state(path=account_file)
-                    if await cookie_auth(account_file):
-                        kuaishou_logger.success(_msg("🥳", "快手扫码登录成功，小人开心收工"))
-                        result = _build_login_result(True, "success", "快手扫码登录成功", account_file, qrcode_info, page.url)
-                    else:
-                        kuaishou_logger.error(_msg("😢", "快手扫码完成了，但 cookie 校验失败"))
-                        result = _build_login_result(
-                            False,
-                            "cookie_invalid",
-                            "快手扫码流程结束，但 cookie 校验失败",
-                            account_file,
-                            qrcode_info,
-                            page.url,
-                        )
-                    return result
+async def get_ks_cookie(account_file=None, qrcode_callback=None, headless=None,
+                        poll_interval=3, max_checks=100, cdp_url=None, *,
+                        account_name=None, local_browser=None):
+    """Compatibility entry point: interactive login persists only in the Profile."""
+    account = _account_alias(account_file, account_name)
+    if cdp_url:
+        raise UsageError("快手 login 使用本地 Profile；不支持外部 CDP 登录。")
+    async with async_playwright() as playwright:
+        async with local_browser_session(playwright, platform="kuaishou", account=account,
+                                         create=True, headless=headless,
+                                         local_browser=local_browser) as session:
+            login_detail = await _login_in(session, account, qrcode_callback=qrcode_callback,
+                                           poll_interval=poll_interval, max_checks=max_checks)
+            if not await is_logged_in(session.context, managed=False):
+                raise LoginRequiredError("快手扫码结束但尚未登录；请运行 sau kuaishou login。")
+            result = _build_login_result(True, "logged_in", "快手登录成功", account,
+                                         login_detail.get("qrcode"), login_detail.get("current_url", ""))
+            result["account_name"] = account
+            return result
 
-                if qrcode_info and await _is_ks_qrcode_expired(page):
-                    kuaishou_logger.warning(_msg("😵", "二维码失效了，小人马上去刷新"))
-                    refresh_button = page.locator("p.qrcode-refresh").first
-                    if await refresh_button.count():
-                        await refresh_button.click()  # native-click: login；二维码过期刷新
-                        await asyncio.sleep(1)
-                    qrcode_info = await _save_ks_qrcode(
-                        page,
-                        account_file,
-                        qrcode_path,
-                        qrcode_callback=qrcode_callback,
-                    )
-                    qrcode_path = Path(qrcode_info["image_path"])
 
-                await asyncio.sleep(poll_interval)
+async def _login_in(session, account, *, qrcode_callback=None, poll_interval=3, max_checks=100):
+    page = await session.context.new_page()
+    try:
+        return await _login_on_page(page, qrcode_callback=qrcode_callback,
+                             poll_interval=poll_interval, max_checks=max_checks)
+    except Exception:
+        _raise_if_local_login_required(page, verification_only=True)
+        raise
 
-            result = _build_login_result(
-                False,
-                "timeout",
-                "等待快手扫码登录超时",
-                account_file,
-                qrcode_info,
-                page.url,
-            )
-        except Exception as exc:
-            result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
-        finally:
-            if remove_qrcode_file(qrcode_path):
-                kuaishou_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
-                kuaishou_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            if should_close_context:
-                await context.close()
-            await browser.close()
 
-    return result
+async def _login_on_page(page, *, qrcode_callback, poll_interval, max_checks):
+    response = await page.goto(KUAISHOU_LOGIN_URL, wait_until="domcontentloaded", timeout=30_000)
+    status = getattr(response, "status", None)
+    if isinstance(status, int) and status >= 400:
+        raise RuntimeError(f"快手登录页面失败：HTTP {status}")
+    if page.url.startswith(KUAISHOU_UPLOAD_URL):
+        return {"qrcode": None, "current_url": page.url}
+    kuaishou_logger.info("请在浏览器里扫码登录快手；登录态将保存到所选本地 Profile。")
+    # QR artifacts are temporary UI assistance, never a second identity store.
+    with tempfile.TemporaryDirectory(prefix="sau-kuaishou-login-", ignore_cleanup_errors=True) as directory:
+        qrcode_target = str(Path(directory) / "login.png")
+        qrcode_info = await _save_ks_qrcode(page, qrcode_target, qrcode_callback=qrcode_callback)
+        qrcode_path = Path(qrcode_info["image_path"])
+        for _ in range(max_checks):
+            if page.url.startswith(KUAISHOU_UPLOAD_URL) or await _is_ks_login_page_gone(page):
+                return {"qrcode": qrcode_info, "current_url": page.url}
+            if await _is_ks_qrcode_expired(page):
+                refresh_button = page.locator("p.qrcode-refresh").first
+                if await refresh_button.count():
+                    await refresh_button.click()  # native-click: login；二维码过期刷新
+                    await asyncio.sleep(1)
+                qrcode_info = await _save_ks_qrcode(page, qrcode_target, qrcode_path,
+                                                  qrcode_callback=qrcode_callback)
+                qrcode_path = Path(qrcode_info["image_path"])
+            await asyncio.sleep(poll_interval)
+        raise LoginRequiredError("等待快手扫码登录超时；请重新运行 sau kuaishou login。")
 
 
 class KSBaseUploader(BaseVideoUploader):
@@ -525,22 +499,18 @@ class KSBaseUploader(BaseVideoUploader):
         account_file,
         publish_strategy: str | None = None,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
+        *, account_name=None, local_browser=None,
     ):
         self.publish_date = publish_date
         self.account_file = None if account_file is None else str(account_file)
         self.publish_strategy = publish_strategy
         self.debug = debug
         self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
+        self.account_name = account_name
+        self.local_browser = local_browser
 
     async def validate_base_args(self, *, check_cookie: bool = True):
-        if check_cookie:
-            if not os.path.exists(self.account_file):
-                raise RuntimeError(f"cookie文件不存在，请先完成快手登录: {self.account_file}")
-            if not await cookie_auth(self.account_file):
-                raise RuntimeError(f"cookie文件已失效，请先完成快手登录: {self.account_file}")
-
         if self.publish_strategy is None:
             self.publish_strategy = (
                 KUAISHOU_PUBLISH_STRATEGY_SCHEDULED
@@ -689,10 +659,11 @@ class KSVideo(KSBaseUploader):
         account_file,
         publish_strategy: str | None = None,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         thumbnail_path=None,
         desc: str | None = None,
         collection_name: str | None = None,
+        *, account_name=None, local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -700,6 +671,8 @@ class KSVideo(KSBaseUploader):
             publish_strategy=publish_strategy,
             debug=debug,
             headless=headless,
+            account_name=account_name,
+            local_browser=local_browser,
         )
         self.title = title
         self.file_path = file_path
@@ -834,43 +807,46 @@ class KSVideo(KSBaseUploader):
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        kuaishou_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
-        await self.validate_upload_args()
-        kuaishou_logger.info(_msg("🥳", "上传前检查通过"))
-
-        browser = await playwright.chromium.launch(headless=self.headless, **KUAISHOU_LAUNCH_KWARGS)
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **KUAISHOU_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            if await save_upload_session(context, self.account_file):
-                kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
-            await asyncio.sleep(2)
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        await self.validate_upload_args(check_cookie=False)
+        async with local_browser_session(
+            playwright, platform="kuaishou", account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as local_session:
+            if not await is_logged_in(local_session.context, managed=False):
+                raise LoginRequiredError("快手登录态失效；请运行 sau kuaishou login。")
+            await self.upload_in(local_session)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
+        self._publish_attempted = False
         page = await session.context.new_page()
         # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
         self._humanizer(page)
-        await page.goto(KUAISHOU_UPLOAD_URL)
+        try:
+            response = await page.goto(KUAISHOU_UPLOAD_URL)
+        except Exception:
+            if not session.managed:
+                _raise_if_local_login_required(page)
+            raise
         if session.managed:
             _raise_if_login_required(page)
+        else:
+            _raise_if_local_login_required(page)
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and status >= 400:
+                raise RuntimeError(f"快手发布页面失败：HTTP {status}")
         kuaishou_logger.info(_msg("🏃", f"小人开始搬运视频: {self.title}.mp4"))
         kuaishou_logger.info(_msg("🧭", "小人正在赶往快手上传主页"))
-        await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
-        await self._upload_video_on_page(
-            page, multilogin=session.managed
-        )
+        try:
+            await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
+            await self._upload_video_on_page(page, multilogin=session.managed)
+        except Exception as exc:
+            if not session.managed and not isinstance(exc, LoginRequiredError):
+                _raise_if_local_login_required(page, publish_attempted=getattr(self, "_publish_attempted", False))
+            raise
 
     async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
+        check_login = _raise_if_login_required if multilogin else _raise_if_local_login_required
         humanizer = self._humanizer(page)
         upload_button = page.locator("button[class^='_upload-btn']")
         await upload_button.wait_for(state="visible", timeout=10000)
@@ -912,6 +888,8 @@ class KSVideo(KSBaseUploader):
         )
         retry_count = 0
         while time.monotonic() < upload_deadline:
+            if not multilogin:
+                check_login(page)
             budget.check_pre_click()
             try:
                 number = await page.locator("text=上传中").count()
@@ -927,8 +905,7 @@ class KSVideo(KSBaseUploader):
 
                 await asyncio.sleep(2)
             except Exception as exc:
-                if multilogin:
-                    _raise_if_login_required(page)
+                check_login(page)
                 kuaishou_logger.warning(_msg("😵", f"检查上传状态时出错，小人继续重试: {exc}"))
                 await asyncio.sleep(2)
             retry_count += 1
@@ -955,9 +932,10 @@ class KSVideo(KSBaseUploader):
         publish_clicked = False
         last_publish_error = None
         for attempt in range(1, KUAISHOU_PUBLISH_ATTEMPTS + 1):
+            if not multilogin:
+                check_login(page, publish_attempted=publish_clicked)
             if budget.remaining_seconds() <= 0:
-                if multilogin:
-                    _raise_if_login_required(page, publish_attempted=publish_clicked)
+                check_login(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             try:
                 if not publish_clicked:
@@ -969,15 +947,20 @@ class KSVideo(KSBaseUploader):
                             raise RuntimeError("未找到快手发布按钮")
                         await humanizer.click(publish_button)
                         publish_clicked = True
+                        self._publish_attempted = True
                         await asyncio.sleep(1)
                         await _click_visible_publish_confirm(page, humanizer)
                     publish_clicked = True
+                    self._publish_attempted = True
 
                 await page.wait_for_url(KUAISHOU_MANAGE_URL_PATTERN, timeout=5000)
                 kuaishou_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                 break
             except Exception as exc:
+                if not multilogin:
+                    check_login(page, publish_attempted=publish_clicked or maybe_dispatched(exc))
                 if maybe_dispatched(exc):
+                    self._publish_attempted = True
                     # The publish/confirm click may already have landed:
                     # re-dispatching could publish twice.
                     raise budget.timeout_error(True) from exc
@@ -986,8 +969,7 @@ class KSVideo(KSBaseUploader):
                     if publish_clicked:
                         raise budget.timeout_error(True) from exc
                     raise
-                if multilogin:
-                    _raise_if_login_required(page, publish_attempted=publish_clicked)
+                check_login(page, publish_attempted=publish_clicked)
                 last_publish_error = exc
                 kuaishou_logger.info(_msg(
                     "🏃", f"小人正在冲刺发布视频（{attempt}/{KUAISHOU_PUBLISH_ATTEMPTS}）: {exc}"
@@ -1023,7 +1005,8 @@ class KSNote(KSBaseUploader):
         title: str | None = None,
         publish_strategy: str | None = None,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
+        *, account_name=None, local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -1031,6 +1014,8 @@ class KSNote(KSBaseUploader):
             publish_strategy=publish_strategy,
             debug=debug,
             headless=headless,
+            account_name=account_name,
+            local_browser=local_browser,
         )
         self.image_paths = image_paths
         self.note = note or ""
@@ -1053,6 +1038,7 @@ class KSNote(KSBaseUploader):
         self.image_paths = normalized_image_paths
 
     async def upload_note_content(self, page: Page, *, multilogin: bool = False) -> None:
+        check_login = _raise_if_login_required if multilogin else _raise_if_local_login_required
         humanizer = self._humanizer(page)
         budget = self.publish_budget
         kuaishou_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
@@ -1096,6 +1082,8 @@ class KSNote(KSBaseUploader):
         max_retries = 60
         retry_count = 0
         while retry_count < max_retries:
+            if not multilogin:
+                check_login(page)
             budget.check_pre_click()
             try:
                 number = await page.locator("text=上传中").count()
@@ -1112,8 +1100,7 @@ class KSNote(KSBaseUploader):
 
                 await asyncio.sleep(2)
             except Exception as exc:
-                if multilogin:
-                    _raise_if_login_required(page)
+                check_login(page)
                 kuaishou_logger.warning(_msg("😵", f"检查图文上传状态时出错，小人继续重试: {exc}"))
                 await asyncio.sleep(2)
             retry_count += 1
@@ -1132,9 +1119,10 @@ class KSNote(KSBaseUploader):
 
         publish_clicked = False
         while True:
+            if not multilogin:
+                check_login(page, publish_attempted=publish_clicked)
             if budget.remaining_seconds() <= 0:
-                if multilogin:
-                    _raise_if_login_required(page, publish_attempted=publish_clicked)
+                check_login(page, publish_attempted=publish_clicked)
                 raise budget.timeout_error(publish_clicked)
             try:
                 if not publish_clicked:
@@ -1143,18 +1131,23 @@ class KSNote(KSBaseUploader):
                     if await reject_ambiguous(publish_button, "快手发布按钮") > 0:
                         await humanizer.click(publish_button)
                         publish_clicked = True
+                        self._publish_attempted = True
 
                     await asyncio.sleep(1)
                     confirm_button = page.get_by_text("确认发布")
                     if await reject_ambiguous(confirm_button, "快手确认发布按钮") > 0:
                         await humanizer.click(confirm_button)
                     publish_clicked = True
+                    self._publish_attempted = True
 
                 await page.wait_for_url(KUAISHOU_MANAGE_URL_PATTERN, timeout=5000)
                 kuaishou_logger.success(_msg("🥳", "图文发布成功，小人开心收工"))
                 break
             except Exception as exc:
+                if not multilogin:
+                    check_login(page, publish_attempted=publish_clicked or maybe_dispatched(exc))
                 if maybe_dispatched(exc):
+                    self._publish_attempted = True
                     # 图文发布/确认发布可能已经点出去：绝不二次派发。
                     raise budget.timeout_error(True) from exc
                 if (isinstance(exc, ElementUnusableError)
@@ -1162,8 +1155,7 @@ class KSNote(KSBaseUploader):
                     if publish_clicked:
                         raise budget.timeout_error(True) from exc
                     raise
-                if multilogin:
-                    _raise_if_login_required(page, publish_attempted=publish_clicked)
+                check_login(page, publish_attempted=publish_clicked)
                 kuaishou_logger.info(_msg("🏃", f"小人正在冲刺发布图文: {exc}"))
                 if self.debug:
                     await page.screenshot(full_page=True)
@@ -1178,40 +1170,42 @@ class KSNote(KSBaseUploader):
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        kuaishou_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
-        await self.validate_upload_args()
-        kuaishou_logger.info(_msg("🥳", "图文上传前检查通过"))
-
-        browser = await playwright.chromium.launch(headless=self.headless, **KUAISHOU_LAUNCH_KWARGS)
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **KUAISHOU_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            if await save_upload_session(context, self.account_file):
-                kuaishou_logger.success(_msg("🥳", "cookie 更新完毕"))
-            await asyncio.sleep(2)
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        await self.validate_upload_args(check_cookie=False)
+        async with local_browser_session(
+            playwright, platform="kuaishou", account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as local_session:
+            if not await is_logged_in(local_session.context, managed=False):
+                raise LoginRequiredError("快手登录态失效；请运行 sau kuaishou login。")
+            await self.upload_in(local_session)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
+        self._publish_attempted = False
         page = await session.context.new_page()
         # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
         self._humanizer(page)
-        await page.goto(KUAISHOU_UPLOAD_URL)
+        try:
+            response = await page.goto(KUAISHOU_UPLOAD_URL)
+        except Exception:
+            if not session.managed:
+                _raise_if_local_login_required(page)
+            raise
         if session.managed:
             _raise_if_login_required(page)
+        else:
+            _raise_if_local_login_required(page)
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and status >= 400:
+                raise RuntimeError(f"快手发布页面失败：HTTP {status}")
         kuaishou_logger.info(_msg("🧭", "小人正在赶往快手图文发布页"))
-        await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
-        await self.upload_note_content(
-            page, multilogin=session.managed
-        )
+        try:
+            await page.wait_for_url(KUAISHOU_UPLOAD_URL_PATTERN)
+            await self.upload_note_content(page, multilogin=session.managed)
+        except Exception as exc:
+            if not session.managed and not isinstance(exc, LoginRequiredError):
+                _raise_if_local_login_required(page, publish_attempted=getattr(self, "_publish_attempted", False))
+            raise
 
     async def main(self, *, session: BrowserSession | None = None):
         if session is not None:

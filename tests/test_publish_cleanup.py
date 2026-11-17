@@ -14,8 +14,7 @@ from utils.browser_session import _local_session
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 
 LOCAL_UPLOADS = (
-    ("ks", "KSVideo"),
-    ("ks", "KSNote"),
+    # Kuaishou persistent outcomes: test_kuaishou_profiles.
     # TencentVideo persistent outcomes: test_tencent_profiles.
     ("tencent", "TencentNote"),
     ("alipay", "AlipayVideo"),

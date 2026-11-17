@@ -283,59 +283,7 @@ class LocalGoldenTests(unittest.TestCase):
         )
         self.assertEqual(_build_ks_launch_kwargs(""), {"channel": "chromium"})
 
-    def test_ks_video_launch_context_and_init_script_are_golden(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_ks_video(tmp_dir, "/tmp/ks-cookie.json", headless=False)
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-
-            playwright = FakePlaywright()
-            init_script = AsyncMock(side_effect=lambda context: context)
-
-            with patch.object(ks_main, "set_init_script", init_script):
-                asyncio.run(app.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **KUAISHOU_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/ks-cookie.json", **KUAISHOU_CONTEXT_KWARGS}],
-        )
-        init_script.assert_awaited_once_with(browser.contexts[0])
-        app.upload_in.assert_awaited_once()
-        self.assertEqual(app.upload_in.await_args.args[0].mode, "local")
-
-    def test_ks_note_launch_context_and_teardown_are_golden(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_ks_note(tmp_dir, "/tmp/ks-note-cookie.json")
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-
-            playwright = FakePlaywright()
-            with (
-                patch.object(
-                    ks_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
-                ),
-                patch.object(ks_main.asyncio, "sleep", AsyncMock()),
-            ):
-                asyncio.run(app.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": True, **KUAISHOU_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        context = browser.contexts[0]
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/ks-note-cookie.json", **KUAISHOU_CONTEXT_KWARGS}],
-        )
-        self.assertEqual(context.storage_state_calls, ["/tmp/ks-note-cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
+    # Persistent local entry points: tests.test_kuaishou_profiles.
 
 
 # --------------------------------------------------------------------------- #
@@ -432,7 +380,7 @@ class MultiloginSeamTests(unittest.TestCase):
 
             with (
                 patch.object(ks_main, "cookie_auth", cookie_auth),
-                patch.object(ks_main.os.path, "exists", MagicMock()) as exists,
+                patch.object(Path, "open", MagicMock()) as exists,
             ):
                 asyncio.run(
                     app.upload(
