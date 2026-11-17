@@ -22,9 +22,8 @@ from uploader.zhihu_uploader.video import ZhihuVideo
 from sau_commands.arguments import (
     SCHEDULE_HELP_ZH,
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
-    resolve_account_file,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -39,6 +38,8 @@ from sau_commands.browser import (
 )
 from sau_commands.arguments import single_line_value
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
 
 def _log_identity_unverified(target) -> None:
@@ -56,19 +57,19 @@ def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     zhihu_parser = platform_parsers.add_parser("zhihu", help="知乎创作中心文章与视频发布")
     zhihu_actions = zhihu_parser.add_subparsers(dest="action", required=True)
-    zhihu_login = zhihu_actions.add_parser("login", help="在可见 Chrome 中登录并保存本地会话")
+    add_reset_profile_action(zhihu_actions)
+    zhihu_login = zhihu_actions.add_parser("login", help="在所选浏览器中登录本地 Profile")
     zhihu_login.add_argument("--account", required=False, help="本地会话别名，可与知乎展示名不同")
+    add_local_runtime_flags(zhihu_login)
     zhihu_login.add_argument("--timeout", type=int, default=600, help="登录等待秒数")
-    zhihu_check = zhihu_actions.add_parser("check", help="检查知乎登录态和页头账号绑定")
+    zhihu_check = zhihu_actions.add_parser("check", help="检查知乎当前 Profile 登录态")
     zhihu_check.add_argument("--account", required=False, help="本地会话别名")
     add_browser_flags(zhihu_check)
-    add_runtime_flags(zhihu_check)
-    zhihu_check.set_defaults(headless=False)
+    add_local_runtime_flags(zhihu_check)
     zhihu_verify = zhihu_actions.add_parser("verify", help="按已保存的作品 URL 只读核对提交结果")
     zhihu_verify.add_argument("--account", required=False, help="本地会话别名")
     zhihu_verify.add_argument("--result", required=True, type=existing_file_path)
-    add_runtime_flags(zhihu_verify)
-    zhihu_verify.set_defaults(headless=False)
+    add_local_runtime_flags(zhihu_verify)
     zhihu_article = zhihu_actions.add_parser("upload-article", help="发布知乎文章；正文配图由原稿位置决定")
     zhihu_article.add_argument("--account", required=False, help="本地会话别名")
     zhihu_article.add_argument("--title", type=single_line_value, required=True, help="文章标题，最多 100 字")
@@ -78,9 +79,8 @@ def register(platform_parsers):
     zhihu_article.add_argument("--prepare-only", action="store_true", help="填写并检查编辑器后结束，不点击发布")
     zhihu_article.add_argument("--upload-timeout", type=int, default=600, help="每张正文图片上传等待秒数")
     add_not_before_flag(zhihu_article)
-    add_runtime_flags(zhihu_article)
+    add_local_runtime_flags(zhihu_article)
     add_browser_flags(zhihu_article)
-    zhihu_article.set_defaults(headless=False)
     zhihu_video = zhihu_actions.add_parser("upload-video", help="上传并发布一个知乎视频")
     zhihu_video.add_argument("--account", required=False, help="本地会话别名")
     zhihu_video.add_argument("--file", required=True, type=existing_file_path, help="视频文件，大于 100KB、最大 20GB、最长 4 小时")
@@ -98,14 +98,13 @@ def register(platform_parsers):
     zhihu_video.add_argument("--prepare-only", action="store_true", help="上传并填写后结束，不点击发布")
     zhihu_video.add_argument("--upload-timeout", type=int, default=1200, help="视频上传等待秒数")
     add_not_before_flag(zhihu_video)
-    add_runtime_flags(zhihu_video)
+    add_local_runtime_flags(zhihu_video)
     add_browser_flags(zhihu_video)
-    zhihu_video.set_defaults(headless=False)
 
 
 async def _run_multilogin(args, target):
     """Multilogin path: Profile owns identity; no cookies/identity files are read."""
-    headless = args.headless
+    headless = resolve_headless(getattr(args, "headless", None))
 
     if args.action == "check":
         async with async_playwright() as playwright:
@@ -159,6 +158,8 @@ async def _run_multilogin(args, target):
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
     if args.action == "login":
         reject_managed_login("zhihu", args)
         require_local_account(args)
@@ -173,18 +174,21 @@ async def run(args):
         require_account(args)
         account = args.account
 
-    account_file = resolve_account_file("zhihu", account)
     if args.action == "login":
-        result = await login_zhihu_account(account_file, args.timeout)
+        result = await login_zhihu_account(account_name=account, timeout=args.timeout,
+            headless=args.headless, local_browser=args.local_browser)
     elif args.action == "check":
-        valid = await check_zhihu_account(account_file, args.headless)
+        valid = await check_zhihu_account(account_name=account, headless=args.headless,
+            local_browser=args.local_browser)
         print("valid" if valid else "invalid")
         return 0 if valid else 1
     elif args.action == "verify":
-        result = await verify_zhihu_result(account_file, args.result, args.headless)
+        result = await verify_zhihu_result(account_name=account, result_file=args.result,
+            headless=args.headless, local_browser=args.local_browser)
     elif args.action == "upload-article":
         app = ZhihuArticle(
-            title=args.title, content_file=args.content_file, account_file=account_file,
+            title=args.title, content_file=args.content_file, account_name=account,
+            local_browser=args.local_browser,
             schedule=args.schedule, prepare_only=args.prepare_only,
             upload_timeout=args.upload_timeout, headless=args.headless, debug=args.debug,
             publish_not_before=args.not_before,
@@ -192,7 +196,8 @@ async def run(args):
         result = await app.main()
     else:
         app = ZhihuVideo(
-            title=args.title, file_path=args.file, account_file=account_file,
+            title=args.title, file_path=args.file, account_name=account,
+            local_browser=args.local_browser,
             description=args.desc, category=args.category,
             topics=[], video_mark=args.video_mark, show_options=args.show_options,
             originality=args.originality, schedule=args.schedule,

@@ -1,5 +1,5 @@
 """知乎创作中心页面与上传限制。"""
-from conf import LOCAL_CHROME_PATH
+import conf
 
 
 ZHIHU_CREATOR_URL = "https://www.zhihu.com/creator"
@@ -7,9 +7,9 @@ ZHIHU_ARTICLE_URL = "https://zhuanlan.zhihu.com/write"
 ZHIHU_VIDEO_URL = "https://www.zhihu.com/upload-video"
 ZHIHU_MANAGE_URL = "https://www.zhihu.com/creator/manage/creation"
 
-# Golden local-mode browser options.  Multilogin mode silently ignores these;
-# the Profile owns its timezone/fingerprint.
-ZHIHU_LAUNCH_KWARGS = {"executable_path": LOCAL_CHROME_PATH or None, "channel": "chrome"}
+# Kept only for historical managed ignored-option logging; local sessions use
+# utils.local_browser resolution at invocation time.
+ZHIHU_LAUNCH_KWARGS = {"executable_path": getattr(conf, "LOCAL_CHROME_PATH", None) or None, "channel": "chrome"}
 ZHIHU_SCHEDULE_MINUTES = 30
 ZHIHU_SCHEDULE_MAX_HOURS = 48
 

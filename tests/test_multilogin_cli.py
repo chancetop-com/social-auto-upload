@@ -437,7 +437,7 @@ class UsageAndExitCodeTests(unittest.TestCase):
                             code, err = self._run(argv, SENTINEL_TOKEN)
                         provider.assert_not_called()
                     else:
-                        with patch.object(module, "resolve_account_file", new=resolve):
+                        with patch.object(module, "resolve_account_file", new=resolve, create=True):
                             code, err = self._run(argv, SENTINEL_TOKEN)
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
