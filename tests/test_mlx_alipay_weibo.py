@@ -38,7 +38,6 @@ from uploader.alipay_uploader.main import (
 )
 from uploader.weibo_uploader import main as weibo_main
 from uploader.weibo_uploader.main import (
-    WEIBO_CONTEXT_KWARGS,
     WEIBO_HOME_URL,
     WEIBO_INIT_SCRIPT,
     WEIBO_LAUNCH_KWARGS,
@@ -540,53 +539,7 @@ class AlipayIsLoggedInTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class WeiboLocalGoldenTests(unittest.TestCase):
-    def test_constants_are_golden(self):
-        expected_launch = weibo_main._build_launch_kwargs(headless=False)
-        expected_without_headless = {
-            key: value for key, value in expected_launch.items() if key != "headless"
-        }
-        self.assertEqual(WEIBO_LAUNCH_KWARGS, expected_without_headless)
-        self.assertNotIn("headless", WEIBO_LAUNCH_KWARGS)
-        self.assertEqual(
-            WEIBO_CONTEXT_KWARGS,
-            {"viewport": {"width": 1280, "height": 2000}},
-        )
-        self.assertFalse(WEIBO_INIT_SCRIPT)
-
-    def test_local_upload_keeps_launch_context_and_teardown(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(
-                tmp_dir, platform="weibo", account_file="/tmp/weibo-cookie.json", headless=False
-            )
-            video.validate_upload_args = AsyncMock()
-            upload_in = AsyncMock()
-            video.upload_in = upload_in
-
-            playwright = FakePlaywright()
-            asyncio.run(video.upload(playwright))
-
-        expected_launch = weibo_main._build_launch_kwargs(headless=False)
-        self.assertEqual(playwright.chromium.launch_calls, [expected_launch])
-
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/weibo-cookie.json", **WEIBO_CONTEXT_KWARGS}],
-        )
-        upload_in.assert_awaited_once()
-        session = upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-
-        context = browser.contexts[0]
-        self.assertEqual(context.forbidden_calls, [])
-        self.assertEqual(context.add_init_script_calls, [])
-        self.assertEqual(context.storage_state_calls, ["/tmp/weibo-cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        self.assertEqual(
-            playwright.events, ["launch", "context.close", "browser.close"]
-        )
+# Persistent Weibo local lifecycle and options: tests/test_weibo_profiles.py.
 
 
 # ---------------------------------------------------------------------------
@@ -660,18 +613,6 @@ class WeiboMultiloginTests(unittest.TestCase):
                 asyncio.run(video.upload(None, session=session))
 
         open_publish.assert_not_awaited()
-
-    def test_local_upload_never_calls_login_required_helper(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(tmp_dir, platform="weibo", account_file="/tmp/w.json")
-            video.validate_upload_args = AsyncMock()
-            video.upload_in = AsyncMock()
-            guard = MagicMock()
-
-            with patch.object(weibo_main, "_raise_if_login_required", guard):
-                asyncio.run(video.upload(FakePlaywright()))
-
-        guard.assert_not_called()
 
     def test_publish_button_scrolls_into_view_before_humanized_click(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
