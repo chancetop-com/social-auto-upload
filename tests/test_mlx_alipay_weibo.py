@@ -30,7 +30,6 @@ from sau_commands import weibo as weibo_command
 from tests.fakes import FakeContext, FakeMultiloginClient, FakePlaywright
 from uploader.alipay_uploader import main as alipay_main
 from uploader.alipay_uploader.main import (
-    ALIPAY_CONTEXT_KWARGS,
     ALIPAY_INIT_SCRIPT,
     ALIPAY_LAUNCH_KWARGS,
     ALIPAY_LIFE_ACCOUNT_URL,
@@ -307,11 +306,11 @@ def _target() -> MultiloginTarget:
 
 
 # ---------------------------------------------------------------------------
-# Alipay — local golden path
+# Alipay — preserved managed options
 # ---------------------------------------------------------------------------
 
 
-class AlipayLocalGoldenTests(unittest.TestCase):
+class AlipayManagedOptionsTests(unittest.TestCase):
     def test_constants_are_golden(self):
         expected_launch = alipay_main._build_launch_kwargs(headless=False)
         expected_without_headless = {
@@ -319,45 +318,9 @@ class AlipayLocalGoldenTests(unittest.TestCase):
         }
         self.assertEqual(ALIPAY_LAUNCH_KWARGS, expected_without_headless)
         self.assertNotIn("headless", ALIPAY_LAUNCH_KWARGS)
-        self.assertEqual(ALIPAY_CONTEXT_KWARGS, {"permissions": ["geolocation"]})
         self.assertFalse(ALIPAY_INIT_SCRIPT)
 
-    def test_local_upload_keeps_launch_context_and_teardown(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(
-                tmp_dir, platform="alipay", account_file="/tmp/alipay-cookie.json", headless=False
-            )
-            video.validate_upload_args = AsyncMock()
-            upload_in = AsyncMock()
-            video.upload_in = upload_in
-
-            playwright = FakePlaywright()
-            init_script = AsyncMock()
-            with patch.object(alipay_main, "set_init_script", init_script):
-                asyncio.run(video.upload(playwright))
-
-        expected_launch = alipay_main._build_launch_kwargs(headless=False)
-        self.assertEqual(playwright.chromium.launch_calls, [expected_launch])
-
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/alipay-cookie.json", **ALIPAY_CONTEXT_KWARGS}],
-        )
-        init_script.assert_not_awaited()
-        upload_in.assert_awaited_once()
-        session = upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-
-        context = browser.contexts[0]
-        # FakeContext forbids grant_permissions; reaching here proves it was not called.
-        self.assertEqual(context.forbidden_calls, [])
-        self.assertEqual(context.storage_state_calls, ["/tmp/alipay-cookie.json"])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        self.assertEqual(
-            playwright.events, ["launch", "context.close", "browser.close"]
-        )
+    # Persistent local behavior is exercised through the CLI in test_alipay_profiles.
 
 
 # ---------------------------------------------------------------------------
@@ -440,17 +403,7 @@ class AlipayMultiloginTests(unittest.TestCase):
 
         video.upload_video_file.assert_not_awaited()
 
-    def test_local_upload_never_calls_login_required_helper(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video(tmp_dir, platform="alipay", account_file="/tmp/a.json")
-            video.validate_upload_args = AsyncMock()
-            video.upload_in = AsyncMock()
-            guard = MagicMock()
-
-            with patch.object(alipay_main, "_raise_if_login_required", guard):
-                asyncio.run(video.upload(FakePlaywright()))
-
-        guard.assert_not_called()
+    # Persistent local behavior is exercised through the CLI in test_alipay_profiles.
 
     def test_wrapper_with_session_does_not_open_a_second_playwright(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
