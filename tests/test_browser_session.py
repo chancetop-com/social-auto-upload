@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Offline lifecycle tests for ``utils.browser_session``.
 
-The local branch must stay behaviour-equivalent to the existing uploaders; the
-MLX branch must follow spec §5.4/§5.5 exactly.  All fakes are hand-written so
+The generic session requires a managed provider; the MLX branch must follow
+spec §5.4/§5.5 exactly.  All fakes are hand-written so
 that touching a forbidden Playwright API fails loudly.
 """
 
@@ -26,7 +26,6 @@ from tests.fakes import (
 from utils.browser_session import (
     BrowserSession,
     browser_session,
-    log_local_session_ready,
     provider_label,
 )
 from utils.multilogin import MultiloginProvider, MultiloginTarget
@@ -54,193 +53,24 @@ class ProviderLabelTests(unittest.TestCase):
         self.assertFalse(hasattr(module, "_provider_label"))
 
 
-class LocalBrowserSessionTests(unittest.TestCase):
-    def test_launch_new_context_and_teardown_parameters_are_forwarded(self):
-        events: list[str] = []
-        playwright = FakePlaywright(events=events)
-        account_file = Path("/tmp/ticket15-cookie.json")
-        launch_kwargs = {
-            "channel": "chromium",
-            "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-        }
-        context_kwargs = {"permissions": ["geolocation"]}
-        setup_calls: list[object] = []
+class ManagedOnlyBrowserSessionTests(unittest.TestCase):
+    def test_missing_provider_fails_before_browser_or_legacy_cookie_access(self):
+        for account_file in (None, Path("/tmp/obsolete-cookie.json")):
+            with self.subTest(account_file=account_file):
+                playwright = FakePlaywright()
 
-        async def context_setup(context):
-            setup_calls.append(context)
-            return None
+                async def scenario():
+                    async with browser_session(
+                        playwright, headless=False, account_file=account_file
+                    ):
+                        self.fail("a provider is required")
 
-        async def scenario():
-            async with browser_session(
-                playwright,
-                headless=True,
-                account_file=account_file,
-                launch_kwargs=launch_kwargs,
-                context_kwargs=context_kwargs,
-                init_script=True,
-                context_setup=context_setup,
-            ) as session:
-                self.assertEqual(session.mode, "local")
-                self.assertIs(session.browser, playwright.chromium.launch_browser)
-                self.assertEqual(len(playwright.chromium.launch_browser.contexts), 1)
-                self.assertIs(session.context, playwright.chromium.launch_browser.contexts[0])
-                return session.context
-
-        with patch(
-            "utils.browser_session.set_init_script", new=AsyncMock(side_effect=lambda ctx: ctx)
-        ) as init_script:
-            context = run(scenario())
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": True, **launch_kwargs}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": account_file, **context_kwargs}],
-        )
-        init_script.assert_awaited_once_with(context)
-        self.assertEqual(setup_calls, [context])
-        self.assertEqual(context.storage_state_calls, [account_file])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        self.assertEqual(events, ["launch", "context.close", "browser.close"])
-
-    def test_local_defaults_skip_init_script_and_context_setup(self):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(
-                playwright,
-                headless=False,
-                account_file="/tmp/cookie.json",
-            ):
-                pass
-
-        with patch("utils.browser_session.set_init_script", new=AsyncMock()) as init_script:
-            run(scenario())
-
-        init_script.assert_not_awaited()
-        context = playwright.chromium.launch_browser.contexts[0]
-        self.assertEqual(context.add_init_script_calls, [])
-
-    def test_local_writes_storage_state_only_on_normal_exit(self):
-        playwright = FakePlaywright()
-        account_file = "/tmp/cookie.json"
-
-        async def scenario():
-            async with browser_session(
-                playwright, headless=True, account_file=account_file
-            ):
-                raise ValueError("upload failed")
-
-        with self.assertRaisesRegex(ValueError, "upload failed"):
-            run(scenario())
-
-        context = playwright.chromium.launch_browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, [])
-        self.assertTrue(context.closed)
-        self.assertTrue(playwright.chromium.launch_browser.closed)
-
-    def test_local_without_account_file_does_not_write_storage_state(self):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(playwright, headless=True, account_file=None):
-                pass
-
-        run(scenario())
-
-        browser = playwright.chromium.launch_browser
-        context = browser.contexts[0]
-        self.assertEqual(browser.new_context_calls, [{"storage_state": None}])
-        self.assertEqual(context.storage_state_calls, [])
-
-    def test_context_setup_return_value_replaces_context(self):
-        playwright = FakePlaywright()
-        replacement = FakeContext()
-
-        async def context_setup(context):
-            self.assertIs(context, playwright.chromium.launch_browser.contexts[0])
-            return replacement
-
-        async def scenario():
-            async with browser_session(
-                playwright,
-                headless=True,
-                account_file="/tmp/cookie.json",
-                context_setup=context_setup,
-            ) as session:
-                self.assertIs(session.context, replacement)
-                return session.context
-
-        run(scenario())
-
-        self.assertEqual(replacement.storage_state_calls, ["/tmp/cookie.json"])
-        self.assertTrue(replacement.closed)
-
-    def test_context_setup_runs_after_init_script(self):
-        playwright = FakePlaywright()
-        order: list[str] = []
-
-        async def fake_init(context):
-            order.append("init_script")
-            return context
-
-        async def context_setup(context):
-            order.append("context_setup")
-            return context
-
-        async def scenario():
-            async with browser_session(
-                playwright,
-                headless=True,
-                init_script=True,
-                context_setup=context_setup,
-            ):
-                pass
-
-        with patch("utils.browser_session.set_init_script", new=fake_init):
-            run(scenario())
-
-        self.assertEqual(order, ["init_script", "context_setup"])
-
-    def test_local_rejects_headless_in_launch_kwargs(self):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(
-                playwright, headless=True, launch_kwargs={"headless": False}
-            ):
-                pass
-
-        with self.assertRaisesRegex(ValueError, "headless"):
-            run(scenario())
-
-    def test_local_rejects_storage_state_in_context_kwargs(self):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(
-                playwright,
-                headless=True,
-                context_kwargs={"storage_state": "cookie.json"},
-            ):
-                pass
-
-        with self.assertRaisesRegex(ValueError, "storage_state"):
-            run(scenario())
-
-    def test_session_does_not_expose_owned_or_stop(self):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(playwright, headless=True) as session:
-                self.assertFalse(hasattr(session, "owned"))
-                self.assertFalse(hasattr(session, "stop"))
-
-        run(scenario())
+                with self.assertRaisesRegex(
+                    ValueError, "managed.*local_browser_session.*platform.*account"
+                ):
+                    run(scenario())
+                self.assertEqual(playwright.chromium.launch_calls, [])
+                self.assertEqual(playwright.chromium.connect_calls, [])
 
 
 class MultiloginBrowserSessionTests(unittest.TestCase):
@@ -826,34 +656,9 @@ class ManagedIgnoredKeysTests(unittest.TestCase):
         self.assertEqual(len(startup), 1)
         self.assertIn("ignored=launch_kwargs, account,", startup[0].args[0])
 
-    def test_local_mode_with_the_same_options_never_warns(self):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(
-                playwright,
-                headless=True,
-                account_file="/tmp/cookie.json",
-                launch_kwargs={"channel": "chromium"},
-                context_kwargs={"locale": "zh-CN"},
-                init_script=True,
-            ):
-                pass
-
-        with (
-            patch("utils.browser_session.logger.warning") as warning,
-            patch(
-                "utils.browser_session.set_init_script",
-                new=AsyncMock(side_effect=lambda ctx: ctx),
-            ),
-        ):
-            run(scenario())
-
-        warning.assert_not_called()
-
 
 class StartupLogTests(unittest.TestCase):
-    """Exactly one startup line per run, in both modes, with fixed fields."""
+    """Exactly one managed startup line per run with fixed fields."""
 
     STARTUP_PREFIX = "browser session ready: "
 
@@ -863,59 +668,6 @@ class StartupLogTests(unittest.TestCase):
             for call in info.call_args_list
             if str(call.args[0]).startswith(self.STARTUP_PREFIX)
         ]
-
-    def _run_local(self, *, headless=True, account_file="/tmp/cookie.json"):
-        playwright = FakePlaywright()
-
-        async def scenario():
-            async with browser_session(
-                playwright, headless=headless, account_file=account_file
-            ):
-                pass
-
-        run(scenario())
-
-    def test_local_startup_log_has_mode_headless_identity_and_ignored(self):
-        with patch("utils.browser_session.logger.info") as info:
-            self._run_local(headless=False)
-
-        startup = self._startup_calls(info)
-        self.assertEqual(len(startup), 1)
-        self.assertEqual(
-            startup[0].args[0],
-            "browser session ready: mode=local, headless=headed, "
-            "identity=account_file:/tmp/cookie.json, ignored=-",
-        )
-
-    def test_local_helper_emits_the_same_single_line(self):
-        with patch("utils.browser_session.logger.info") as info:
-            log_local_session_ready(
-                headless=False, account_file="/tmp/cookie.json"
-            )
-
-        startup = self._startup_calls(info)
-        self.assertEqual(len(startup), 1)
-        self.assertEqual(
-            startup[0].args[0],
-            "browser session ready: mode=local, headless=headed, "
-            "identity=account_file:/tmp/cookie.json, ignored=-",
-        )
-
-    def test_local_headless_labelling(self):
-        with patch("utils.browser_session.logger.info") as info:
-            self._run_local(headless=True)
-
-        startup = self._startup_calls(info)
-        self.assertEqual(len(startup), 1)
-        self.assertIn("headless=headless,", startup[0].args[0])
-
-    def test_local_without_account_file_still_reports_identity(self):
-        with patch("utils.browser_session.logger.info") as info:
-            self._run_local(headless=True, account_file=None)
-
-        startup = self._startup_calls(info)
-        self.assertEqual(len(startup), 1)
-        self.assertIn("identity=account_file:-", startup[0].args[0])
 
     def test_mlx_startup_log_folds_the_legacy_profile_line(self):
         events: list[str] = []

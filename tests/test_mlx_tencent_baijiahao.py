@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tencent (视频号) + Baijiahao uploader seam, login probe and CLI (ticket 19).
 
-Local mode must stay byte-equivalent (golden launch/context/init values).  The
+Local Profile behavior is covered by the platform Profile tests. The
 Multilogin branch consumes only the injected ``BrowserSession``: it never
 launches/navigates a browser context, never reads or writes cookies, never
 injects init scripts and never grants permissions.
@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import sau_cli
 from sau_commands import baijiahao as baijiahao_command
 from sau_commands import tencent as tencent_command
-from tests.fakes import FakeContext, FakePage, FakePlaywright
+from tests.fakes import FakeContext, FakePage
 from uploader.baijiahao_uploader import main as baijiahao_main
 from uploader.baijiahao_uploader.main import (
     BAIJIAHAO_CONTEXT_KWARGS,
@@ -39,7 +39,6 @@ from uploader.tencent_uploader.main import (
     TENCENT_HOME_URL,
     TENCENT_LAUNCH_KWARGS,
     TENCENT_UPLOAD_URL,
-    TencentNote,
     TencentVideo,
 )
 from utils.browser_session import BrowserSession
@@ -221,18 +220,6 @@ def _make_tencent_video(account_file=None) -> TencentVideo:
     )
 
 
-def _make_tencent_note(tmp_dir: str, account_file=None) -> TencentNote:
-    image_path = Path(tmp_dir) / "image.png"
-    image_path.write_bytes(b"image")
-    return TencentNote(
-        image_paths=[str(image_path)],
-        note="图文正文",
-        tags=[],
-        publish_date=0,
-        account_file=account_file,
-    )
-
-
 def _make_baijiahao(account_file=None) -> BaiJiaHaoVideo:
     return BaiJiaHaoVideo(
         title="视频标题",
@@ -244,43 +231,15 @@ def _make_baijiahao(account_file=None) -> BaiJiaHaoVideo:
 
 
 # ---------------------------------------------------------------------------
-# Local golden values / legacy teardown
+# Managed constructors; local Profile behavior has dedicated coverage
 # ---------------------------------------------------------------------------
 
 
 class TencentLocalGoldenTests(unittest.TestCase):
     # Formal video Profile lifecycle: tests.test_tencent_profiles.
 
-    def test_note_keeps_legacy_init_script_and_golden_kwargs(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            note = _make_tencent_note(tmp_dir, "/tmp/tencent-note.json")
-            note.validate_upload_args = AsyncMock()
-            note.upload_in = AsyncMock()
-            playwright = FakePlaywright()
-            init_script = AsyncMock(side_effect=lambda context: context)
-
-            with (
-                patch.object(tencent_main, "set_init_script", init_script),
-                patch.object(tencent_main.asyncio, "sleep", AsyncMock()),
-            ):
-                asyncio.run(note.upload(playwright))
-
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": note.headless, **TENCENT_LAUNCH_KWARGS}],
-        )
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/tencent-note.json", **TENCENT_CONTEXT_KWARGS}],
-        )
-        init_script.assert_awaited_once_with(browser.contexts[0])
-        self.assertTrue(tencent_main.TENCENT_NOTE_INIT_SCRIPT)
-
     def test_mlx_account_file_none_does_not_crash_constructor(self):
         self.assertIsNone(_make_tencent_video(None).account_file)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            self.assertIsNone(_make_tencent_note(tmp_dir, None).account_file)
 
 
 class BaijiahaoLocalGoldenTests(unittest.TestCase):
@@ -404,23 +363,6 @@ class TencentMultiloginUploadTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             asyncio.run(video.open_upload_page(local_page, multilogin=False))
         self.assertNotIsInstance(ctx.exception, LoginRequiredError)
-
-    def test_note_mlx_uses_session_and_never_opens_playwright(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            note = _make_tencent_note(tmp_dir, None)
-            note.upload = AsyncMock()
-            session = BrowserSession(
-                browser=MagicMock(), context=MagicMock(), mode="multilogin"
-            )
-
-            with patch.object(
-                tencent_main, "async_playwright", MagicMock()
-            ) as async_playwright:
-                asyncio.run(note.tencent_upload_note(session=session))
-
-        async_playwright.assert_not_called()
-        note.upload.assert_awaited_once_with(None, session=session)
-        self.assertIsNone(note.account_file)
 
 
 class BaijiahaoMultiloginUploadTests(unittest.TestCase):

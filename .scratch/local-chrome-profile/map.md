@@ -83,3 +83,7 @@ Status: resolved
 ### 2026-11-17 — 用户目录顺序修正
 
 当前布局为 `browser_profiles/<chrome|chromium>/<platform>/<raw_account>`，覆盖原决策中的目录顺序；归属与 guard 位于可删除账号叶子之外，合法别名不因内部文件名受限。既有四份资料由[实施票 21](../local-chrome-profile-implementation/issues/21-browser-kind-first-layout.md)安全移动并正常 check，历史证据保留原路径。
+
+## 2026-11-17 用户追加：旧入口与 stealth 删除
+
+用户明确覆盖此前保留历史调用方/辅助资源的约定：删除旧 TikTok Firefox、未完成且未注册的 TencentNote、通用旧本地会话，再按引用闭包删除 stealth helper/资源/打包项/旧测试。保留正式 17 平台、Bilibili biliup、业务 JS/剪贴板/Humanizer 和完整 managed provider 契约；缺 provider 的通用调用明确失败，不猜测本地 Profile。实施及证据见[票 22](../local-chrome-profile-implementation/issues/22-remove-obsolete-browser-and-stealth.md)。早期记录描述历史事实。
