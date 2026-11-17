@@ -18,10 +18,11 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.local_account import local_account_alias
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError
 from utils.local_browser_session import local_browser_session
 from utils.humanize import (
     DEFAULT_PROFILE,
@@ -114,15 +115,7 @@ def _raise_if_local_login_required(page, *, publish_attempted=False):
 
 
 def _account_alias(account_file=None, account_name=None):
-    """Legacy positional names identify an alias only; no old file is opened."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("youtube_") and name.endswith(".json"):
-        return name[len("youtube_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="youtube")
 
 
 def local_context_kwargs():

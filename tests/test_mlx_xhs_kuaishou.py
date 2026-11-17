@@ -675,7 +675,6 @@ class XhsCliTests(_CliCase):
         self.assertEqual(code, 0)
         self.assertIn("Xiaohongshu video upload submitted", out)
         builder.assert_called_once()
-        self.assertIsNone(builder.call_args.args[1])
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
         self.assertEqual(kwargs["launch_kwargs"], XHS_LAUNCH_KWARGS)
@@ -818,7 +817,6 @@ class XhsCliTests(_CliCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Xiaohongshu note upload submitted", out)
-        self.assertIsNone(builder.call_args.args[1])
         fake_app.xiaohongshu_upload_note.assert_awaited_once_with(session=session)
 
     def test_upload_mlx_does_not_preflight_login(self):
@@ -998,7 +996,6 @@ class KuaishouCliTests(_CliCase):
         self.assertEqual(code, 0)
         self.assertIn("Kuaishou video upload submitted", out)
         builder.assert_called_once()
-        self.assertIsNone(builder.call_args.args[1])
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
         self.assertEqual(kwargs["launch_kwargs"], KUAISHOU_LAUNCH_KWARGS)
@@ -1044,7 +1041,6 @@ class KuaishouCliTests(_CliCase):
 
         self.assertEqual(code, 0)
         self.assertIn("Kuaishou note upload submitted", out)
-        self.assertIsNone(builder.call_args.args[1])
         fake_app.main.assert_awaited_once_with(session=session)
 
     def test_upload_mlx_logged_out_returns_10_and_skips_upload(self):

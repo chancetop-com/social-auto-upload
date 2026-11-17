@@ -84,12 +84,11 @@ sau tiktok upload-video \
 - 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`。
 - 本地 Profile 是唯一登录态来源；检查/发布不引导登录。重建一个明确目标：`sau tiktok reset-profile --account creator --browser-kind chrome`；不启动浏览器，不删除另一种类、旧文件或历史结果，之后先重新 login。占用时立即失败，禁止抢占。
 - 两种模式登录/验证均退出 `10`，网络/页面结构/浏览器故障退出 `1`；共享 15 分钟发布预算。提交后错误带 `publish_attempted=true` 时，先核查作品再决定重跑。
-- 退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 - 安装、浏览器启动与当前 Profile 登录分开核验。验收视频/图文显式传 `--no-publish`：上传素材、编辑并等待发布就绪后停止，可能留下临时素材/草稿，不证明已经发布。
 
 ## 托管浏览器模式（可选）
 
-`check`、`upload-video` 和 `upload-note` 均可改用托管浏览器 Profile：MLX 需要 `--folder-id` + `--profile-id`，AdsPower 只需要 `--profile-id`（`--folder-id` 忽略）。两种模式都不读写 cookie 文件，`--account` 被忽略，日志标签取 profile_id，`login` 一律拒绝。退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+`check`、`upload-video` 和 `upload-note` 均可改用托管浏览器 Profile：MLX 需要 `--folder-id` + `--profile-id`，AdsPower 只需要 `--profile-id`（`--folder-id` 忽略）。两种模式都不读写 cookie 文件，`--account` 被忽略，日志标签取 profile_id，`login` 一律拒绝。使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。
 
 ## 视频参数
 
@@ -113,7 +112,7 @@ sau tiktok upload-video \
 
 ## 退出码与失败处理
 
-- `0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录或验证、`11` 托管限流（不自动重试）、`130` 中断。
+- `0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录或验证、`130` 中断。
 - 图片数量/格式/大小、Title/Description/hashtag 超限、`--note`/`--notef` 冲突等本地校验失败在启动浏览器前退出 `2`。
 - 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
 - 收到 `9` 时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。

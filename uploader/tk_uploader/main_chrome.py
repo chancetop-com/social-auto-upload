@@ -34,13 +34,14 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_UPLOAD_URL,
     Tk_Locator,
 )
+from utils.local_account import local_account_alias
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser import resolve_headless
 from utils.local_browser_session import local_browser_session
 from uploader.tk_uploader.schedule import prepare_schedule
-from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from pathlib import Path
 from utils.humanize import DEFAULT_PROFILE
 from utils.humanize import MAYBE_DISPATCHED
@@ -1060,16 +1061,7 @@ async def is_logged_in(context, *, managed: bool = True) -> bool:
 
 
 def _account_alias(account_file, account_name=None):
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError('本地调用需要 account_name 账号别名。')
-    # Existing direct callers may still pass the old positional filename. This
-    # is name translation only: no file exists/read/write/cleanup operation.
-    name = Path(str(account_file)).name
-    if name.endswith('.json'):
-        return name[:-5].removeprefix('tiktok_')
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="tiktok", allow_unprefixed_json=True)
 
 
 async def tiktok_setup(account_file=None, handle=False, *, headless=None, force=False,

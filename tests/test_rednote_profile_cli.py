@@ -72,6 +72,13 @@ class RednoteProfileCliTests(unittest.TestCase):
         with acquire_local_profile('rednote', 'creator', kind, create=True) as profile:
             return profile.path
 
+    def test_direct_check_accepts_unprefixed_legacy_json_name(self):
+        import asyncio
+        self.profile()
+        self.assertTrue(asyncio.run(rednote.rednote_setup('/absent/creator.json')))
+        self.assertEqual(Path(self.pw.chromium.persistent_calls[-1]['user_data_dir']).name, 'creator')
+        self.assertFalse(self.context.storage_state_calls)
+
     def test_reappearing_legacy_file_is_untouched_and_login_does_not_restart(self):
         with patch.object(rednote.asyncio, 'sleep', new=self.no_sleep):
             code, _, err = self.cli('login', '--account', 'creator', '--headed')

@@ -138,13 +138,13 @@ async def check_douyin_account(account_name, headless=None, *, local_browser=Non
     return await douyin_cookie_auth(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
-def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> DouYinVideo:
+def _build_video_uploader(request: DouyinVideoUploadRequest) -> DouYinVideo:
     app = DouYinVideo(
         request.title,
         str(request.video_file),
         request.tags,
         request.publish_date,
-        account_file,
+        None,
         desc=request.description,
         thumbnail_landscape_path=(
             str(request.thumbnail_landscape_file) if request.thumbnail_landscape_file else None
@@ -166,14 +166,14 @@ def _build_video_uploader(request: DouyinVideoUploadRequest, account_file) -> Do
     return app
 
 
-def _build_note_uploader(request: DouyinNoteUploadRequest, account_file) -> DouYinNote:
+def _build_note_uploader(request: DouyinNoteUploadRequest) -> DouYinNote:
     app = DouYinNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
         note=request.note,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=account_file,
+        account_file=None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
@@ -193,7 +193,7 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
     validate_single_line(request.title)
     validate_single_line(request.product_title, label="商品短标题")
     if target is not None:
-        app = _build_video_uploader(request, None)
+        app = _build_video_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -209,7 +209,7 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
                 await app.douyin_upload_video(session=session)
         return None
 
-    app = _build_video_uploader(request, None)
+    app = _build_video_uploader(request)
     await app.douyin_upload_video()
     return None
 
@@ -217,7 +217,7 @@ async def upload_video(request: DouyinVideoUploadRequest, *, target=None) -> Pat
 async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path | None:
     validate_single_line(request.title)
     if target is not None:
-        app = _build_note_uploader(request, None)
+        app = _build_note_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -233,7 +233,7 @@ async def upload_note(request: DouyinNoteUploadRequest, *, target=None) -> Path 
                 await app.douyin_upload_note(session=session)
         return None
 
-    app = _build_note_uploader(request, None)
+    app = _build_note_uploader(request)
     await app.douyin_upload_note()
     return None
 

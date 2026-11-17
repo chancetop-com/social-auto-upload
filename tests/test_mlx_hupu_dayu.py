@@ -446,7 +446,6 @@ class HupuCliTests(unittest.TestCase):
         self.assertEqual(kwargs["extra_ignored"], ("context_setup",))
         probe.assert_awaited_once_with(session.context)
         app.upload.assert_awaited_once_with(session=session)
-        self.assertIsNone(builder.call_args.args[1])
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
 

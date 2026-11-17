@@ -421,27 +421,10 @@ class UsageAndExitCodeTests(unittest.TestCase):
             ]
             for module, argv in cases:
                 with self.subTest(argv=argv):
-                    resolve = MagicMock(
-                        side_effect=AssertionError("cookie path must not be built")
-                    )
-                    if module in (instagram_command, facebook_command, facebook_page_command):
-                        # Migrated works actions use the raw local alias, never
-                        # a Cookie path or a managed provider/account label.
-                        with (
-                            patch.object(module, {instagram_command: "instagram_post_action", facebook_command: "facebook_post_action", facebook_page_command: "meta_post_action"}[module], new=resolve),
-                            patch.object(
-                                module, "resolve_managed_provider",
-                                side_effect=AssertionError("managed provider must not be resolved"),
-                            ) as provider,
-                        ):
-                            code, err = self._run(argv, SENTINEL_TOKEN)
-                        provider.assert_not_called()
-                    else:
-                        with patch.object(module, "resolve_account_file", new=resolve, create=True):
-                            code, err = self._run(argv, SENTINEL_TOKEN)
+                    code, err = self._run(argv, SENTINEL_TOKEN)
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
-                    resolve.assert_not_called()
+
 
     def test_exit_code_mapping(self):
         cases = (

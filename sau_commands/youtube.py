@@ -92,12 +92,12 @@ async def check_youtube_account(account_name, headless=None, *, local_browser=No
     return await youtube_setup(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
-def _build_youtube_uploader(request: YouTubeVideoUploadRequest, account_file) -> YouTubeVideo:
+def _build_youtube_uploader(request: YouTubeVideoUploadRequest) -> YouTubeVideo:
     app = YouTubeVideo(
         request.title,
         str(request.video_file),
         request.tags,
-        account_file,
+        None,
         description=request.description,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         playlist=request.playlist,
@@ -117,7 +117,7 @@ def _raise_login_required(target) -> None:
 
 async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> None:
     if target is not None:
-        app = _build_youtube_uploader(request, None)
+        app = _build_youtube_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -134,7 +134,7 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=Non
                 await app.main(session=session)
         return None
 
-    app = _build_youtube_uploader(request, None)
+    app = _build_youtube_uploader(request)
     app.set_publish_date(request.schedule)
     await app.main()
     return None

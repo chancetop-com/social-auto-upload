@@ -199,7 +199,7 @@ class NotBeforeArgumentTests(unittest.TestCase):
             publish_date=0,
             publish_not_before=target,
         )
-        app = _build_video_uploader(request, "cookies/douyin_creator.json")
+        app = _build_video_uploader(request)
         self.assertEqual(app.publish_not_before, target)
 
     @staticmethod

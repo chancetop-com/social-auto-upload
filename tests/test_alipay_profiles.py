@@ -154,6 +154,26 @@ class AlipayProfilesTests(unittest.TestCase):
                 self.assertEqual(result[0], code, result)
                 if 'verify' in str(page.target_url): self.assertIn('reason=verification', result[2])
 
+    def test_unrelated_origin_or_query_is_not_platform_authentication(self):
+        self.profile()
+        for url, login, expected in [
+            ('https://proxy.example/login', False, 1),
+            ('https://proxy.example/verify', False, 1),
+            ('https://proxy.example/interstitial', True, 1),
+            ('https://auth.alipay.com.proxy.example/login', True, 1),
+            ('https://proxy.example/?next=https://auth.alipay.com/login', False, 1),
+            ('https://c.alipay.com/page/home?next=login&message=verify', False, 0),
+        ]:
+            for action in ('check', 'upload-video') if expected == 1 else ('check',):
+                with self.subTest(url=url, login=login, action=action):
+                    self.context.next_page = BackendPage(url=url, login=login)
+                    result = (self.cli('check', '--account', 'Creator')
+                              if action == 'check' else self.upload())
+                    self.assertEqual(result[0], expected, result)
+                    if expected == 1:
+                        self.assertIn('页面未停留在支付宝内容创作平台', result[2])
+                    self.assertNotIn('reason=verification', result[2])
+
     def test_pre_and_post_submit_login_iframe_or_verification_keep_phase(self):
         self.profile()
         for phase in ('before', 'after', 'click-error'):
@@ -188,6 +208,26 @@ class AlipayProfilesTests(unittest.TestCase):
         self.assertIn('cover upload denied', result[2])
         self.assertEqual(page.selectors['publish'].click_count, 0)
 
+
+    def test_foreign_auth_redirect_after_submit_keeps_unknown_result(self):
+        self.profile()
+        for route in ('login', 'verify'):
+            with self.subTest(route=route):
+                page = UploadPage()
+                submit = page.selectors['publish']
+                async def click(**_):
+                    submit.click_count += 1
+                    page.url = f'https://proxy.example/{route}'
+                    page.login = True
+                    raise TimeoutError('foreign redirect during submission')
+                submit.click = click
+                self.context.next_page = page
+                with patch.object(uploader.asyncio, 'sleep', new=AsyncMock()):
+                    result = self.upload()
+                self.assertEqual(result[0], 9, result)
+                self.assertNotIn('reason=verification', result[2])
+                self.assertEqual(submit.click_count, 1)
+                self.assertTrue(self.context.closed)
 
     def test_defaults_overrides_browser_isolation_and_absent_optional_settings(self):
         with patch.object(conf, 'LOCAL_CHROME_HEADLESS', True):

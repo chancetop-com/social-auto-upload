@@ -81,12 +81,12 @@ async def check_hupu_account(account_name, headless=None, *, local_browser=None)
     return await hupu_cookie_auth(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
-def _build_uploader(request: HupuVideoUploadRequest, account_file) -> HuPuVideo:
+def _build_uploader(request: HupuVideoUploadRequest) -> HuPuVideo:
     app = HuPuVideo(
         title=request.title,
         file_path=str(request.video_file),
         tags=request.tags,
-        account_file=account_file,
+        account_file=None,
         desc=request.description,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         debug=request.debug,
@@ -104,7 +104,7 @@ def _raise_login_required(target) -> None:
 
 async def upload_hupu_video(request: HupuVideoUploadRequest, *, target=None) -> None:
     if target is not None:
-        app = _build_uploader(request, None)
+        app = _build_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -121,7 +121,7 @@ async def upload_hupu_video(request: HupuVideoUploadRequest, *, target=None) -> 
                 await app.upload(session=session)
         return None
 
-    app = _build_uploader(request, None)
+    app = _build_uploader(request)
     await app.main()
     return None
 

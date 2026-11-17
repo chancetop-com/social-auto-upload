@@ -129,10 +129,10 @@ async def check_meta_account(platform: str, account_name: str, *, proxy=FACEBOOK
                                   headless=headless, local_browser=local_browser)
 
 
-def _build_uploader(request: MetaUploadRequest, account_file) -> MetaBusinessUploader:
+def _build_uploader(request: MetaUploadRequest) -> MetaBusinessUploader:
     app = MetaBusinessUploader(
         request.platform,
-        account_file,
+        None,
         title=request.title,
         description=request.description,
         tags=request.tags,
@@ -158,7 +158,7 @@ async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dic
     if target is not None:
         # Profile owns channel/proxy/fingerprint; no cookie file is resolved
         # and ``--proxy`` / the environment proxy are not forwarded.
-        app = _build_uploader(replace(request, proxy=None), None)
+        app = _build_uploader(replace(request, proxy=None))
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -173,7 +173,7 @@ async def upload_meta_content(request: MetaUploadRequest, *, target=None) -> dic
                     _raise_login_required(request.platform, target)
                 return await app.upload(session=session)
 
-    return await _build_uploader(request, None).upload()
+    return await _build_uploader(request).upload()
 
 
 async def run(args):

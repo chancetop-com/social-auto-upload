@@ -117,14 +117,14 @@ async def check_kuaishou_account(account_name, headless=None, *, local_browser=N
     return await kuaishou_cookie_auth(account_name=account_name, headless=headless, local_browser=local_browser)
 
 
-def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> KSVideo:
+def _build_video_uploader(request: KuaishouVideoUploadRequest) -> KSVideo:
     app = KSVideo(
         title=request.title,
         file_path=str(request.video_file),
         desc=request.description,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=account_file,
+        account_file=None,
         thumbnail_path=str(request.thumbnail_file) if request.thumbnail_file else None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
@@ -137,14 +137,14 @@ def _build_video_uploader(request: KuaishouVideoUploadRequest, account_file) -> 
     return app
 
 
-def _build_note_uploader(request: KuaishouNoteUploadRequest, account_file) -> KSNote:
+def _build_note_uploader(request: KuaishouNoteUploadRequest) -> KSNote:
     app = KSNote(
         image_paths=[str(path) for path in request.image_files],
         title=request.title,
         note=request.note,
         tags=request.tags,
         publish_date=request.publish_date,
-        account_file=account_file,
+        account_file=None,
         publish_strategy=request.publish_strategy,
         debug=request.debug,
         headless=request.headless,
@@ -161,7 +161,7 @@ def _raise_login_required(target) -> None:
 
 async def upload_kuaishou_video(request: KuaishouVideoUploadRequest, *, target=None) -> Path | None:
     if target is not None:
-        app = _build_video_uploader(request, None)
+        app = _build_video_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -177,14 +177,14 @@ async def upload_kuaishou_video(request: KuaishouVideoUploadRequest, *, target=N
                 await app.main(session=session)
         return None
 
-    app = _build_video_uploader(request, None)
+    app = _build_video_uploader(request)
     await app.main()
     return None
 
 
 async def upload_kuaishou_note(request: KuaishouNoteUploadRequest, *, target=None) -> Path | None:
     if target is not None:
-        app = _build_note_uploader(request, None)
+        app = _build_note_uploader(request)
         async with async_playwright() as playwright:
             async with browser_session(
                 playwright,
@@ -200,7 +200,7 @@ async def upload_kuaishou_note(request: KuaishouNoteUploadRequest, *, target=Non
                 await app.main(session=session)
         return None
 
-    app = _build_note_uploader(request, None)
+    app = _build_note_uploader(request)
     await app.main()
     return None
 

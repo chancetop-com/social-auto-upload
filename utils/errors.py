@@ -30,6 +30,13 @@ class LoginRequiredError(Exception):
         self.publish_attempted = bool(publish_attempted)
 
 
+class PageCheckError(RuntimeError):
+    """An explicit HTTP/page check failed before submission (CLI exit 1).
+
+    Authentication diagnostics must not replace this already classified fault.
+    """
+
+
 class PublishResultUnknownError(Exception):
     """The publish click was sent but success was never observed.
 

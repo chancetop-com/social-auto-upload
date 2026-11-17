@@ -531,14 +531,10 @@ class ParameterMatrixTests(unittest.TestCase):
             ]
             for module, argv in cases:
                 with self.subTest(argv=argv):
-                    resolve = MagicMock(
-                        side_effect=AssertionError("cookie path must not be built")
-                    )
-                    with patch.object(module, "resolve_account_file", new=resolve, create=True):
-                        code, _, err = _run(argv, env={"ADSPOWER_API_KEY": KEY})
+                    code, _, err = _run(argv, env={"ADSPOWER_API_KEY": KEY})
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
-                    resolve.assert_not_called()
+
 
     def test_article_stays_local_and_accepts_no_browser_flags(self):
         parser = sau_cli.build_parser()

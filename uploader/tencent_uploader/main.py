@@ -17,11 +17,12 @@ from patchright.async_api import async_playwright
 import conf
 from conf import BASE_DIR
 from uploader.base_video import BaseVideoUploader
+from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError, UsageError
+from utils.errors import LoginRequiredError
 from utils.local_browser_session import local_browser_session
 from utils.humanize import (
     MAYBE_DISPATCHED,
@@ -194,15 +195,7 @@ def format_str_for_short_title(origin_title: str) -> str:
 
 
 def _account_alias(account_file=None, account_name=None):
-    """Old positional paths identify an alias only; no old file is accessed."""
-    if account_name is not None:
-        return account_name
-    if account_file is None:
-        raise UsageError("本地调用需要 account_name 账号别名。")
-    name = Path(str(account_file)).name
-    if name.startswith("tencent_") and name.endswith(".json"):
-        return name[len("tencent_"):-len(".json")]
-    return str(account_file)
+    return local_account_alias(account_file, account_name, platform="tencent")
 
 
 async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):

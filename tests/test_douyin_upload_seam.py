@@ -520,7 +520,6 @@ class DouyinMlxCliUploadTests(unittest.TestCase):
         probe.assert_awaited_once_with(session.context)
         fake_app.douyin_upload_video.assert_awaited_once_with(session=session)
         builder.assert_called_once()
-        self.assertIsNone(builder.call_args.args[1])
         resolve_account.assert_not_called()
         setup.assert_not_awaited()
 
@@ -572,7 +571,6 @@ class DouyinMlxCliUploadTests(unittest.TestCase):
         self.assertEqual(session_cm.exit_calls, 1)
         fake_app.douyin_upload_note.assert_awaited_once_with(session=session)
         builder.assert_called_once()
-        self.assertIsNone(builder.call_args.args[1])
 
     def test_upload_mlx_logged_out_returns_10_and_skips_upload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

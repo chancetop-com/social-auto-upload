@@ -42,6 +42,8 @@
 - 2026-11-17 最终收口：21–24 全部 resolved 并集成到 `91d2cc03`，本工作树 fast-forward 后逐项核对新布局/同 inode 移动/四次 check、历史代码和资源删除/发行物、Instagram 两种页面/Humanizer/真实 creator 两次复验、三平台停止摘要。以上历史 Comments 保留当时状态，当前以本条及 Answer 为准；没有再次账号操作或上传。
 - 最后隔离离线回归收集 2,123、选择 2,025、分列 98 个已单独实测的真实浏览器用例（含 23 新模块全部 6 项）；实际 124.370s，2,023 passed / 2 个既有 opt-in provider smoke skipped，0 failures/errors，无新代码修复。公共 parser 仍为 17 平台 / 87 浏览器动作 / 93 总动作，所需 flags 全部存在。完整命令、manifest/log 与各项证据见 [累计最终记录](../research/20-final-validation.md)。
 
+- 2026-11-17 审查后补充：两轴独立审查及同一新实施者的全部修复已完成，见 [Spec](../research/final-review-spec.md) 与 [Standards](../research/final-review-standards.md)。最终隔离离线 2,031 项通过（2,029 passed / 2 个既有 opt-in skip，0 failures/errors）；98 项已有浏览器证据复用，无账号操作。候选独立复核、集成合并与 root 最终工作树清理仍待执行。
+
 ## Answer
 
 原定迁移及用户追加 21–24 的实施和约定验收均已完成，17 平台正式本地入口使用当前 kind-first 持久化 Profile；旧资料/旧布局临时作业已执行并退出，授权废弃代码及 stealth 已删除，文档与按需浏览器安装路线已收口。原四平台八个真实 no-publish 结果、后续四份资料移动/check 及两次受影响 creator no-publish 复验均有分层证据，用户配置/实际 Profile/历史结果保留。普通 Instagram 只报告受控验证，未实际发布或删除作品。
