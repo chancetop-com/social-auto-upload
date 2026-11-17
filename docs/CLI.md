@@ -332,7 +332,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Rednote 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
@@ -399,7 +399,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
 - `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
+- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Rednote 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
 - 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
@@ -515,9 +515,9 @@ sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --t
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-Rednote 使用独立命令 `sau rednote`，账号文件与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
+Rednote 使用独立命令 `sau rednote`，持久化 Profile 与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
 
-小红书本地模式的浏览器 context 固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`；Rednote 使用 `en-US`。托管模式沿用 Profile 自身的语言设置。
+小红书本地模式的浏览器 context 固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`；Rednote 本地已改为保留浏览器/Profile 原语言。托管模式沿用 Profile 自身的语言设置。
 
 ### 小红书发布声明
 
@@ -746,7 +746,7 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 
 结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible`（无归因时省略）。`options` 是新增字段，旧消费方可直接忽略。
 
-本地模式的浏览器 context 固定 `locale=en-US` 与 `Accept-Language: en-US`，不依赖操作系统的浏览器语言（TikTok 已迁移为保留当前语言）；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
+本地模式的浏览器 context 固定 `locale=en-US` 与 `Accept-Language: en-US`，不依赖操作系统的浏览器语言（TikTok、Rednote 已迁移为保留当前语言）；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
 
 > 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
 >
@@ -934,7 +934,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Rednote 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 

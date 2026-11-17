@@ -1,6 +1,6 @@
 # Rednote CLI 契约
 
-执行前以 `sau rednote <子命令> --help` 核对安装版本的参数。`login`、`check`、`upload-video`、`upload-note` 使用独立的 Rednote 账号；本地模式需要 `--account`。
+执行前以 `sau rednote <子命令> --help` 核对安装版本的参数。`login`、`check`、`upload-video`、`upload-note` 使用独立的 Rednote 账号；本地模式需要 `--account`。默认 Chrome、有头；显式模式优先于 `LOCAL_CHROME_HEADLESS`，缺省 False。`--local-browser chromium` 可选完整 Chromium，`LOCAL_CHROME_PATH` 优先。所有动作使用同一平台/别名/实际种类的持久化 Profile，仅 login 引导登录。旧 JSON 不读写、不自动清理；网络/页面故障为 1，缺少 Profile 或明确未登录为 10。
 
 ## 发布前准备
 
@@ -50,4 +50,4 @@ sau rednote upload-note --account creator \
 
 托管模式由 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 二选一启用；MLX 需要 `--folder-id` 与 `--profile-id`，AdsPower 需要 `--profile-id`。先在 Profile 人工登录，CLI `login` 仅用于本地。托管模式忽略 `--account`、保留 Profile 设置、不读写本地 cookie。
 
-已验收本地登录、扫码、图文/视频发布前准备、封面、五种声明、原创开关、话题和定时回读。实际英文后台、真实托管 Profile 及最终提交仍待验收。
+旧 Cookie/context 路径曾验收本地登录、扫码和发布前选项；新持久化 Profile 已完成离线回归，真实账号验收留待最终回归。实际英文后台、真实托管 Profile 及最终提交仍待验收。

@@ -69,3 +69,5 @@
 ## 交付记录
 
 - 2026-11-17：[01 已解决](./issues/01-profile-ownership-and-reset.md)。第一批四平台开放显式重建，共享 Profile 归属/跨进程占用已交付；20 项所有权/重建测试和 213 项相关回归通过。当前只改变重建入口，浏览器持久化会话及其实际浏览器验证由 02 继续交付，其余平台按上述阻塞关系接入。
+
+- 2026-11-17：[03 已解决](./issues/03-rednote-persistent-profile.md)。Rednote 的 login/check/视频/图文和直接 uploader/setup 已接入持久化 Profile；152 项相关离线测试及 18 项完整 Chromium 自然 viewport 合成 DOM 测试通过。[验证记录](./research/03-rednote-validation.md) 区分新路径离线证据与留待 20 的真实账号验收。

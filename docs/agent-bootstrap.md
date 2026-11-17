@@ -74,7 +74,7 @@
    - `sau kuaishou --help`
    - `sau xiaohongshu --help`
    - `sau bilibili --help`
-10. TikTok 已使用持久化 Profile：默认系统 Chrome；先确认选择来源。Chrome 由用户按官方方式安装；显式 Chromium 使用项目固定 Patchright 的完整浏览器（`uv run patchright install --no-shell chromium`）。保留已有 conf.py；显式 headed/headless 优先于 LOCAL_CHROME_HEADLESS，未配置默认有头。登录使用 `sau tiktok login --account <alias> --headed`，交互完成后同配置 check；Profile/明确未登录退出 10，运行故障退出 1。仅 login 引导登录，真实发布前回归显式传 --no-publish；不要导入旧 Cookie 或自动重发。其他平台保留各自现有运行方式。
+10. TikTok、Rednote 已使用持久化 Profile：默认系统 Chrome；先确认选择来源。Chrome 由用户按官方方式安装；显式 Chromium 使用项目固定 Patchright 的完整浏览器（`uv run patchright install --no-shell chromium`）。保留已有 conf.py；显式 headed/headless 优先于 LOCAL_CHROME_HEADLESS，未配置默认有头。登录使用 `sau tiktok login --account <alias> --headed` 或 `sau rednote login --account <alias> --headed`，交互完成后同配置 check；Profile/明确未登录退出 10，运行故障退出 1。仅 login 引导登录，真实发布前回归显式传 --no-publish；不要导入旧 Cookie 或自动重发。其他平台保留各自现有运行方式。
 11. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了

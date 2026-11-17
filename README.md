@@ -167,6 +167,8 @@ sau douyin check --account creator
 # 换成 dayu、xueqiu、zhihu 等平台名称即可；具体登录要求见对应文档。
 ```
 
+Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；新 Profile 的真实账号验收留待最终回归。见 [Rednote 说明](./docs/rednote.md)。
+
 TikTok、Rednote、Instagram、小红书还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
 
 #### 指定发布时刻（可选）

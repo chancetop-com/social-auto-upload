@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Rednote adapter initialized from the Xiaohongshu uploader on 2026-11-16.
 
-Keep platform differences here: creator origin, English browser locale, session
+Keep platform differences here: creator origin, session
 checks and UI anchors. Selector comments inherited from Xiaohongshu describe
 baseline evidence, not completed Rednote account acceptance. See docs/rednote.md.
 """
@@ -26,16 +26,13 @@ from patchright.async_api import Page
 from patchright.async_api import Playwright
 from patchright.async_api import async_playwright
 
-from conf import LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
-from utils.base_social_media import set_init_script
 from utils.blocked import BlockedKind
 from utils.blocked import BlockedRules
 from utils.blocked import classify as classify_block
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
-from utils.browser_session import log_local_session_ready
 from utils.browser_session import provider_label
 from utils.browser_time import page_wall_clock
 from utils.controls import read_switch_state
@@ -50,7 +47,9 @@ from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, UsageError
+from utils.local_browser import resolve_headless
+from utils.local_browser_session import local_browser_session
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.text_validation import validate_single_line
@@ -103,10 +102,6 @@ REDNOTE_CONTENT_TYPES = tuple(REDNOTE_CONTENT_TYPE_LABELS) + tuple(
 
 REDNOTE_LOGIN_CHECK_SETTLE_MS = 3_000
 
-# 2026-11-16 Rednote 实际登录态：web_session / id_token 位于 .rednote.com，
-# 不存在小红书的 galaxy_creator_session_id。这里只做 web_session 快路预检，
-# 是否真正登录仍以发布页 probe 为准。
-REDNOTE_SESSION_COOKIE_NAME = "web_session"
 # 检查发布页的观测窗口：导航 30s + 静置 3s（探测失败是退出 1，不是失效）。
 REDNOTE_PROBE_NAVIGATION_TIMEOUT_MS = 30_000
 REDNOTE_PROBE_SETTLE_MS = REDNOTE_LOGIN_CHECK_SETTLE_MS
@@ -393,13 +388,9 @@ REDNOTE_NOTE_ADD_IMAGE_INPUT_CANDIDATES = (
     Candidate('.img-list .top input[type="file"][multiple]'),
 )
 
-# Golden local-mode browser options.  ``sau_commands/rednote.py`` passes the
-# same values to ``browser_session`` in Multilogin mode, so the two paths cannot
-# drift.  Geolocation is a local-only context option: the Multilogin branch must
-# never call ``grant_permissions`` (spec §8).
+# Retained only for managed ignored-option diagnostics; local sessions use
+# native browser defaults through local_browser_session.
 REDNOTE_LAUNCH_KWARGS = {"channel": "chromium"}
-# Rednote 面向英文浏览器环境；实际后台仍可能返回中文，优先结构选择器。
-# 托管模式沿用 Profile 自身的语言，不修改其指纹。
 REDNOTE_CONTEXT_KWARGS = {
     "permissions": ["geolocation"],
     "locale": "en-US",
@@ -1227,23 +1218,6 @@ def _multiset_difference(after, before) -> list[str]:
     return new_values
 
 
-async def _rednote_user_agent(browser) -> str:
-    """返回不带 ``HeadlessChrome`` 标记的浏览器 UA。
-
-    Rednote创作者中心的 SSO 会直接拒绝无头 Chromium 默认 UA：即使 cookie
-    完全有效，所有请求也会被重定向到 ``/login``（``service-ticket`` 返回
-    704 您已登出）。这里读取浏览器真实 UA 并把 ``HeadlessChrome`` 换成
-    ``Chrome``，让无头模式与有头模式使用同一套 UA。
-    """
-    probe_context = await browser.new_context()
-    try:
-        probe_page = await probe_context.new_page()
-        user_agent = await probe_page.evaluate("() => navigator.userAgent")
-    finally:
-        await close_browser_resources(context=probe_context)
-    return user_agent.replace("HeadlessChrome", "Chrome")
-
-
 def _anchor_hit_line(step: str, resolved: Resolved, page: Page) -> str:
     """命中日志的唯一格式：环节 / 候选种类 / 选择器 / URL。"""
     url = str(getattr(page, "url", "") or "")
@@ -1318,7 +1292,7 @@ def _build_login_result(
     success: bool,
     status: str,
     message: str,
-    account_file: str,
+    account_name: str,
     qrcode: dict | None = None,
     current_url: str = "",
 ) -> dict:
@@ -1326,7 +1300,7 @@ def _build_login_result(
         "success": success,
         "status": status,
         "message": message,
-        "account_file": str(account_file),
+        "account_name": str(account_name),
         "qrcode": qrcode,
         "current_url": current_url,
     }
@@ -1417,80 +1391,10 @@ async def _save_rednote_qrcode(
     return qrcode_info
 
 
-def _local_login_required() -> LoginRequiredError:
-    """本地会话前置失败的唯一错误形状（退出 10，未启动浏览器）。"""
-    return LoginRequiredError(
-        _blocked_message("login", "local", publish_attempted=False),
-        reason="login",
-        publish_attempted=False,
-    )
-
-
-async def local_session_preflight(account_file) -> None:
-    """零网络本地前置：账号文件存在 + 会话 cookie 存在 + 未过期。
-
-    ``expires <= 0`` 表示会话 cookie / 过期时间未知，按规格放行。任何读取
-    失败都视为「无法证明会话存在」→ ``LoginRequiredError``，绝不启动浏览器。
-    """
-    path = Path(str(account_file))
-    if not path.is_file():
-        raise _local_login_required()
-
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raise _local_login_required() from None
-
-    cookies = state.get("cookies") if isinstance(state, dict) else None
-    if not isinstance(cookies, list):
-        raise _local_login_required()
-
-    creator_host = urlsplit(_build_rednote_creator_url("/")).hostname
-    for cookie in cookies:
-        if not isinstance(cookie, dict):
-            continue
-        if cookie.get("name") != REDNOTE_SESSION_COOKIE_NAME or not cookie.get("value"):
-            continue
-        domain = str(cookie.get("domain", "")).lower()
-        cookie_host = domain.lstrip(".")
-        if not cookie_host or not creator_host:
-            continue
-        if creator_host != cookie_host and not (
-            domain.startswith(".") and creator_host.endswith("." + cookie_host)
-        ):
-            continue
-        expires = cookie.get("expires")
-        try:
-            expiry = float(expires) if expires is not None else 0.0
-        except (TypeError, ValueError):
-            expiry = 0.0
-        if expiry <= 0 or expiry > time.time():
-            return
-    raise _local_login_required()
-
-
-async def save_storage_state_atomic(context: BrowserContext, account_file) -> None:
-    """把当前 context 的 storage_state 原子写回账号文件（temp + replace）。"""
-    state = await context.storage_state()
-    target = Path(str(account_file))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_path = tempfile.mkstemp(
-        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(state, handle, ensure_ascii=False)
-        os.replace(temp_path, target)
-    except BaseException:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
-
-
-async def probe_session(context: BrowserContext) -> tuple[str, str]:
+async def probe_session(context: BrowserContext, *, close_page: bool = True) -> tuple[str, str]:
     """发布页唯一观测（check 与登录后复核共用）。
+
+    本地由 persistent context 有界关闭所有页面；托管保留独立页面清理。
 
     一次 ``new_page`` → 导航发布页 → 静置 → 分类器 → 上传入口 ``attached``
     （count ≥ 1）。返回 ``("valid" | kind, 当前 URL)``；导航 5xx / 超时 /
@@ -1554,146 +1458,113 @@ async def probe_session(context: BrowserContext) -> tuple[str, str]:
 
         raise RuntimeError("Rednote发布页检查失败：未找到上传入口（页面结构异常）")
     finally:
-        await close_browser_resources(page=page)
+        if close_page:
+            await close_browser_resources(page=page)
+
+
+def _account_alias(account_file=None, account_name=None):
+    """Translate legacy positional names without accessing their old state files."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.endswith(".json"):
+        return name[:-5].removeprefix("rednote_")
+    return str(account_file)
 
 
 async def rednote_setup(
-    account_file,
-    handle=False,
-    return_detail=False,
-    qrcode_callback=None,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    account_file=None, handle=False, return_detail=False, qrcode_callback=None,
+    headless: bool | None = None, *, account_name=None, local_browser=None,
+    session: BrowserSession | None = None, poll_interval=3, max_checks=100,
 ):
-    # 登录命令总是允许重新扫码；不再用网络探测决定是否跳过。
+    """Login or check one Profile; injected sessions retain their owner's lifetime."""
+    account = _account_alias(account_file, account_name)
+    if session is None:
+        headless = resolve_headless(headless)
+        async with async_playwright() as playwright:
+            async with local_browser_session(
+                playwright, platform="rednote", account=account, headless=headless,
+                local_browser=local_browser, create=handle,
+            ) as active:
+                return await rednote_setup(
+                    handle=handle, return_detail=return_detail,
+                    qrcode_callback=qrcode_callback, headless=headless,
+                    account_name=account, session=active,
+                    poll_interval=poll_interval, max_checks=max_checks,
+                )
     if handle:
-        rednote_logger.info(_msg("🖼️", "准备打开英文环境浏览器登录 Rednote"))
-        result = await rednote_cookie_gen(
-            account_file,
+        result = await _login_in(
+            session, account, headless=resolve_headless(headless),
             qrcode_callback=qrcode_callback,
-            headless=headless,
+            poll_interval=poll_interval, max_checks=max_checks,
         )
-        return result if return_detail else result["success"]
-
-    try:
-        await local_session_preflight(account_file)
-    except LoginRequiredError:
-        result = _build_login_result(
-            False, "cookie_invalid", "cookie文件不存在或已失效", account_file
-        )
-        return result if return_detail else False
-
-    result = _build_login_result(True, "cookie_valid", "cookie有效", account_file)
-    return result if return_detail else True
+    else:
+        kind, evidence = await probe_session(session.context, close_page=session.managed)
+        if kind != "valid":
+            raise LoginRequiredError(
+                _blocked_message(kind, session.mode, publish_attempted=False),
+                reason=kind, publish_attempted=False,
+            )
+        result = _build_login_result(True, "valid", "Profile 登录态有效", account,
+                                     current_url=evidence)
+    return result if return_detail else result["success"]
 
 
 async def rednote_cookie_gen(
-    account_file,
-    qrcode_callback=None,
-    poll_interval: int = 3,
-    max_checks: int = 100,
-    headless: bool = LOCAL_CHROME_HEADLESS,
+    account_file=None, qrcode_callback=None, poll_interval=3, max_checks=100,
+    headless: bool | None = None, *, account_name=None, local_browser=None,
+    session: BrowserSession | None = None,
 ):
-    if headless:
-        rednote_logger.info(
-            _msg(
-                "🖼️",
-                "Rednote登录将以无头模式运行，小人会输出终端二维码并保存本地二维码图片",
-            )
-        )
+    """Compatibility name for Profile login; no Cookie JSON is read or written."""
+    return await rednote_setup(
+        account_file, handle=True, return_detail=True,
+        qrcode_callback=qrcode_callback, headless=headless,
+        account_name=account_name, local_browser=local_browser, session=session,
+        poll_interval=poll_interval, max_checks=max_checks,
+    )
 
-    account_path = Path(account_file)
-    account_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            headless=headless, channel="chromium"
+async def _login_in(session, account, *, headless, qrcode_callback, poll_interval, max_checks):
+    context = session.context
+    page = await context.new_page()
+    qrcode_info = None
+    # QR images are operation artifacts, never alternate authentication state.
+    with tempfile.TemporaryDirectory(prefix="sau-rednote-qr-", ignore_cleanup_errors=True) as qr_dir:
+        await page.goto(
+            _build_rednote_creator_url("/login"),
+            wait_until="domcontentloaded",
+            timeout=REDNOTE_PROBE_NAVIGATION_TIMEOUT_MS,
         )
-        context = await browser.new_context(
-            user_agent=await _rednote_user_agent(browser),
-            **REDNOTE_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-        qrcode_path = None
-        qrcode_info = None
-        result = _build_login_result(False, "failed", "Rednote登录失败", account_file)
-        try:
-            page = await context.new_page()
-            await page.goto(
-                _build_rednote_creator_url("/login"),
-                wait_until="domcontentloaded",
-                timeout=REDNOTE_PROBE_NAVIGATION_TIMEOUT_MS,
+        await Humanizer(page).after_navigate()
+        blocked = await classify_blocked(page)
+        if blocked == "verification" and headless:
+            raise LoginRequiredError(
+                _blocked_message(blocked, session.mode, publish_attempted=False),
+                reason=blocked, publish_attempted=False,
             )
-            await Humanizer(page).after_navigate()
-            if headless or qrcode_callback is not None:
-                qrcode_info = await _save_rednote_qrcode(
-                    page, account_file, qrcode_callback=qrcode_callback
-                )
-                qrcode_path = Path(qrcode_info["image_path"])
-                rednote_logger.info(_msg("🧍", "请使用 Rednote APP 扫码登录"))
-            else:
-                # 国际账号可用短信登录；有头模式不强制切换到二维码。
-                rednote_logger.info(
-                    _msg(
-                        "🧍",
-                        "请在此浏览器中完成 Rednote 登录（短信或扫码），完成前请保持窗口打开",
+        if blocked is not None and (headless or qrcode_callback is not None):
+            qrcode_info = await _save_rednote_qrcode(
+                page, str(Path(qr_dir) / "rednote"), qrcode_callback=qrcode_callback,
+            )
+            rednote_logger.info(_msg("🧍", "请使用 Rednote APP 扫码登录"))
+        else:
+            rednote_logger.info(_msg("🧍", "请在此浏览器中完成 Rednote 登录（短信或扫码）"))
+        for _ in range(max_checks):
+            if await classify_blocked(page) is None:
+                await asyncio.sleep(REDNOTE_LOGIN_SUCCESS_SETTLE_SECONDS)
+                kind, evidence = await probe_session(context, close_page=False)
+                if kind != "valid":
+                    raise LoginRequiredError(
+                        _blocked_message(kind, session.mode, publish_attempted=False),
+                        reason=kind, publish_attempted=False,
                     )
-                )
-
-            for _ in range(max_checks):
-                # 扫码完成判据只有分类器：返回 None 即离开登录/验证页。
-                if await classify_blocked(page) is None:
-                    await asyncio.sleep(REDNOTE_LOGIN_SUCCESS_SETTLE_SECONDS)
-                    kind, evidence = await probe_session(context)
-                    if kind == "valid":
-                        await save_storage_state_atomic(context, account_file)
-                        rednote_logger.success(
-                            _msg("🥳", "Rednote 登录成功，会话已保存")
-                        )
-                        result = _build_login_result(
-                            True,
-                            "success",
-                            "Rednote 登录成功",
-                            account_file,
-                            qrcode_info,
-                            evidence or page.url,
-                        )
-                    else:
-                        result = _build_login_result(
-                            False,
-                            "cookie_invalid",
-                            "Rednote 登录流程结束，但发布页复核未通过",
-                            account_file,
-                            qrcode_info,
-                            evidence or page.url,
-                        )
-                    return result
-
-                await asyncio.sleep(poll_interval)
-
-            result = _build_login_result(
-                False,
-                "timeout",
-                "等待 Rednote 登录超时",
-                account_file,
-                qrcode_info,
-                page.url,
-            )
-        except Exception as exc:
-            result = _build_login_result(
-                False,
-                "failed",
-                str(exc),
-                account_file,
-                current_url=page.url if "page" in locals() else "",
-            )
-        finally:
-            if remove_qrcode_file(qrcode_path):
-                rednote_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
-                rednote_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
-        return result
+                rednote_logger.success(_msg("🥳", "Rednote 登录成功，状态由 Profile 保存"))
+                return _build_login_result(True, "success", "Rednote 登录成功", account,
+                                           qrcode_info, evidence or page.url)
+            await asyncio.sleep(poll_interval)
+        raise RuntimeError("等待 Rednote 登录超时")
 
 
 class RednoteBaseUploader(BaseVideoUploader):
@@ -1703,19 +1574,23 @@ class RednoteBaseUploader(BaseVideoUploader):
         account_file,
         publish_strategy: str = REDNOTE_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         original_declaration: bool | None = None,
         content_type: str | None = None,
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
         no_publish: bool = False,
+        *,
+        account_name=None,
+        local_browser=None,
     ):
         self.publish_date = publish_date
         self.account_file = None if account_file is None else str(account_file)
         self.publish_strategy = publish_strategy
         self.debug = debug
-        self.local_executable_path = LOCAL_CHROME_PATH
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.headless = headless
         # 两项声明默认都不操作页面：None / "" 表示保持平台默认。
         self.original_declaration = original_declaration
@@ -1725,11 +1600,7 @@ class RednoteBaseUploader(BaseVideoUploader):
         self.shoot_date = (shoot_date or "").strip()
         self.no_publish = no_publish
 
-    async def validate_base_args(self, *, check_cookie: bool = True):
-        if check_cookie:
-            # 唯一的本地前置：零网络，失败 = 退出 10 且不启动浏览器。
-            await local_session_preflight(self.account_file)
-
+    async def validate_base_args(self):
         if self.publish_strategy not in {
             REDNOTE_PUBLISH_STRATEGY_IMMEDIATE,
             REDNOTE_PUBLISH_STRATEGY_SCHEDULED,
@@ -2762,13 +2633,16 @@ class RednoteVideo(RednoteBaseUploader):
         desc: str | None = None,
         publish_strategy: str = REDNOTE_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         original_declaration: bool | None = None,
         content_type: str | None = None,
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
         no_publish: bool = False,
+        *,
+        account_name=None,
+        local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -2782,6 +2656,7 @@ class RednoteVideo(RednoteBaseUploader):
             shoot_location=shoot_location,
             shoot_date=shoot_date,
             no_publish=no_publish,
+            account_name=account_name, local_browser=local_browser,
         )
         self.title = title
         self.file_path = file_path
@@ -2789,8 +2664,8 @@ class RednoteVideo(RednoteBaseUploader):
         self.thumbnail_path = thumbnail_path
         self.desc = desc or ""
 
-    async def validate_upload_args(self, *, check_cookie: bool = True):
-        await self.validate_base_args(check_cookie=check_cookie)
+    async def validate_upload_args(self):
+        await self.validate_base_args()
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         validate_title_length(self.title)
@@ -3059,40 +2934,24 @@ class RednoteVideo(RednoteBaseUploader):
         self, playwright: Playwright | None, *, session: BrowserSession | None = None
     ) -> None:
         if session is not None:
-            await self.validate_upload_args(check_cookie=False)
+            await self.validate_upload_args()
             await self.upload_in(session)
             return
 
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        rednote_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
-        rednote_logger.info(_msg("🥳", "上传前检查通过"))
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **REDNOTE_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            user_agent=await _rednote_user_agent(browser),
-            **REDNOTE_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-        log_local_session_ready(headless=self.headless, account_file=self.account_file)
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
+        async with local_browser_session(
+            playwright, platform="rednote",
+            account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as active:
+            await rednote_setup(
+                account_name=_account_alias(self.account_file, self.account_name),
+                session=active,
             )
-            try:
-                await save_storage_state_atomic(context, self.account_file)
-                rednote_logger.success(_msg("🥳", "cookie 更新完毕"))
-            except Exception as error:
-                rednote_logger.warning(
-                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
-                )
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+            await self.upload_in(active)
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
@@ -3121,13 +2980,16 @@ class RednoteNote(RednoteBaseUploader):
         desc: str | None = None,
         publish_strategy: str = REDNOTE_PUBLISH_STRATEGY_IMMEDIATE,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
         original_declaration: bool | None = None,
         content_type: str | None = None,
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
         no_publish: bool = False,
+        *,
+        account_name=None,
+        local_browser=None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -3141,6 +3003,7 @@ class RednoteNote(RednoteBaseUploader):
             shoot_location=shoot_location,
             shoot_date=shoot_date,
             no_publish=no_publish,
+            account_name=account_name, local_browser=local_browser,
         )
         self.image_paths = image_paths
         self.note = note or ""
@@ -3160,8 +3023,8 @@ class RednoteNote(RednoteBaseUploader):
             self._title_explicit = False
             self._title_auto_truncated = self.title != derived
 
-    async def validate_upload_args(self, *, check_cookie: bool = True):
-        await self.validate_base_args(check_cookie=check_cookie)
+    async def validate_upload_args(self):
+        await self.validate_base_args()
         if not self.image_paths:
             raise ValueError("图文模式下，图片是必须的")
         if not self.title or not str(self.title).strip():
@@ -3278,40 +3141,24 @@ class RednoteNote(RednoteBaseUploader):
         self, playwright: Playwright | None, *, session: BrowserSession | None = None
     ) -> None:
         if session is not None:
-            await self.validate_upload_args(check_cookie=False)
+            await self.validate_upload_args()
             await self.upload_in(session)
             return
 
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        rednote_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
-        rednote_logger.info(_msg("🥳", "图文上传前检查通过"))
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **REDNOTE_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            user_agent=await _rednote_user_agent(browser),
-            **REDNOTE_CONTEXT_KWARGS,
-        )
-        context = await set_init_script(context)
-        log_local_session_ready(headless=self.headless, account_file=self.account_file)
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
+        async with local_browser_session(
+            playwright, platform="rednote",
+            account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+        ) as active:
+            await rednote_setup(
+                account_name=_account_alias(self.account_file, self.account_name),
+                session=active,
             )
-            try:
-                await save_storage_state_atomic(context, self.account_file)
-                rednote_logger.success(_msg("🥳", "cookie 更新完毕"))
-            except Exception as error:
-                rednote_logger.warning(
-                    _msg("⚠️", f"cookie 保存失败（发布已成功，不影响结果）: {error}")
-                )
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+            await self.upload_in(active)
 
     async def upload_in(self, session: BrowserSession) -> None:
         page = await session.context.new_page()
