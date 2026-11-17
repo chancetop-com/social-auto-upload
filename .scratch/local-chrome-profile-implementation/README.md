@@ -105,3 +105,7 @@
 
 - 2026-11-17：[22 已解决](./issues/22-remove-obsolete-browser-and-stealth.md)。按追加授权删除旧 TikTok Firefox、TencentNote、generic local branch 和 stealth helper/资源/打包/旧测试；保留正式业务与完整 provider 契约。897 项相关回归（2 skip）、交互/资源门禁 4 项、解压 wheel 3 项及 wheel/sdist 检查通过；未操作真实账号。见 [22 验证记录](./research/22-obsolete-browser-removal.md)。
 - 2026-11-17：[24 已解决](./issues/24-clarify-no-publish-output.md) 明确 Rednote、TikTok、小红书视频/图文 no-publish 成功摘要；本地及托管统一说明素材上传、检查完成且未点击发布，历史日志原文保留。305 项离线与 18 项真实浏览器受控 DOM 检查通过；未操作真实账号或额外上传。验证结果见票据 Comments。
+
+## 用户追加实施结果
+
+- [21：浏览器种类首层布局与资料搬迁](./issues/21-browser-kind-first-layout.md)已完成；四个原始 Profile 保留 inode 安全移动，四项普通 Chrome 有头 check 均 valid/0。未知旧父目录 `.DS_Store` 保留，历史 19/20 路径不改写；[新布局验证记录](./research/21-layout-validation.md)另存实际证据。
