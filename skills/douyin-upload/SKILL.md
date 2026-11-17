@@ -1,6 +1,6 @@
 ---
 name: douyin-upload
-description: 当 agent 需要通过已安装的 `sau` CLI 完成抖音登录、cookie 校验、视频上传或图文发布时使用这个 skill。该 skill 适用于已经安装 `social-auto-upload` 且可调用 `sau` 命令的环境。优先使用这个 skill 进行稳定的命令式抖音工作流，而不是一开始就阅读 uploader 源码。
+description: 当 agent 需要通过已安装的 `sau` CLI 完成抖音登录、登录态检查、视频上传或图文发布时使用这个 skill。该 skill 适用于已经安装 `social-auto-upload` 且可调用 `sau` 命令的环境。优先使用这个 skill 进行稳定的命令式抖音工作流，而不是一开始就阅读 uploader 源码。
 license: MIT-0
 slug: social-auto-upload-douyin-upload
 displayName: 抖音视频与图文发布
@@ -20,8 +20,8 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 
 | 功能 | 命令入口 | 说明 |
 | --- | --- | --- |
-| 抖音登录 | `sau douyin login --account <name>` | 生成或刷新指定账号的 cookie |
-| cookie 校验 | `sau douyin check --account <name>` | 检查指定账号 cookie 是否有效 |
+| 抖音登录 | `sau douyin login --account <name>` | 在专用持久化 Profile 完成登录 |
+| 登录态检查 | `sau douyin check --account <name>` | 检查指定 Profile 登录态 |
 | 视频上传 | `sau douyin upload-video ...` | 上传并发布抖音视频 |
 | 图文上传 | `sau douyin upload-note ...` | 上传并发布抖音图文 |
 
@@ -40,14 +40,14 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 ## 支持动作
 
 - 使用 `sau douyin login --account <name>` 登录抖音
-- 使用 `sau douyin check --account <name>` 校验 cookie 是否有效
+- 使用 `sau douyin check --account <name>` 检查 Profile 登录态
 - 使用 `sau douyin upload-video ...` 上传抖音视频
 - 使用 `sau douyin upload-note ...` 上传抖音图文
 
 ## 命令选择建议
 
-- 当用户需要新的 cookie，或现有 cookie 已失效时，使用 `login`
-- 当用户只需要确认 cookie 状态时，使用 `check`
+- 当用户需要登录，或现有 Profile 登录失效时，使用 `login`
+- 当用户只需要确认登录状态时，使用 `check`
 - 当用户要发布视频时，使用 `upload-video`
 - 当用户要发布图文时，使用 `upload-note`
 
@@ -60,13 +60,20 @@ summary: 使用 sau 登录抖音并发布视频或图文。
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
 - 二维码图片本身就是给用户扫码的，优先直接把本地图片展示/发送给用户
 
+## 本地 Profile 与结果处理
+
+抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/douyin/<原始别名>/<chrome|chromium>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
+
+只有 login 引导扫码或验证；缺少 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。同别名可以重新登录另一真实账号，Chrome 与 Chromium 各自隔离。发布中遇到验证即结束本次任务；提交后退出 `10` 会附 `publish_attempted=true`，退出 `9` 表示结果未知，都先核对作品再决定重试。重建使用 `sau douyin reset-profile --account creator --browser-kind chrome`，无需 binary，拒绝占用，保留另一浏览器及历史结果；不会自动恢复发布任务。抖音没有 `--no-publish`，环境验证使用离线或受控页面，不能以真实提交验收。
+
 ## 托管浏览器模式（可选）
 
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，抖音的 `check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
-- 两种模式下 `--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 两种模式下 `--account` 被忽略，身份由 `profile_id` 决定；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 托管忽略本地浏览器选择/路径，只采用上述 headless 来源；本地安装和资料不参与。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ```bash
