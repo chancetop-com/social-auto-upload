@@ -17,7 +17,7 @@ LOCAL_UPLOADS = (
     # Kuaishou persistent outcomes: test_kuaishou_profiles.
     # TencentVideo persistent outcomes: test_tencent_profiles.
     ("tencent", "TencentNote"),
-    ("alipay", "AlipayVideo"),
+    # Alipay persistent outcomes: test_alipay_profiles.
     ("weibo", "WeiBoVideo"),
     # Baijiahao persistent outcomes: test_baijiahao_profiles.
     ("hupu", "HuPuVideo"),

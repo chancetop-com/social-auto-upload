@@ -4,10 +4,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json as _json
-import os
 import re
 import time
+from tempfile import TemporaryDirectory
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from patchright.async_api import (
     BrowserContext,
@@ -17,13 +18,13 @@ from patchright.async_api import (
     async_playwright,
 )
 
-from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+import conf
 from uploader.base_video import BaseVideoUploader
-from utils.base_social_media import set_init_script
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError, PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.local_browser_session import local_browser_session
 from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -40,6 +41,10 @@ ALIPAY_LIFE_ACCOUNT_URL = "https://c.alipay.com/page/life-account/index?_appScen
 ALIPAY_POSTS_URL = "https://c.alipay.com/page/content-creation/posts"
 
 
+class AlipayPageFault(RuntimeError):
+    """An explicit platform fault takes precedence over incidental login markup."""
+
+
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 
@@ -49,7 +54,7 @@ def _build_login_result(success: bool, status: str, message: str, account_file: 
         "success": success,
         "status": status,
         "message": message,
-        "account_file": str(account_file),
+        "account_name": str(account_file),
         "qrcode": qrcode,
         "current_url": current_url,
     }
@@ -65,18 +70,16 @@ async def _emit_qrcode_callback(qrcode_callback, payload: dict):
 
 def _build_launch_kwargs(headless: bool | None = None) -> dict:
     launch_kwargs = {}
-    if LOCAL_CHROME_PATH:
-        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+    if getattr(conf, "LOCAL_CHROME_PATH", None):
+        launch_kwargs["executable_path"] = conf.LOCAL_CHROME_PATH
     if headless is not None:
         launch_kwargs["headless"] = headless
     return launch_kwargs
 
 
-# Golden local-mode browser options (ticket 20).  ``sau_commands/alipay.py``
-# passes the same values to ``browser_session`` in Multilogin mode, so the two
-# paths cannot drift.  Alipay deliberately does NOT inject the stealth init
-# script (it breaks the qiankun micro-app), and Multilogin never grants
-# geolocation permissions.
+# Historical managed options stay stable. Local sessions use the shared resolver.
+# Stealth breaks the qiankun micro-app; neither mode injects it.
+# Managed Alipay never grants geolocation permissions.
 ALIPAY_LAUNCH_KWARGS = _build_launch_kwargs()
 ALIPAY_CONTEXT_KWARGS = {"permissions": ["geolocation"]}
 ALIPAY_INIT_SCRIPT = False
@@ -153,8 +156,7 @@ async def _cover_input_attached(locator) -> bool:
 def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this; the local branch keeps its historical
-    retry/timeout behaviour untouched.  ``publish_attempted`` must be true when
+    Only the managed branch calls this; local sessions use iframe-aware checks.  ``publish_attempted`` must be true when
     the redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
@@ -168,8 +170,8 @@ def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
         )
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to Alipay.
+async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
+    """Probe the current Profile without changing stored state.
 
     The page-level behaviour mirrors the historical ``cookie_auth`` check (login
     URL / login iframe means logged out) and adds a positive anchor: the
@@ -177,23 +179,31 @@ async def is_logged_in(context: BrowserContext) -> bool:
     timeouts, 5xx responses and pages without the anchor (including unexpected
     domains) raise, so an outage is never reported as exit code 10.
 
-    Only ``context.new_page()`` / ``goto`` / ``close`` are used.
+    Local pages belong to the persistent context owner; managed probes close
+    only their own page.
     """
     page = await context.new_page()
     try:
-        response = await page.goto(
-            ALIPAY_LOGIN_CHECK_URL,
-            wait_until="domcontentloaded",
-            timeout=ALIPAY_LOGIN_CHECK_TIMEOUT_MS,
-        )
+        try:
+            response = await page.goto(
+                ALIPAY_LOGIN_CHECK_URL,
+                wait_until="domcontentloaded",
+                timeout=ALIPAY_LOGIN_CHECK_TIMEOUT_MS,
+            )
+        except Exception:
+            if not managed:
+                await _raise_if_local_login_required(page)
+            raise
         status = getattr(response, "status", None)
-        if isinstance(status, int) and status >= 500:
+        if isinstance(status, int) and status >= (500 if managed else 400):
             raise RuntimeError(f"支付宝登录状态检查失败：HTTP {status}")
 
         wait_for_timeout = getattr(page, "wait_for_timeout", None)
         if wait_for_timeout is not None:
             await wait_for_timeout(ALIPAY_LOGIN_CHECK_SETTLE_MS)
 
+        if not managed:
+            return await _local_login_state(page)
         current_url = str(getattr(page, "url", "") or "")
         lowered = current_url.lower()
         if any(marker in lowered for marker in ALIPAY_LOGIN_URL_MARKERS):
@@ -218,18 +228,58 @@ async def is_logged_in(context: BrowserContext) -> bool:
             "支付宝登录状态检查失败：未找到内容创作入口（页面结构异常）"
         )
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
-def _resolve_account_file(account_file: str | Path) -> str:
-    path = Path(account_file).expanduser()
-    if path.is_absolute():
-        return str(path)
+def _account_alias(account_file=None, account_name=None):
+    """Legacy positional paths identify an alias only; no old state is accessed."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("支付宝本地模式需要 account_name 账号别名")
+    name = Path(str(account_file)).name
+    if name.startswith("alipay_") and name.endswith(".json"):
+        return name[len("alipay_"):-len(".json")]
+    return str(account_file)
 
-    if len(path.parts) == 1:
-        return str((Path(BASE_DIR) / "cookies" / "alipay_uploader" / path).resolve())
 
-    return str(path.resolve())
+async def _raise_if_local_login_required(page, *, publish_attempted=False):
+    url = str(page.url).lower()
+    verification = any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa"))
+    if verification:
+        raise LoginRequiredError("支付宝需要人机验证 reason=verification；请先完成验证后重试。",
+                                 reason="verification", publish_attempted=publish_attempted)
+    if (urlsplit(url).hostname == "auth.alipay.com" or "login" in url
+            or await page.locator('iframe[title="login"]').count()):
+        raise LoginRequiredError("支付宝未登录；请运行 sau alipay login --account <账号别名>。",
+                                 publish_attempted=publish_attempted)
+
+
+async def _check_login_after_error(page, *, publish_attempted=False):
+    """Use available login evidence without replacing a primary browser error."""
+    try:
+        await _raise_if_local_login_required(page, publish_attempted=publish_attempted)
+    except LoginRequiredError:
+        raise
+    except Exception:
+        pass
+
+
+async def _local_login_state(page):
+    try:
+        await _raise_if_local_login_required(page)
+    except LoginRequiredError as error:
+        if error.reason == "verification":
+            raise
+        return False
+    if urlsplit(str(page.url)).hostname != "c.alipay.com":
+        raise RuntimeError("支付宝登录状态检查失败：页面未停留在支付宝内容创作平台")
+    for selector in ALIPAY_LOGIN_POSITIVE_SELECTORS:
+        locator = page.locator(selector)
+        if await locator.count() and await locator.first.is_visible():
+            return True
+    raise RuntimeError("支付宝登录状态检查失败：未找到内容创作入口（页面结构或权限异常）")
 
 
 def format_title_with_tags(title: str, tags: list[str], max_length: int = 30) -> str:
@@ -318,136 +368,76 @@ async def _capture_alipay_qr(page: Page, account_file: str, previous_qrcode_path
     return {"image_path": str(qrcode_path), "image_data_url": ""}
 
 
-async def alipay_cookie_gen(account_file, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 100, headless: bool = LOCAL_CHROME_HEADLESS):
-    """打开浏览器，用户扫码登录支付宝生活号，登录成功后保存 cookie（镜像 douyin_cookie_gen）。
-
-    二维码 png 落 cookies 目录（*login_qrcode*.png）供终端显示/告知位置；qrcode_callback 可选（如 relogin 推飞书）。
-    headless=False 时也可直接在弹出的浏览器里扫码。
-    返回 _build_login_result 结果 dict。
-    """
-    account_file = _resolve_account_file(account_file)
-    Path(account_file).parent.mkdir(parents=True, exist_ok=True)
-    qrcode_path = None
-    result = _build_login_result(False, "failed", "支付宝登录失败", account_file)
+async def alipay_cookie_gen(account_file=None, qrcode_callback=None, poll_interval: int = 3,
+                            max_checks: int = 100, headless=None, *, account_name=None,
+                            local_browser=None):
+    """Guide QR login in the selected persistent Profile without exporting state."""
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
-        context = await browser.new_context()
-        try:
-            page = await context.new_page()
-            # 注意：不能用 set_init_script(stealth) —— 实验证明 stealth 会阻止支付宝登录 iframe 注入
-            # 先进受保护的后台页，未登录会触发登录弹窗（iframe[title="login"]，异步注入约 2~4s）
-            await page.goto(ALIPAY_PORTAL_HOME, timeout=60000, wait_until="domcontentloaded")
-            if headless:
-                alipay_logger.info(_msg("🧍", "无头登录中：二维码已存为图片，请在终端扫或打开图片扫码（或由发布进程推送到飞书）"))
-            else:
-                alipay_logger.info(_msg("🧍", "请在打开的浏览器中扫码登录支付宝生活号（登录完成后请勿手动关闭浏览器）"))
-
-            # 等登录 iframe 出现
-            login_iframe = page.locator('iframe[title="login"]')
-            for _ in range(30):
+        async with local_browser_session(playwright, platform="alipay", account=account,
+                headless=headless, local_browser=local_browser, create=True) as session:
+            if await is_logged_in(session.context, managed=False):
+                return _build_login_result(True, "profile_valid", "Profile 已登录", account)
+            page = await session.context.new_page()
+            qrcode_path = None
+            qr_directory = TemporaryDirectory(prefix="sau-alipay-qr-", ignore_cleanup_errors=True)
+            try:
+                response = await page.goto(ALIPAY_PORTAL_HOME, timeout=60000, wait_until="domcontentloaded")
+                status = getattr(response, "status", None)
+                if isinstance(status, int) and status >= 400:
+                    raise RuntimeError(f"支付宝登录页面故障：HTTP {status}")
+                alipay_logger.info(_msg("🧍", "请扫描登录二维码（登录完成后请勿手动关闭浏览器）"))
+                # Keep the native QR iframe intact: stealth breaks qiankun rendering.
+                qrcode_info = await _capture_alipay_qr(page, str(Path(qr_directory.name) / "login"))
+                qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
+                await _emit_qrcode_callback(qrcode_callback, qrcode_info)
+                for _ in range(max_checks):
+                    if await _is_alipay_login_completed(page, page.locator('iframe[title="login"]')):
+                        # The portal is not proof of content-creation permission.
+                        if not await is_logged_in(session.context, managed=False):
+                            raise LoginRequiredError("支付宝登录未完成；请重新运行 sau alipay login。")
+                        return _build_login_result(True, "success", "支付宝扫码登录成功", account, qrcode_info, page.url)
+                    await page.wait_for_timeout(poll_interval * 1000)
+                raise RuntimeError("等待支付宝扫码登录超时")
+            finally:
                 try:
-                    if await login_iframe.count():
-                        break
-                except Exception:
-                    pass
-                await page.wait_for_timeout(1000)
-            else:
-                await context.close()
-                await browser.close()
-                return _build_login_result(False, "timeout", "等待登录弹窗超时（30s），放弃保存", account_file, current_url=page.url)
-
-            # 截图二维码（无头时给终端/飞书；有头时也截一份备用，不致命）
-            qrcode_info = await _capture_alipay_qr(page, account_file)
-            qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
-            await _emit_qrcode_callback(qrcode_callback, qrcode_info)
-            alipay_logger.info(_msg("🧍", "请扫码，正在耐心等待登录完成"))
-
-            # 轮询等待登录完成：登录 iframe 消失（登录成功后 auth 页会跳走）
-            for _i in range(max_checks):  # 最多等 3~5 分钟
-                if await _is_alipay_login_completed(page, login_iframe):
-                    alipay_logger.info(_msg("🥳", f"扫码成功，已经跳转到登录后页面: {page.url}"))
-                    result = _build_login_result(True, "success", "支付宝扫码登录成功", account_file, qrcode_info, page.url)
-                    break
-                await page.wait_for_timeout(poll_interval * 1000)
-            else:
-                result = _build_login_result(False, "timeout", "等待支付宝扫码登录超时", account_file, qrcode_info, page.url)
-
-            if result["success"]:
-                await asyncio.sleep(2)
-                await context.storage_state(path=account_file)
-                # 登录结束，轻量确认 cookie 文件里有点东西
-                try:
-                    _d = _json.load(open(account_file))
-                    _has_cookie = any(c.get("value") for c in _d.get("cookies", []))
-                    if not _has_cookie:
-                        result = _build_login_result(False, "cookie_invalid", "支付宝扫码流程结束，但 cookie 为空", account_file, qrcode_info, page.url)
-                except Exception as _e:
-                    alipay_logger.warning(_msg("⚠️", f"cookie 文件校验异常（忽略，按成功处理）: {_e}"))
-        except Exception as exc:
-            result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
-        finally:
-            if remove_qrcode_file(qrcode_path):
-                alipay_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
-                alipay_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
-    return result
+                    remove_qrcode_file(qrcode_path)
+                except OSError as error:
+                    alipay_logger.warning(f"临时二维码清理失败，保留登录结果: {error}")
+                qr_directory.cleanup()
+                # Persistent context owns operation pages and bounded cleanup.
 
 
 async def _is_alipay_login_completed(page: Page, login_iframe) -> bool:
-    # 登录成功判定：登录 iframe 消失（登录成功后 auth 页会跳走），且 URL 回到 c.alipay.com 后台不算登录页
-    try:
-        if await login_iframe.count() != 0:
-            return False
-        url = page.url
-        if url.startswith("https://c.alipay.com/") and "login" not in url.lower():
-            return True
-    except Exception:
+    if await login_iframe.count():
         return False
-    return False
+    url = str(page.url).lower()
+    if any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa")):
+        await _raise_if_local_login_required(page)
+    return urlsplit(url).hostname == "c.alipay.com" and "login" not in url
 
 
-async def cookie_auth(account_file):
-    account_file = _resolve_account_file(account_file)
+async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
+    """Compatibility name for checking the selected persistent Profile."""
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            page = await context.new_page()
-            await page.goto(ALIPAY_LIFE_ACCOUNT_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
-
-            # 登录会整页跳 auth.alipay.com；仍停留在 c.alipay.com 且不在 login 页才算有效
-            url = page.url
-            if url.startswith("https://auth.alipay.com/") or "login" in url.lower():
-                alipay_logger.info(_msg("🥹", "cookie 已失效（跳转到登录页）"))
-                return False
-            if await page.locator('iframe[title="login"]').count():
-                alipay_logger.info(_msg("🥹", "cookie 已失效（出现登录弹窗）"))
-                return False
-
-            alipay_logger.success(_msg("🥳", "cookie 有效"))
+        async with local_browser_session(playwright, platform="alipay", account=account,
+                headless=headless, local_browser=local_browser) as session:
+            if not await is_logged_in(session.context, managed=False):
+                raise LoginRequiredError("支付宝未登录；请运行 sau alipay login --account <账号别名>。")
             return True
-        except Exception as exc:
-            alipay_logger.warning(_msg("😵", f"cookie 校验时出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await close_browser_resources(browser=browser)
 
 
-async def alipay_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
-    account_file = _resolve_account_file(account_file)
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie 文件不存在或已失效", account_file)
-            return result if return_detail else False
-        alipay_logger.info(_msg("🥹", "cookie 文件不存在或已失效，自动打开浏览器请扫码登录"))
-        result = await alipay_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie 有效", account_file)
-    return result if return_detail else True
+async def alipay_setup(account_file=None, handle=False, return_detail=False, qrcode_callback=None,
+                       headless=None, *, account_name=None, local_browser=None):
+    account = _account_alias(account_file, account_name)
+    if handle:
+        result = await alipay_cookie_gen(account_name=account, qrcode_callback=qrcode_callback,
+                                        headless=headless, local_browser=local_browser)
+    else:
+        await cookie_auth(account_name=account, headless=headless, local_browser=local_browser)
+        result = _build_login_result(True, "profile_valid", "Profile 已登录", account)
+    return result if return_detail else result["success"]
 
 
 class AlipayVideo(BaseVideoUploader):
@@ -458,34 +448,32 @@ class AlipayVideo(BaseVideoUploader):
         title,
         file_path,
         tags,
-        account_file,
+        account_file=None,
         desc: str | None = None,
         thumbnail_path: str | None = None,
         collection_name: str | None = None,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
+        *, account_name=None, local_browser=None,
     ):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
         self.account_file = (
-            _resolve_account_file(account_file) if account_file is not None else None
+            str(account_file) if account_file is not None else None
         )
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
         self.collection_name = collection_name
         self.debug = debug
         self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.max_title_length = 30
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
+        # check_cookie is retained only for direct-call signature compatibility.
         format_title_with_tags(self.title, self.tags, max_length=self.max_title_length)
-        if check_cookie:
-            if not self.account_file or not os.path.exists(self.account_file):
-                raise RuntimeError(f"cookie文件不存在，请先完成支付宝生活号登录: {self.account_file}")
-            if not await cookie_auth(self.account_file):
-                raise RuntimeError(f"cookie文件已失效，请先完成支付宝生活号登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         self.file_path = str(self.validate_video_file(self.file_path))
@@ -511,13 +499,19 @@ class AlipayVideo(BaseVideoUploader):
 
     async def open_upload_page(self, page: Page, *, multilogin: bool = False) -> None:
         # 进内容创作平台首页，点"发布视频"卡片（JS 跳转）进入短视频发布表单
-        await page.goto(
+        response = await page.goto(
             ALIPAY_LIFE_ACCOUNT_URL,
             timeout=self.publish_budget.clamp_ms(120000),
             wait_until="domcontentloaded",
         )
+        if getattr(self, "_local_profile_mode", False):
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and status >= 400:
+                raise AlipayPageFault(f"支付宝发布页面故障：HTTP {status}")
         if multilogin:
             _raise_if_login_required(page)
+        elif getattr(self, "_local_profile_mode", False):
+            await _raise_if_local_login_required(page)
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
@@ -605,6 +599,8 @@ class AlipayVideo(BaseVideoUploader):
             await page.wait_for_timeout(800)
             alipay_logger.success(_msg("🖼️", "封面已上传"))
         except Exception as exc:
+            if getattr(self, "_local_profile_mode", False):
+                raise
             alipay_logger.warning(_msg("😵", f"封面上传失败，跳过继续: {exc}"))
 
     async def _set_cover_via_chooser(
@@ -684,9 +680,13 @@ class AlipayVideo(BaseVideoUploader):
                 alipay_logger.success(_msg("🥳", f"已选择合集：{self.collection_name}"))
                 return
 
+            if getattr(self, "_local_profile_mode", False):
+                raise RuntimeError(f"找不到请求的合集：{self.collection_name}")
             alipay_logger.warning(_msg("😵", f"账号中无「{self.collection_name}」合集，跳过归集"))
             await humanizer.press("Escape")
         except Exception as exc:
+            if getattr(self, "_local_profile_mode", False):
+                raise
             alipay_logger.warning(_msg("😵", f"选择合集失败，跳过归集继续发布: {exc}"))
 
     async def check_ai_label(self, page: Page) -> None:
@@ -709,6 +709,8 @@ class AlipayVideo(BaseVideoUploader):
         start = time.monotonic()
         timeout = budget.clamp_seconds(timeout)
         while True:
+            if getattr(self, "_local_profile_mode", False):
+                await _raise_if_local_login_required(page)
             budget.check_pre_click()
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"等待视频上传/转码超时（>{timeout}s），确认发布按钮始终不可用")
@@ -844,6 +846,7 @@ class AlipayVideo(BaseVideoUploader):
                 pass
 
         retried_after_aigc = False
+        quality_attempted = False
         try:
             page.on("response", _on_response)
             page.on("request", _on_request)
@@ -853,16 +856,22 @@ class AlipayVideo(BaseVideoUploader):
                 标题断字等），拦截真正提交导致 90s 超时。弹窗里「继续发布」才是放行，
                 「返回更换」虽是主按钮样式却会退回修改，必须按文案点「继续发布」。
                 返回是否点了「继续发布」。"""
+                nonlocal quality_attempted
+                if getattr(self, "_local_profile_mode", False) and quality_attempted:
+                    return False
                 try:
                     btn = page.locator(
                         ALIPAY_QUALITY_MODAL_BUTTON_SELECTOR
                     ).first
                     if await btn.count() and await btn.is_visible():
+                        quality_attempted = True
                         await humanizer.click(btn)
                         alipay_logger.info(_msg("✅", "已点击优化项弹窗「继续发布」放行提交"))
                         await page.wait_for_timeout(500)
                         return True
                 except Exception as exc:
+                    if getattr(self, "_local_profile_mode", False):
+                        raise
                     alipay_logger.warning(_msg("😵", f"点击「继续发布」失败: {exc}"))
                 return False
 
@@ -874,14 +883,20 @@ class AlipayVideo(BaseVideoUploader):
             budget.check_pre_click()
             await _collect_click_diag("点击前")
             await humanizer.before_submit()
+            if getattr(self, "_local_profile_mode", False):
+                await _raise_if_local_login_required(page)
             try:
                 await humanizer.click(publish_btn)
             except Exception as exc:
                 if maybe_dispatched(exc):
+                    self._local_publish_attempted = True
+                    if getattr(self, "_local_profile_mode", False):
+                        await _check_login_after_error(page, publish_attempted=True)
                     # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
                     raise budget.timeout_error(True) from exc
                 raise
             publish_clicked = True
+            self._local_publish_attempted = True
             await page.wait_for_timeout(600)
             await _collect_click_diag("首次点击后")
             # 首次点击后可能立即弹出优化项拦截弹窗，先放行一次
@@ -893,6 +908,8 @@ class AlipayVideo(BaseVideoUploader):
             while budget.remaining_seconds() > 0:
                 if multilogin:
                     _raise_if_login_required(page, publish_attempted=publish_clicked)
+                elif getattr(self, "_local_profile_mode", False):
+                    await _raise_if_local_login_required(page, publish_attempted=publish_clicked)
                 if "/content-creation/posts" in page.url:
                     alipay_logger.success(_msg("🥳", "视频发布成功"))
                     return
@@ -906,13 +923,14 @@ class AlipayVideo(BaseVideoUploader):
                 no_submit_signal = not (saw_captcha_verify or saw_publish_submit)
 
                 # 命中 AIGC 预处理链路后，页面通常仍停留在发布页，需要再点一次确认发布才真正提交。
-                # 仅在尚未观察到提交请求时补点，避免提交后因 AIGC 事件晚到而重复发布。
+                # 保留托管历史行为；本地提交后只观察，缺少请求事件不能证明尚未提交。
                 try:
                     saw_aigc_done = any(
                         ("querylooptask" in u.lower() and '"done":true' in (b or "").lower())
                         for _, u, _, b in net_events
                     )
-                    if saw_aigc_done and not retried_after_aigc and no_submit_signal:
+                    if (not getattr(self, "_local_profile_mode", False)
+                            and saw_aigc_done and not retried_after_aigc and no_submit_signal):
                         if await publish_btn.count() and not await publish_btn.is_disabled():
                             await humanizer.before_submit()
                             try:
@@ -939,7 +957,7 @@ class AlipayVideo(BaseVideoUploader):
                     pass
                 try:
                     if await fail_toast.count() and await fail_toast.is_visible():
-                        raise RuntimeError("发布失败（页面返回失败提示）")
+                        raise AlipayPageFault("发布失败（页面返回失败提示）")
                 except RuntimeError:
                     raise
                 except Exception:
@@ -947,6 +965,13 @@ class AlipayVideo(BaseVideoUploader):
                 await page.wait_for_timeout(1000)
 
             raise budget.timeout_error(publish_clicked)
+        except (AlipayPageFault, LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
+            if getattr(self, "_local_profile_mode", False) and self._local_publish_attempted:
+                await _check_login_after_error(page, publish_attempted=True)
+                raise budget.timeout_error(True) from error
+            raise
         finally:
             page.remove_listener("response", _on_response)
             page.remove_listener("request", _on_request)
@@ -973,46 +998,40 @@ class AlipayVideo(BaseVideoUploader):
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
 
-        alipay_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
-        await self.validate_upload_args()
-        alipay_logger.info(_msg("🥳", "上传前检查通过"))
-
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **ALIPAY_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **ALIPAY_CONTEXT_KWARGS,
-        )
-        # 注意：不能用 set_init_script(stealth) —— 会阻止支付宝内容创作平台(qiankun 微应用)渲染
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-
-            if await save_upload_session(context, self.account_file):
-                alipay_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        await self.validate_upload_args(check_cookie=False)
+        async with local_browser_session(playwright, platform="alipay",
+                account=_account_alias(self.account_file, self.account_name),
+                headless=self.headless, local_browser=self.local_browser) as owned:
+            if not await is_logged_in(owned.context, managed=False):
+                raise LoginRequiredError("支付宝未登录；请运行 sau alipay login --account <账号别名>。")
+            await self.upload_in(owned)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
+        self._local_profile_mode = not session.managed
+        self._local_publish_attempted = False
         multilogin = session.managed
         page = await session.context.new_page()
         # 一个 page 一个 Humanizer：构造点紧跟 new_page，之后所有交互都用它。
         self._humanizer(page)
-        await self.open_upload_page(page, multilogin=multilogin)
-        alipay_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
+        try:
+            await self.open_upload_page(page, multilogin=multilogin)
+            alipay_logger.info(_msg("🏃", f"开始上传视频: {self.title}"))
 
-        await self.upload_video_file(page, self.file_path)
-        await self.fill_title_and_tags(page)
-        await self.fill_description(page)
-        await self.upload_thumbnail(page)
-        await self.apply_collection(page)
-        await self.check_ai_label(page)
-        await self.wait_for_upload_complete(page)
-        await self.submit_publish(page, multilogin=multilogin)
+            await self.upload_video_file(page, self.file_path)
+            await self.fill_title_and_tags(page)
+            await self.fill_description(page)
+            await self.upload_thumbnail(page)
+            await self.apply_collection(page)
+            await self.check_ai_label(page)
+            await self.wait_for_upload_complete(page)
+            await self.submit_publish(page, multilogin=multilogin)
+        except (AlipayPageFault, LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception:
+            if not multilogin:
+                await _check_login_after_error(page, publish_attempted=self._local_publish_attempted)
+            raise
 
     async def alipay_upload_video(self, *, session: BrowserSession | None = None):
         if session is not None:
