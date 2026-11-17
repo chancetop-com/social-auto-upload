@@ -11,6 +11,7 @@ import conf
 from patchright.async_api import async_playwright
 from utils.local_browser_session import local_browser_session
 from utils.local_browser import resolve_local_browser
+from utils.local_profile import acquire_local_profile
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -54,6 +55,10 @@ async def main():
                                 page=await session.context.new_page(); await page.goto(url)
                                 assert await page.evaluate('localStorage.getItem("persist")')==token
                                 assert await page.evaluate('document.cookie')=='persist='+token
+                            # Even the final matrix row must prove browser cleanup
+                            # released both project ownership and native singleton state.
+                            with acquire_local_profile('tiktok', 'isolated-smoke', kind, root=root) as profile:
+                                assert profile.exists
                             record={'kind':kind,'headless':headless,'source':config.source,'version':version,'persistence':True,'anonymous_isolation':True}
                             results.append(record); print(json.dumps(record),flush=True)
     finally:
