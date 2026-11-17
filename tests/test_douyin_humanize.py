@@ -602,6 +602,9 @@ class HumanizeEventSequenceTests(unittest.TestCase):
             page = _page(
                 {
                     "text:发布图文:exact": tab,
+                    "text:扫码登录:exact": FakeLocator("no-login", count=0),
+                    "text:手机号登录:exact": FakeLocator("no-login", count=0),
+                    'input[placeholder*="验证码"], input[placeholder*="短信"]': FakeLocator("no-verification", count=0),
                     "div[class^='container'] input[accept*='image']": upload,
                     "role:button:发布": publish,
                 },

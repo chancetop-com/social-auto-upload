@@ -22,8 +22,7 @@ LOCAL_UPLOADS = (
     ("weibo", "WeiBoVideo"),
     ("baijiahao", "BaiJiaHaoVideo"),
     ("hupu", "HuPuVideo"),
-    ("douyin", "DouYinVideo"),
-    ("douyin", "DouYinNote"),
+    # Douyin persistent outcomes: test_douyin_profile_cli.
     # YouTube persistent outcomes: test_youtube_profiles.
     # Xiaohongshu persistent outcomes: test_xhs_profile_cli.
     # TikTok persistent-context outcomes are covered by test_tiktok_profile_cli.

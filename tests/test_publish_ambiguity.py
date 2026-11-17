@@ -271,6 +271,9 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
             page = fixtures._page(
                 {
                     "text:发布图文:exact": fixtures._Clickable("image-tab", log=log),
+                    "text:扫码登录:exact": fixtures.FakeLocator("no-login", count=0),
+                    "text:手机号登录:exact": fixtures.FakeLocator("no-login", count=0),
+                    'input[placeholder*="验证码"], input[placeholder*="短信"]': fixtures.FakeLocator("no-verification", count=0),
                     "div[class^='container'] input[accept*='image']": fixtures.FakeLocator(
                         "input"
                     ),
