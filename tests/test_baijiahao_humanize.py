@@ -757,15 +757,8 @@ class SecurityVerificationAfterPublishTests(unittest.TestCase):
 
         self.assertTrue(caught.exception.publish_attempted)
 
-    def test_local_security_verification_after_publish_is_result_unknown(self):
-        page = self._page()
-
-        with patch.object(baijiahao_main, "Humanizer", _RecordingHumanizer):
-            app = _video()
-            app.start_publish_budget()
-            humanizer = app._humanizer(page)
-            with self.assertRaises(PublishResultUnknownError):
-                asyncio.run(app._submit_publish(page, humanizer=humanizer))
+    # Local post-submit verification retains reason and publish_attempted in
+    # the public CLI flow: test_baijiahao_profiles.
 
 
 # ---------------------------------------------------------------------------
@@ -982,6 +975,9 @@ class BaijiahaoHumanizeDisabledTests(unittest.TestCase):
                 'input[type="file"][accept*="video"], '
                 'input[type="file"][accept*="mp4"]': FakeLocator("video-input"),
                 TITLE_EDITOR_SELECTOR: FakeLocator("title-editor"),
+                'text="百度安全验证"': FakeLocator("verification", count=0),
+                baijiahao_main.QR_SELECTOR: FakeLocator("QR", count=0),
+                'text:注册/登录百家号': FakeLocator("login", count=0),
             }
         )
         context = MagicMock()

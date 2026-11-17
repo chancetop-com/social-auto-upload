@@ -169,7 +169,7 @@ sau douyin check --account creator
 
 Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；新 Profile 的真实账号验收留待最终回归。见 [Rednote 说明](./docs/rednote.md)。
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、百家号 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
 
 #### 指定发布时刻（可选）
 
@@ -259,7 +259,7 @@ sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --titl
 sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
 sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
-sau baijiahao upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
+sau baijiahao upload-video --account <account_name> --file videos/demo.mp4 --thumbnail videos/demo.png --title "示例标题" --desc "示例简介" --tags tag1,tag2
 sau alipay upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 sau weibo upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
@@ -430,3 +430,5 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 [![Star History Chart](https://star-history.dera.page/svg?repos=dreammis/social-auto-upload&type=Date)](https://star-history.dera.page/#dreammis/social-auto-upload&Date)
 
 Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Facebook Page 隔离；登录、检查、视频/图文和作品核验/删除共用来源/headless 配置，旧 JSON 不读写。账号别名允许换号，作品管理仍校验当前用户、原作者、编号和正文；托管环境下 verify/delete 继续走本地。详见 [Facebook CLI](./docs/CLI.md#facebook-cli-子命令)。
+
+百家号 login/check/视频及直接 uploader 已使用独立持久化 Profile。默认 Chrome 有头、可选完整 Chromium/自定义路径；只安装所选来源，旧 JSON 不读写。先 `sau baijiahao login --account creator --headed`，同配置 check；视频必须提供横版封面。验证与未登录退出 10，故障退出 1；提交后先核对作品，结果未知 9 禁止自动重发。无 no-publish 开关，本轮仅做离线和受控 DOM 验收，详见 [百家号 CLI](./docs/CLI.md#百家号-cli-子命令)。

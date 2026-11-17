@@ -20,7 +20,7 @@ LOCAL_UPLOADS = (
     ("tencent", "TencentNote"),
     ("alipay", "AlipayVideo"),
     ("weibo", "WeiBoVideo"),
-    ("baijiahao", "BaiJiaHaoVideo"),
+    # Baijiahao persistent outcomes: test_baijiahao_profiles.
     ("hupu", "HuPuVideo"),
     ("douyin", "DouYinVideo"),
     ("douyin", "DouYinNote"),
