@@ -84,3 +84,5 @@
 - 2026-11-17：[10 已解决](./issues/10-kuaishou-persistent-profile.md)。快手 login/check/视频/图文/reset-profile 与全部可达直接调用使用持久化 Profile；219 项相关离线回归及真实 Chrome 小窗口的两个合成内容流程通过。保留封面、合集、定时、QR 和提交后保护，未操作真实账号。见 [10 验证记录](./research/10-kuaishou-validation.md)。
 
 - 2026-11-17：[12 已解决](./issues/12-baijiahao-persistent-profile.md)。百家号 login/check/视频/reset-profile 与直接调用使用持久化 Profile，严格区分登录/验证与运行故障，保护提交结果及清理所有权。372 项相关离线回归通过，Chrome 有头/完整 Chromium 无头两条受控 DOM 合成流程通过；未操作真实账号或发布作品。见 [12 验证记录](./research/12-baijiahao-validation.md)。
+
+- 2026-11-17：[14 已解决](./issues/14-hupu-persistent-profile.md)。虎扑 login/check/视频/reset-profile 与直接 setup/uploader 复用持久化 Profile；移除 UA/viewport/webdriver context 重建和旧 JSON 流程，保留 QQ popup/二维码、文件选择器、专区弹窗与提交保护。合入微博 13 后 364 项相关回归通过；Chrome 有头与完整 Chromium 无头两条受控 DOM 流程通过，未操作真实账号或发布作品。见 [14 验证记录](./research/14-hupu-validation.md)。

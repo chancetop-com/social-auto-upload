@@ -55,4 +55,4 @@ All page and submission requests were fulfilled by the local browser fixture. Th
 
 No Hupu account login, real upload/publication, or work deletion was performed. Hupu has no no-publish switch. One-time old-state work belongs to ticket 19; real four-platform no-publish acceptance belongs to ticket 20. Shared browser/Profile capabilities were unchanged, so ticket 01/02 process and browser matrix evidence was reused rather than rerun.
 
-At the initial tested integration baseline, Weibo, Alipay, Dayu, Zhihu and Xueqiu remain on their ticket-specific legacy paths; Bilibili biliup is excluded. Concurrent completed-platform docs/reset lists are unioned when merging the latest integration before delivery.
+Integration `fb9be5d` (Weibo 13) was merged into the Hupu branch as `4706bef`; shared docs/reset lists retain both platforms. The same offline command plus `tests.test_weibo_profiles tests.test_weibo_humanize` passed **364 tests in 20.355s** after the merge. `git diff --check` passed. Hupu runtime/browser code was unchanged by that merge. Alipay, Dayu, Zhihu and Xueqiu remain on their ticket-specific legacy paths; Bilibili biliup is excluded.
