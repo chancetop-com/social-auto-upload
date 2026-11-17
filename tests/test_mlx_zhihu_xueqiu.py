@@ -321,55 +321,7 @@ class XueqiuIsLoggedInTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ZhihuLocalGoldenTests(unittest.TestCase):
-    def _assert_common(self, playwright, account_file):
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **ZHIHU_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": str(account_file.resolve())}],
-        )
-        self.assertTrue(browser.closed)
-
-    def test_article_local_launch_context_and_timezone_are_golden(self):
-        with tempfile.TemporaryDirectory() as folder:
-            account_file = Path(folder) / "account.json"
-            app, _ = _make_zhihu_article(folder, account_file=account_file)
-            app.validate_upload_args = MagicMock()
-            upload_in = AsyncMock(return_value={"success": True})
-            app.upload_in = upload_in
-
-            playwright = FakePlaywright()
-            with patch.object(
-                zhihu_article, "async_playwright", MagicMock(return_value=_AsyncCM(playwright))
-            ):
-                result = asyncio.run(app.main())
-
-        self.assertEqual(result, {"success": True})
-        self._assert_common(playwright, account_file)
-        session = upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-        self.assertEqual(ZHIHU_LAUNCH_KWARGS["channel"], "chrome")
-
-    def test_video_local_launch_context_and_timezone_are_golden(self):
-        with tempfile.TemporaryDirectory() as folder:
-            account_file = Path(folder) / "account.json"
-            app, _ = _make_zhihu_video(folder, account_file=account_file)
-            app.validate_upload_args = MagicMock()
-            upload_in = AsyncMock(return_value={"success": True})
-            app.upload_in = upload_in
-
-            playwright = FakePlaywright()
-            with patch.object(
-                zhihu_video, "async_playwright", MagicMock(return_value=_AsyncCM(playwright))
-            ):
-                result = asyncio.run(app.main())
-
-        self.assertEqual(result, {"success": True})
-        self._assert_common(playwright, account_file)
-        self.assertEqual(upload_in.await_args.args[0].mode, "local")
+    """Legacy Xueqiu coverage; Zhihu is covered by test_zhihu_profiles."""
 
     def test_xueqiu_local_launch_context_are_golden(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -463,15 +415,11 @@ class MultiloginUploaderSeamTests(unittest.TestCase):
                 patch.object(
                     zhihu_article, "read_zhihu_identity", AsyncMock(side_effect=AssertionError("identity read"))
                 ) as reader,
-                patch.object(
-                    zhihu_article, "load_zhihu_identity", MagicMock(side_effect=AssertionError("identity binding"))
-                ) as binding,
             ):
                 result = asyncio.run(app.upload_in(session))
 
         self.assertEqual(result["status"], "prepared")
         reader.assert_not_awaited()
-        binding.assert_not_called()
         app.fill_article_form.assert_awaited_once_with(page, multilogin=True)
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
@@ -511,7 +459,6 @@ class MultiloginUploaderSeamTests(unittest.TestCase):
             article, _ = _make_zhihu_article(folder, account_file=None)
             xueqiu, _ = _make_xueqiu_article(folder, account_file=None)
             with (
-                patch.object(zhihu_article, "load_zhihu_identity", MagicMock(side_effect=AssertionError)),
                 patch.object(xueqiu_article, "load_xueqiu_identity", MagicMock(side_effect=AssertionError)),
             ):
                 article.validate_upload_args(check_cookie=False)
@@ -1023,13 +970,11 @@ class ZhihuMlxCliCheckTests(_CliMixin, unittest.TestCase):
         session = Namespace(context=object())
         factory, session_cm = self._patch_session(session)
         probe = AsyncMock(return_value=True)
-        resolve_account = MagicMock(side_effect=AssertionError("cookie path used"))
         logger = MagicMock()
         with (
             patch.object(zhihu_command, "async_playwright", lambda: _AsyncCM(object())),
             patch.object(zhihu_command, "browser_session", new=factory),
             patch.object(zhihu_command, "is_logged_in", new=probe),
-            patch.object(zhihu_command, "resolve_account_file", new=resolve_account),
             patch.object(zhihu_command, "logger", new=logger),
         ):
             code, out, _ = self._run(
@@ -1042,7 +987,6 @@ class ZhihuMlxCliCheckTests(_CliMixin, unittest.TestCase):
         self.assertIsNone(factory.call_args.kwargs["account_file"])
         self.assertEqual(factory.call_args.kwargs["managed"].target.profile_id, "profile")
         probe.assert_awaited_once_with(session.context)
-        resolve_account.assert_not_called()
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
         logger.info.assert_called_once()
@@ -1094,24 +1038,6 @@ class ZhihuMlxCliCheckTests(_CliMixin, unittest.TestCase):
         self.assertIn("--profile-id", err)
         factory.assert_not_called()
 
-    def test_local_check_stays_on_legacy_path(self):
-        factory = MagicMock()
-        account_file = Path("/tmp/zhihu_local.json")
-        with (
-            patch.object(zhihu_command, "browser_session", new=factory),
-            patch.object(zhihu_command, "resolve_account_file", MagicMock(return_value=account_file)),
-            patch.object(zhihu_command, "check_zhihu_account", new=AsyncMock(return_value=True)) as check,
-        ):
-            code, out, _ = self._run(
-                ["zhihu", "check", "--account", "creator"], token=""
-            )
-
-        self.assertEqual(code, 0)
-        self.assertIn("valid", out)
-        factory.assert_not_called()
-        check.assert_awaited_once_with(account_file, False)
-
-
 class ZhihuMlxCliUploadTests(_CliMixin, unittest.TestCase):
     def _article_argv(self, content: Path) -> list[str]:
         return [
@@ -1135,14 +1061,12 @@ class ZhihuMlxCliUploadTests(_CliMixin, unittest.TestCase):
             app.main = AsyncMock(return_value={"success": True})
             builder = MagicMock(return_value=app)
             probe = AsyncMock(return_value=True)
-            resolve_account = MagicMock(side_effect=AssertionError("cookie path used"))
 
             with (
                 patch.object(zhihu_command, "async_playwright", lambda: _AsyncCM(object())),
                 patch.object(zhihu_command, "browser_session", new=factory),
                 patch.object(zhihu_command, "is_logged_in", new=probe),
                 patch.object(zhihu_command, "ZhihuArticle", new=builder),
-                patch.object(zhihu_command, "resolve_account_file", new=resolve_account),
             ):
                 code, out, _ = self._run(self._article_argv(content))
 
@@ -1155,7 +1079,6 @@ class ZhihuMlxCliUploadTests(_CliMixin, unittest.TestCase):
         probe.assert_awaited_once_with(session.context)
         app.main.assert_awaited_once_with(session=session)
         self.assertEqual(session_cm.exit_calls, 1)
-        resolve_account.assert_not_called()
 
     def test_upload_article_logged_out_returns_10_and_skips_upload(self):
         with tempfile.TemporaryDirectory() as folder:

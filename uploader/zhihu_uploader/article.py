@@ -14,21 +14,23 @@ from uuid import uuid4
 from loguru import logger
 from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, async_playwright, expect
 
+import conf
+
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.text_validation import validate_single_line
 from utils.article_render import load_article, ARTICLE_MARKDOWN_EXTENSIONS
-from utils.browser_cleanup import close_browser_resources
+from utils.local_browser_session import local_browser_session
 from utils.browser_session import BrowserSession
-from utils.errors import PublishResultUnknownError
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from uploader.zhihu_uploader.constants import (
     ZHIHU_ARTICLE_TITLE_MAX, ZHIHU_ARTICLE_URL,
-    ZHIHU_IMAGE_EXTENSIONS, ZHIHU_LAUNCH_KWARGS,
+    ZHIHU_IMAGE_EXTENSIONS,
 )
 from uploader.zhihu_uploader.schedule import fill_zhihu_article_schedule, validate_zhihu_schedule
 from uploader.zhihu_uploader.session import (
-    load_zhihu_identity, raise_if_login_required, read_zhihu_identity,
+    account_alias, check_zhihu_account, raise_if_login_required, read_zhihu_identity,
 )
 
 
@@ -48,9 +50,11 @@ async def grant_clipboard_permission(page: Page, *, multilogin: bool) -> None:
 class ZhihuArticle:
     """按原稿结构导入正文，在原稿位置上传图片，核对后只发表一次。"""
 
-    def __init__(self, title, content_file, account_file, schedule=None,
-                 headless=True, debug=False, prepare_only=False, upload_timeout=600,
-                 publish_not_before=None):
+    def __init__(self, title, content_file, account_file=None, schedule=None,
+                 headless=None, debug=False, prepare_only=False, upload_timeout=600,
+                 publish_not_before=None, *, account_name=None, local_browser=None):
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.title = title
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file is not None else None
@@ -91,8 +95,7 @@ class ZhihuArticle:
     def validate_upload_args(self, *, check_cookie: bool = True) -> None:
         """在启动浏览器前检查标题、正文、图片及定时时间。
 
-        Cookie/identity binding is local-only; Multilogin mode passes
-        ``check_cookie=False`` because the Profile is the identity.
+        ``check_cookie`` is accepted for source compatibility; no old state is read.
         """
         validate_single_line(self.title)
         if not self.title.strip() or len(self.title) > ZHIHU_ARTICLE_TITLE_MAX:
@@ -103,12 +106,7 @@ class ZhihuArticle:
         self.images = self.document.images
         if not "".join(self.document.text).strip():
             raise ValueError("知乎文章正文不能为空")
-        if check_cookie:
-            if self.account_file is None or not self.account_file.is_file():
-                raise FileNotFoundError("请先执行 sau zhihu login 保存账号")
-            self.identity = load_zhihu_identity(self.account_file)
-        else:
-            self.identity = None
+        self.identity = None
         self.schedule = validate_zhihu_schedule(self.schedule)
         if self.upload_timeout <= 0:
             raise ValueError("上传期限必须大于 0 秒")
@@ -250,39 +248,27 @@ class ZhihuArticle:
 
     def results_dir(self) -> Path:
         """Result manifests sit next to the local account; MLX uses a temp dir."""
-        base = (
-            self.account_file.parent
-            if self.account_file is not None
-            else Path(tempfile.gettempdir()) / "sau-mlx"
-        )
+        if self.account_file is not None:
+            base = self.account_file.parent
+        elif self.account_name is not None:
+            base = Path(conf.BASE_DIR) / "cookies"
+        else:
+            base = Path(tempfile.gettempdir()) / "sau-mlx"
         return base / "zhihu_results"
 
     async def main(self, *, session: BrowserSession | None = None) -> dict:
-        """仅以作品详情 URL 作为已发表证据；提交响应未知时禁止自动重试。
-
-        ``session`` is the Multilogin seam: it runs only the page/publish body and
-        never launches, creates a context, injects scripts, writes cookies, or
-        closes anything it does not own.  ``session is None`` keeps the historical
-        local browser lifecycle.
-        """
+        """Use one selected Profile for preflight and business, or borrow a session."""
+        self.validate_upload_args(check_cookie=False)
         if session is not None:
-            self.validate_upload_args(check_cookie=False)
+            if not session.managed:
+                await check_zhihu_account(session=session)
             return await self.upload_in(session)
-
-        self.validate_upload_args()
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                headless=self.headless, **ZHIHU_LAUNCH_KWARGS,
-            )
-            try:
-                context = await browser.new_context(
-                    storage_state=str(self.account_file),
-                )
-                return await self.upload_in(
-                    BrowserSession(browser=browser, context=context, mode="local")
-                )
-            finally:
-                await close_browser_resources(browser=browser)
+            async with local_browser_session(playwright, platform="zhihu",
+                    account=account_alias(self.account_file, self.account_name),
+                    headless=self.headless, local_browser=self.local_browser) as owned:
+                await check_zhihu_account(session=owned)
+                return await self.upload_in(owned)
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: editor page operations plus a single publish click."""
@@ -304,18 +290,24 @@ class ZhihuArticle:
         page = None
         submitted = False
         publish_clicked = False
+        http_failure = False
         try:
             page = await session.context.new_page()
             # 人类化实例在 page 创建后建立：HUMANIZE 在构造时快照，之后不再读 env。
             self._humanizer(page)
             response = await page.goto(ZHIHU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:
+                http_failure = True
                 raise RuntimeError(f"知乎文章编辑器访问失败，HTTP {response.status}")
             if multilogin:
                 raise_if_login_required(page)
-            elif await read_zhihu_identity(page) != self.identity:
-                raise RuntimeError("知乎文章编辑器页头与本地账号绑定不一致")
+            else:
+                raise_if_login_required(page, managed=False)
+                self.identity = await read_zhihu_identity(page, strict=True)
+                result["identity"] = self.identity
             await self.fill_article_form(page, multilogin=multilogin)
+            if not multilogin:
+                raise_if_login_required(page, managed=False)
             result.update(images=self.uploaded_images, manifest=self.document.manifest)
             result["status"] = "prepared"
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -349,9 +341,20 @@ class ZhihuArticle:
                 raise budget.timeout_error(True) from None
             result.update(success=True, status="published", url=page.url)
             return result
-        except PublishResultUnknownError:
+        except PublishResultUnknownError as exc:
+            if not multilogin:
+                result.update(error=str(exc), status="submission_unknown", publish_attempted=True)
+                if page is not None:
+                    raise_if_login_required(page, publish_attempted=True, managed=False)
             raise
         except Exception as exc:
+            if not multilogin and result["status"] != "published":
+                result.update(error=str(exc), publish_attempted=publish_clicked,
+                    status="submission_unknown" if publish_clicked else "failed_before_submit")
+                if isinstance(exc, LoginRequiredError):
+                    raise
+                if page is not None and not http_failure:
+                    raise_if_login_required(page, publish_attempted=publish_clicked, managed=False)
             if multilogin and page is not None:
                 raise_if_login_required(page, publish_attempted=publish_clicked)
             result["error"] = str(exc)
@@ -365,6 +368,8 @@ class ZhihuArticle:
                 screenshot = result_file.with_suffix(".png")
                 await page.screenshot(path=str(screenshot))
                 result["screenshot"] = str(screenshot)
+            if not multilogin and publish_clicked:
+                raise budget.timeout_error(True) from exc
             raise RuntimeError(f"知乎文章阶段={result['status']}，结果文件={result_file}: {exc}") from exc
         finally:
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

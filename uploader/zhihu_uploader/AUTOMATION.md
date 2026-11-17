@@ -4,7 +4,9 @@
 
 `sau_commands/zhihu.py` 声明 CLI；本目录的 `session.py`、`article.py`、`video.py`、`schedule.py`、`verification.py` 分别处理会话、文章、视频、定时和原作品查询。使用说明见 `skills/zhihu-upload/SKILL.md`。
 
-会话为 `cookies/zhihu_<alias>.json`，账号绑定为相邻 `.identity.json`。`session.py::PROFILE_IMAGE` 从页头当前用户入口读取昵称和头像路径；它们并非永久用户 ID，改名或换头像会导致绑定不一致。不要将登录超时或网络错误直接判为会话失效。
+本地会话由 `utils.local_browser_session` 持有 `browser_profiles/zhihu/<原始别名>/<chrome|chromium>/` 的锁和生命周期，预检与业务共用 context；注入 session 的调用不自行关闭。没有 Cookie JSON 恢复/导出或身份旁文件门槛。`session.py::PROFILE_IMAGE` 从当次页头读取 name/avatar_path；只校验必要字段，不作永久绑定或前后防换号比较。verify 仍核对历史结果的账号证据与标题。结果位置保持 `cookies/zhihu_results/`（直接调用保留 account_file 父目录约定）。
+
+默认 Chrome 有头、no_viewport；来源与 headless 均由共享解析器决定。只有 login 使用 create=True；业务明确未登录/验证退出 10，HTTP/字段/页面故障退出 1。提交后保留 publish_attempted，未知结果退出 9；所有本地页面交给持久 context 有界清理。reset-profile 使用共享精确重建入口，不自动恢复或重发旧任务。
 
 ### Multilogin X 模式
 
@@ -23,7 +25,7 @@
 
 ## 视频
 
-`video.py::main` 依次完成文件校验、账号核对、上传、菜单读取、表单检查、提交与详情链接读取。
+`video.py::main` 依次完成文件校验、Profile 登录检查、上传、菜单读取、表单检查、提交与详情链接读取。
 
 ```python
 video_input = page.locator("input.VideoUploadButton-fileInput[type=file]")
@@ -43,6 +45,6 @@ control = field.get_by_role("combobox")
 
 ## 验证边界
 
-原登录浏览器中的文章和视频均已完成真实发表及详情核对。Python CLI 整条链路、非 PNG 图片及定时受理仍需独立验证；本地测试不替代线上提交证据。排查素材、截图与账号结果保存在忽略目录 `.local/`，不纳入公开使用文档。
+原有记录中的登录浏览器文章和视频曾完成真实发表及详情核对；本次 Profile 迁移仅执行离线流程与受控 DOM 回归，不操作真实知乎账号。Python CLI 线上整条链路、非 PNG 图片及定时受理仍需独立验证；本地测试不替代线上提交证据。排查素材、截图与账号结果保存在忽略目录 `.local/`，不纳入公开使用文档。
 
 `--prepare-only` 和候选查询可能自动保存草稿。结果未知时先查原作品，禁止自动重发。定时是实验性路径，必须核对平台实际排期后才能返回定时成功。

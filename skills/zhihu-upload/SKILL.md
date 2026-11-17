@@ -16,11 +16,12 @@ summary: 使用 sau 登录知乎并发布文章或视频。
 
 | 功能 | 命令入口 | 说明 |
 | --- | --- | --- |
-| 登录 | `sau zhihu login --account <name>` | 保存指定账号的本地会话 |
-| 账号检查 | `sau zhihu check --account <name>` | 检查会话与当前账号是否一致 |
+| 登录 | `sau zhihu login --account <name>` | 建立指定别名和浏览器种类的 Profile |
+| 账号检查 | `sau zhihu check --account <name>` | 检查当前 Profile 是否登录 |
 | 文章发布 | `sau zhihu upload-article ...` | HTML/Markdown/TXT 原稿，图片保留原稿位置 |
 | 视频发布 | `sau zhihu upload-video ...` | 单视频、标题、简介、领域与内容声明 |
-| 作品核对 | `sau zhihu verify --account <name> --result <json>` | 打开结果文件中的原作品链接核对标题 |
+| Profile 重建 | `sau zhihu reset-profile --account <name> --browser-kind chrome` | 只清空明确指定的种类，历史结果保留 |
+| 作品核对 | `sau zhihu verify --account <name> --result <json>` | 核对原作品链接、历史账号证据与标题 |
 
 元数据约定：文章使用 `title + content-file`，视频使用 `title + desc + originality + category + video-mark`。`--account` 是本地会话别名，无须与知乎昵称相同。
 
@@ -31,7 +32,11 @@ sau zhihu login --account creator
 sau zhihu check --account creator
 ```
 
-账号密码、验证码在登录窗口输入；会话文件保存在本地，不提交到仓库。
+账号密码、验证码在登录窗口输入。只有 login 引导登录；正常关闭后使用相同浏览器配置 check。登录态由 `browser_profiles/zhihu/<原始别名>/<chrome|chromium>/` 持久保存，旧 Cookie JSON 和 `.identity.json` 不读写或清理。同别名可以重新登录任意账号，两种浏览器可登录不同账号；展示名和头像路径仅是当次信息，不是永久 ID。
+
+本地默认系统 Chrome、有头。保留已有 `conf.py`；`LOCAL_CHROME_PATH` 非空优先，否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False；直接调用 `headless=None` 使用配置，显式 False 保持有头。只安装所选来源：Chrome 由用户准备；完整 Chromium 执行 `uv run patchright install --no-shell chromium`，或复用兼容自定义路径。失败不自动换浏览器；安装成功、可启动、已登录分别核验。
+
+缺少 Profile 或明确登录/验证退出 10，停止业务并先完成 login；网络、权限、页面或必需身份字段故障退出 1。Profile 占用时关闭原使用者后重试；明确需要重建时运行上表 reset-profile，选择 chrome 或 chromium，无需 binary。重建不影响另一种类及历史结果，也不允许据此重新提交旧任务。
 
 ## 文章
 
@@ -77,17 +82,21 @@ sau zhihu upload-video --account creator --file "视频.mp4" --title "视频标�
 
 文章和视频均可加 `--prepare-only`，填写并检查后结束；`--prepare-only`、`--show-options` 都可能留下远端草稿。
 
+结果保留在 `cookies/zhihu_results/`，直接调用传旧 account_file 路径时仍使用其父目录下的 `zhihu_results/`；该参数仅提供别名和结果位置，不恢复旧登录态。verify 使用历史结果中的原账号证据与作品标题，换号后需登录原作品账号核验，不会把历史身份改成新账号。
+
 `published` 表示平台确认发表，详情链接写入结果文件的 `url`；视频地址可为 `/pin/<作品ID>`。若详情读取失败，保留 `published` 和 `error`，到创作中心查原作品，勿重发。`prepared` 不表示发表成功。若为 `submission_unknown`，也先按标题和提交时间检查原作品。已有 URL 时可执行：
 
 ```powershell
 sau zhihu verify --account creator --result "本次结果.json"
 ```
 
+发布后登录/验证仍退出 10 并保留 `publish_attempted=true`；结果未知退出 9，先核对原作品、禁止自动重发。
+
 `--schedule "YYYY-MM-DDTHH:MM:00Z"` 为实验性选项（UTC 绝对时刻，填写前换算到浏览器时区），限制在当前时刻 30 分钟后至 48 小时内；尚不保证完整排期流程可用。
 
 ## 托管浏览器模式（可选）
 
-设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下跳过剪贴板授权，填写时读取浏览器/Profile 时区。
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式下跳过剪贴板授权，填写时读取浏览器/Profile 时区。本地文章只向 `https://zhuanlan.zhihu.com` 授予剪贴板权限，保留原稿位置配图和读回检查。托管 headless 采用同样的显式参数/配置优先级，忽略本地浏览器来源和路径，不要求本地 Chrome/Chromium；verify 仍使用原始本地别名。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。

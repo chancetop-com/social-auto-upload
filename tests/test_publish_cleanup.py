@@ -166,8 +166,6 @@ class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import MagicMock, Mock
 
         entries = (
-            ("uploader.zhihu_uploader.video", "ZhihuVideo", "main", None),
-            ("uploader.zhihu_uploader.article", "ZhihuArticle", "main", None),
             ("uploader.xueqiu_uploader.article", "XueqiuArticle", "main", None),
         )
         for module_name, cls, entry, opener in entries:
