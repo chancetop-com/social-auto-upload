@@ -29,7 +29,7 @@ LOCAL_UPLOADS = (
     ("douyin", "DouYinVideo"),
     ("douyin", "DouYinNote"),
     ("youtube", "YouTubeVideo"),
-    ("tk", "TiktokVideo"),
+    # TikTok persistent-context outcomes are covered by test_tiktok_profile_cli.
 )
 
 

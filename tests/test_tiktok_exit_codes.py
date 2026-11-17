@@ -405,7 +405,7 @@ class LoginRequiredMessageTests(unittest.TestCase):
             tk_main._raise_if_login_required(page, publish_attempted=True)
 
         message = str(ctx.exception)
-        self.assertIn("请在 Multilogin 应用中登录 Profile 后重试", message)
+        self.assertIn("托管模式请在浏览器管理应用中完成登录或验证", message)
         self.assertIn("发布点击已发出", message)
         self.assertIn("作品列表", message)
         self.assertIs(ctx.exception.publish_attempted, True)
@@ -417,7 +417,7 @@ class LoginRequiredMessageTests(unittest.TestCase):
             tk_main._raise_if_login_required(page)
 
         message = str(ctx.exception)
-        self.assertIn("请在 Multilogin 应用中登录 Profile 后重试", message)
+        self.assertIn("托管模式请在浏览器管理应用中完成登录或验证", message)
         self.assertNotIn("发布点击已发出", message)
         self.assertIs(ctx.exception.publish_attempted, False)
 

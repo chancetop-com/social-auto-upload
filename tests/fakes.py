@@ -169,6 +169,8 @@ class FakeBrowserType:
         self.events = events if events is not None else []
         self.launch_calls: list[dict[str, Any]] = []
         self.connect_calls: list[dict[str, Any]] = []
+        self.persistent_calls: list[dict[str, Any]] = []
+        self.persistent_context: FakeContext | None = None
         self.launch_browser: FakeBrowser | None = None
         self.launch_error: BaseException | None = None
         self._connect_outcomes: list[Any] = []
@@ -194,6 +196,16 @@ class FakeBrowserType:
         if self.launch_browser is None:
             self.launch_browser = self.new_browser()
         return self.launch_browser
+
+    async def launch_persistent_context(self, **kwargs: Any) -> FakeContext:
+        self.persistent_calls.append(dict(kwargs))
+        self.events.append("launch_persistent_context")
+        if self.launch_error is not None:
+            raise self.launch_error
+        context = self.persistent_context or FakeContext(events=self.events)
+        browser = self.launch_browser or self.new_browser([context])
+        context.browser = browser
+        return context
 
     async def connect_over_cdp(self, url: str, **kwargs: Any) -> FakeBrowser:
         self.connect_calls.append({"url": url, **kwargs})

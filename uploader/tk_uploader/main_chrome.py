@@ -14,7 +14,6 @@ from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 import os
 import asyncio
 
-from conf import LOCAL_CHROME_PATH, LOCAL_CHROME_HEADLESS
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
 from uploader.tk_uploader.tk_config import (
@@ -35,13 +34,14 @@ from uploader.tk_uploader.tk_config import (
     TIKTOK_UPLOAD_URL,
     Tk_Locator,
 )
-from utils.base_social_media import set_init_script
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
+from utils.local_browser import resolve_headless
+from utils.local_browser_session import local_browser_session
 from uploader.tk_uploader.schedule import prepare_schedule
-from utils.errors import LoginRequiredError, PublishResultUnknownError
-from utils.files_times import get_absolute_path
+from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from pathlib import Path
 from utils.humanize import DEFAULT_PROFILE
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
@@ -49,19 +49,9 @@ from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.log import tiktok_logger
 
-# Multilogin deployment prerequisite: the Profile UI must already be English
-# (US).  The MLX branch deliberately skips ``change_language`` so it never
-# rewrites the Profile preference.
-
-# Golden local-mode browser options.  The Multilogin branch ignores them, but
-# locking them here keeps the legacy Chromium path byte-equivalent.
-# An empty LOCAL_CHROME_PATH means "use the Chromium bundled with Patchright";
-# passing executable_path="" makes Playwright try to spawn ``.`` and fail.
-TIKTOK_LAUNCH_KWARGS = (
-    {"executable_path": LOCAL_CHROME_PATH} if LOCAL_CHROME_PATH else {}
-)
-# Local mode should not depend on the operator's OS language.  MLX ignores
-# these kwargs and uses the Profile's own English (US) configuration.
+# Managed uploads keep their existing ignored-option diagnostics. The local
+# persistent path never consumes these legacy metadata exports.
+TIKTOK_LAUNCH_KWARGS: dict = {}
 TIKTOK_CONTEXT_KWARGS: dict = {"locale": "en-US"}
 TIKTOK_INIT_SCRIPT = False
 
@@ -929,8 +919,7 @@ async def _set_privacy_option(
 def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this. Local mode keeps its historical
-    retry-until-timeout behaviour. ``publish_attempted`` must be true when the
+    Every browser mode uses this guard. ``publish_attempted`` must be true when the
     redirect is observed after the publish click was dispatched, so exit 10
     never claims "not published" and the text never invites a blind retry.
     """
@@ -941,14 +930,24 @@ def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     if any(marker in path for marker in _LOGIN_URL_MARKERS):
         message = (
             "TikTok 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
+            "本地模式请运行 sau tiktok login --account <name>；托管模式请在浏览器管理应用中完成登录或验证。"
         )
         if publish_attempted:
             message += _TIKTOK_PUBLISH_ATTEMPTED_SUFFIX
         raise LoginRequiredError(
             message,
             publish_attempted=publish_attempted,
+            reason="verification" if any(marker in path for marker in ("captcha", "verify", "two-factor", "2fa")) else "login",
         )
+
+
+async def _guard_login(page, *, publish_attempted=False):
+    _raise_if_login_required(page, publish_attempted=publish_attempted)
+    if await _login_form_present(page):
+        message = 'TikTok 需要登录；本地请运行 sau tiktok login --account <name>，托管请在浏览器管理应用登录。'
+        if publish_attempted:
+            message += _TIKTOK_PUBLISH_ATTEMPTED_SUFFIX
+        raise LoginRequiredError(message, publish_attempted=publish_attempted)
 
 
 async def _select_probe_page(context):
@@ -1010,7 +1009,7 @@ async def _upload_entry_present(page, timeout_ms: int) -> bool:
     return False
 
 
-async def is_logged_in(context) -> bool:
+async def is_logged_in(context, *, managed: bool = True) -> bool:
     """Return ``True`` only when TikTok Studio shows the upload entry.
 
     A login page/form means ``False``; network errors, 5xx, timeouts and
@@ -1024,7 +1023,7 @@ async def is_logged_in(context) -> bool:
     deadline = time.monotonic() + TIKTOK_LOGIN_CHECK_TIMEOUT_MS / 1000
     try:
         response = await page.goto(
-            TIKTOK_LOGIN_CHECK_URL,
+            TIKTOK_LOGIN_CHECK_URL if managed else TIKTOK_UPLOAD_URL,
             wait_until="domcontentloaded",
             timeout=TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
         )
@@ -1034,6 +1033,8 @@ async def is_logged_in(context) -> bool:
                 f"TikTok Studio 返回 HTTP {status}，无法判断登录状态。"
             )
 
+        if any(marker in str(page.url).lower() for marker in ("captcha", "verify", "two-factor", "2fa")):
+            _raise_if_login_required(page)
         if "/login" in str(page.url).lower():
             return False
         if await _login_form_present(page):
@@ -1056,184 +1057,64 @@ async def is_logged_in(context) -> bool:
         await close_browser_resources(page=page)
 
 
-async def _new_local_context(browser, *, storage_state, attempts: int = 3):
-    """Create a local context, retrying Playwright's storage-state race.
-
-    ``new_context(storage_state=...)`` can transiently fail with
-    "Execution context was destroyed" while Playwright restores localStorage.
-    """
-    last_exc = None
-    for attempt in range(1, attempts + 1):
-        try:
-            return await browser.new_context(
-                storage_state=str(storage_state),
-                **TIKTOK_CONTEXT_KWARGS,
-            )
-        except (PlaywrightError, OSError) as exc:
-            last_exc = exc
-            tiktok_logger.warning(
-                "[+] TikTok local context creation failed "
-                f"({attempt}/{attempts}): {exc}"
-            )
-            await asyncio.sleep(1)
-    raise last_exc
+def _account_alias(account_file, account_name=None):
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError('本地调用需要 account_name 账号别名。')
+    # Existing direct callers may still pass the old positional filename. This
+    # is name translation only: no file exists/read/write/cleanup operation.
+    name = Path(str(account_file)).name
+    if name.endswith('.json'):
+        return name[:-5].removeprefix('tiktok_')
+    return str(account_file)
 
 
-async def cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) -> bool:
-    """Validate a local cookie file against TikTok Studio.
-
-    Any Playwright/launch/read error is reported as invalid rather than raised,
-    so ``check`` always prints ``invalid`` and exits ``1``.
-    """
-    try:
-        return await _cookie_auth(account_file, headless=headless)
-    except (PlaywrightError, OSError, ValueError) as exc:
-        tiktok_logger.error(f"[+] cookie check failed: {exc}")
-        return False
-
-
-async def _cookie_auth(account_file, *, headless: bool = LOCAL_CHROME_HEADLESS) -> bool:
+async def tiktok_setup(account_file=None, handle=False, *, headless=None, force=False,
+                       account_name=None, local_browser=None, session=None):
+    """Login or check a persistent Profile; only handle=True guides login."""
+    if session is not None:
+        if handle:
+            await login_in(session)
+            return True
+        if not await is_logged_in(session.context, managed=session.managed):
+            raise LoginRequiredError('TikTok 需要登录；请先运行 sau tiktok login --account <name>。')
+        return True
+    account = _account_alias(account_file, account_name)
     async with async_playwright() as playwright:
-        try:
-            browser = await playwright.chromium.launch(
-                headless=headless, **TIKTOK_LAUNCH_KWARGS
-            )
-        except (PlaywrightError, OSError) as exc:
-            tiktok_logger.error(f"[+] cookie check failed to launch: {exc}")
-            return False
-        try:
-            try:
-                context = await _new_local_context(
-                    browser, storage_state=account_file
-                )
-            except (PlaywrightError, OSError, ValueError) as exc:
-                tiktok_logger.error(
-                    f"[+] cookie check failed: unreadable cookie ({exc})"
-                )
-                return False
-            try:
-                if TIKTOK_INIT_SCRIPT:
-                    context = await set_init_script(context)
-                page = await context.new_page()
-                response = await page.goto(
-                    "https://www.tiktok.com/tiktokstudio/upload?lang=en",
-                    wait_until="domcontentloaded",
-                    timeout=30_000,
-                )
-                status = (
-                    getattr(response, "status", 200)
-                    if response is not None
-                    else 200
-                )
-                if int(status) >= 500:
-                    tiktok_logger.error(
-                        f"[+] cookie check failed: HTTP {status}"
-                    )
-                    return False
-                if "/login" in str(page.url).lower():
-                    tiktok_logger.error("[+] cookie expired")
-                    return False
-                if await _login_form_present(page):
-                    tiktok_logger.error("[+] cookie expired")
-                    return False
-                if await _upload_entry_present(
-                    page, TIKTOK_LOCAL_ENTRY_WAIT_MS
-                ):
-                    tiktok_logger.success("[+] cookie valid")
-                    return True
-                tiktok_logger.error("[+] cookie check failed: upload entry not found")
-                return False
-            except (PlaywrightError, OSError, ValueError) as exc:
-                tiktok_logger.error(f"[+] cookie check failed: {exc}")
-                return False
-            finally:
-                await close_browser_resources(context=context)
-        finally:
-            await close_browser_resources(browser=browser)
+        async with local_browser_session(playwright, platform='tiktok', account=account,
+                                         headless=headless, local_browser=local_browser, create=handle) as active:
+            return await tiktok_setup(handle=handle, session=active)
 
 
-async def tiktok_setup(
-    account_file,
-    handle: bool = False,
-    *,
-    headless: bool = LOCAL_CHROME_HEADLESS,
-    force: bool = False,
-) -> bool:
-    """Ensure a local cookie exists and is valid.
-
-    ``handle=True`` opens an interactive headed login when the cookie is missing
-    or expired, then re-validates it.  ``force=True`` opens the login even when
-    an existing cookie is valid (used by ``sau tiktok login`` so operators can
-    always switch accounts).  ``handle=False`` only checks.
-    """
-    account_file = get_absolute_path(str(account_file), "tk_uploader")
-    if force or not os.path.exists(account_file) or not await cookie_auth(
-        account_file, headless=headless
-    ):
-        if not handle:
-            return False
-        tiktok_logger.info(
-            "[+] opening a headed browser for manual TikTok login."
-        )
-        await get_tiktok_cookie(account_file)
-        return await cookie_auth(account_file, headless=headless)
-    return True
+async def cookie_auth(account_file=None, *, headless=None, account_name=None, local_browser=None):
+    """Compatibility call name; checks the Profile, never a cookie file."""
+    return await tiktok_setup(account_file, headless=headless, account_name=account_name,
+                              local_browser=local_browser)
 
 
-async def get_tiktok_cookie(account_file) -> str:
-    """Open a headed browser and save the cookie after the user logs in.
+async def get_tiktok_cookie(account_file=None, *, headless=None, account_name=None, local_browser=None):
+    """Compatibility call name; login persists only in the browser Profile."""
+    return await tiktok_setup(account_file, handle=True, headless=headless,
+                              account_name=account_name, local_browser=local_browser)
 
-    TikTok has no reliable QR/deep-link login on the desktop web; the operator
-    completes the login in the browser, then presses Enter in the terminal.  A
-    non-interactive terminal is rejected explicitly instead of hanging.
-    """
+
+async def login_in(session):
+    """Guide login in the caller's current Profile and require positive evidence."""
     if not sys.stdin.isatty():
-        raise RuntimeError(
-            "TikTok 本地登录需要交互式终端：请在终端运行 "
-            "`sau tiktok login --account <name>`，完成浏览器登录后按 Enter。"
-        )
-
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            headless=False,
-            # Patchright rejects any arg that does not start with "-"; keep the
-            # language as one ``--lang=...`` argument, never two tokens.
-            args=["--lang=en-US"],
-            **TIKTOK_LAUNCH_KWARGS,
-        )
+        raise RuntimeError('TikTok 本地登录需要交互式终端：请运行 sau tiktok login --account <name>，完成浏览器登录后按 Enter。')
+    page = await session.context.new_page()
+    try:
+        await page.goto('https://www.tiktok.com/login', wait_until='domcontentloaded', timeout=60_000)
+        tiktok_logger.info('请在浏览器中完成 TikTok 登录；完成后回到终端按 Enter。')
         try:
-            context = await browser.new_context(**TIKTOK_CONTEXT_KWARGS)
-            try:
-                if TIKTOK_INIT_SCRIPT:
-                    context = await set_init_script(context)
-                page = await context.new_page()
-                try:
-                    await page.goto(
-                        "https://www.tiktok.com/login?lang=en",
-                        wait_until="domcontentloaded",
-                        timeout=60_000,
-                    )
-                except Exception as exc:
-                    tiktok_logger.warning(
-                        f"[+] TikTok login page was slow: {exc}"
-                    )
-                tiktok_logger.info(
-                    "请在打开的浏览器中完成 TikTok 登录；完成后回到终端按 Enter "
-                    "保存 cookie。"
-                )
-                try:
-                    await asyncio.to_thread(input, "")
-                except EOFError as exc:
-                    raise RuntimeError(
-                        "无法读取终端输入，TikTok 本地登录已取消。"
-                    ) from exc
-                await context.storage_state(path=str(account_file))
-                tiktok_logger.success(f"[+] cookie saved: {account_file}")
-                return str(account_file)
-            finally:
-                await context.close()
-        finally:
-            await browser.close()
+            await asyncio.to_thread(input, '')
+        except EOFError as error:
+            raise RuntimeError('无法读取终端输入，TikTok 本地登录已取消。') from error
+        if not await is_logged_in(session.context, managed=session.managed):
+            raise LoginRequiredError('TikTok 登录尚未完成；请重新运行 login。')
+    finally:
+        await close_browser_resources(page=page)
 
 
 class TiktokBaseUploader(BaseVideoUploader):
@@ -1311,89 +1192,23 @@ class TiktokBaseUploader(BaseVideoUploader):
         page, _owned = await _select_probe_page(session.context)
         multilogin = session.managed
         budget = self.start_publish_budget()
-        await self._upload_on_page(
-            page, multilogin=multilogin, budget=budget
-        )
+        self._publish_attempted = False
+        try:
+            await self._upload_on_page(page, multilogin=multilogin, budget=budget)
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception:
+            await _guard_login(page, publish_attempted=self._publish_attempted)
+            raise
 
     async def upload_local(self, playwright: Playwright | None) -> None:
-        """Run the legacy local-browser branch (cookie file, no Multilogin)."""
         if playwright is None:
-            raise ValueError("本地模式需要 Playwright 实例")
-        if not self.account_file:
-            raise ValueError(
-                "本地模式需要 cookie 文件；请先运行 "
-                "`sau tiktok login --account <name>`。"
-            )
-
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **TIKTOK_LAUNCH_KWARGS
-        )
-        try:
-            try:
-                context = await _new_local_context(
-                    browser, storage_state=self.account_file
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    "TikTok 本地 cookie 加载失败，请重新运行 "
-                    "`sau tiktok login --account <name>`。"
-                ) from exc
-            try:
-                if TIKTOK_INIT_SCRIPT:
-                    context = await set_init_script(context)
-                page = await context.new_page()
-                # Local mode sets the page language explicitly; Multilogin
-                # Profiles must already be English (US) and skip this step.
-                await self.change_language(page)
-                # Local mode keeps the same total budget as Multilogin so a
-                # stuck upload cannot hold the process forever.
-                budget = self.start_publish_budget()
-                await self._upload_on_page(
-                    page, multilogin=False, budget=budget
-                )
-                try:
-                    await context.storage_state(path=f"{self.account_file}")
-                    tiktok_logger.info('  [-] update cookie！')
-                except Exception as error:
-                    tiktok_logger.warning(
-                        f"[+] TikTok cookie 保存失败（发布已成功，不影响结果）: {error}"
-                    )
-                await asyncio.sleep(2)
-            finally:
-                await close_browser_resources(context=context)
-        finally:
-            await close_browser_resources(browser=browser)
-
-    async def change_language(self, page):
-        # Best-effort only: local mode already sets ``locale=en-US``; TikTok's
-        # analytics-heavy home page can exceed a ``load`` timeout.
-        try:
-            await page.goto(
-                "https://www.tiktok.com",
-                wait_until="domcontentloaded",
-                timeout=30_000,
-            )
-            await page.wait_for_selector(
-                '[data-e2e="nav-more-menu"]', timeout=10_000
-            )
-            # 已经设置为英文, 省略这个步骤
-            if (
-                await page.locator(
-                    '[data-e2e="nav-more-menu"]'
-                ).text_content()
-                == "More"
-            ):
-                return
-
-            await page.locator('[data-e2e="nav-more-menu"]').click()  # native-click: language；界面语言初始化不是用户内容
-            await page.locator('[data-e2e="language-select"]').click()  # native-click: language；界面语言初始化不是用户内容
-            await page.locator(
-                '#creator-tools-selection-menu-header >> text=English (US)'
-            ).click()  # native-click: language；界面语言初始化不是用户内容
-        except Exception as exc:
-            tiktok_logger.warning(
-                f"[+] TikTok language switch skipped: {exc}"
-            )
+            raise ValueError('本地模式需要 Playwright 实例')
+        account = _account_alias(self.account_file, self.account_name)
+        async with local_browser_session(playwright, platform='tiktok', account=account,
+                                         headless=self.headless, local_browser=self.local_browser) as session:
+            await tiktok_setup(session=session)
+            await self.upload_in(session)
 
     async def _upload_on_page(
         self,
@@ -1430,10 +1245,9 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self.click_publish(
             page, deadline=budget, multilogin=multilogin
         )
-        if multilogin:
-            # The click already happened; a late redirect must not claim the
-            # post was untouched.
-            _raise_if_login_required(page, publish_attempted=True)
+        # The click already happened; a late redirect must not claim the
+        # post was untouched.
+        await _guard_login(page, publish_attempted=True)
         # 9. read back the published item
         # The publish click already succeeded; a missing link is only a bookkeeping
         # failure and must never turn a confirmed publish into exit 1.
@@ -1454,24 +1268,21 @@ class TiktokBaseUploader(BaseVideoUploader):
                 timeout=60_000,
             )
         except Exception as exc:
-            if multilogin:
-                _raise_if_login_required(page)
+            await _guard_login(page)
             # The Studio app can still render after a slow ``load``; the entry
             # wait below owns the real failure if it did not.
             tiktok_logger.warning(
                 f"[+] TikTok upload navigation was slow: {exc}"
             )
         tiktok_logger.info(f'[+]Uploading-------{self.media_label()}')
-        if multilogin:
-            _raise_if_login_required(page)
+        await _guard_login(page)
 
         try:
             await page.wait_for_url(
                 re.compile(r".*tiktokstudio/upload.*"), timeout=10000
             )
         except Exception as exc:
-            if multilogin:
-                _raise_if_login_required(page)
+            await _guard_login(page)
             # The Studio app may already be rendering even when the exact URL
             # wait loses a race with a redirect; the entry wait below decides.
             tiktok_logger.warning(
@@ -1492,8 +1303,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             tiktok_logger.info("TikTok upload entry appeared.")
         except Exception as e:
             tiktok_logger.error("TikTok upload entry did not appear in time.")
-            if multilogin:
-                _raise_if_login_required(page)
+            await _guard_login(page)
 
         await self.choose_base_locator(page)
         await self.ensure_mode(page)
@@ -2702,8 +2512,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         while True:
             if budget.remaining_seconds() <= 0:
                 raise budget.pre_click_error()
-            if multilogin:
-                _raise_if_login_required(page)
+            await _guard_login(page)
             button = await self._publish_button_ready(
                 page, multilogin=multilogin
             )
@@ -2729,8 +2538,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         Returns ``None`` when no candidate is present or the match is
         disabled / ``aria-disabled="true"``.
         """
-        if multilogin:
-            _raise_if_login_required(page)
+        await _guard_login(page)
         found = await _find_candidate(
             self.locator_base, _PUBLISH_BUTTON_CANDIDATES, visible=True, unique=True
         )
@@ -2802,18 +2610,19 @@ class TiktokBaseUploader(BaseVideoUploader):
         try:
             await _humanized_click(humanizer, publish_button)
         except Exception as e:
-            if multilogin:
-                _raise_if_login_required(
-                    page, publish_attempted=_maybe_dispatched(e)
-                )
+            await _guard_login(
+                page, publish_attempted=_maybe_dispatched(e)
+            )
             if not _maybe_dispatched(e):
                 raise
             publish_clicked = True
+            self._publish_attempted = True
             tiktok_logger.warning(
                 f"  [-] publish click raised after dispatch: {e}"
             )
         else:
             publish_clicked = True
+            self._publish_attempted = True
             tiktok_logger.info("  [-] publish click sent")
 
         # Phase 2 — result polling only. This loop never re-enters the click
@@ -2824,8 +2633,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             poll_iterations += 1
             if poll_iterations > TIKTOK_PUBLISH_MAX_LOOP_ITERATIONS:
                 raise budget.timeout_error(True)
-            if multilogin:
-                _raise_if_login_required(page, publish_attempted=publish_clicked)
+            await _guard_login(page, publish_attempted=publish_clicked)
             try:
                 budget.check_pre_click()
             except RuntimeError:
@@ -2855,10 +2663,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 await asyncio.sleep(0.5)
                 continue
             except Exception as e:
-                if multilogin:
-                    _raise_if_login_required(
-                        page, publish_attempted=publish_clicked
-                    )
+                await _guard_login(
+                    page, publish_attempted=publish_clicked
+                )
                 raise budget.timeout_error(True) from e
 
             tiktok_logger.success("  [-] video published success")
@@ -3007,6 +2814,8 @@ class TiktokVideo(TiktokBaseUploader):
         options: TiktokPublishOptions | None = None,
         headless: bool | None = None,
         no_publish: bool = False,
+        account_name=None,
+        local_browser=None,
     ):
         self.title = title
         self.file_path = file_path
@@ -3014,12 +2823,11 @@ class TiktokVideo(TiktokBaseUploader):
         self.publish_date = publish_date
         self.thumbnail_path = thumbnail_path
         self.account_file = account_file
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.options = options
         self.no_publish = no_publish
-        self.local_executable_path = LOCAL_CHROME_PATH
-        self.headless = (
-            LOCAL_CHROME_HEADLESS if headless is None else headless
-        )
+        self.headless = resolve_headless(headless)
         self.locator_base = None
 
     async def handle_upload_error(self, page):
@@ -3372,8 +3180,7 @@ class TiktokVideo(TiktokBaseUploader):
         while True:
             if budget is not None:
                 budget.check_pre_click()
-            if multilogin:
-                _raise_if_login_required(page)
+            await _guard_login(page)
             try:
                 # Current Studio exposes the publish button via data-e2e; the
                 # legacy class+text form remains only as a fallback.
@@ -3404,8 +3211,7 @@ class TiktokVideo(TiktokBaseUploader):
             except ElementUnusableError:
                 raise
             except Exception:
-                if multilogin:
-                    _raise_if_login_required(page)
+                await _guard_login(page)
                 tiktok_logger.info("  [-] video uploading...")
                 await asyncio.sleep(2)
 
@@ -3453,20 +3259,23 @@ class TiktokNote(TiktokBaseUploader):
         title=None,
         options=None,
         debug=False,
-        headless=True,
+        headless=None,
         no_publish=False,
+        account_name=None,
+        local_browser=None,
     ):
         self.image_paths = list(image_paths)
         self.note = note
         self.tags = tags
         self.publish_date = publish_date
         self.account_file = account_file
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.title = validate_single_line(title)
         self.options = options
         self.no_publish = no_publish
         self.debug = debug
-        self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
+        self.headless = resolve_headless(headless)
         self.locator_base = None
         self.last_item_id = None
 
@@ -3662,8 +3471,7 @@ class TiktokNote(TiktokBaseUploader):
         while True:
             if budget is not None:
                 budget.check_pre_click()
-            if multilogin:
-                _raise_if_login_required(page)
+            await _guard_login(page)
             try:
                 processed = await page.locator("div[data-id]").count() > 0
                 if not processed:
@@ -3708,8 +3516,7 @@ class TiktokNote(TiktokBaseUploader):
             except ElementUnusableError:
                 raise
             except Exception:
-                if multilogin:
-                    _raise_if_login_required(page)
+                await _guard_login(page)
 
             tiktok_logger.info("  [-] photos uploading...")
             await asyncio.sleep(2)

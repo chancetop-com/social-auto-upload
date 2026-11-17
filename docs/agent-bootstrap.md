@@ -11,6 +11,7 @@
 - `kuaishou`
 - `xiaohongshu`
 - `dayu`
+- `tiktok`
 
 ## 这份文档解决什么问题
 
@@ -44,6 +45,7 @@
 - kuaishou
 - xiaohongshu
 - dayu
+- tiktok
 
 你的第一目标不是通读全部源码，也不是优先运行历史 examples，而是先把项目安装到“可运行、可验证、可继续执行任务”的状态。
 
@@ -62,6 +64,7 @@
    - `skills/xiaohongshu-upload/`
    - `skills/bilibili-upload/`
    - `skills/dayu-upload/`
+   - `skills/tiktok-upload/`
 6. `examples/` 仅保留文章示例素材，不包含可执行脚本；统一使用当前 CLI 主线。
 7. 如果登录流程生成二维码图片，不要只返回图片路径；请直接展示图片，或者明确告诉我该打开哪个本地图片文件扫码。
 8. 如果是 Bilibili 登录，不要在非交互环境里强行代跑；应改为指导我在本地真实终端执行。
@@ -71,7 +74,8 @@
    - `sau kuaishou --help`
    - `sau xiaohongshu --help`
    - `sau bilibili --help`
-10. 完成后，请明确输出：
+10. TikTok 已使用持久化 Profile：默认系统 Chrome；先确认选择来源。Chrome 由用户按官方方式安装；显式 Chromium 使用项目固定 Patchright 的完整浏览器（`uv run patchright install --no-shell chromium`）。保留已有 conf.py；显式 headed/headless 优先于 LOCAL_CHROME_HEADLESS，未配置默认有头。登录使用 `sau tiktok login --account <alias> --headed`，交互完成后同配置 check；Profile/明确未登录退出 10，运行故障退出 1。仅 login 引导登录，真实发布前回归显式传 --no-publish；不要导入旧 Cookie 或自动重发。其他平台保留各自现有运行方式。
+11. 完成后，请明确输出：
    - 你实际执行了哪些命令
    - 哪些验证通过了
    - 当前项目是否已经进入“可继续登录/上传”的状态

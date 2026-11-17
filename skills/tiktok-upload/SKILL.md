@@ -1,10 +1,10 @@
 ---
 name: tiktok-upload
-description: 使用 `sau tiktok` 在本地 cookie 模式或托管浏览器 Profile（Multilogin X / AdsPower）下检查登录并发布 TikTok 视频与图文。Use when 用户要发布 TikTok 视频或图文。
+description: 使用 `sau tiktok` 在本地持久化 Profile 模式或托管浏览器 Profile（Multilogin X / AdsPower）下检查登录并发布 TikTok 视频与图文。Use when 用户要发布 TikTok 视频或图文。
 license: MIT-0
 slug: social-auto-upload-tiktok-upload
 displayName: TikTok 视频与图文发布
-version: 1.2.0
+version: 1.3.0
 summary: 使用 sau tiktok 在本地模式或托管浏览器模式（MLX / AdsPower）下检查登录并发布视频与图文。
 ---
 
@@ -12,21 +12,25 @@ summary: 使用 sau tiktok 在本地模式或托管浏览器模式（MLX / AdsPo
 
 TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI：
 
-- **本地模式**（默认）：不设置任一托管凭据，使用本地 Chromium 与 `cookies/tiktok_<account>.json`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器上下文固定 `en-US`，无需改系统语言。
+- **本地模式**（默认）：不设置托管凭据，使用专用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器保存完整状态，旧 Cookie JSON 不读写或自动清理。
 - **Multilogin X（MLX）模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`。
 - **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`（映射 AdsPower `user_id`）；`--folder-id` 忽略。
 
 ## 部署前提
 
 **本地模式**
-- CLI 所在机器可运行 Chromium（Patchright）。
-- 首次使用先运行 `sau tiktok login --account <name>`：会打开有头浏览器，人工完成 TikTok 登录后回到终端按 Enter 保存 cookie。
+- 默认系统 Chrome，由用户从 [Google Chrome 官网](https://www.google.com/chrome/) 安装；显式 `--local-browser chromium` 使用项目固定 Patchright 的完整浏览器，安装命令 `uv run patchright install --no-shell chromium`。只需准备选定来源，启动失败不自动切换。
+- `conf.py` 的非空 `LOCAL_CHROME_PATH` 优先；否则显式 --local-browser > LOCAL_BROWSER > chrome。自定义产品不能可靠识别时退出 1，不能靠改文件名强行指定种类。
+- 显式 --headed/--headless > LOCAL_CHROME_HEADLESS > False；升级保留用户已有 True，只有首次配置才复制示例。托管同样采用此 headless 优先级，并完全忽略本地来源。
+- Profile 按平台、原始别名、浏览器种类隔离；同种类修改路径/版本/有头模式继续复用。别名允许换登录账号，另一个浏览器种类须单独登录。
+- 窗口、UA、语言均沿用当前浏览器；现有选择器仍需要支持的页面布局。
+- 首次使用在交互终端运行 `sau tiktok login --account <name> --headed`：人工完成登录后回到终端按 Enter，取得正向登录证据；随后同一来源运行 check。只有 login 引导登录，业务失效会停止。
 - 图文（`upload-note`）要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖。
 
 **Multilogin 模式**
 - CLI 与 Multilogin 桌面应用在同一台 macOS/Windows 机器，桌面应用已启动。
 - Profile 使用 Mimic 内核，已人工登录 TikTok，且没有待处理验证码或 2FA。
-- Profile 界面语言必须为 **English (US)**；托管模式会跳过 CLI 内的语言切换。
+- Profile 界面语言必须为 **English (US)**；本地保留当前语言；托管保留既有 English 登录探测入口，不修改 Profile 偏好。
 - 图文（`upload-note`）还要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；没有入口时命令在选文件前退出 `1`。
 
 **AdsPower 模式**
@@ -39,8 +43,8 @@ TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI�
 
 ```bash
 # 本地模式：先登录一次
-sau tiktok login --account creator
-# 0=已登录，1=无效
+sau tiktok login --account creator --headed
+# 0=已登录，10=需登录/验证，1=运行故障
 sau tiktok check --account creator
 sau tiktok upload-video --account creator --file videos/demo.mp4 --title "标题"
 sau tiktok upload-note --account creator --images images/1.jpg images/2.png
@@ -76,16 +80,16 @@ sau tiktok upload-video \
   --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
 ```
 
-- 本地模式必填 `--account`；托管模式 `--account` 可选，仅作日志标签，缺省为 `profile_id`。
+- 本地模式必填 `--account`；托管模式 --account 被忽略，身份及日志标签取 profile_id。
 - 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`。
-- 本地模式读写 `cookies/tiktok_<account>.json`；托管模式不读写 cookie 文件。
-- 托管模式下登录页、验证码或 2FA 退出 `10`，本地模式按运行失败退出 `1`；两种模式的发布循环总超时均为 15 分钟。
+- 本地 Profile 是唯一登录态来源；检查/发布不引导登录。重建一个明确目标：`sau tiktok reset-profile --account creator --browser-kind chrome`；不启动浏览器，不删除另一种类、旧文件或历史结果，之后先重新 login。占用时立即失败，禁止抢占。
+- 两种模式登录/验证均退出 `10`，网络/页面结构/浏览器故障退出 `1`；共享 15 分钟发布预算。提交后错误带 `publish_attempted=true` 时，先核查作品再决定重跑。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
-- 真实账号的本地登录与发布**待验收**；首次使用请先用测试账号验证。
+- 2026-11-17 隔离浏览器验证已通过；新的持久化 Profile 真实平台回归留待最终收口。验收视频/图文显式传 `--no-publish`：上传素材、编辑并等待发布就绪后停止，可能留下临时素材/草稿，不证明已经发布。
 
 ## 托管浏览器模式（可选）
 
-`check`、`upload-video` 和 `upload-note` 均可改用托管浏览器 Profile：MLX 需要 `--folder-id` + `--profile-id`，AdsPower 只需要 `--profile-id`（`--folder-id` 忽略）。两种模式都不读写 cookie 文件，`--account` 仅作日志标签，`login` 一律拒绝。退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+`check`、`upload-video` 和 `upload-note` 均可改用托管浏览器 Profile：MLX 需要 `--folder-id` + `--profile-id`，AdsPower 只需要 `--profile-id`（`--folder-id` 忽略）。两种模式都不读写 cookie 文件，`--account` 被忽略，日志标签取 profile_id，`login` 一律拒绝。退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 
 ## 视频参数
 
@@ -109,12 +113,12 @@ sau tiktok upload-video \
 
 ## 退出码与失败处理
 
-- `0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要人工登录、`130` 中断。
+- `0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录或验证、`11` 托管限流（不自动重试）、`130` 中断。
 - 图片数量/格式/大小、Title/Description/hashtag 超限、`--note`/`--notef` 冲突等本地校验失败在启动浏览器前退出 `2`。
 - 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
 - 收到 `9` 时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关。
 
-定时发布使用 `--schedule "YYYY-MM-DDTHH:MM:00Z"`（UTC 绝对时刻，填写前换算到浏览器时区；精确到 5 分钟）；只有用户明确给出时间才传。托管模式只验证“已登录”，Profile 即身份，调度侧需确保 `profile_id` 与目标账号匹配；本地模式则由 `--account` 决定 cookie 文件。命令级登录检测已是 provider-aware 文案；部分平台上传过程中的登录/验证码/2FA 错误仍可能提到 Multilogin，属于已知遗留。
+定时发布使用 `--schedule "YYYY-MM-DDTHH:MM:00Z"`；只有用户明确给出时间才传。托管 Profile 即身份，本地别名选择独立 Profile。关闭故障不覆盖主结果；重新登录、崩溃或重建都不代表可以重新提交旧任务。
 
 每次发布前让用户确认账号、单条视频或一组图片、标题、正文/标签及立即/定时方式。页面布局或登录状态不符合预期时停止并报告；只有平台页面确认提交后才报告成功，未知结果先核查 TikTok Studio，不能直接重发。

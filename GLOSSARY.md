@@ -20,7 +20,7 @@
 
 ## 本地模式（Local 模式）
 
-项目原有的默认模式：不设置任一托管模式环境变量时，上传器自行启动浏览器，从 `cookies/<platform>_<account>.json` 读取 `storage_state`，上传后写回。托管模式下该文件完全不参与。
+不设置任一托管模式环境变量时，由项目启动并关闭浏览器。迁移阶段 TikTok 已使用独立持久化本地浏览器 Profile 作为唯一登录态来源；其他平台仍沿用旧 Cookie JSON / storage_state 流程，随平台接入逐批替换。托管模式下本地资料完全不参与。
 
 ## 本地浏览器 Profile
 

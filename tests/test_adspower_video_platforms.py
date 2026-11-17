@@ -17,6 +17,7 @@ import unittest
 from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import conf
 import sau_cli
 from sau_commands import (
     alipay,
@@ -69,7 +70,7 @@ class _AsyncCM:
 def _run(argv):
     with patch.dict(
         os.environ, {"ADSPOWER_API_KEY": KEY}, clear=True
-    ):
+    ), patch.object(conf, "LOCAL_CHROME_HEADLESS", False):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(
             io.StringIO()
         ) as err:
@@ -106,10 +107,10 @@ class VideoPlatformCoverageTests(unittest.TestCase):
             login_patch,
             patch.object(
                 module,
-                "resolve_account_file",
+                "local_browser_session" if module is tiktok else "resolve_account_file",
                 new=MagicMock(
                     side_effect=AssertionError(
-                        "managed mode must not build a cookie path"
+                        "managed mode must not acquire any local browser identity"
                     )
                 ),
             ),
