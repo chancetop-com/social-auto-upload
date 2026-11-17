@@ -4,7 +4,7 @@
 
 ## 首次安装
 
-先按[项目安装说明](./install.md)安装 Python 3.10–3.12、依赖和 `sau` 命令，并从 `conf.example.py` 复制生成本地 `conf.py`。雪球使用已安装的 Google Chrome；安装 Chromium 不等于安装 Chrome。Chrome 不在默认位置时，在 `conf.py` 中配置 `LOCAL_CHROME_PATH` 为本机实际可执行文件路径，默认留空则使用系统 Chrome 通道。
+先按[项目安装说明](./install.md)安装 Python 3.10–3.12、依赖和 `sau` 命令，并从 `conf.example.py` 复制生成本地 `conf.py`。保留已有 `conf.py`。默认选择系统 Chrome，只准备所选浏览器；显式 `--local-browser chromium` 使用项目固定 Patchright 配套的完整 Chromium，可用 `uv run patchright install --no-shell chromium` 安装。`LOCAL_CHROME_PATH` 非空时优先使用并识别实际产品种类，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；启动失败不切换来源。
 
 推荐使用 Markdown 原稿。需要 Node.js 22+，首次执行 `sau article setup` 安装渲染依赖。仓库提供带两张段间配图的 [Markdown 示例](../examples/xueqiu_article.md)，配图文件随仓库提供，直接从项目根目录运行：
 
@@ -24,9 +24,11 @@ sau xueqiu login --account creator --expected-name "你的雪球昵称"
 sau xueqiu check --account creator
 ```
 
-登录时在打开的 Chrome 中完成验证。程序保存本地会话并绑定用户 ID，同一别名不会覆盖其他账号。账号密码无需写入命令或源码。后续上传与查询复用该会话。
+登录时在所选浏览器中完成验证；关闭后用同配置 check。login/check/文章/verify 共用 `browser_profiles/xueqiu/<原始别名>/<chrome|chromium>/`，由浏览器保存会话，旧 Cookie JSON 和身份旁文件不读写、不自动迁移。别名只管理资料，允许同别名换号，两种浏览器也可登录不同账号；`--expected-name` 仍核对本次明确请求，verify 继续核对原作品作者。账号密码无需写入命令或源码。
 
-默认使用可见 Chrome；本机无头访问曾被平台拦截，可显式传 `--headless`，但不能把访问拦截当作登录失效。
+显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，login/check/文章/verify 和直接调用遵循同一优先级，保持当前语言和自然窗口。只在 login 引导登录；缺少 Profile、明确未登录或人机验证退出 10（验证带 `reason=verification`），网络、403、页面或必需身份字段故障退出 1。
+
+重建一个明确种类：`sau xueqiu reset-profile --account creator --browser-kind chrome`。无需浏览器 binary，只清空指定叶子 Profile；占用时拒绝，保留另一种类及历史结果，之后重新 login。
 
 ### Multilogin X 模式
 
@@ -84,7 +86,7 @@ sau xueqiu upload-article --account creator --title "文章标题" --content-fil
 
 发表成功返回 `status: published` 和作品 ID；程序核对最终受理的主体、标题、分享范围与正文，并在已发布管理列表按 ID 查询。`management_verified: true` 表示后台原作品查询也通过。私人文章显示“仅自己可见”，不代表未发表。
 
-`prepared` 只表示草稿/预览检查完成。命令输出结果 JSON 路径，结果及截图保存在账号目录的 `xueqiu_results` 下。
+`prepared` 只表示草稿/预览检查完成。命令输出结果 JSON 路径，结果及截图保持原路径 `cookies/xueqiu_results/`，重建 Profile 不删除历史记录。
 
 提交遇到超时或 `submission_unknown` 时，只查询原作品，不重复上传：
 
@@ -98,10 +100,10 @@ sau xueqiu verify --account creator --result "本次结果文件.json"
 
 ## 开发验证
 
-完成项目安装、Chrome 安装和 `sau article setup` 后，可执行：
+以下跨浏览器测试需要系统 Chrome、完整 Chromium 和 `sau article setup` 的渲染依赖；正常运行只需所选浏览器。准备后执行：
 
 ```powershell
-python -m unittest tests.test_xueqiu_uploader tests.test_article_render tests.test_sau_browser_cli -v
+python -m unittest tests.test_xueqiu_profiles tests.test_xueqiu_uploader tests.test_xueqiu_humanize tests.test_xueqiu_profile_dom -v
 ```
 
-这些测试使用临时文件、本地浏览器页面和模拟查询响应，不需要雪球账号，也不会发表文章。分页查询包含模拟测试；不同系统和账号仍需在各自环境验证，当前真实发表验收环境为 Windows Chrome。
+这些测试使用临时文件、本地浏览器页面和模拟查询响应，不需要雪球账号，也不会发表文章。分页查询包含模拟测试；不同系统和账号仍需在各自环境验证，历史真实发表验收环境为 Windows Chrome；本次持久化迁移仅验证离线流程和隔离合成浏览器页面，未操作真实账号或发表。

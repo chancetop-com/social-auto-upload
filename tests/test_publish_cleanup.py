@@ -168,7 +168,6 @@ class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):
         entries = (
             ("uploader.zhihu_uploader.video", "ZhihuVideo", "main", None),
             ("uploader.zhihu_uploader.article", "ZhihuArticle", "main", None),
-            ("uploader.xueqiu_uploader.article", "XueqiuArticle", "main", None),
         )
         for module_name, cls, entry, opener in entries:
             for outcome in (None, PublishResultUnknownError("primary unknown")):
