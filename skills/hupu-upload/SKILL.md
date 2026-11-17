@@ -23,7 +23,7 @@ sau hupu upload-video --account creator --file videos/demo.mp4 --title "标题" 
 ## 本地运行与登录
 
 1. 保留已有 `conf.py`。本地默认系统 Chrome、有头；只准备选定来源：系统 Chrome、`uv run patchright install --no-shell chromium` 安装的完整 Chromium，或 `LOCAL_CHROME_PATH` 指定的可执行文件。路径优先于 `--local-browser chrome|chromium`，再优先于 `LOCAL_BROWSER`（缺省 chrome）。来源失败直接停止，不自动回退。
-2. 显式 `--headed` / `--headless` 优先于 `LOCAL_CHROME_HEADLESS`（缺省 False）。login/check/上传及预检沿用同一配置；Chrome 与 Chromium 分开使用 `browser_profiles/hupu/<原始别名>/<chrome|chromium>`，可以各自登录不同真实账号。
+2. 显式 `--headed` / `--headless` 优先于 `LOCAL_CHROME_HEADLESS`（缺省 False）。login/check/上传及预检沿用同一配置；Chrome 与 Chromium 分开使用 `browser_profiles/<chrome|chromium>/hupu/<原始别名>`，可以各自登录不同真实账号。
 3. 运行 login，在浏览器完成 QQ 扫码或必要验证。QQ iframe/popup、终端二维码及业务交互保留；浏览器自然窗口和现有语言保持不变。正常关闭后，用相同浏览器选择运行 check，看到 valid 才继续。旧 Cookie JSON 不参与，也不会自动删除。
 4. 只有 login 引导登录。check/上传缺少 Profile、明确未登录或验证退出 10；验证保留 `reason=verification`，网络/页面/权限/必需字段故障退出 1。恢复登录后重新发起任务；提交后先核对作品，禁止自动重发。15 分钟预算与 not-before 保持；结果未知退出 9，`publish_attempted=true` 表示可能已经提交。
 5. 用户明确要求清空资料时，运行 `sau hupu reset-profile --account creator --browser-kind chrome`（或 chromium）。命令无需 binary，只清空指定种类；占用时拒绝，其他 Profile、旧资料和历史结果保留。成功后重新 login。

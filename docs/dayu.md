@@ -11,7 +11,7 @@ sau dayu login --account creator --headed --expected-name "你的大鱼号名称
 sau dayu check --account creator
 ```
 
-登录、检查、视频、文章与核验共用 `browser_profiles/dayu/<原始别名>/<chrome|chromium>/`，浏览器自动保存登录态；旧 Cookie JSON 与 `.identity.json` 不读取、不导入、不写回。`creator` 是资料别名，可以重新登录其他真实账号，两种浏览器也可登录不同账号。`--expected-name` 只核对这次明确请求的名称，省略时不绑定真实账号；历史结果仍要求原作者主体一致。
+登录、检查、视频、文章与核验共用 `browser_profiles/<chrome|chromium>/dayu/<原始别名>/`，浏览器自动保存登录态；旧 Cookie JSON 与 `.identity.json` 不读取、不导入、不写回。`creator` 是资料别名，可以重新登录其他真实账号，两种浏览器也可登录不同账号。`--expected-name` 只核对这次明确请求的名称，省略时不绑定真实账号；历史结果仍要求原作者主体一致。
 
 默认系统 Chrome、有头、自然窗口。只安装所选来源：Chrome 按官方方式安装；完整 Chromium 用 `uv run patchright install --no-shell chromium`，命令追加 `--local-browser chromium`。已有自定义路径 `LOCAL_CHROME_PATH` 优先，否则 `--local-browser` > `LOCAL_BROWSER` > `chrome`；`--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > `False`。升级保留已有 conf.py，没有新增配置项也可运行。失败会报告所选来源，不自动切换浏览器。
 

@@ -16,7 +16,7 @@ summary: 使用独立 Rednote Profile 完成登录、检查及发布流程。
 4. 视频使用 `upload-video --file <path> --title <title> --desc <body>`；图文使用 `upload-note --images <paths...> --title <title> --note <body>`。可加 `--tags tag1,tag2`，完整参数查询各子命令的 `--help`。
 5. 根据退出码报告结果：干跑成功仅表示发布前准备完成。`9` 或 `publish_attempted=true` 必须人工核对是否已发布；`10` 先恢复登录或完成人机验证。
 
-默认域名为 `https://creator.rednote.com`，可用独立的 `SAU_REDNOTE_CREATOR_BASE_URL` 覆盖。身份只保存在 `browser_profiles/rednote/<原始别名>/<chrome|chromium>`：平台、别名、实际浏览器种类隔离；旧 JSON 不参与读写或清理。别名可重新登录不同账号。
+默认域名为 `https://creator.rednote.com`，可用独立的 `SAU_REDNOTE_CREATOR_BASE_URL` 覆盖。身份只保存在 `browser_profiles/<chrome|chromium>/rednote/<原始别名>`：平台、别名、实际浏览器种类隔离；旧 JSON 不参与读写或清理。别名可重新登录不同账号。
 
 默认系统 Chrome、有头且自然窗口；`--local-browser chromium` 选择配套完整 Chromium，`LOCAL_CHROME_PATH` 优先。显式 headed/headless 优先于 `LOCAL_CHROME_HEADLESS`，缺省为 False，保留已有配置。只准备选定来源，失败不自动切换。占用立即退出 1。明确要求清空时运行 `sau rednote reset-profile --account <name> --browser-kind chrome|chromium`，只清空指定种类，之后重新 login；无需安装浏览器，不自动恢复发布。
 

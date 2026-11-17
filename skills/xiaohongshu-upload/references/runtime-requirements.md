@@ -21,7 +21,7 @@ sau xiaohongshu login --account creator --local-browser chromium --headed
 
 配置优先级：非空 `LOCAL_CHROME_PATH`（已有可执行文件）优先；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。仅要求实际选择的来源，不探测或安装另一来源；失败不换浏览器。同种浏览器的路径、headless 切换复用 Profile，两种浏览器各有独立资料。
 
-本地资料位于 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>/`，与日常浏览器隔离。旧 Cookie JSON 不读写或自动清理。托管模式不要求本地浏览器安装，完全忽略本地来源配置。
+本地资料位于 `browser_profiles/<chrome|chromium>/xiaohongshu/<原始别名>/`，与日常浏览器隔离。旧 Cookie JSON 不读写或自动清理。托管模式不要求本地浏览器安装，完全忽略本地来源配置。
 
 ## 常见调用方式
 

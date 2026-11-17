@@ -33,6 +33,9 @@ async def main():
                             config=resolve_local_browser(headless=headless,local_browser=kind)
                             assert config.kind==kind,(path,config)
                             async with local_browser_session(pw,platform='tiktok',account='isolated-smoke',create=True,profile_root=root,configuration=config) as session:
+                                expected = Path(root).resolve() / kind / 'tiktok' / 'isolated-smoke'
+                                assert expected.is_dir()
+                                assert not (expected / '.sau-owner.json').exists()
                                 page=await session.context.new_page(); await page.goto(url)
                                 token=f'{kind}-{headless}-{bool(path)}'
                                 await page.evaluate('(v) => {localStorage.setItem("persist",v); document.cookie="persist="+v+"; max-age=3600; path=/"}',token)

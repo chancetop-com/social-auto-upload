@@ -82,7 +82,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(out.strip(), 'valid')
         self.assertEqual(self.pw.chromium.persistent_calls, [{
-            'user_data_dir': str(self.root / 'browser_profiles/xiaohongshu/creator/chrome'),
+            'user_data_dir': str(self.root / 'browser_profiles/chrome/xiaohongshu/creator'),
             'channel': 'chrome', 'headless': True, 'no_viewport': True}])
         self.assertTrue(self.context.closed)
         self.assertFalse(self.context.storage_state_calls)
@@ -99,7 +99,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 call = self.pw.chromium.persistent_calls[-1]
                 self.assertEqual(call['channel'], kind)
                 self.assertEqual(call['headless'], headless)
-                self.assertTrue(call['user_data_dir'].endswith('/creator/' + kind))
+                self.assertTrue(call['user_data_dir'].endswith('/' + kind + '/xiaohongshu/creator'))
         self.assertEqual(len(self.pw.chromium.persistent_calls), 3)
         self.assertFalse(self.pw.chromium.launch_calls)
         self.assertFalse(self.context.storage_state_calls)
@@ -290,6 +290,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.context.page_factory = LoginPage
         def callback(info):
             self.assertTrue(Path(info['image_path']).exists())
+            self.assertEqual(Path(info['image_path']).parent, self.root / 'browser_profiles/chrome/xiaohongshu/creator')
             raise ValueError('QR delivery failed')
         with self.assertRaisesRegex(ValueError, 'QR delivery failed'):
             asyncio.run(xhs.xiaohongshu_setup(account_name='creator', handle=True, qrcode_callback=callback))
@@ -314,7 +315,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         call = self.pw.chromium.persistent_calls[0]
         self.assertEqual(call['executable_path'], str(executable))
         self.assertNotIn('channel', call)
-        self.assertTrue(call['user_data_dir'].endswith('/creator/chrome'))
+        self.assertTrue(call['user_data_dir'].endswith('/chrome/xiaohongshu/creator'))
 
     def test_managed_video_and_note_preserve_ignored_options_and_no_publish(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser

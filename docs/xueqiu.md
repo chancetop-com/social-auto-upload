@@ -24,7 +24,7 @@ sau xueqiu login --account creator --expected-name "你的雪球昵称"
 sau xueqiu check --account creator
 ```
 
-登录时在所选浏览器中完成验证；关闭后用同配置 check。login/check/文章/verify 共用 `browser_profiles/xueqiu/<原始别名>/<chrome|chromium>/`，由浏览器保存会话，旧 Cookie JSON 和身份旁文件不读写、不自动迁移。别名只管理资料，允许同别名换号，两种浏览器也可登录不同账号；`--expected-name` 仍核对本次明确请求，verify 继续核对原作品作者。账号密码无需写入命令或源码。
+登录时在所选浏览器中完成验证；关闭后用同配置 check。login/check/文章/verify 共用 `browser_profiles/<chrome|chromium>/xueqiu/<原始别名>/`，由浏览器保存会话，旧 Cookie JSON 和身份旁文件不读写、不自动迁移。别名只管理资料，允许同别名换号，两种浏览器也可登录不同账号；`--expected-name` 仍核对本次明确请求，verify 继续核对原作品作者。账号密码无需写入命令或源码。
 
 显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，login/check/文章/verify 和直接调用遵循同一优先级，保持当前语言和自然窗口。只在 login 引导登录；缺少 Profile、明确未登录或人机验证退出 10（验证带 `reason=verification`），网络、403、页面或必需身份字段故障退出 1。
 

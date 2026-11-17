@@ -37,7 +37,7 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 
 ## 本地浏览器准备
 
-17 个浏览器平台均使用 `browser_profiles/<平台>/<原始别名>/<chrome|chromium>`，仅 login 引导登录；正常关闭后以同配置 check。默认系统 Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装；选择 Chromium 时用项目环境的 `uv run patchright install chromium`，可加 `--no-shell`，完整浏览器同时服务有头与无头。基础安装和 help 无浏览器要求。
+17 个浏览器平台均使用 `browser_profiles/<chrome|chromium>/<平台>/<原始别名>`，仅 login 引导登录；正常关闭后以同配置 check。默认系统 Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装；选择 Chromium 时用项目环境的 `uv run patchright install chromium`，可加 `--no-shell`，完整浏览器同时服务有头与无头。基础安装和 help 无浏览器要求。
 
 保留已有 conf.py。非空 `LOCAL_CHROME_PATH` 优先，其次显式 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。旧 Cookie 不读写，别名可换号。仅显式 `reset-profile --account <别名> --browser-kind chrome|chromium` 清空指定 Profile，无需 binary，保留另一种类和历史结果；占用时拒绝。Bilibili 使用 biliup 的独立流程。
 

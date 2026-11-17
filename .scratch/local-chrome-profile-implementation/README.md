@@ -28,6 +28,7 @@
 | [18](./issues/18-xueqiu-persistent-profile.md) | 雪球全流程与当次身份接入 | 第五批 | 13、14、15 |
 | [19](./issues/19-one-time-legacy-migration.md) | 执行一次性旧资料迁移并删除临时实现 | 五批接入后的一次性作业 | 16、17、18 |
 | [20](./issues/20-final-convergence-and-no-publish-validation.md) | 完成全入口收口与四平台真实验收 | 最终交付 | 19 |
+| [21](./issues/21-browser-kind-first-layout.md) | 浏览器种类首层布局与现有资料安全搬迁 | 用户追加 | 19，20 已验证基线 |
 
 ## 执行顺序
 
@@ -41,7 +42,7 @@
 
 - 采用术语表中的本地浏览器 Profile、Profile 占用、Profile 重建、账号别名、发布目标、Browser session、不发布模式和发布结果未知。原始规格给出完整契约；票据补充可验证交付边界，不放宽规格。
 - 平台接入覆盖正式 CLI 可达的全部本地动作及直接支撑它们的 uploader；保持真实 local 模式及既有 session 注入边界。未注册历史入口和 Bilibili biliup 不扩大为本次改造范围。
-- 默认 Chrome 有头，支持显式 Chromium、自定义路径和 headless；只要求选定来源，失败不回退。Profile 按平台、原始别名和实际种类隔离，保留 01 的目录归属、锁和重建边界。
+- 默认 Chrome 有头，支持显式 Chromium、自定义路径和 headless；只要求选定来源，失败不回退。Profile 按 `browser_profiles/<chrome|chromium>/<platform>/<raw_account>` 隔离；21 将守护资料置于账号数据之外，保留 01 的归属、锁与重建语义。
 - 只有 login 引导登录；业务登录失效即结束。使用当前会话所需身份，别名可以换号；显式发布目标和历史作品核验仍有效。正常流程不读取旧登录态，也不承担一次性迁移。
 - 保持提交至多一次、发布预算、not-before、结果文件、publish_attempted 和禁止自动重发。用法错误为 2，运行/探测故障为 1，登录/验证为 10，发布结果未知为 9，托管限流为 11；提交后异常保留既有阶段信息和恢复指导。
 - 本地退出指纹、语言及固定窗口覆盖，保留 Patchright 默认和业务所需脚本、权限、代理及交互能力。MLX/AdsPower 只改变批准的 headless 来源，其他路由、参数、日志和所有权行为保持。

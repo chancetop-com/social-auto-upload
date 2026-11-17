@@ -109,7 +109,7 @@ class TencentProfilesTests(unittest.TestCase):
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 0)
         calls = self.playwright.chromium.persistent_calls
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0], {'user_data_dir': str(self.root / 'browser_profiles/tencent/Creator/chrome'), 'channel': 'chrome', 'headless': False, 'no_viewport': True})
+        self.assertEqual(calls[0], {'user_data_dir': str(self.root / 'browser_profiles/chrome/tencent/Creator'), 'channel': 'chrome', 'headless': False, 'no_viewport': True})
         self.assertEqual(calls[0], calls[1])
         self.assertTrue(self.context.closed)
         self.assertEqual(self.context.browser.close_calls, 0)
@@ -206,7 +206,7 @@ class TencentProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('executable_path=', result[2])
         self.assertEqual(len(self.playwright.chromium.persistent_calls), 2)
-        self.assertTrue(all(call['user_data_dir'].endswith('/chromium') for call in self.playwright.chromium.persistent_calls))
+        self.assertTrue(all(call['user_data_dir'].endswith('/chromium/tencent/Creator') for call in self.playwright.chromium.persistent_calls))
 
     def test_reset_is_exact_and_requires_no_browser_and_rejects_active_profile(self):
         chrome, chromium = self.profile(), self.profile('chromium')

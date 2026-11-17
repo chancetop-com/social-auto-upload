@@ -83,7 +83,7 @@ class FacebookPageProfileCliTests(unittest.TestCase):
         code, _, err = self.run_cli('check', '--account', 'Creator', '--proxy', 'http://localhost:7890')
         self.assertEqual(code, 0, err)
         self.assertEqual(self.pw.chromium.persistent_calls, [{
-            'user_data_dir':str(self.root / 'browser_profiles/facebook-page/Creator/chrome'),
+            'user_data_dir':str(self.root / 'browser_profiles/chrome/facebook-page/Creator'),
             'channel':'chrome', 'headless':True, 'no_viewport':True,
             'proxy':{'server':'http://localhost:7890'},
         }])
@@ -114,7 +114,7 @@ class FacebookPageProfileCliTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual([c['headless'] for c in calls], [True,False,True])
         self.assertEqual(calls[0]['user_data_dir'], calls[1]['user_data_dir'])
-        self.assertTrue(calls[2]['user_data_dir'].endswith('/facebook-page/Creator/chromium'))
+        self.assertTrue(calls[2]['user_data_dir'].endswith('/chromium/facebook-page/Creator'))
         self.assertFalse((self.root / 'cookies').exists())
         self.assertFalse(self.context.storage_state_calls)
         self.assertTrue(self.context.closed)

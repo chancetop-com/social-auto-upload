@@ -46,3 +46,7 @@ CLI 在任何本地路径访问前拒绝托管模式，不调用 provider；浏�
 - `git check-ignore browser_profiles/synthetic/check` 返回该路径；`git diff --check` 通过。`git merge --no-edit codex/local-chrome-profile` 在本 worktree 执行，结果 `Already up to date.`；sandbox 不允许写 worktree Git 元数据时经授权 escalation 完成，没有修改 integration checkout。
 - Windows `lockfile` 的保守检查依据 [Chromium process_singleton_win.cc](https://raw.githubusercontent.com/chromium/chromium/main/chrome/browser/process_singleton_win.cc) 的 delete-on-close 文件行为；不宣称检查能够证明残留进程已退出。
 - 本票没有启动浏览器、接触真实账号、发布或删除作品。浏览器启动/持久化实测属于 02；四平台现有业务会话仍待 02–05 接入，其他平台待各自票开放 reset-profile。无本票阻塞。
+
+### 2026-11-17 后续目录修正
+
+本票以上路径描述记录 01 的历史实现。当前目录顺序、外置归属/guard 与实际资料搬迁以[21](./21-browser-kind-first-layout.md)和[当前规格](../../local-chrome-profile/spec.md#3-profile-定位元数据与别名)为准；历史验证结果不改写。

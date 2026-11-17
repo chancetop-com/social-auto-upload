@@ -13,7 +13,7 @@ sau rednote check --account creator
 
 有头登录保留网页默认的短信入口，用户也可以切到扫码；等待命令显示登录成功后再关闭窗口。无头登录 `--headless` 输出二维码。CLI 的测试浏览器和日常 Chrome 是不同会话，日常 Chrome 已登录不代表 CLI 已登录。
 
-本地身份只保存在 `browser_profiles/rednote/<原始别名>/<chrome|chromium>` 的专用持久化 Profile，与日常浏览器、小红书及另一浏览器种类隔离。默认系统 Chrome、有头、自然窗口尺寸；`--local-browser chromium` 选择项目 Patchright 配套的完整 Chromium，`LOCAL_CHROME_PATH` 覆盖选择。显式 `--headed` / `--headless` 优先于 `conf.py` 的 `LOCAL_CHROME_HEADLESS`，未配置时为有头；保留已有配置。登录、检查、内部预检和发布采用同一来源与 Profile。仅需安装实际选择的浏览器，安装见 [运行环境](./install.md#4-按所选浏览器准备运行环境)。
+本地身份只保存在 `browser_profiles/<chrome|chromium>/rednote/<原始别名>` 的专用持久化 Profile，与日常浏览器、小红书及另一浏览器种类隔离。默认系统 Chrome、有头、自然窗口尺寸；`--local-browser chromium` 选择项目 Patchright 配套的完整 Chromium，`LOCAL_CHROME_PATH` 覆盖选择。显式 `--headed` / `--headless` 优先于 `conf.py` 的 `LOCAL_CHROME_HEADLESS`，未配置时为有头；保留已有配置。登录、检查、内部预检和发布采用同一来源与 Profile。仅需安装实际选择的浏览器，安装见 [运行环境](./install.md#4-按所选浏览器准备运行环境)。
 
 普通命令不读取、导入、导出或删除旧 Cookie JSON。只有 `login` 引导登录；缺少 Profile、明确未登录或人机验证退出 `10`，网络、页面结构或浏览器故障退出 `1`。登录有效性由发布页上传入口确认；目录存在不代表已登录。账号别名可以重新登录其他真实账号，两种浏览器也可以使用不同账号。
 

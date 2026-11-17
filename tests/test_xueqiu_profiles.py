@@ -95,7 +95,7 @@ class XueqiuProfilesTests(unittest.TestCase):
         result = self.cli('login', '--account', 'Creator', '--expected-name', 'Second')
         self.assertEqual(result[0], 0, result)
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 0)
-        self.assertEqual(self.pw.chromium.persistent_calls, [dict(user_data_dir=str(self.root / 'browser_profiles/xueqiu/Creator/chrome'), channel='chrome', headless=False, no_viewport=True)] * 3)
+        self.assertEqual(self.pw.chromium.persistent_calls, [dict(user_data_dir=str(self.root / 'browser_profiles/chrome/xueqiu/Creator'), channel='chrome', headless=False, no_viewport=True)] * 3)
         self.assertFalse(self.context.storage_state_calls)
         self.assertEqual(old.read_text(), 'broken old cookies')
         self.assertEqual(identity.read_text(), 'broken binding')
@@ -240,7 +240,7 @@ class XueqiuProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('executable_path=', result[2])
         self.assertEqual(len(self.pw.chromium.persistent_calls), 2)
-        self.assertTrue(all(c['user_data_dir'].endswith('/chromium') for c in self.pw.chromium.persistent_calls))
+        self.assertTrue(all(c['user_data_dir'].endswith('/chromium/xueqiu/Creator') for c in self.pw.chromium.persistent_calls))
 
     def test_verify_remains_local_under_provider_environment(self):
         self.profile()
@@ -249,7 +249,7 @@ class XueqiuProfilesTests(unittest.TestCase):
         with patch.dict(os.environ, {'ADSPOWER_API_KEY': 'fixture', 'ADSPOWER_PROFILE_ID': 'other-account'}):
             result = self.cli('verify', '--account', 'Creator', '--result', str(result_file))
         self.assertEqual(result[0], 10, result)
-        self.assertTrue(self.pw.chromium.persistent_calls[0]['user_data_dir'].endswith('/Creator/chrome'))
+        self.assertTrue(self.pw.chromium.persistent_calls[0]['user_data_dir'].endswith('/chrome/xueqiu/Creator'))
 
     def publish_page(self, *, payload=None, redirect=None, response_error=None):
         from tests.test_xueqiu_humanize import PREVIEW_CLOSE, PUBLISH_BUTTON, _Clickable

@@ -188,7 +188,7 @@ class ZhihuProfilesTests(unittest.TestCase):
         self.assertIn('Second', second[1])
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 0)
         calls = self.pw.chromium.persistent_calls
-        self.assertEqual(calls, [dict(user_data_dir=str(self.root / 'browser_profiles/zhihu/Creator/chrome'), channel='chrome', headless=False, no_viewport=True)] * 3)
+        self.assertEqual(calls, [dict(user_data_dir=str(self.root / 'browser_profiles/chrome/zhihu/Creator'), channel='chrome', headless=False, no_viewport=True)] * 3)
         self.assertTrue(self.context.closed)
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse(self.context.add_init_script_calls)
@@ -409,7 +409,7 @@ class ZhihuProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('executable_path=', result[2])
         self.assertEqual(len(self.pw.chromium.persistent_calls), 2)
-        self.assertTrue(all(call['user_data_dir'].endswith('/chromium') for call in self.pw.chromium.persistent_calls))
+        self.assertTrue(all(call['user_data_dir'].endswith('/chromium/zhihu/Creator') for call in self.pw.chromium.persistent_calls))
 
     def test_managed_login_reset_and_rate_limit_keep_existing_routes(self):
         from tests.fakes import FakeAdspowerClient
