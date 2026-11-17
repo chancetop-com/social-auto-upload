@@ -6,10 +6,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from patchright.async_api import async_playwright, expect
-from conf import LOCAL_CHROME_PATH
+from utils.local_browser_session import local_browser_session
 from uploader.xueqiu_uploader.constants import XUEQIU_HOME_URL
 from uploader.xueqiu_uploader.content import load_xueqiu_article
-from uploader.xueqiu_uploader.session import load_xueqiu_identity, read_xueqiu_identity
+from uploader.xueqiu_uploader.session import account_alias, read_xueqiu_identity, raise_if_login_required, XueqiuAccessError
 
 
 async def check_xueqiu_article_content(body, document, image_sources=None):
@@ -49,9 +49,16 @@ async def check_xueqiu_article_content(body, document, image_sources=None):
 
 async def query_xueqiu_article(page, identity, content_id, title=None, visibility=None):
     """通过实测的已发布管理列表查询原 ID，只读核对，绝不重新发表。"""
-    await page.goto(XUEQIU_HOME_URL, wait_until="domcontentloaded", timeout=45000)
+    try:
+        response = await page.goto(XUEQIU_HOME_URL, wait_until="domcontentloaded", timeout=45000)
+    except Exception:
+        raise_if_login_required(page, managed=False)
+        raise
+    if response is not None and isinstance(response.status, int) and response.status >= 400:
+        raise XueqiuAccessError(f"雪球作品查询访问失败：HTTP {response.status}")
+    raise_if_login_required(page, managed=False)
     if (await read_xueqiu_identity(page))["uid"] != identity["uid"]:
-        raise RuntimeError("雪球查询主体与绑定账号不一致")
+        raise RuntimeError("雪球查询主体与原作品作者不一致")
     # 内容管理是首页实际侧栏入口；SPA 导航会附带平台所需的请求头，直接请求 JSON 并不等价。
     async with page.expect_response(lambda response: response.request.method == "GET"
                                     and urlsplit(response.url).path == "/xq/query/v1/search/long",
@@ -92,17 +99,16 @@ async def query_xueqiu_article(page, identity, content_id, title=None, visibilit
         payload = await response.json()
 
 
-async def verify_xueqiu_result(account_file, result_file, headless=False):
-    """从结果文件恢复原作品 ID，在绑定账号下只读查询提交结果。"""
-    account_file = Path(account_file)
+async def verify_xueqiu_result(account_file, result_file, headless=None, *, account_name=None, local_browser=None, session=None):
+    """从结果文件恢复原作品及作者，在当前 Profile 只读查询提交结果。"""
     result_file = Path(result_file)
     result = json.loads(result_file.read_text(encoding="utf-8"))
-    identity = load_xueqiu_identity(account_file)
+    identity = result.get("identity") or {}
     content_id = result.get("content_id", "")
     if not re.fullmatch(r"[1-9][0-9]*", str(content_id)):
         raise ValueError("结果文件没有平台返回的作品 ID，请先在后台核查原作品，勿重新发表")
-    if result.get("identity", {}).get("uid") != identity["uid"]:
-        raise ValueError("结果文件与所选雪球账号不一致")
+    if not isinstance(identity, dict) or not re.fullmatch(r"[1-9][0-9]*", str(identity.get("uid", ""))):
+        raise ValueError("结果文件缺少原作品作者 ID，请先核查原作品，勿重新发表")
     # 当前结果保存原稿路径；查询必须使用未修改的原稿重查正文，不能清除原有内容错误后直接报成功。
     document = None
     if result.get("content_file"):
@@ -111,18 +117,16 @@ async def verify_xueqiu_result(account_file, result_file, headless=False):
             raise ValueError("原稿与发表时的内容不一致，请恢复原稿后查询，勿重新发表")
     elif result.get("error"):
         raise ValueError("旧结果缺少原稿路径且保留核对错误，请先在后台核查原作品，勿重新发表")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(executable_path=LOCAL_CHROME_PATH or None, channel="chrome", headless=headless)
+    async def verify_in(owned):
+        context = owned.context
+        page = await context.new_page()
         try:
-            context = await browser.new_context(storage_state=str(account_file))
-            page = await context.new_page()
             record = await query_xueqiu_article(page, identity, content_id, result.get("title"), result.get("visibility"))
             if document is not None:
-                # 核对后台实际保存的正文，不改写编辑器，不触发发表动作。
+                # Read the server body without editing or publishing the original work.
                 check_page = await context.new_page()
                 await check_page.set_content(record.get("text") or "")
                 await check_xueqiu_article_content(check_page.locator("body"), document, result.get("images"))
-                await check_page.close()
             screenshot = result_file.with_suffix(".verified.png")
             await page.screenshot(path=str(screenshot), full_page=True)
             result.update(success=True, status="published", management_verified=True,
@@ -131,5 +135,16 @@ async def verify_xueqiu_result(account_file, result_file, headless=False):
             result.pop("error", None)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             return result
-        finally:
-            await browser.close()
+        except Exception as error:
+            if not isinstance(error, XueqiuAccessError):
+                raise_if_login_required(page, managed=False)
+            raise
+
+    if session is not None:
+        return await verify_in(session)
+    async with async_playwright() as playwright:
+        async with local_browser_session(
+            playwright, platform="xueqiu", account=account_alias(account_file, account_name),
+            headless=headless, local_browser=local_browser,
+        ) as owned:
+            return await verify_in(owned)

@@ -23,7 +23,7 @@ class XueqiuInputTests(unittest.TestCase):
             '--declaration', '本文包含AI生成内容',
         ])
         self.assertFalse(args.prepare_only)
-        self.assertFalse(args.headless)
+        self.assertIsNone(args.headless)
         self.assertFalse(hasattr(args, 'images'))
         self.assertEqual(resolve_account_file('xueqiu', 'test').name, 'xueqiu_test.json')
 
@@ -138,14 +138,7 @@ class XueqiuContentTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, '保留核对错误'):
             await verify_xueqiu_result(account, result)
 
-    async def test_verify_rejects_wrong_account_before_opening_browser(self):
-        root = Path(self.folder.name)
-        account = root / 'account.json'
-        account.with_suffix('.identity.json').write_text(json.dumps({'uid': '123', 'name': '测试'}), encoding='utf-8')
-        result = root / 'result.json'
-        result.write_text(json.dumps({'identity': {'uid': '456'}, 'content_id': '789'}), encoding='utf-8')
-        with self.assertRaisesRegex(ValueError, '账号不一致'):
-            await verify_xueqiu_result(account, result)
+    # Current Profile / historical author checks run through CLI in test_xueqiu_profiles.
 
 
 class XueqiuQueryTests(unittest.IsolatedAsyncioTestCase):

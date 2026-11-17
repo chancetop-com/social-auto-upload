@@ -272,13 +272,13 @@ class LocalProfileTests(unittest.TestCase):
         from contextlib import ExitStack
         from sau_commands import browser
         with ExitStack() as stack:
-            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook", "facebook-page", "douyin", "kuaishou", "tencent", "baijiahao", "weibo", "hupu", "alipay"):
+            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook", "facebook-page", "douyin", "kuaishou", "tencent", "baijiahao", "weibo", "hupu", "alipay", "xueqiu"):
                 stack.enter_context(patch(f"sau_commands.{platform.replace('-', '_')}.async_playwright",
                                           side_effect=AssertionError("must not start browser")))
             stack.enter_context(patch.object(browser, "MultiloginClient", side_effect=AssertionError("provider")))
             stack.enter_context(patch.object(browser, "AdspowerClient", side_effect=AssertionError("provider")))
             stack.enter_context(patch("subprocess.run", side_effect=AssertionError("must not inspect browser product")))
-            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook", "facebook-page", "douyin", "kuaishou", "tencent", "baijiahao", "weibo", "hupu", "alipay"):
+            for platform in ("tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook", "facebook-page", "douyin", "kuaishou", "tencent", "baijiahao", "weibo", "hupu", "alipay", "xueqiu"):
                 self.assertEqual(self.run_reset(platform=platform)[0], 0)
                 for variable in ("MLX_API_TOKEN", "ADSPOWER_API_KEY"):
                     with patch.dict(os.environ, {variable: "test-credential"}):
@@ -286,7 +286,7 @@ class LocalProfileTests(unittest.TestCase):
                         self.assertEqual(code, 2, err)
                         self.assertIn("仅支持本地模式", err)
             for platform in (
-                             "dayu", "zhihu", "xueqiu", "bilibili"):
+                             "dayu", "zhihu", "bilibili"):
                 self.assertEqual(self.run_reset(platform=platform)[0], 2)
 
     def test_equivalent_root_spelling_cannot_bypass_profile_lock(self):

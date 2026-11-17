@@ -371,33 +371,7 @@ class ZhihuLocalGoldenTests(unittest.TestCase):
         self._assert_common(playwright, account_file)
         self.assertEqual(upload_in.await_args.args[0].mode, "local")
 
-    def test_xueqiu_local_launch_context_are_golden(self):
-        with tempfile.TemporaryDirectory() as folder:
-            account_file = Path(folder) / "account.json"
-            app, _ = _make_xueqiu_article(folder, account_file=account_file)
-            app.validate_upload_args = MagicMock()
-            upload_in = AsyncMock(return_value={"success": True})
-            app.upload_in = upload_in
-
-            playwright = FakePlaywright()
-            with patch.object(
-                xueqiu_article, "async_playwright", MagicMock(return_value=_AsyncCM(playwright))
-            ):
-                result = asyncio.run(app.main())
-
-        self.assertEqual(result, {"success": True})
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, **XUEQIU_LAUNCH_KWARGS}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": str(account_file.resolve()), **XUEQIU_CONTEXT_KWARGS}],
-        )
-        self.assertTrue(browser.closed)
-        self.assertEqual(XUEQIU_CONTEXT_KWARGS, {})
-        self.assertEqual(XUEQIU_LAUNCH_KWARGS["channel"], "chrome")
+    # Xueqiu local orchestration is covered by tests.test_xueqiu_profiles.
 
 
 class MultiloginUploaderSeamTests(unittest.TestCase):
@@ -490,15 +464,11 @@ class MultiloginUploaderSeamTests(unittest.TestCase):
                 patch.object(
                     xueqiu_article, "read_xueqiu_identity", AsyncMock(side_effect=AssertionError("identity read"))
                 ) as reader,
-                patch.object(
-                    xueqiu_article, "load_xueqiu_identity", MagicMock(side_effect=AssertionError("identity binding"))
-                ) as binding,
             ):
                 result = asyncio.run(app.upload_in(session))
 
         self.assertTrue(result["success"])
         reader.assert_not_awaited()
-        binding.assert_not_called()
         app.fill_article_form.assert_awaited_once_with(page, multilogin=True)
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
@@ -512,7 +482,6 @@ class MultiloginUploaderSeamTests(unittest.TestCase):
             xueqiu, _ = _make_xueqiu_article(folder, account_file=None)
             with (
                 patch.object(zhihu_article, "load_zhihu_identity", MagicMock(side_effect=AssertionError)),
-                patch.object(xueqiu_article, "load_xueqiu_identity", MagicMock(side_effect=AssertionError)),
             ):
                 article.validate_upload_args(check_cookie=False)
                 xueqiu.validate_upload_args(check_cookie=False)
@@ -952,7 +921,7 @@ class XueqiuPostSuccessBookkeepingTests(unittest.TestCase):
         self.assertTrue(result["management_verified"])
         self.assertNotIn("published_screenshot", result)
 
-    def test_cookie_save_failure_keeps_published_result(self):
+    def test_local_published_result_does_not_export_cookie_state(self):
         page = self._page()
         with tempfile.TemporaryDirectory() as folder:
             app, _ = _make_xueqiu_article(
@@ -978,7 +947,7 @@ class XueqiuPostSuccessBookkeepingTests(unittest.TestCase):
                 result = asyncio.run(app.upload_in(session))
 
         self.assertTrue(result["success"])
-        context.storage_state.assert_awaited_once()
+        context.storage_state.assert_not_awaited()
 
     def test_uncomputable_url_is_left_empty(self):
         page = self._page(user_id=None)
