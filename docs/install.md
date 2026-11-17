@@ -44,7 +44,7 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-安装完成后，会注册 `sau` 命令。
+安装完成后，会注册 `sau` 命令。发行包已移除被替代的 TikTok Firefox 实现、未完成的视频号图文和 stealth 脚本，无需准备 Firefox 或额外注入资源；正式浏览器功能使用下述 Patchright 路线，Bilibili 继续使用独立的 biliup。文章渲染脚本、主题及许可证资源仍随包提供。
 
 ### 4. 按所选浏览器准备运行环境
 

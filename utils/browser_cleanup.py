@@ -25,17 +25,3 @@ async def close_browser_resources(*, page=None, context=None, browser=None) -> N
             await _close_resource(context, "Browser context")
         finally:
             await _close_resource(browser, "Browser")
-
-
-async def save_upload_session(context, account_file) -> bool:
-    """Refresh cookies after a completed upload without making it retryable.
-
-    Login must still require successful persistence; this helper is only for
-    post-upload write-back.
-    """
-    try:
-        await context.storage_state(path=account_file)
-    except Exception as error:  # noqa: BLE001 - cleanup must preserve the primary outcome
-        logger.warning("Cookie write-back failed; preserving upload result: {}", error)
-        return False
-    return True

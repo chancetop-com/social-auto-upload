@@ -79,3 +79,7 @@ Status: resolved
 - 为其他平台获取真实账号或执行真实回归。
 - 新增 GitHub CI workflow 或由 CI 安装说明扩展出的自动验收体系；从未属于用户请求。
 - 本次建图会话直接实现迁移；实施阶段在决策完成后按上述五批推进。
+
+## 2026-11-17 用户追加：旧入口与 stealth 删除
+
+用户明确覆盖此前保留历史调用方/辅助资源的约定：删除旧 TikTok Firefox、未完成且未注册的 TencentNote、通用旧本地会话，再按引用闭包删除 stealth helper/资源/打包项/旧测试。保留正式 17 平台、Bilibili biliup、业务 JS/剪贴板/Humanizer 和完整 managed provider 契约；缺 provider 的通用调用明确失败，不猜测本地 Profile。实施及证据见[票 22](../local-chrome-profile-implementation/issues/22-remove-obsolete-browser-and-stealth.md)。早期记录描述历史事实。

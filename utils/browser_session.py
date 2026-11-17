@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""The single browser lifecycle seam for local and managed modes.
+"""The managed browser lifecycle seam and shared session value.
 
-Callers only ever acquire a browser through :func:`browser_session`.  Ownership
-and teardown live here: the returned :class:`BrowserSession` intentionally has no
+Managed callers acquire a browser through :func:`browser_session`; local callers
+use ``local_browser_session`` with an explicit platform and account. Ownership
+and managed teardown live here. The returned :class:`BrowserSession` has no
 ``owned`` flag and no ``stop()`` method, so callers cannot stop a profile twice
 or stop it before the work is finished.
 """
@@ -27,8 +28,6 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from utils.browser_cleanup import close_browser_resources, save_upload_session
-from utils.base_social_media import set_init_script
 from utils.errors import StartIncompleteError
 from utils.managed_browser import ManagedBrowserProvider
 
@@ -113,7 +112,7 @@ def _startup_line(
     ignored: tuple[str, ...],
     extras: tuple[str, ...] = (),
 ) -> str:
-    """Build the single "session is ready" line both modes log once per run."""
+    """Build the single "session is ready" line each managed run logs."""
     fields = (
         f"mode={mode}",
         f"headless={'headless' if headless else 'headed'}",
@@ -122,26 +121,6 @@ def _startup_line(
         *extras,
     )
     return "browser session ready: " + ", ".join(fields)
-
-
-def log_local_session_ready(
-    *, headless: bool, account_file: str | Path | None
-) -> None:
-    """Emit the one startup line for a local path that launches Chromium itself.
-
-    ``check`` and the two uploader-local branches do not go through
-    :func:`browser_session`, so they call this exactly once after their own
-    launch.  Managed runs already log through the session seam and must not
-    call it again.
-    """
-    identity = (
-        f"account_file:{account_file}"
-        if account_file is not None
-        else "account_file:-"
-    )
-    logger.info(
-        _startup_line(mode="local", headless=headless, identity=identity, ignored=())
-    )
 
 
 def _endpoint_display(url: str) -> str:
@@ -211,11 +190,11 @@ async def browser_session(
     | None = None,
     extra_ignored: Iterable[str] = (),
 ) -> AsyncIterator[BrowserSession]:
-    """Acquire a browser context for either local or managed browser mode.
+    """Acquire a managed browser context through the selected provider.
 
-    ``managed is None`` → existing local ``launch`` / ``new_context`` /
-    ``storage_state`` behaviour.  Otherwise the provider starts its profile,
-    the session attaches over CDP, and the profile is stopped on exit.
+    A provider is required. Local callers must use ``local_browser_session``
+    with explicit platform and account identity. ``account_file`` is accepted
+    for managed caller compatibility and is never read or written.
 
     Managed mode cannot apply ``launch_kwargs`` / ``context_kwargs`` /
     ``init_script`` / ``context_setup``; each non-empty one is reported once in
@@ -224,17 +203,10 @@ async def browser_session(
     """
 
     if managed is None:
-        async with _local_session(
-            playwright,
-            headless=headless,
-            account_file=account_file,
-            launch_kwargs=launch_kwargs,
-            context_kwargs=context_kwargs,
-            init_script=init_script,
-            context_setup=context_setup,
-        ) as session:
-            yield session
-        return
+        raise ValueError(
+            "browser_session requires a managed provider; use "
+            "local_browser_session with explicit platform and account for local mode"
+        )
 
     ignored = _ignored_option_names(
         launch_kwargs=launch_kwargs,
@@ -253,70 +225,6 @@ async def browser_session(
         ignored=ignored,
     ) as session:
         yield session
-
-
-@asynccontextmanager
-async def _local_session(
-    playwright: "Playwright",
-    *,
-    headless: bool,
-    account_file: str | Path | None,
-    launch_kwargs: Mapping[str, Any] | None,
-    context_kwargs: Mapping[str, Any] | None,
-    init_script: bool,
-    context_setup: Callable[
-        ["BrowserContext"], Awaitable["BrowserContext | None"]
-    ]
-    | None,
-) -> AsyncIterator[BrowserSession]:
-    launch_options = dict(launch_kwargs or {})
-    if "headless" in launch_options:
-        raise ValueError(
-            "launch_kwargs must not contain 'headless'; pass headless=... instead"
-        )
-
-    context_options = dict(context_kwargs or {})
-    if "storage_state" in context_options:
-        raise ValueError(
-            "context_kwargs must not contain 'storage_state'; pass account_file=... instead"
-        )
-
-    browser = await playwright.chromium.launch(headless=headless, **launch_options)
-    context = await browser.new_context(
-        storage_state=account_file,
-        **context_options,
-    )
-
-    if init_script:
-        prepared = await set_init_script(context)
-        if prepared is not None:
-            context = prepared
-
-    if context_setup is not None:
-        prepared = await context_setup(context)
-        if prepared is not None:
-            context = prepared
-
-    identity = (
-        f"account_file:{account_file}"
-        if account_file is not None
-        else "account_file:-"
-    )
-    logger.info(
-        _startup_line(mode="local", headless=headless, identity=identity, ignored=())
-    )
-
-    completed = False
-    try:
-        yield BrowserSession(browser=browser, context=context, mode="local")
-        completed = True
-    finally:
-        # Cookie write-back only on a clean exit, matching the uploaders.
-        try:
-            if completed and account_file is not None:
-                await save_upload_session(context, account_file)
-        finally:
-            await close_browser_resources(context=context, browser=browser)
 
 
 @asynccontextmanager
@@ -484,6 +392,5 @@ async def _stop_profile(provider: ManagedBrowserProvider) -> None:
 __all__ = [
     "BrowserSession",
     "browser_session",
-    "log_local_session_ready",
     "provider_label",
 ]

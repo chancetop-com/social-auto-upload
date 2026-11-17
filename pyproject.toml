@@ -33,4 +33,4 @@ include-package-data = true
 include = ["uploader*", "utils*", "sau_commands*"]
 
 [tool.setuptools.package-data]
-utils = ["stealth.min.js", "article_renderer/*.mjs", "article_renderer/*.json", "article_renderer/*LICENSE*", "article_renderer/NOTICE.md"]
+utils = ["article_renderer/*.mjs", "article_renderer/*.json", "article_renderer/*LICENSE*", "article_renderer/NOTICE.md"]

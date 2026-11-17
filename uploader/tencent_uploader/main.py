@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import inspect
-import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +17,7 @@ from patchright.async_api import async_playwright
 import conf
 from conf import BASE_DIR
 from uploader.base_video import BaseVideoUploader
-from utils.base_social_media import set_init_script
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError, reject_ambiguous
@@ -33,7 +31,7 @@ from utils.humanize import (
 from utils.log import tencent_logger
 
 TENCENT_LOGIN_URL = "https://channels.weixin.qq.com"
-# Historical managed hints and unregistered note defaults remain compatible
+# Historical managed hints remain compatible
 # with existing conf.py files that omit optional browser settings.
 LOCAL_CHROME_PATH = getattr(conf, "LOCAL_CHROME_PATH", "")
 LOCAL_CHROME_HEADLESS = getattr(conf, "LOCAL_CHROME_HEADLESS", False)
@@ -134,10 +132,8 @@ TENCENT_LAUNCH_KWARGS = {
     if key != "headless"
 }
 TENCENT_CONTEXT_KWARGS: dict = {}
-# The unregistered note path retains its old script. Managed ignores these hints;
-# formal local video never injects it.
+# Preserve the formal video managed hint; local Profile sessions do not inject scripts.
 TENCENT_INIT_SCRIPT = False
-TENCENT_NOTE_INIT_SCRIPT = True
 
 TENCENT_LOGIN_CHECK_URL = TENCENT_UPLOAD_URL
 TENCENT_LOGIN_CHECK_TIMEOUT_MS = 20_000
@@ -669,12 +665,7 @@ class TencentBaseUploader(BaseVideoUploader):
         elif multilogin:
             _raise_if_login_required(page, publish_attempted=publish_attempted)
 
-    async def validate_base_args(self, *, check_cookie: bool = True):
-        if check_cookie:
-            if not self.account_file or not os.path.exists(self.account_file):
-                raise RuntimeError(f"cookie文件不存在，请先完成视频号登录: {self.account_file}")
-            if not await cookie_auth(self.account_file):
-                raise RuntimeError(f"cookie文件已失效，请先完成视频号登录: {self.account_file}")
+    async def validate_base_args(self):
         if self.publish_strategy not in {TENCENT_PUBLISH_STRATEGY_IMMEDIATE, TENCENT_PUBLISH_STRATEGY_SCHEDULED}:
             raise ValueError(f"不支持的发布策略: {self.publish_strategy}")
 
@@ -1321,7 +1312,7 @@ class TencentVideo(TencentBaseUploader):
         self.short_title = short_title
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
-        await self.validate_base_args(check_cookie=False)
+        await self.validate_base_args()
         if not self.title or not str(self.title).strip():
             raise ValueError("视频模式下，title 是必须的")
         self.file_path = str(self.validate_video_file(self.file_path))
@@ -1518,129 +1509,3 @@ class TencentVideo(TencentBaseUploader):
 
     async def main(self):
         await self.tencent_upload_video()
-
-
-class TencentNote(TencentBaseUploader):
-    def __init__(
-        self,
-        image_paths,
-        note,
-        tags,
-        publish_date: datetime | int,
-        account_file,
-        title: str | None = None,
-        publish_strategy: str = TENCENT_PUBLISH_STRATEGY_IMMEDIATE,
-        debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
-        is_draft: bool = False,
-    ):
-        super().__init__(
-            publish_date=publish_date,
-            account_file=account_file,
-            publish_strategy=publish_strategy,
-            debug=debug,
-            headless=headless,
-        )
-        self.image_paths = image_paths
-        self.note = note or ""
-        self.title = title or (self.note[:30] if self.note else "")
-        self.tags = tags or []
-        self.is_draft = is_draft
-
-    async def validate_upload_args(self, *, check_cookie: bool = True):
-        await self.validate_base_args(check_cookie=check_cookie)
-        if not self.title or not str(self.title).strip():
-            raise ValueError("图文模式下，title 是必须的")
-        if not self.image_paths:
-            raise ValueError("图文模式下，图片是必须的")
-
-        if isinstance(self.image_paths, (str, Path)):
-            self.image_paths = [self.image_paths]
-
-        normalized_image_paths = []
-        for image_path in self.image_paths:
-            normalized_image_paths.append(str(self.validate_image_file(image_path)))
-        self.image_paths = normalized_image_paths
-
-    async def switch_to_note_mode(self, page: Page) -> None:
-        raise NotImplementedError("请在 TencentNote.switch_to_note_mode 中补充视频号切换到图文发布模式的逻辑")
-
-    async def upload_note_images(self, page: Page) -> None:
-        raise NotImplementedError("请在 TencentNote.upload_note_images 中补充视频号图文图片上传逻辑")
-
-    async def fill_note_title_and_tags(self, page: Page) -> None:
-        raise NotImplementedError("请在 TencentNote.fill_note_title_and_tags 中补充视频号图文标题/话题填写逻辑")
-
-    async def fill_note_body(self, page: Page) -> None:
-        return None
-
-    async def prepare_note_for_publish(self, page: Page) -> None:
-        await self.fill_note_title_and_tags(page)
-        await self.fill_note_body(page)
-        await self.apply_collection(page)
-        await self.apply_original_statement(page)
-
-    async def upload_note_content(self, page: Page) -> None:
-        await self.switch_to_note_mode(page)
-        await self.upload_note_images(page)
-        await self.prepare_note_for_publish(page)
-
-    async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
-        if session is not None:
-            await self.validate_upload_args(check_cookie=False)
-            await self.upload_in(session)
-            return
-
-        if playwright is None:
-            raise ValueError("本地模式需要 Playwright 实例")
-
-        tencent_logger.info(_msg("🧍", "小人先检查 cookie、图文图片和发布时间"))
-        await self.validate_upload_args()
-        tencent_logger.info(_msg("🥳", "图文上传前检查通过"))
-
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **TENCENT_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **TENCENT_CONTEXT_KWARGS,
-        )
-        if TENCENT_NOTE_INIT_SCRIPT:
-            context = await set_init_script(context)
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-            if await save_upload_session(context, self.account_file):
-                tencent_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await close_browser_resources(context=context, browser=browser)
-
-    async def upload_in(self, session: BrowserSession) -> None:
-        self.start_publish_budget()
-        multilogin = session.managed
-        page = await session.context.new_page()
-        # 每个 page 一个行为层实例；缓存按 page 身份失效（spec §2.2）。
-        self._humanizer(page)
-        await self.open_upload_page(page, multilogin=multilogin)
-        if multilogin:
-            _raise_if_login_required(page)
-        tencent_logger.info(_msg("🏃", f"小人开始搬运图文，共 {len(self.image_paths)} 张图片"))
-
-        await self.upload_note_content(page)
-
-        if self.publish_strategy == TENCENT_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
-            await self.set_schedule_time_tencent(page, self.publish_date)
-
-        await self.submit_publish(page, multilogin=multilogin)
-
-    async def tencent_upload_note(self, *, session: BrowserSession | None = None):
-        if session is not None:
-            await self.upload(None, session=session)
-            return
-        async with async_playwright() as playwright:
-            await self.upload(playwright)
-
-    async def main(self):
-        await self.tencent_upload_note()

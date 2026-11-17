@@ -882,9 +882,8 @@ WIRED_META_PACKAGES = (
 class PlatformWideGateTests(unittest.TestCase):
     """Gates A–E across the configured uploader packages and TikTok module.
 
-    TikTok is checked file-scoped at ``uploader/tk_uploader/main_chrome.py``:
-    the sibling legacy ``uploader/tk_uploader/main.py`` is unwired and out of
-    spec §3.12's target, so scanning the whole package would flag dead code.
+    TikTok's business interactions are checked file-scoped at
+    ``uploader/tk_uploader/main_chrome.py``.
     """
 
     def _assert_all_clean(self, packages) -> None:
