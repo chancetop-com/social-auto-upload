@@ -107,7 +107,7 @@ class VideoPlatformCoverageTests(unittest.TestCase):
             login_patch,
             patch.object(
                 module,
-                "local_browser_session" if module in (tiktok, xiaohongshu) else "youtube_setup" if module is youtube else "ks_setup" if module is kuaishou else "tencent_setup" if module is tencent else "baijiahao_setup" if module is baijiahao else "resolve_account_file",
+                "local_browser_session" if module in (tiktok, xiaohongshu) else "youtube_setup" if module is youtube else "ks_setup" if module is kuaishou else "tencent_setup" if module is tencent else "baijiahao_setup" if module is baijiahao else "weibo_setup" if module is weibo else "resolve_account_file",
                 new=MagicMock(
                     side_effect=AssertionError(
                         "managed mode must not acquire any local browser identity"

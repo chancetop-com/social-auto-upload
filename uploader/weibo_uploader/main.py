@@ -2,8 +2,8 @@
 """微博视频上传 + 扫码登录。
 
 功能：
-  - weibo_cookie_gen: headless 扫码登录（微博 passport 二维码）
-  - cookie_auth: 验证 cookie 是否有效
+  - weibo_cookie_gen: 持久化 Profile 扫码登录（微博 passport 二维码）
+  - cookie_auth: 检查所选 Profile 的当前登录证据
   - weibo_setup: 统一入口（检查/触发登录）
   - WeiBoVideo: 视频上传类
 
@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
 import re
 import time
+import tempfile
+from urllib.parse import urlsplit
 from pathlib import Path
 
 from patchright.async_api import (
@@ -28,16 +29,18 @@ from patchright.async_api import (
     async_playwright,
 )
 
-from conf import BASE_DIR, LOCAL_CHROME_HEADLESS, LOCAL_CHROME_PATH
+from conf import LOCAL_CHROME_PATH
 from uploader.base_video import BaseVideoUploader
 from utils.text_validation import validate_single_line
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.dom import ElementUnusableError, reject_ambiguous
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.local_browser import resolve_headless, resolve_local_browser
+from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer, maybe_dispatched
 from utils.log import weibo_logger
-from utils.login_qrcode import build_login_qrcode_path, remove_qrcode_file
+from utils.login_qrcode import build_login_qrcode_path
 
 
 WEIBO_HOME_URL = "https://weibo.com/"
@@ -81,11 +84,9 @@ def _build_launch_kwargs(headless: bool | None = None) -> dict:
     return launch_kwargs
 
 
-# Golden local-mode browser options (ticket 20).  The tall viewport only helps
-# the local flow keep the publish button on screen; Multilogin must not assume
-# it (the publish button is scrolled into view instead).
+# Legacy managed launch options remain unchanged; local sessions use the resolver.
 WEIBO_LAUNCH_KWARGS = _build_launch_kwargs()
-WEIBO_CONTEXT_KWARGS = {"viewport": {"width": 1280, "height": 2000}}
+WEIBO_CONTEXT_KWARGS = {}
 WEIBO_INIT_SCRIPT = False
 
 WEIBO_LOGIN_CHECK_TIMEOUT_MS = 25_000
@@ -102,8 +103,8 @@ WEIBO_LOGIN_URL_MARKERS = ("newlogin", "passport", "signin")
 def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this.  Local mode keeps its historical
-    retry/timeout behaviour.  ``publish_attempted`` must be true when the
+    Only managed sessions call this; local Profile sessions use their own
+    login/verification diagnostics.  ``publish_attempted`` must be true when the
     redirect is observed after the publish click was dispatched.
     """
     url = str(getattr(page, "url", "") or "").lower()
@@ -123,8 +124,8 @@ def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
         )
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to Weibo.
+async def is_logged_in(context: BrowserContext, *, managed=True, account=None) -> bool:
+    """Check current page-level login evidence; preserve managed probe semantics.
 
     Requires a page-level positive signal: the avatar/feed marker.  Explicit
     login URLs and a visible「登录」button mean logged out; network errors,
@@ -140,6 +141,8 @@ async def is_logged_in(context: BrowserContext) -> bool:
             wait_until="domcontentloaded",
             timeout=WEIBO_LOGIN_CHECK_TIMEOUT_MS,
         )
+        if not managed:
+            _check_local_response(response)
         status = getattr(response, "status", None)
         if isinstance(status, int) and status >= 500:
             raise RuntimeError(f"微博登录状态检查失败：HTTP {status}")
@@ -148,6 +151,8 @@ async def is_logged_in(context: BrowserContext) -> bool:
         if wait_for_timeout is not None:
             await wait_for_timeout(WEIBO_LOGIN_CHECK_SETTLE_MS)
 
+        if not managed:
+            return await _local_page_authenticated(page, account=account)
         current_url = str(getattr(page, "url", "") or "")
         lowered = current_url.lower()
         if any(marker in lowered for marker in WEIBO_LOGIN_URL_MARKERS):
@@ -176,17 +181,30 @@ async def is_logged_in(context: BrowserContext) -> bool:
         raise RuntimeError(
             "微博登录状态检查失败：未找到头像/feed 等已登录信号（页面结构异常）"
         )
+    except Exception:
+        if not managed:
+            try:
+                await _raise_local_login_required(page, account=account)
+            except LoginRequiredError:
+                raise
+            except Exception:
+                pass  # Keep the original network/page failure if diagnosis also fails.
+        raise
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
-def _resolve_account_file(account_file: str | Path) -> str:
-    path = Path(account_file).expanduser()
-    if path.is_absolute():
-        return str(path)
-    if len(path.parts) == 1:
-        return str((Path(BASE_DIR) / "cookies" / "weibo_uploader" / path).resolve())
-    return str(path.resolve())
+def _account_alias(account_file=None, account_name=None):
+    """A legacy positional filename supplies an alias only, never stored state."""
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.startswith("weibo_") and name.endswith(".json"):
+        return name[len("weibo_"):-len(".json")]
+    return str(account_file)
 
 
 async def _grab_qr(page: Page, account_file: str) -> dict:
@@ -247,135 +265,126 @@ async def _grab_qr(page: Page, account_file: str) -> dict:
     return {"image_path": str(qrcode_path), "image_data_url": ""}
 
 
-async def _is_login_completed(page: Page) -> bool:
-    """判断微博登录是否完成：URL 回到首页 且 出现用户头像/feed 流。"""
-    url = page.url
-    # 还在 login/passport 页面
-    if "newlogin" in url or "passport" in url:
+def _check_local_response(response):
+    status = getattr(response, "status", None)
+    if isinstance(status, int) and status >= 400:
+        raise RuntimeError(f"微博登录状态检查失败：HTTP {status}")
+
+
+async def _local_visible(locator):
+    return await locator.count() > 0 and await locator.is_visible()
+
+
+async def _local_login_reason(page):
+    url = str(page.url).lower()
+    host = urlsplit(url).hostname or ""
+    if host != "weibo.com" and not host.endswith(".weibo.com"):
+        return None
+    if any(marker in url for marker in ("captcha", "verify", "two-factor", "2fa")):
+        return "verification"
+    login_url = any(marker in url for marker in WEIBO_LOGIN_URL_MARKERS)
+    try:
+        if await _local_visible(page.locator('text="安全验证"').first):
+            return "verification"
+    except Exception:
+        if not login_url:
+            raise
+    if login_url or await _local_visible(page.get_by_text("登录", exact=True).first):
+        return "login"
+    return None
+
+
+def _local_login_error(account=None, *, reason="login", publish_attempted=False):
+    action = "完成人机验证" if reason == "verification" else "完成登录"
+    return LoginRequiredError(
+        f"微博需要{action}（reason={reason}）；请运行 sau weibo login --account {account or '<account>'!r}，"
+        "使用相同本地浏览器选择。提交后请先核对作品，不要自动重发。",
+        reason=reason, publish_attempted=publish_attempted)
+
+
+async def _raise_local_login_required(page, *, account=None, publish_attempted=False):
+    reason = await _local_login_reason(page)
+    if reason:
+        raise _local_login_error(account, reason=reason, publish_attempted=publish_attempted)
+
+
+async def _local_page_authenticated(page, *, account=None):
+    reason = await _local_login_reason(page)
+    if reason == "verification":
+        raise _local_login_error(account, reason=reason)
+    if reason == "login":
         return False
-    # 检查是否回到首页且有用户态
-    if "weibo.com" in url and "login" not in url:
-        # 出现 feed 流或头像说明登录成功
-        has_user = await page.locator('[class*="Nav_avatar"], [class*="woo-avatar"]').count()
-        if has_user:
+    if urlsplit(str(page.url)).hostname not in ("weibo.com", "www.weibo.com"):
+        raise RuntimeError(f"微博登录检查失败：意外页面 {page.url}")
+    for selector in WEIBO_LOGIN_POSITIVE_SELECTORS:
+        if await _local_visible(page.locator(selector).first):
             return True
-        # cookies 中有 SUB 说明登录成功
-        cookies = await page.context.cookies()
-        if any(c.get("name") == "SUB" for c in cookies):
-            return True
-    return False
+    raise RuntimeError("微博登录检查失败：缺少已登录头像/feed 信号（页面结构异常）")
 
 
-async def weibo_cookie_gen(account_file, qrcode_callback=None, poll_interval: int = 3, max_checks: int = 120, headless: bool = LOCAL_CHROME_HEADLESS):
-    """无头/有头扫码登录微博，保存 cookie。
+async def weibo_cookie_gen(account_file=None, qrcode_callback=None, poll_interval=3,
+                           max_checks=120, headless=None, *, account_name=None,
+                           local_browser=None):
+    """Guide login into the selected Profile; no Cookie JSON is read or written."""
+    return await weibo_setup(account_file, handle=True, return_detail=True,
+                             qrcode_callback=qrcode_callback, headless=headless,
+                             account_name=account_name, local_browser=local_browser,
+                             poll_interval=poll_interval, max_checks=max_checks)
 
-    流程：直接打开微博 passport 扫码页 → 截取二维码 → 等待扫码完成（跳转回首页）→ 保存 storage_state。
-    返回标准 login result dict。
-    """
-    account_file = _resolve_account_file(account_file)
-    Path(account_file).parent.mkdir(parents=True, exist_ok=True)
-    qrcode_path = None
-    result = _build_login_result(False, "failed", "微博登录失败", account_file)
 
+async def cookie_auth(account_file=None, *, account_name=None, headless=None, local_browser=None):
+    """Compatibility entry: check the selected persistent Profile only."""
+    return await weibo_setup(account_file, account_name=account_name,
+                             headless=headless, local_browser=local_browser)
+
+
+async def weibo_setup(account_file=None, handle=False, return_detail=False,
+                       qrcode_callback=None, headless=None, *, account_name=None,
+                       local_browser=None, poll_interval=3, max_checks=120, session=None):
+    account = _account_alias(account_file, account_name)
+    if session is not None:
+        if not await is_logged_in(session.context, managed=session.managed, account=account):
+            raise _local_login_error(account)
+        return True
+    configuration = resolve_local_browser(headless=headless, local_browser=local_browser)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
-        context = await browser.new_context()
-        try:
-            page = await context.new_page()
-            # 直接导航到 passport 扫码登录页，绕过首页的"登录"按钮（headless 下不可见）
-            await page.goto(WEIBO_PASSPORT_QR_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
-
-            if headless:
-                weibo_logger.info(_msg("🧍", "无头登录中：二维码已存为图片，请用微博APP扫码"))
+        async with local_browser_session(playwright, platform="weibo", account=account,
+                                         configuration=configuration, create=handle) as session:
+            qrcode_info = None
+            current_url = ""
+            if not handle:
+                if not await is_logged_in(session.context, managed=False, account=account):
+                    raise _local_login_error(account)
             else:
-                weibo_logger.info(_msg("🧍", "请在打开的浏览器中扫码登录微博"))
-
-            # 截取二维码
-            qrcode_info = await _grab_qr(page, account_file)
-            qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
-            await _emit_qrcode_callback(qrcode_callback, qrcode_info)
-
-            weibo_logger.info(_msg("🧍", "请扫码，正在耐心等待登录完成"))
-
-            # 轮询等待登录完成（页面跳转离开 passport 或出现用户态 cookie）
-            for _ in range(max_checks):
+                page = await session.context.new_page()
+                response = await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
+                _check_local_response(response)
+                await page.wait_for_timeout(WEIBO_LOGIN_CHECK_SETTLE_MS)
+                reason = await _local_login_reason(page)
+                if reason:
+                    weibo_logger.info("请在所选浏览器完成微博登录/验证；无头模式可用 --headed 重开同一 Profile。")
+                    with tempfile.TemporaryDirectory(prefix="sau-weibo-qr-", ignore_cleanup_errors=True) as qr_dir:
+                        if reason == "login":
+                            response = await page.goto(WEIBO_PASSPORT_QR_URL, timeout=60000, wait_until="domcontentloaded")
+                            _check_local_response(response)
+                            await page.wait_for_timeout(5000)
+                            if await _local_login_reason(page) == "login":
+                                qrcode_info = await _grab_qr(page, str(Path(qr_dir) / "login.png"))
+                                await _emit_qrcode_callback(qrcode_callback, qrcode_info)
+                        for _ in range(max_checks):
+                            await page.wait_for_timeout(poll_interval * 1000)
+                            reason = await _local_login_reason(page)
+                            if not reason and await _local_page_authenticated(page, account=account):
+                                break
+                        else:
+                            raise _local_login_error(account, reason=reason or "login")
+                else:
+                    await _local_page_authenticated(page, account=account)
                 current_url = page.url
-                # 跳转离开 passport 页面说明登录成功
-                if "passport" not in current_url and "weibo.com" in current_url:
-                    weibo_logger.info(_msg("🥳", f"扫码成功，跳转到: {current_url}"))
-                    result = _build_login_result(True, "success", "微博扫码登录成功", account_file, qrcode_info, current_url)
-                    break
-                # 检查 cookies 中是否出现 SUB（部分情况页面不跳转但 cookie 已写入）
-                cookies = await context.cookies()
-                if any(c.get("name") == "SUB" and c.get("value") for c in cookies):
-                    weibo_logger.info(_msg("🥳", f"扫码成功（检测到 SUB cookie），当前: {current_url}"))
-                    result = _build_login_result(True, "success", "微博扫码登录成功", account_file, qrcode_info, current_url)
-                    break
-                await page.wait_for_timeout(poll_interval * 1000)
-            else:
-                result = _build_login_result(False, "timeout", "等待微博扫码登录超时", account_file, qrcode_info, page.url)
-
-            if result["success"]:
-                await asyncio.sleep(2)
-                await context.storage_state(path=account_file)
-                weibo_logger.success(_msg("🥳", f"cookie 已保存: {account_file}"))
-        except Exception as exc:
-            result = _build_login_result(False, "failed", str(exc), account_file, current_url=page.url if "page" in locals() else "")
-        finally:
-            if remove_qrcode_file(qrcode_path):
-                weibo_logger.info(_msg("🧹", f"临时二维码文件已清理: {qrcode_path}"))
-            if not result["success"]:
-                weibo_logger.error(_msg("😢", f"登录失败: {result['message']}"))
-            await context.close()
-            await browser.close()
-    return result
-
-
-async def cookie_auth(account_file):
-    """验证微博 cookie 是否有效。访问首页，检测是否出现登录提示。"""
-    account_file = _resolve_account_file(account_file)
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
-        try:
-            context = await browser.new_context(storage_state=account_file)
-            page = await context.new_page()
-            await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
-
-            # 检查是否被跳转到登录页
-            if "newlogin" in page.url or "passport" in page.url:
-                weibo_logger.info(_msg("🥹", "cookie 已失效（跳转到登录页）"))
-                return False
-
-            # 检查是否有「登录」按钮（未登录态会显示）
-            login_btn = page.get_by_text("登录", exact=True).first
-            if await login_btn.count() and await login_btn.is_visible():
-                weibo_logger.info(_msg("🥹", "cookie 已失效（出现登录按钮）"))
-                return False
-
-            weibo_logger.success(_msg("🥳", "cookie 有效"))
-            return True
-        except Exception as exc:
-            weibo_logger.warning(_msg("😵", f"cookie 校验出错，按失效处理: {exc}"))
-            return False
-        finally:
-            await close_browser_resources(browser=browser)
-
-
-async def weibo_setup(account_file, handle=False, return_detail=False, qrcode_callback=None, headless: bool = LOCAL_CHROME_HEADLESS):
-    """统一入口：检查 cookie → 如无效且 handle=True 则触发扫码登录。"""
-    account_file = _resolve_account_file(account_file)
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            result = _build_login_result(False, "cookie_invalid", "cookie 文件不存在或已失效", account_file)
-            return result if return_detail else False
-        weibo_logger.info(_msg("🥹", "cookie 文件不存在或已失效，自动打开浏览器请扫码登录"))
-        result = await weibo_cookie_gen(account_file, qrcode_callback=qrcode_callback, headless=headless)
-        return result if return_detail else result["success"]
-
-    result = _build_login_result(True, "cookie_valid", "cookie 有效", account_file)
-    return result if return_detail else True
+            result = _build_login_result(True, "profile_valid", "微博 Profile 登录有效", account,
+                                         qrcode=qrcode_info, current_url=current_url)
+            result["account_name"] = account
+            return result if return_detail else True
 
 
 class WeiBoVideo(BaseVideoUploader):
@@ -398,30 +407,27 @@ class WeiBoVideo(BaseVideoUploader):
         thumbnail_path: str | None = None,
         collection_name: str | None = None,
         debug: bool = False,
-        headless: bool = LOCAL_CHROME_HEADLESS,
+        headless: bool | None = None,
+        *, account_name=None, local_browser=None,
     ):
         self.title = title
         self.file_path = file_path
         self.tags = tags or []
         self.account_file = (
-            _resolve_account_file(account_file) if account_file is not None else None
+            str(account_file) if account_file is not None else None
         )
         self.publish_date = publish_date
         self.desc = desc or ""
         self.thumbnail_path = thumbnail_path
         self.collection_name = collection_name
         self.debug = debug
-        self.headless = headless
-        self.local_executable_path = LOCAL_CHROME_PATH
+        self.headless = resolve_headless(headless)
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.max_title_length = 30
 
     async def validate_upload_args(self, *, check_cookie: bool = True):
         validate_single_line(self.title)
-        if check_cookie:
-            if not self.account_file or not os.path.exists(self.account_file):
-                raise RuntimeError(f"cookie文件不存在，请先完成微博登录: {self.account_file}")
-            if not await cookie_auth(self.account_file):
-                raise RuntimeError(f"cookie文件已失效，请先完成微博登录: {self.account_file}")
         if not self.title or not str(self.title).strip():
             raise ValueError("视频标题不能为空")
         if not self.thumbnail_path:
@@ -434,42 +440,47 @@ class WeiBoVideo(BaseVideoUploader):
             raise ValueError(f"封面文件过大（{thumb_size / 1024 / 1024:.1f}MB），微博要求 < 5MB")
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        await self.validate_upload_args(check_cookie=False)
         if session is not None:
-            await self.validate_upload_args(check_cookie=False)
+            if not session.managed and not await is_logged_in(session.context, managed=False, account=self.account_name):
+                raise _local_login_error(self.account_name)
             await self.upload_in(session)
             return
-
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
-
-        weibo_logger.info(_msg("🧍", "先检查 cookie 和视频文件"))
-        await self.validate_upload_args()
-        weibo_logger.info(_msg("🥳", "上传前检查通过"))
-
-        browser = await playwright.chromium.launch(
-            headless=self.headless, **WEIBO_LAUNCH_KWARGS
-        )
-        context = await browser.new_context(
-            storage_state=self.account_file,
-            **WEIBO_CONTEXT_KWARGS,
-        )
-
-        try:
-            await self.upload_in(
-                BrowserSession(browser=browser, context=context, mode="local")
-            )
-
-            # 保存 cookie
-            if await save_upload_session(context, self.account_file):
-                weibo_logger.success(_msg("🥳", "cookie 更新完毕"))
-        finally:
-            await close_browser_resources(context=context, browser=browser)
+        self.account_name = _account_alias(self.account_file, self.account_name)
+        async with local_browser_session(playwright, platform="weibo", account=self.account_name,
+                                         headless=self.headless, local_browser=self.local_browser) as local_session:
+            await self.upload(None, session=local_session)
 
     async def upload_in(self, session: BrowserSession) -> None:
         self.start_publish_budget()
+        self._local_profile_upload = not session.managed
+        self._publish_attempted = False
+        self._active_page = None
+        try:
+            await self._upload_session(session)
+        except Exception as error:
+            if self._local_profile_upload and self._active_page is not None:
+                try:
+                    await _raise_local_login_required(self._active_page, account=self.account_name,
+                                                     publish_attempted=self._publish_attempted)
+                except LoginRequiredError:
+                    raise
+                except Exception:
+                    pass  # A failed diagnostic must preserve the original operation error.
+                if self._publish_attempted and not isinstance(error, (LoginRequiredError, PublishResultUnknownError)):
+                    raise self.publish_budget.timeout_error(True) from error
+            raise
+
+    async def _upload_session(self, session):
         multilogin = session.managed
         page = await session.context.new_page()
-        await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
+        self._active_page = page
+        response = await page.goto(WEIBO_HOME_URL, timeout=60000, wait_until="domcontentloaded")
+        if self._local_profile_upload:
+            _check_local_response(response)
+            await _raise_local_login_required(page, account=self.account_name)
         await page.wait_for_timeout(3000)
         if multilogin:
             _raise_if_login_required(page)
@@ -477,6 +488,9 @@ class WeiBoVideo(BaseVideoUploader):
 
         # 1) 点击首页「视频」入口，弹出发布窗口（popup）
         publish_page = await self._open_video_publish_page(page, multilogin=multilogin)
+        self._active_page = publish_page
+        if self._local_profile_upload:
+            await _raise_local_login_required(publish_page, account=self.account_name)
 
         # 发布页是另一个 page：必须换新实例，首页实例不得跨页复用。
         humanizer = self._humanizer(publish_page)
@@ -543,6 +557,7 @@ class WeiBoVideo(BaseVideoUploader):
             await humanizer.click(video_btn)
             await humanizer.after_navigate()
         publish_page = await popup_info.value
+        self._active_page = publish_page
         await publish_page.wait_for_timeout(3000)
         if multilogin:
             _raise_if_login_required(publish_page)
@@ -579,6 +594,8 @@ class WeiBoVideo(BaseVideoUploader):
         last_log = 0.0
         while True:
             budget.check_pre_click()
+            if getattr(self, "_local_profile_upload", False):
+                await _raise_local_login_required(page, account=self.account_name)
             if time.monotonic() - start > timeout:
                 raise TimeoutError(f"视频上传超时（>{timeout}s）")
 
@@ -691,6 +708,8 @@ class WeiBoVideo(BaseVideoUploader):
         start = time.monotonic()
         while time.monotonic() - start < 300:  # 宽松 5 分钟，且不突破总预算
             self.publish_budget.check_pre_click()
+            if getattr(self, "_local_profile_upload", False):
+                await _raise_local_login_required(page, account=self.account_name)
             # 结果判定：编辑封面层不再可见 → 成功
             try:
                 if not await cover_layer.is_visible():
@@ -959,7 +978,7 @@ class WeiBoVideo(BaseVideoUploader):
         await publish_btn.wait_for(
             state="visible", timeout=budget.clamp_ms(15000)
         )
-        # 不依赖本地模式的高视口；滚动到可视区后再触发点击（本地模式同样无害）。
+        # 使用实际窗口：先滚动，再由 Humanizer 校验可交互和落点。
         await publish_btn.scroll_into_view_if_needed()
         await budget.wait_until_allowed(
             getattr(self, "publish_not_before", None),
@@ -968,18 +987,22 @@ class WeiBoVideo(BaseVideoUploader):
         )
         budget.check_pre_click()
         await humanizer.before_submit()
+        if getattr(self, "_local_profile_upload", False):
+            await _raise_local_login_required(page, account=self.account_name)
         try:
             await humanizer.click(publish_btn, point=(0.65, 0.5))
         except Exception as exc:
             # 按下鼠标之后的任何异常（``mouse.down`` 之后的 Playwright/原生报错）
             # 都可能已经触发提交：禁止二次派发，按结果未知上抛。
             if maybe_dispatched(exc):
+                self._publish_attempted = True
                 raise budget.timeout_error(True) from exc
             if not isinstance(exc, ElementUnusableError):
                 raise
             if exc.reason.startswith("ambiguous:"):
                 raise
             if getattr(exc, "publish_clicked", False):
+                self._publish_attempted = True
                 # 确定已派发的异常：原样上抛，不再点第二次。
                 raise
             weibo_logger.warning(
@@ -993,15 +1016,19 @@ class WeiBoVideo(BaseVideoUploader):
                 await humanizer.click(publish_btn, point=(0.35, 0.5))
             except Exception as retry_exc:
                 if maybe_dispatched(retry_exc):
+                    self._publish_attempted = True
                     raise budget.timeout_error(True) from retry_exc
                 raise
         weibo_logger.info(_msg("🏃", "已点击发布按钮"))
         publish_clicked = True
+        self._publish_attempted = True
 
         success_layer = page.locator('div[class*="_layer1_9a8j7"]').first
         again_btn = page.locator('button:has(span:text-is("再发一条视频"))').first
         dialog_confirmed = False
         while budget.remaining_seconds() > 0:
+            if getattr(self, "_local_profile_upload", False):
+                await _raise_local_login_required(page, account=self.account_name, publish_attempted=True)
             if multilogin:
                 _raise_if_login_required(page, publish_attempted=publish_clicked)
             try:

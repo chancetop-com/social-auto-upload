@@ -774,8 +774,10 @@ class WeiboTwoInstanceTests(unittest.TestCase):
         self.assertIs(app._humanizer_instance, popup_humanizer)
 
     def test_upload_in_hands_every_post_popup_step_the_popup_instance(self):
-        home = WeiboPage()
-        publish = WeiboPage()
+        auth_selectors = {'text="安全验证"': FakeLocator("verification", count=0),
+                          "text:登录:exact": FakeLocator("login", count=0)}
+        home = WeiboPage(selectors=auth_selectors)
+        publish = WeiboPage(selectors=auth_selectors)
         session = BrowserSession(
             browser=MagicMock(), context=MagicMock(), mode="local"
         )
