@@ -49,6 +49,30 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         with acquire_local_profile('xiaohongshu', 'creator', kind, create=True) as profile:
             return profile.path
 
+    def test_reappearing_legacy_file_is_untouched_and_login_does_not_restart(self):
+        from tests.fakes_clock import FakeClock
+        self.context.page_factory = LoginPage
+        with FakeClock().patch(xhs):
+            code, _, err = self.cli('login', '--account', 'creator', '--headed')
+            self.assertEqual(code, 0, err)
+        legacy = self.root / 'cookies/xiaohongshu_creator.json'
+        legacy.parent.mkdir(exist_ok=True)
+        legacy.write_bytes(b'reappeared broken credentials')
+        open_file = Path.open
+        def deny_legacy_open(path, *args, **kwargs):
+            if path == legacy:
+                raise AssertionError('normal commands must never read or rewrite old credentials')
+            return open_file(path, *args, **kwargs)
+        with patch.object(Path, 'open', deny_legacy_open):
+            with FakeClock().patch(xhs):
+                code, _, err = self.cli('login', '--account', 'creator', '--headed')
+                self.assertEqual(code, 0, err)
+            code, _, err = self.cli('check', '--account', 'creator', '--headed')
+            self.assertEqual(code, 0, err)
+        self.assertEqual(legacy.read_bytes(), b'reappeared broken credentials')
+        self.assertEqual(len(self.pw.chromium.persistent_calls), 3)
+        self.assertFalse(self.context.storage_state_calls)
+
     def test_check_uses_selected_profile_and_ignores_legacy_state(self):
         self.profile()
         legacy = self.root / 'cookies/xiaohongshu_creator.json'
