@@ -53,3 +53,7 @@ PYTHONPATH=. /Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-u
 ## 未执行与范围
 
 本票未执行真实知乎登录/发表/删除，不要求新增知乎账号。原有非 PNG 真实上传、完整线上文章链路及定时受理尚未因此得到验收；离线和合成 DOM 不冒充这些结果。Dayu/Xueqiu 分别由 16/18 交付；本票不改它们运行时。一次性旧资料作业属于 19，四指定平台真实 no-publish 与最终全入口收口属于 20。Bilibili 及正式 CLI 不可达历史入口不在范围内。
+
+## 合入第五批并行交付
+
+合入 integration `be16eb5`（雪球 18）后，合并共享平台列表、provider 本地路由断言，并移除两个平台都已被公共 CLI 测试取代的旧 local-launch 测试类。上述离线命令增加 `tests.test_xueqiu_profiles` 后，**357 passed / 11.360s**；未修改 Xueqiu 运行时。

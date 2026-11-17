@@ -15,16 +15,16 @@ from patchright.async_api import Page, TimeoutError as BrowserTimeoutError, asyn
 
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.text_validation import validate_single_line
-from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
+from utils.local_browser_session import local_browser_session
 from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer, maybe_dispatched
 from uploader.xueqiu_uploader.constants import (
-    XUEQIU_ARTICLE_URL, XUEQIU_CONTEXT_KWARGS, XUEQIU_DECLARATIONS,
-    XUEQIU_IMAGE_SUFFIXES, XUEQIU_LAUNCH_KWARGS, XUEQIU_VISIBILITY,
+    XUEQIU_ARTICLE_URL, XUEQIU_DECLARATIONS,
+    XUEQIU_IMAGE_SUFFIXES, XUEQIU_VISIBILITY,
 )
 from uploader.xueqiu_uploader.session import (
-    load_xueqiu_identity, raise_if_login_required, read_xueqiu_identity,
+    account_alias, raise_if_login_required, read_xueqiu_identity, XueqiuAccessError,
 )
 from uploader.xueqiu_uploader.content import load_xueqiu_article
 from uploader.xueqiu_uploader.verification import check_xueqiu_article_content, query_xueqiu_article
@@ -43,8 +43,8 @@ class XueqiuArticle:
     """通过原生粘贴与图片上传保留文章结构，以服务端确认作为发表结果。"""
 
     def __init__(self, title, content_file, account_file, visibility="公开",
-                 declaration="不添加创作声明", prepare_only=False, headless=False, debug=False,
-                 cover=None, publish_not_before=None):
+                 declaration="不添加创作声明", prepare_only=False, headless=None, debug=False,
+                 cover=None, publish_not_before=None, *, account_name=None, local_browser=None):
         self.title = validate_single_line(title).strip()
         self.content_file = Path(content_file).expanduser().resolve()
         self.account_file = Path(account_file).resolve() if account_file is not None else None
@@ -52,6 +52,8 @@ class XueqiuArticle:
         self.declaration = declaration
         self.prepare_only = prepare_only
         self.headless = headless
+        self.account_name = account_name
+        self.local_browser = local_browser
         self.debug = debug
         self.cover = Path(cover).expanduser().resolve() if cover else None
         self.publish_not_before = publish_not_before
@@ -86,8 +88,8 @@ class XueqiuArticle:
     def validate_upload_args(self, *, check_cookie: bool = True):
         """所有本地参数在创建远端草稿前校验，不猜测尚未观察到的长度上限。
 
-        Cookie/identity binding is local-only; Multilogin mode passes
-        ``check_cookie=False`` because the Profile is the identity.
+        ``check_cookie`` remains a compatibility keyword; no login file is read.
+        Identity required for publication comes from the current editor.
         """
         validate_single_line(self.title)
         if not self.title or "\n" in self.title or "\r" in self.title:
@@ -104,12 +106,7 @@ class XueqiuArticle:
                 raise FileNotFoundError(f"图片不存在: {image}")
             if image.stat().st_size == 0:
                 raise ValueError(f"图片不能为空: {image}")
-        if check_cookie:
-            if self.account_file is None or not self.account_file.is_file():
-                raise FileNotFoundError("请先执行 sau xueqiu login 保存账号")
-            self.identity = load_xueqiu_identity(self.account_file)
-        else:
-            self.identity = None
+        self.identity = None
 
     async def fill_article_body(self, page, body, *, multilogin: bool = False):
         """在原稿图片位置放置唯一标记，原生上传后再核对完整图文交错顺序。"""
@@ -252,8 +249,6 @@ class XueqiuArticle:
             await expect(cover_image).to_have_js_property("complete", True)
             if await cover_image.evaluate("e => e.naturalWidth") <= 0:
                 raise RuntimeError("预览中的封面无法加载")
-        if not multilogin and (await read_xueqiu_identity(page))["uid"] != self.identity["uid"]:
-            raise RuntimeError("雪球填写期间账号发生变化，已中止")
 
     async def _close_preview(self, page: Page) -> None:
         """预览遮罩：只能坐标点关闭开关，不删遮罩、不强点。"""
@@ -276,7 +271,7 @@ class XueqiuArticle:
             raise
 
     def results_dir(self) -> Path:
-        """Result manifests sit next to the local account; MLX uses a temp dir."""
+        """Keep the historical results location; account_file is only a path hint."""
         base = (
             self.account_file.parent
             if self.account_file is not None
@@ -287,7 +282,7 @@ class XueqiuArticle:
     async def main(self, *, session: BrowserSession | None = None) -> dict:
         """准备模式保留草稿和预览；提交模式只点击一次，结果未知时禁止自动重发。
 
-        ``session`` is the Multilogin seam: it runs only the page/publish body and
+        ``session`` is caller-owned: it runs only the page/publish body and
         never launches, creates a context, injects scripts, writes cookies, or
         closes anything it does not own.
         """
@@ -297,18 +292,11 @@ class XueqiuArticle:
 
         self.validate_upload_args()
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                headless=self.headless, **XUEQIU_LAUNCH_KWARGS,
-            )
-            try:
-                context = await browser.new_context(
-                    storage_state=str(self.account_file), **XUEQIU_CONTEXT_KWARGS,
-                )
-                return await self.upload_in(
-                    BrowserSession(browser=browser, context=context, mode="local")
-                )
-            finally:
-                await close_browser_resources(browser=browser)
+            async with local_browser_session(
+                playwright, platform="xueqiu", account=account_alias(self.account_file, self.account_name),
+                headless=self.headless, local_browser=self.local_browser,
+            ) as owned:
+                return await self.upload_in(owned)
 
     async def upload_in(self, session: BrowserSession) -> dict:
         """Business body: editor/preview/publish plus one server response check."""
@@ -330,11 +318,12 @@ class XueqiuArticle:
             self._humanizer(page)
             response = await page.goto(XUEQIU_ARTICLE_URL, wait_until="domcontentloaded", timeout=45000)
             if response is not None and response.status >= 400:
-                raise RuntimeError(f"雪球编辑器访问失败，HTTP {response.status}")
-            if multilogin:
-                raise_if_login_required(page)
-            elif (await read_xueqiu_identity(page))["uid"] != self.identity["uid"]:
-                raise RuntimeError("雪球主体与绑定账号不一致")
+                error_type = RuntimeError if multilogin else XueqiuAccessError
+                raise error_type(f"雪球编辑器访问失败，HTTP {response.status}")
+            raise_if_login_required(page, managed=multilogin)
+            if not multilogin:
+                self.identity = await read_xueqiu_identity(page)
+                result["identity"] = self.identity
             result["remote_draft_possible"] = True
             await self.fill_article_form(page, multilogin=multilogin)
             result.update(images=self.uploaded_images, cover=self.cover_url,
@@ -387,7 +376,7 @@ class XueqiuArticle:
                 if payload.get("title") != self.title:
                     raise RuntimeError("雪球受理作品的标题不符，请核查原作品")
                 if not multilogin and str(payload.get("user_id")) != self.identity["uid"]:
-                    raise RuntimeError("雪球受理作品的主体与本地绑定账号不符，请核查原作品")
+                    raise RuntimeError("雪球受理作品的主体与本次发布账号不符，请核查原作品")
                 if payload.get("is_private") is not (self.visibility == "私人"):
                     raise RuntimeError("雪球受理作品的分享范围不符，请核查原作品")
             except PublishResultUnknownError:
@@ -399,7 +388,7 @@ class XueqiuArticle:
             # 先持久化已返回的 ID，即使后续内容核对异常也只能查询原作品，禁止重发。
             result["content_id"] = str(content_id)
             result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-            # 平台已确认受理；后续核验、截图与 cookie 保存都是附加记录，失败只能告警。
+            # 平台已确认受理；后续核验与截图都是附加记录，失败只能告警。
             result.update(success=True, status="published", url="")
             try:
                 author_id = payload.get("user_id") if multilogin else self.identity["uid"]
@@ -426,7 +415,7 @@ class XueqiuArticle:
             except Exception as error:
                 logger.warning(f"雪球发表后核验未完成（发表已确认，结果保留）: {error}")
             finally:
-                if check_page is not None:
+                if check_page is not None and multilogin:
                     try:
                         await check_page.close()
                     except Exception as error:
@@ -437,16 +426,14 @@ class XueqiuArticle:
                     result["published_screenshot"] = str(result_file.with_suffix(".published.png"))
                 except Exception as error:
                     logger.warning(f"雪球发表截图失败（不影响发表结果）: {error}")
-                try:
-                    await session.context.storage_state(path=str(self.account_file))
-                except Exception as error:
-                    logger.warning(f"雪球 cookie 保存失败（不影响发表结果）: {error}")
             return result
         except PublishResultUnknownError:
+            if not multilogin and page is not None:
+                raise_if_login_required(page, publish_attempted=True, managed=multilogin)
             raise
         except Exception as exc:
-            if multilogin and page is not None:
-                raise_if_login_required(page, publish_attempted=publish_clicked)
+            if page is not None and not isinstance(exc, XueqiuAccessError):
+                raise_if_login_required(page, publish_attempted=publish_clicked, managed=multilogin)
             result["error"] = str(exc)
             if result["status"] == "preparing":
                 result["status"] = "failed"

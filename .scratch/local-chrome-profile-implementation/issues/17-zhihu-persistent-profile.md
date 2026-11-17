@@ -32,6 +32,8 @@
 - 红绿过程及覆盖入口见 [验证记录](../research/17-zhihu-validation.md)。新增 16 项 Profile 流程测试，相关离线回归 **347 passed / 11.110s**；已有知乎 uploader 测试 **6 passed / 2.232s**，含真实 Chrome 无头合成 DOM 文章完整性测试。无真实知乎账号操作。
 - 更新 CLI/skill、配置示例、安装/登录说明、Bootstrap、Automation 及术语；移除旧身份旁文件和仅防换号比较，保留 origin 剪贴板权限、文章原稿读回、媒体校验、实时选项、发布预算/not-before、历史结果目录与 verify 原作品证据。可选配置缺失的新进程导入检查与 diff 检查通过。
 
+- 合入 integration `be16eb5`（雪球 18）后，共享列表/测试采用两平台并集，新增雪球公共流程回归，共 **357 passed / 11.360s**。
+
 ## Answer
 
 知乎 login/check/文章/视频/verify/reset-profile 和全部可达独立调用已接入共享持久化 Profile，内部预检与业务共用 session/占用，注入会话保持调用方所有权。默认 Chrome 有头、来源和 headless 优先级完整；同别名可换号，名称/头像只用于当前操作和历史作品证据。旧 JSON/旁文件不参与正常流程，verify 仍要求原作品账号、URL 和标题，历史身份不改写。
