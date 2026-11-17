@@ -564,8 +564,9 @@ async def run(args):
             no_publish=getattr(args, "no_publish", False),
         )
         await _upload_note(request, target)
+        outcome = "prepared (not published)" if request.no_publish and target is None else "submitted"
         print(
-            f"TikTok note upload submitted: {len(request.image_files)} images"
+            f"TikTok note upload {outcome}: {len(request.image_files)} images"
         )
         return 0
 
@@ -586,7 +587,8 @@ async def run(args):
             no_publish=getattr(args, "no_publish", False),
         )
         await _upload_video(request, target)
-        print(f"TikTok video upload submitted: {request.video_file}")
+        outcome = "prepared (not published)" if request.no_publish and target is None else "submitted"
+        print(f"TikTok video upload {outcome}: {request.video_file}")
         return 0
 
     raise RuntimeError(f"Unsupported TikTok action: {args.action}")

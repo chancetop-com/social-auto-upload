@@ -18,17 +18,12 @@ uv pip install -e .
 
 默认使用用户安装的系统 Chrome；保留已有 conf.py。若选择 Chromium，显式传 `--local-browser chromium` 并安装项目固定版本配套的完整浏览器：
 
-Windows PowerShell：
-
-```powershell
-$env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install --no-shell chromium
+```sh
+uv run patchright install chromium
+# 可选：uv run patchright install --no-shell chromium
 ```
 
-Linux / macOS（bash / zsh）：
-
-```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install --no-shell chromium
-```
+普通安装与 `--no-shell` 都包含完整 Chromium；仅 headless shell 不足。Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装，项目不自动安装/更新。托管动作无需本地浏览器。需要下载镜像时由用户设置 `PLAYWRIGHT_DOWNLOAD_HOST`，安装和运行保持相同项目环境和缓存。
 
 ## 常见调用方式
 

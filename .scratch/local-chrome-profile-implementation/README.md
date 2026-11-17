@@ -96,3 +96,6 @@
 - 2026-11-17：[18 已解决](./issues/18-xueqiu-persistent-profile.md)。雪球 login/check/文章/verify/reset-profile 与直接入口使用持久化 Profile，移除旧身份旁文件约束，保留当次主体和历史作者核验及结果路径。299 项相关离线检查、16 项浏览器/内容检查通过，完整文章合成流程在 Chrome 有头和 Chromium 无头通过；未操作真实账号或作品。见 [18 验证记录](./research/18-xueqiu-validation.md)。
 
 - 2026-11-17：[19 已解决](./issues/19-one-time-legacy-migration.md)。实际完成 TikTok/lukechen、Rednote/rednote、Instagram/luke、小红书/180 原仓库 Chrome 有头迁移；每项持续占用至两次正向探测与两次严格正常关闭后定向删除旧 Cookie。四个 Profile 保留，四个旧文件均已清理，临时迁移代码/入口/专用测试已实际删除；11 项临时合成验证、移除后97项正常Profile回归通过。见[实际执行与移除记录](./research/19-migration-execution.md)。剩余目标0、阻塞无，20可开始真实no-publish验收。
+
+
+- 2026-11-17：[20 原定范围验收已完成，整体仍待追加要求](./issues/20-final-convergence-and-no-publish-validation.md)。17 个浏览器平台、87 个正式动作完成最终审计；最小配置导入、小红书已认证 login、Instagram 实际中文入口及本地 no-publish 输出修复。集成离线 2,030 项（2 skip）、最后相关 274 项、受控浏览器 33 项及最后 6 项通过；原仓库四平台普通 login/重开 check 与全部 8 个真实 no-publish 流程通过，无实际发布或删除。用户随后要求改为 kind/platform/account 目录并移除明确废弃的旧入口与 stealth 资源；本基线不宣称这些追加工作已完成，父规格保持未完成。见 [20 分层验证记录](./research/20-final-validation.md)。

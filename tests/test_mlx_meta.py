@@ -841,7 +841,9 @@ class FacebookCliTests(_CliBase):
                 facebook_command, "FacebookPost", new=builder
             ), patch.object(
                 facebook_command, "facebook_cookie_auth", new=resolve_account
-            ), patch.object(facebook_command, "facebook_setup", new=setup):
+            ), patch.object(facebook_command, "facebook_setup", new=setup), patch(
+                'conf.LOCAL_CHROME_HEADLESS', False, create=True
+            ):
                 code, out, _ = self._run(
                     [
                         "facebook",

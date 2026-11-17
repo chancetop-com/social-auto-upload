@@ -476,7 +476,8 @@ async def run(args):
         await upload_xiaohongshu_video(
             request, target=target, ignored_keys=ignored_keys
         )
-        print(f"Xiaohongshu video upload submitted: {request.video_file}")
+        outcome = "prepared (not published)" if request.no_publish and target is None else "submitted"
+        print(f"Xiaohongshu video upload {outcome}: {request.video_file}")
         return 0
 
     if args.action == "upload-note":
@@ -505,7 +506,8 @@ async def run(args):
         await upload_xiaohongshu_note(
             request, target=target, ignored_keys=ignored_keys
         )
-        print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")
+        outcome = "prepared (not published)" if request.no_publish and target is None else "submitted"
+        print(f"Xiaohongshu note upload {outcome}: {len(request.image_files)} images")
         return 0
 
     raise RuntimeError(f"Unsupported Xiaohongshu action: {args.action}")

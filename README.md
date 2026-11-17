@@ -117,6 +117,33 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 - [安装说明](./docs/install.md)
 - [更新说明](./docs/update.md)
 
+基础安装 `uv pip install -e .` 只安装项目依赖，不下载或检查浏览器。17 个正式浏览器平台默认使用系统 Chrome 和专用持久化 Profile；Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装，项目不自动安装/更新。可选完整 Chromium 或 `LOCAL_CHROME_PATH` 指定的兼容 binary，只需准备实际来源。托管动作无需本地 Chrome/Chromium。升级保留已有 `conf.py`，包括 `LOCAL_CHROME_HEADLESS=True`；显式 `--headed` / `--headless` 优先。
+
+#### 可选的两条 CI 安装路线
+
+下面是已准备 Python 3.11、uv 和源码的 **Ubuntu 24.04 x64** 示例，未在本次 macOS 验收中执行，也不新增 workflow。先 `uv sync --locked --python 3.11`，按来源任选一条。
+
+系统 Chrome 使用 Google 官方 amd64 DEB；已有兼容安装时复用：
+
+```sh
+curl --fail --location --retry 3 https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb --output /tmp/google-chrome.deb
+sudo apt-get update
+sudo apt-get install -y /tmp/google-chrome.deb xvfb xauth
+uv run patchright install-deps chromium
+google-chrome --version
+```
+
+配套完整 Chromium 使用锁定 Patchright 的安装器，无需 Chrome：
+
+```sh
+sudo apt-get update
+sudo apt-get install -y xvfb xauth
+uv run patchright install --with-deps chromium
+# 可选替代上一行：uv run patchright install --with-deps --no-shell chromium
+```
+
+无显示的有头命令加 `xvfb-run -a`；Chromium 命令显式加 `--local-browser chromium`，有头/无头均用完整浏览器，只有 headless shell 不够。Chrome DEB 是滚动 stable，记录实际版本；Chromium 缓存按系统/架构及固定 Patchright 版本区分，安装和运行保持相同 `PLAYWRIGHT_BROWSERS_PATH`。已有兼容 binary 可由 `LOCAL_CHROME_PATH` 复用，仍需系统库及相应显示服务。详细依赖、缓存和验证边界见[两条 CI 路线](./docs/install.md#可选-ci-环境两条独立路线)；安装成功、浏览器可启动和平台已登录分别验证。
+
 
 ### AI Agent
 
@@ -167,9 +194,9 @@ sau douyin check --account creator
 # 换成 dayu、xueqiu、zhihu 等平台名称即可；具体登录要求见对应文档。
 ```
 
-Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；新 Profile 的真实账号验收留待最终回归。见 [Rednote 说明](./docs/rednote.md)。
+Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；真实 Profile 验证范围见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。见 [Rednote 说明](./docs/rednote.md)。
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；所有 17 个正式浏览器平台均已接入持久化会话。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
 
 #### 指定发布时刻（可选）
 
@@ -222,16 +249,16 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 
 共同说明：
 
-- 托管模式下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验；本地模式仍要求 `--account` 并决定 cookie 文件。
+- 托管模式下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验；本地浏览器模式仍要求 `--account` 并定位专用 Profile，Bilibili 使用其账号文件。
 - 托管模式下 `login` 一律拒绝；请先在对应桌面应用中登录 Profile，并处理验证码/2FA。托管模式不提供 CLI 登录链路。
 - 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录、`11` 请求过于频繁（429）、`130` 用户中断。**MLX 的 429 已由 `1` 改为 `11`**，调度层需改为退避重试。
 - 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到平台后台（如 TikTok Studio → Content/Posts）按标题、素材与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核。两者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
 - 不支持：Docker / 跨机 / Linux 无桌面、Bilibili、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
-- TikTok 本地模式已使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器的真实隔离验证已通过，真实平台 no-publish 回归留待最终迁移验收；其他平台仍按各自迁移阶段运行。
-- 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止；可能留下草稿，真实平台回归仍由最终验收执行。
+- TikTok 本地模式已使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器隔离与四平台真实 no-publish 的证据和边界见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
+- 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止，可能留下草稿；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
-- Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/instagram/<原始别名>/<chrome|chromium>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文离线验证已覆盖 `--no-publish` 停止点；真实账号回归由最终迁移验收执行。
+- Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/instagram/<原始别名>/<chrome|chromium>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文回归显式使用 `--no-publish`，结果 `prepared` 只证明到达 Share 前；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 
 - 托管模式只验证“已登录”，Profile 即身份；各平台本地作品所需的身份比对在托管发布模式下不执行，账号错配风险由调度侧承担。
 - 已知限制：命令级登录检测已是 provider-aware 文案；但部分平台在上传过程中遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留。

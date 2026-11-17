@@ -25,19 +25,7 @@ uv pip install -e .
 
 ### 3. 如有需要，更新浏览器依赖
 
-当前主线使用 `patchright`。
-
-Windows PowerShell：
-
-```powershell
-$env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
-```
-
-Linux / macOS：
-
-```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
-```
+保留现有 `conf.py`（包括 `LOCAL_CHROME_HEADLESS=True`）和 `browser_profiles/`。升级本身不安装或检查浏览器：系统 Chrome 由用户管理，不自动重装/更新；只有选择 Chromium 且固定 Patchright 版本变化时，执行 `uv run patchright install chromium`，可加 `--no-shell`。安装和运行使用同一 Python 环境与浏览器缓存，只有 headless shell 不满足正式运行契约。已有兼容自定义 binary 可继续通过 `LOCAL_CHROME_PATH` 复用；托管动作无需本地 Chrome/Chromium。Linux 依赖与 Xvfb 见[安装说明](./install.md#可选-ci-环境两条独立路线)。
 
 ### 4. 更新后自检
 
@@ -79,7 +67,7 @@ git pull
 uv pip install -e .
 ```
 
-3. 如需浏览器驱动，更新 `patchright` Chromium
+3. 保留已有配置与 Profile，按实际选择来源执行上方按需浏览器准备；不自动安装或更新 Chrome。
 
 4. 重新验证 CLI：
 

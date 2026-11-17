@@ -174,6 +174,67 @@ class InstagramProfileCliTests(unittest.TestCase):
         self.assertEqual(len(self.pw.chromium.persistent_calls), 2)
         self.assertFalse(self.pw.chromium.launch_calls)
 
+    def test_local_video_and_note_choose_observed_post_submenu_before_upload(self):
+        from tests.fakes_clock import FakeClock
+        import uploader.publish_timeout as timeout
+        clock = FakeClock()
+        class MenuLocator(ComposerLocator):
+            async def click(self):
+                if self.kind == 'post-menu':
+                    self.page.post_clicks += 1
+                    self.page.composer_open = True
+                else:
+                    await super().click()
+        class MenuPage(ComposerPage):
+            def __init__(self, context):
+                super().__init__(context)
+                self.composer_open, self.post_clicks = False, 0
+            def locator(self, selector):
+                if selector == 'a[href="#"]:has(svg[aria-label="帖子"])':
+                    return MenuLocator(self, 'post-menu', int(not self.composer_open))
+                if 'input[type="file"]' in selector:
+                    return ComposerLocator(self, 'media-input', int(self.composer_open))
+                return super().locator(selector)
+            async def wait_for_timeout(self, milliseconds): clock.advance(milliseconds / 1000)
+        self.context.page_type = MenuPage
+        self.profile()
+        for action, option, filename in [('upload-video', '--file', 'video.mp4'), ('upload-note', '--images', 'image.png')]:
+            with self.subTest(action=action):
+                path = self.root / filename
+                path.write_bytes(b'media fixture')
+                with clock.patch(main, timeout):
+                    code, out, err = self.run_cli(action, '--account', 'Creator', option, str(path), '--title', 'caption', '--no-publish', '--headed')
+                self.assertEqual(code, 0, err)
+                page = self.context.pages[-1]
+                self.assertEqual(page.files, [str(path)])
+                self.assertEqual(page.post_clicks, 1)
+                self.assertEqual(page.share_clicks, 0)
+                self.assertIn('prepared', out)
+                self.assertTrue(self.context.closed)
+
+    def test_local_composer_uses_observed_continue_label_before_share(self):
+        class ChineseLocator(ComposerLocator):
+            def get_by_role(self, role, **kwargs):
+                if role == 'button' and 'name' in kwargs:
+                    label = '继续' if self.page.step < 2 else '分享'
+                    return ComposerLocator(self.page, 'action', int(bool(kwargs['name'].fullmatch(label))))
+                return super().get_by_role(role, **kwargs)
+        class ChinesePage(ComposerPage):
+            def get_by_role(self, role, **kwargs): return ChineseLocator(self, role)
+        self.context.page_type = ChinesePage
+        self.profile()
+        for action, option, filename in [('upload-video', '--file', 'video.mp4'), ('upload-note', '--images', 'image.png')]:
+            with self.subTest(action=action):
+                path = self.root / filename
+                path.write_bytes(b'media fixture')
+                code, out, err = self.run_cli(action, '--account', 'Creator', option, str(path), '--title', 'caption', '--no-publish', '--headed')
+                self.assertEqual(code, 0, err)
+                page = self.context.pages[-1]
+                self.assertEqual(page.step, 2)
+                self.assertEqual(page.share_clicks, 0)
+                self.assertEqual(page.caption, 'caption')
+                self.assertIn('prepared', out)
+
     def test_works_stay_local_with_provider_env_and_use_current_author(self):
         self.profile('chromium')
         self.context.page_type = PostPage

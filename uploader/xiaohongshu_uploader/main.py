@@ -1600,11 +1600,16 @@ async def xiaohongshu_cookie_gen(
                 page = await context.new_page()
                 await page.goto(_build_xhs_creator_url("/login"))
                 await Humanizer(page).after_navigate()
-                qrcode_info = await _save_xhs_qrcode(
-                    page, str(profile_path / "login"), qrcode_callback=qrcode_callback,
-                )
-                qrcode_path = Path(qrcode_info["image_path"])
-                xiaohongshu_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
+                qrcode_info = None
+                # An authenticated Profile can redirect /login straight to the
+                # creator workspace. Only a login page needs a QR; success still
+                # requires the positive publish-page probe below.
+                if await classify_blocked(page) == "login":
+                    qrcode_info = await _save_xhs_qrcode(
+                        page, str(profile_path / "login"), qrcode_callback=qrcode_callback,
+                    )
+                    qrcode_path = Path(qrcode_info["image_path"])
+                    xiaohongshu_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))
                 for _ in range(max_checks):
                     if await classify_blocked(page) is None:
                         await asyncio.sleep(XHS_LOGIN_SUCCESS_SETTLE_SECONDS)
@@ -1614,8 +1619,8 @@ async def xiaohongshu_cookie_gen(
                                 _blocked_message(kind, "local", publish_attempted=False),
                                 reason=kind, publish_attempted=False,
                             )
-                        xiaohongshu_logger.success(_msg("🥳", "小红书扫码登录成功，小人开心收工"))
-                        return _build_login_result(True, "success", "小红书扫码登录成功", str(profile_path), qrcode_info, evidence)
+                        xiaohongshu_logger.success(_msg("🥳", "小红书登录成功，状态由 Profile 保存"))
+                        return _build_login_result(True, "success", "小红书登录成功", str(profile_path), qrcode_info, evidence)
                     await asyncio.sleep(poll_interval)
                 kind = await classify_blocked(page) or "login"
                 raise LoginRequiredError(

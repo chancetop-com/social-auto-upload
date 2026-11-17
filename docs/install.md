@@ -48,22 +48,59 @@ uv pip install -e .
 
 ### 4. 按所选浏览器准备运行环境
 
-项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
+项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 的全部正式本地浏览器动作使用持久化 Profile，默认选择系统 Chrome。基础 Python 安装和 CLI help 不下载或检查浏览器；托管动作不要求本地 Chrome/Chromium，Bilibili 仍使用 biliup。
 
 - **Chrome 路线**：用户从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 安装适合系统的 Chrome；项目使用 `channel="chrome"`，不会自动安装或更新它。macOS 选择相应 Apple 芯片或 Intel 版本。
-- **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。未迁移平台仍可能使用 headless shell，保留它们需要的 `uv run patchright install chromium` 安装方式。
+- **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。普通 `uv run patchright install chromium` 同样可用，会额外安装 shell；`--no-shell` 是节省下载的可选方式。
 - **已有自定义浏览器**：在 `conf.py` 设置 `LOCAL_CHROME_PATH`。只检查该来源；启动前根据可靠产品信息识别 Chrome / Chromium，无法识别则停止。仅改文件名或传浏览器选择不能强行指定其种类。
 
 只需准备实际选择的来源；失败不会自动换 binary 或 headless。Linux / CI 需为所选有头浏览器提供显示服务，并按其官方要求安装系统库；可为配套 Chromium 使用 `uv run patchright install --with-deps --no-shell chromium`。仅支持无头的运行环境显式传 `--headless`。若设置 `PLAYWRIGHT_BROWSERS_PATH`，安装和运行保持同一值；不新增 CI workflow。
 
 网络受限时可按需设置 `PLAYWRIGHT_DOWNLOAD_HOST`；镜像来源及可用性由使用者确认，不替代系统 Chrome 官方安装。
 
+### 可选 CI 环境：两条独立路线
+
+以下是已 checkout、装好 Python 3.11 与 uv 的 **Ubuntu 24.04 x64** 环境示例（如 `ubuntu-24.04` runner）。它们是按既有[Chrome 安装研究](../.scratch/local-chrome-profile/research/chrome-arm64-installation.md)和[Chromium 运行研究](../.scratch/local-chrome-profile/research/chromium-runtime-contract.md)整理的安装说明，本次没有执行 Linux CI，也不新增 workflow。按所选来源只执行一条；两条都用项目锁文件固定 Patchright 与其驱动。
+
+**路线 A：Google 官方 Chrome amd64 DEB。** 已装好兼容系统 Chrome 时复用它，跳过下载安装。缺少时由用户或其部署脚本按 [Google 官方安装说明](https://support.google.com/chrome/answer/95346?hl=en)准备；项目本身不安装或更新 Chrome，`patchright install chrome` 不是默认路线。
+
+```sh
+uv sync --locked --python 3.11
+curl --fail --location --retry 3 \
+  https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+  --output /tmp/google-chrome.deb
+sudo apt-get update
+sudo apt-get install -y /tmp/google-chrome.deb xvfb xauth
+uv run patchright install-deps chromium
+google-chrome --version
+test -x /opt/google/chrome/chrome
+```
+
+apt 安装 DEB 声明的系统库，`install-deps chromium` 补充驱动要求的 Linux 依赖，不下载另一份 Chromium。该 DEB 是 x64 滚动 stable，URL 固定不表示 Chrome 版本锁定；记录实际版本并由部署环境管理更新，不套用于 ARM64 runner。
+
+**路线 B：项目固定 Patchright 配套完整 Chromium。** 不需要系统 Chrome：
+
+```sh
+uv sync --locked --python 3.11
+sudo apt-get update
+sudo apt-get install -y xvfb xauth
+uv run patchright install --with-deps chromium
+# 可选：将上一行换为以下命令，省去未使用的 headless shell。
+# uv run patchright install --with-deps --no-shell chromium
+```
+
+普通安装与 `--no-shell` 都提供完整浏览器；仅 `--only-shell` 不满足契约。运行时显式 `--local-browser chromium`，有头和无头始终选择 `channel="chromium"`。浏览器缓存按操作系统、架构、锁文件/固定 Patchright 版本区分；驱动升级后安装对应浏览器。设置 `PLAYWRIGHT_BROWSERS_PATH` 时，安装和运行使用同一值，不从另一环境的缓存推定已就绪。
+
+两条路线的有头运行在无显示环境加 `xvfb-run -a`，例如 `xvfb-run -a uv run sau <平台> check --account <别名> --headed`（Chromium 再加 `--local-browser chromium`）。无头任务可显式 `--headless`，仍需上述完整 binary 和系统库。Xvfb 只提供显示服务，不完成平台登录。安装验证可用隔离临时 Profile 打开空白页，真实账号须另行 login 后同配置 check。
+
+已有兼容的 Chrome/Chromium binary 可通过 `LOCAL_CHROME_PATH` 复用，省去相应浏览器下载；Linux 系统库和有头显示服务仍需准备。记录产品、路径和版本，不承诺任意版本或降级兼容，不复制其他浏览器种类的账号资料。
+
 ### 5. 配置 conf.py
 
 首次安装且 `conf.py` 不存在时复制示例；升级保留已有配置（包括 `LOCAL_CHROME_HEADLESS=True`）：
 
 ```bash
-cp conf.example.py conf.py
+test -f conf.py || cp conf.example.py conf.py
 ```
 
 Windows 也可以直接手动复制并重命名。
@@ -72,7 +109,7 @@ Windows 也可以直接手动复制并重命名。
 
 - `LOCAL_CHROME_PATH`：非空时优先作为实际可执行文件。
 - `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
-- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 同样解析 headless，但完全忽略本地来源配置。
+- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 同样解析 headless，但完全忽略本地来源配置。
 
 ### 6. 验证 CLI 是否可用
 
@@ -166,19 +203,7 @@ sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --titl
 uv pip install -e .
 ```
 
-4. 如需浏览器驱动，优先使用：
-
-Windows PowerShell：
-
-```powershell
-$env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
-```
-
-Linux / macOS：
-
-```bash
-PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright" patchright install chromium
-```
+4. 根据任务的实际来源准备浏览器：默认系统 Chrome 由用户按 Google 官方指引安装；选择完整 Chromium 时执行 `uv run patchright install chromium`（可加 `--no-shell`）。已有兼容 binary 可配置 `LOCAL_CHROME_PATH`。托管动作跳过本地浏览器准备；Linux/CI 按上文两条独立路线处理系统依赖和 Xvfb。保留已有 `conf.py`，不覆盖 `LOCAL_CHROME_HEADLESS=True`。
 
 5. 安装完成后，优先检查：
 

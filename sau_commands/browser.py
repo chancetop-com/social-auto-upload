@@ -247,7 +247,7 @@ def resolve_account_label(args: argparse.Namespace) -> str | None:
 def managed_ignored_keys(args: argparse.Namespace) -> tuple[str, ...]:
     """Return the CLI keys managed mode drops, e.g. ``("account",)``.
 
-    ``--account`` names a local cookie file, so a managed run cannot honour it.
+    ``--account`` names a local Profile alias, so a managed run cannot honour it.
     It is reported once per run through the browser-session warning instead of
     silently changing the identity label.  Empty values never count.
     """
@@ -270,7 +270,7 @@ def require_account(args: argparse.Namespace) -> None:
     """Raise :class:`UsageError` unless ``--account`` is non-empty.
 
     Local-only actions (``verify`` / ``delete``) keep running in local mode even
-    when a managed provider is active, so they must still resolve a cookie file
+    when a managed provider is active, so they must still resolve a local Profile
     and therefore always need ``--account``.
     """
     account = getattr(args, "account", None)

@@ -14,7 +14,7 @@ from patchright.async_api import Playwright
 from patchright.async_api import TimeoutError as PWTimeoutError
 from patchright.async_api import async_playwright
 
-from conf import LOCAL_CHROME_PATH
+import conf
 from uploader.base_video import BaseVideoUploader
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -56,6 +56,9 @@ KUAISHOU_COVER_CHOOSER_TIMEOUT_MS = 10_000
 
 # Preserve the historical ignored-option metadata for managed sessions.
 # Local sessions obtain their effective source from resolve_local_browser.
+LOCAL_CHROME_PATH = getattr(conf, "LOCAL_CHROME_PATH", "")
+
+
 def _build_ks_launch_kwargs(executable_path: str | None = None) -> dict:
     executable = LOCAL_CHROME_PATH if executable_path is None else executable_path
     if executable:
