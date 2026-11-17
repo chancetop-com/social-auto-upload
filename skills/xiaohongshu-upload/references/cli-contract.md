@@ -13,13 +13,13 @@ sau xiaohongshu login --account <account>
 - 必填参数:
   - `--account`
 - 作用:
-  - 启动小红书登录流程，为指定账号生成或刷新 cookie 文件
+  - 在选定的专用持久化 Profile 中扫码，登录后重新打开发布页取得正向登录证据；浏览器关闭后保存资料
   - 如果登录过程中生成本地二维码图片，agent 应优先直接把图片展示/发送给用户扫码，而不是只回传路径
 - 账号说明:
   - `--account` 传的是用户自定义的 `account_name`，不是固定只能叫 `creator`
-  - 一个 `account_name` 对应一个账号文件，可用于多账号隔离和并发任务
+  - 一个原始别名按浏览器种类隔离 Profile；同一 Profile 同时只能由一个命令使用，别名可重新登录其他账号
 
-### 校验 cookie
+### 检查登录态
 
 ```bash
 sau xiaohongshu check --account <account>
@@ -28,8 +28,8 @@ sau xiaohongshu check --account <account>
 - 必填参数:
   - `--account`
 - 预期输出:
-  - `valid`：cookie 可用
-  - `invalid`：cookie 缺失或已失效
+  - `valid`：发布页存在上传入口且未命中登录/验证
+  - `invalid`：Profile 缺失、登录/验证阻断或探测失败；结合退出码判断原因
 
 ### 上传视频
 
@@ -49,6 +49,7 @@ sau xiaohongshu upload-video \
   [--shoot-date YYYY-MM-DD] \
   [--no-publish] \
   [--debug] \
+  [--local-browser chrome|chromium] \
   [--headless | --headed]
 ```
 
@@ -85,6 +86,7 @@ sau xiaohongshu upload-note \
   [--shoot-date YYYY-MM-DD] \
   [--no-publish] \
   [--debug] \
+  [--local-browser chrome|chromium] \
   [--headless | --headed]
 ```
 
@@ -102,6 +104,25 @@ sau xiaohongshu upload-note \
   - `--debug`
   - `--headless`
   - `--headed`
+
+## 本地配置与退出码
+
+login/check/视频/图文都复用 `browser_profiles/xiaohongshu/<别名>/<种类>`。`LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`；缺省 Chrome。显式 headed/headless 优先于 `LOCAL_CHROME_HEADLESS`，未配置默认有头。旧 JSON 不参与，业务不会自动扫码或恢复旧任务。
+
+- `0`：检查通过、登录完成或流程完成；no-publish 仅证明到达提交前停止点。
+- `1`：浏览器、网络、页面结构、必需字段或权限故障；不能据此认定登录失效。
+- `2`：参数错误。
+- `10`：Profile 缺失或明确未登录；`reason=verification` 时先人工完成验证。提交后 stderr 带 `publish_attempted=true`，先核对笔记再决定是否重跑。
+- `9`：提交结果未知，禁止自动重发。
+- `11`：托管请求过于频繁，交给调用方退避。
+
+### 重建指定本地 Profile
+
+```bash
+sau xiaohongshu reset-profile --account <account> --browser-kind chrome
+```
+
+不需要 binary；只清空明确指定的种类，保留其他种类、历史结果和旧文件。占用或归属不明时失败，不接管外部浏览器。重建后先 login。
 
 ## 发布策略
 

@@ -1,6 +1,6 @@
 ---
 name: xiaohongshu-upload
-description: 当 agent 需要通过已安装的 `sau` CLI 完成小红书登录、cookie 校验、视频上传或图文发布时使用这个 skill。该 skill 适用于已经安装 `social-auto-upload` 且可调用 `sau` 命令的环境。优先使用这个 skill 进行稳定的命令式小红书工作流，而不是一开始就阅读 uploader 源码。
+description: 当 agent 需要通过已安装的 `sau` CLI 完成小红书登录、登录态检查、视频上传或图文发布时使用这个 skill。该 skill 适用于已经安装 `social-auto-upload` 且可调用 `sau` 命令的环境。优先使用这个 skill 进行稳定的命令式小红书工作流，而不是一开始就阅读 uploader 源码。
 license: MIT-0
 slug: social-auto-upload-xiaohongshu-upload
 displayName: 小红书视频与图文发布
@@ -20,8 +20,8 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 | 功能 | 命令入口 | 说明 |
 | --- | --- | --- |
-| 小红书登录 | `sau xiaohongshu login --account <name>` | 生成或刷新指定账号的 cookie |
-| cookie 校验 | `sau xiaohongshu check --account <name>` | 检查指定账号 cookie 是否有效 |
+| 小红书登录 | `sau xiaohongshu login --account <name>` | 在指定本地 Profile 中扫码登录 |
+| 登录态检查 | `sau xiaohongshu check --account <name>` | 检查指定 Profile 的平台登录态 |
 | 视频上传 | `sau xiaohongshu upload-video ...` | 上传并发布小红书视频 |
 | 图文上传 | `sau xiaohongshu upload-note ...` | 上传并发布小红书图文 |
 
@@ -29,6 +29,8 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 - 视频使用 `title + desc + tags`
 - 图文使用 `title + note + tags`
+
+本地模式按平台、原始账号别名和浏览器种类保存专用持久化 Profile；默认系统 Chrome、有头，已有 `LOCAL_CHROME_HEADLESS` 配置仍生效。只有 `login` 引导登录，其他动作缺少 Profile 或明确未登录时退出 `10`。别名可以重新登录不同真实账号，Chrome 与 Chromium 登录态独立。
 
 ## 默认工作流
 
@@ -40,14 +42,14 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 ## 支持动作
 
 - 使用 `sau xiaohongshu login --account <name>` 登录小红书
-- 使用 `sau xiaohongshu check --account <name>` 校验 cookie 是否有效
+- 使用 `sau xiaohongshu check --account <name>` 检查平台登录态是否有效
 - 使用 `sau xiaohongshu upload-video ...` 上传小红书视频
 - 使用 `sau xiaohongshu upload-note ...` 上传小红书图文
 
 ## 命令选择建议
 
-- 当用户需要新的 cookie，或现有 cookie 已失效时，使用 `login`
-- 当用户只需要确认 cookie 状态时，使用 `check`
+- 当用户需要登录或更换 Profile 内的账号时，使用 `login`
+- 当用户只需要确认登录态时，使用 `check`
 - 当用户要发布视频时，使用 `upload-video`
 - 当用户要发布图文时，使用 `upload-note`
 
@@ -55,7 +57,10 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 - 先确认当前 shell 里是否可以调用 `sau`
 - 如果 `sau` 不可用，按 `references/runtime-requirements.md` 里的回退方式处理
+- 先选定来源：`LOCAL_CHROME_PATH` 优先；无路径时 `--local-browser chrome|chromium` 优先于 `LOCAL_BROWSER`，缺省为 Chrome。安装只需满足选定来源，失败时按诊断修复该来源。
 - 当用户明确指定无头或有头模式时，显式传 `--headless` 或 `--headed`
+- 验证发布前流程时显式传 `--no-publish`；它会真实上传素材、编辑并等待 ARM 就绪，可能留下临时素材或草稿。
+- 用户明确要求重建本地资料时使用 `reset-profile --account <name> --browser-kind chrome|chromium`；只清空指定种类，不重跑旧任务。
 - 只有用户明确要求定时发布时，才使用 `--schedule`
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
 - 二维码图片本身就是给用户扫码的，优先直接把本地图片展示/发送给用户

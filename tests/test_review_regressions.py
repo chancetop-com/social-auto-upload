@@ -20,7 +20,7 @@ from utils.topic_candidates import click_topic_candidate
 
 class AccountCheckCleanupTests(unittest.TestCase):
     def test_check_preserves_exit_code_and_output_after_cleanup_failure(self):
-        for platform in ("rednote", "xiaohongshu"):
+        for platform in ("rednote",):
             command = importlib.import_module(f"sau_commands.{platform}")
             module = importlib.import_module(f"uploader.{platform}_uploader.main")
             for probe, expected in (("valid", 0), ("login", 10), ("verification", 10)):
@@ -115,7 +115,7 @@ class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
                 browser.close.assert_awaited_once()
 
     async def test_user_agent_probe_preserves_value_and_original_error(self):
-        for platform, function in (("rednote", "_rednote_user_agent"), ("xiaohongshu", "_xhs_user_agent")):
+        for platform, function in (("rednote", "_rednote_user_agent"),):
             module = importlib.import_module(f"uploader.{platform}_uploader.main")
             for original in (None, ValueError("UA unavailable")):
                 with self.subTest(platform=platform, failing=bool(original)):

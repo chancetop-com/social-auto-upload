@@ -263,153 +263,10 @@ def _make_ks_note(tmp_dir: str, account_file=None, **kwargs) -> KSNote:
 # local mode golden options
 # --------------------------------------------------------------------------- #
 class LocalGoldenTests(unittest.TestCase):
-    def test_xhs_video_launch_context_and_init_script_are_golden(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_video(tmp_dir, "/tmp/xhs-cookie.json", headless=False)
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
 
-            playwright = FakePlaywright()
-            init_script = AsyncMock(side_effect=lambda context: context)
 
-            with patch.object(xhs_main, "set_init_script", init_script):
-                asyncio.run(app.upload(playwright))
 
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": False, "channel": "chromium"}],
-        )
-        browser = playwright.chromium.launch_browser
-        # 第一个 context 是 UA 探测用的临时 context，第二个才是真正的上传 context。
-        self.assertEqual(
-            browser.new_context_calls,
-            [
-                {},
-                {
-                    "storage_state": "/tmp/xhs-cookie.json",
-                    "user_agent": "Chrome/120.0",
-                    "permissions": ["geolocation"],
-                    "locale": "zh-CN",
-                    "extra_http_headers": {
-                        "Accept-Language": "zh-CN,zh;q=0.9"
-                    },
-                },
-            ],
-        )
-        probe_context, context = browser.contexts
-        self.assertTrue(probe_context.closed)
-        init_script.assert_awaited_once_with(context)
-        app.upload_in.assert_awaited_once()
-        session = app.upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-        self.assertIs(session.context, context)
 
-    def test_xhs_note_launch_context_and_init_script_are_golden(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_note(tmp_dir, "/tmp/xhs-note-cookie.json")
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-
-            playwright = FakePlaywright()
-            init_script = AsyncMock(side_effect=lambda context: context)
-
-            with patch.object(xhs_main, "set_init_script", init_script):
-                asyncio.run(app.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [{"headless": True, "channel": "chromium"}],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [
-                {},
-                {
-                    "storage_state": "/tmp/xhs-note-cookie.json",
-                    "user_agent": "Chrome/120.0",
-                    "permissions": ["geolocation"],
-                    "locale": "zh-CN",
-                    "extra_http_headers": {
-                        "Accept-Language": "zh-CN,zh;q=0.9"
-                    },
-                },
-            ],
-        )
-        probe_context, context = browser.contexts
-        self.assertTrue(probe_context.closed)
-        init_script.assert_awaited_once_with(context)
-
-    def test_xhs_local_teardown_saves_cookie_then_closes(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_video(tmp_dir, "/tmp/xhs-cookie.json")
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-
-            playwright = FakePlaywright()
-            with patch.object(
-                xhs_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
-            ):
-                asyncio.run(app.upload(playwright))
-
-        browser = playwright.chromium.launch_browser
-        probe_context, context = browser.contexts
-        self.assertTrue(probe_context.closed)
-        # Atomic write-back calls storage_state() without a path, then replaces
-        # the file itself; the path is no longer passed to Playwright.
-        self.assertEqual(context.storage_state_calls, [None])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-
-    def test_xhs_video_cookie_save_failure_after_publish_is_log_only(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_video(tmp_dir, "/tmp/xhs-cookie.json")
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-            playwright = FakePlaywright()
-            with (
-                patch.object(
-                    xhs_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
-                ),
-                patch.object(
-                    xhs_main,
-                    "save_storage_state_atomic",
-                    AsyncMock(side_effect=RuntimeError("磁盘已满")),
-                ),
-                patch.object(xhs_main.xiaohongshu_logger, "warning") as warning,
-            ):
-                asyncio.run(app.upload(playwright))
-
-        browser = playwright.chromium.launch_browser
-        context = browser.contexts[-1]
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        warning.assert_called_once()
-
-    def test_xhs_note_cookie_save_failure_after_publish_is_log_only(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_note(tmp_dir, "/tmp/xhs-note-cookie.json")
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-            playwright = FakePlaywright()
-            with (
-                patch.object(
-                    xhs_main, "set_init_script", AsyncMock(side_effect=lambda c: c)
-                ),
-                patch.object(
-                    xhs_main,
-                    "save_storage_state_atomic",
-                    AsyncMock(side_effect=RuntimeError("磁盘已满")),
-                ),
-                patch.object(xhs_main.xiaohongshu_logger, "warning") as warning,
-            ):
-                asyncio.run(app.upload(playwright))
-
-        browser = playwright.chromium.launch_browser
-        context = browser.contexts[-1]
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        warning.assert_called_once()
 
     def test_ks_launch_kwargs_are_golden_for_both_branches(self):
         expected = (
@@ -525,29 +382,6 @@ class MultiloginSeamTests(unittest.TestCase):
         self.assertEqual(content.await_args.kwargs, {"mode": "multilogin"})
         self.assertIsNone(app.account_file)
 
-    def test_xhs_mlx_never_reads_cookies(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            app = _make_xhs_video(tmp_dir, account_file=None)
-            app.upload_in = AsyncMock()
-            preflight = MagicMock()
-            save = AsyncMock()
-
-            with (
-                patch.object(xhs_main, "local_session_preflight", preflight),
-                patch.object(xhs_main, "save_storage_state_atomic", save),
-            ):
-                asyncio.run(
-                    app.upload(
-                        None,
-                        session=BrowserSession(
-                            browser=MagicMock(), context=MagicMock(), mode="multilogin"
-                        ),
-                    )
-                )
-
-        preflight.assert_not_called()
-        save.assert_not_awaited()
-        self.assertIsNone(app.account_file)
 
     def test_ks_video_consumes_injected_session_without_forbidden_api(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1109,43 +943,6 @@ class XhsCliTests(_CliCase):
         self.assertEqual(session_cm.enter_calls, 1)
         self.assertEqual(session_cm.exit_calls, 1)
 
-    def test_local_upload_and_check_stay_on_legacy_path(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video_path = Path(tmp_dir) / "demo.mp4"
-            video_path.write_bytes(b"video")
-
-            legacy_upload = AsyncMock()
-            legacy_check = AsyncMock(return_value=True)
-            factory = MagicMock()
-
-            with (
-                patch.object(xhs_command, "upload_xiaohongshu_video", new=legacy_upload),
-                patch.object(xhs_command, "check_xiaohongshu_account", new=legacy_check),
-                patch.object(xhs_command, "browser_session", new=factory),
-            ):
-                code, out, _ = self._run(
-                    [
-                        "xiaohongshu",
-                        "upload-video",
-                        "--account",
-                        "creator",
-                        "--file",
-                        str(video_path),
-                        "--title",
-                        "标题",
-                    ],
-                    token="",
-                )
-                check_code, check_out, _ = self._run(
-                    ["xiaohongshu", "check", "--account", "creator"], token=""
-                )
-
-        self.assertEqual(code, 0)
-        self.assertIn("Xiaohongshu video upload submitted", out)
-        self.assertEqual(check_code, 0)
-        self.assertIn("valid", check_out)
-        factory.assert_not_called()
-        self.assertIsNone(legacy_upload.await_args.kwargs.get("target"))
 
 
 class KuaishouCliTests(_CliCase):

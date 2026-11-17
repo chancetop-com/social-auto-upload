@@ -227,6 +227,7 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 - 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核。两者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
 - 不支持：Docker / 跨机 / Linux 无桌面、Bilibili、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
 - TikTok 本地模式已使用 `browser_profiles/tiktok/<原始别名>/<chrome|chromium>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器的真实隔离验证已通过，真实平台 no-publish 回归留待最终迁移验收；其他平台仍按各自迁移阶段运行。
+- 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止；可能留下草稿，真实平台回归仍由最终验收执行。
 - 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
 - Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/instagram/<原始别名>/<chrome|chromium>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文离线验证已覆盖 `--no-publish` 停止点；真实账号回归由最终迁移验收执行。
 

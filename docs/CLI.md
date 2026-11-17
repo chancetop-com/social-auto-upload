@@ -70,7 +70,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok 的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram 的 login/check/视频/图文/verify/delete 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
+目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram 的 login/check/视频/图文/verify/delete 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -238,7 +238,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Instagram、小红书持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -343,7 +343,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 2. Profile 使用 **Mimic 内核**（Stealthfox 不支持 Playwright）。
 3. Profile 已在 Multilogin 应用中人工登录目标平台，且没有待处理验证码或 2FA。
 4. TikTok 现有选择器依赖 **English (US)** 页面；本地保留当前语言，托管沿用既有 English 登录探测入口；遇到不支持的布局会报告步骤错误，不自动修改 Profile 偏好。
-5. 小红书的托管 Profile 界面语言必须为**中文**；CLI 不切换托管 Profile 的语言，中文选择器依赖中文界面。本地模式固定 `zh-CN`。
+5. 小红书的托管 Profile 界面语言必须为**中文**；CLI 不切换托管 Profile 的语言，中文选择器依赖中文界面。小红书本地模式保留当前浏览器语言。
 6. TikTok 图文（`upload-note`）额外要求账号已被 TikTok Studio 的 Photos tab 灰度覆盖；未覆盖时在选文件前退出 `1`（本地与 MLX 相同）。
 
 **MLX 明确不支持：**
@@ -515,9 +515,13 @@ sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --t
 sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
-Rednote 使用独立命令 `sau rednote`，账号文件与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
+Rednote 使用独立命令 `sau rednote`，Profile 与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
 
-小红书本地模式的浏览器 context 固定 `locale=zh-CN` 与 `Accept-Language: zh-CN`；Rednote 使用 `en-US`。托管模式沿用 Profile 自身的语言设置。
+小红书 login/check/视频/图文统一使用 `browser_profiles/xiaohongshu/<原始别名>/<chrome|chromium>/`。默认系统 Chrome、有头；已有 `LOCAL_CHROME_HEADLESS=True` 仍生效。显式 `--headed` / `--headless` 优先于配置；自定义 `LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`，无配置默认 Chrome。只要求选定来源，失败不切换。
+
+仅 login 创建资料并引导扫码；check 与发布缺少 Profile 或明确未登录退出 `10`，网络/页面结构故障退出 `1`，验证保留 `reason=verification`。可在同别名重新登录另一真实账号，两种浏览器各自独立。旧 Cookie JSON 不再读取、写回或自动清理。重建使用 `sau xiaohongshu reset-profile --account <account_name> --browser-kind chrome|chromium`。
+
+本地保留当前语言和自然窗口，不设置 locale、Accept-Language、UA、stealth 或固定 viewport。托管保持原有 Profile 语言约定；仅 headless 默认来源采用新优先级，本地 browser/path 完全忽略。`--no-publish` 实际上传素材、编辑并等待 ARM 后停止，可能留下草稿；离线回归不代表真实平台验收。
 
 ### 小红书发布声明
 
@@ -938,12 +942,12 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、Instagram 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Instagram、小红书已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 
 - `--headless` 只在确实不需要界面时显式传；默认可见窗口更便于人工处理验证码和核对发布结果
-- 未迁移平台保留原有规则：`conf.LOCAL_CHROME_HEADLESS` 只影响直接调用 uploader 的路径，CLI 参数层不读取它
+- 未迁移平台的 `conf.LOCAL_CHROME_HEADLESS` 只影响直接调用 uploader；已迁移平台 CLI 同样读取它
 
 ## 视频上传参数
 

@@ -18,7 +18,6 @@ from sau_commands.xiaohongshu import (
 #   Decision11 (declarations / title defaults).
 
 
-
 class FakeLocator:
     def __init__(self, name, count=0, src=None, children=None):
         self.name = name
@@ -113,57 +112,23 @@ class RecordingPage:
 
 
 class XiaohongshuRequestDefaultTests(unittest.TestCase):
-    """Request dataclasses mirror the CLI contract: headed, debug off."""
+    """Request dataclasses defer browser mode to runtime configuration; debug off."""
 
     def _defaults(self, request_type):
         return {field.name: field.default for field in fields(request_type)}
 
-    def test_video_request_defaults_to_headed_and_debug_off(self):
+    def test_video_request_defers_headless_to_config_and_debug_off(self):
         defaults = self._defaults(XiaohongshuVideoUploadRequest)
         self.assertIs(defaults["debug"], False)
-        self.assertIs(defaults["headless"], False)
+        self.assertIsNone(defaults["headless"])
 
-    def test_note_request_defaults_to_headed_and_debug_off(self):
+    def test_note_request_defers_headless_to_config_and_debug_off(self):
         defaults = self._defaults(XiaohongshuNoteUploadRequest)
         self.assertIs(defaults["debug"], False)
-        self.assertIs(defaults["headless"], False)
+        self.assertIsNone(defaults["headless"])
 
 
 class XiaohongshuUploaderTests(unittest.TestCase):
-    def test_headless_user_agent_drops_headless_marker(self):
-        class ProbePage:
-            async def evaluate(self, script):
-                return (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "HeadlessChrome/156.0.0.0 Safari/537.36"
-                )
-
-        class ProbeContext:
-            def __init__(self):
-                self.closed = False
-
-            async def new_page(self):
-                return ProbePage()
-
-            async def close(self):
-                self.closed = True
-
-        class FakeBrowser:
-            def __init__(self):
-                self.contexts = []
-
-            async def new_context(self):
-                context = ProbeContext()
-                self.contexts.append(context)
-                return context
-
-        browser = FakeBrowser()
-        user_agent = asyncio.run(xhs_main._xhs_user_agent(browser))
-
-        self.assertNotIn("HeadlessChrome", user_agent)
-        self.assertIn("Chrome/156.0.0.0", user_agent)
-        self.assertTrue(browser.contexts[0].closed)
 
     def test_creator_urls_keep_xiaohongshu_domain_by_default(self):
         with patch.dict(os.environ, {"SAU_XHS_CREATOR_BASE_URL": ""}):
@@ -216,41 +181,6 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         locator = asyncio.run(xhs_main._find_xhs_qrcode_locator(page))
         self.assertIs(locator, qrcode_locator)
 
-    def test_setup_returns_detail_when_cookie_invalid_without_handle(self):
-        with patch("uploader.xiaohongshu_uploader.main.os.path.exists", return_value=False):
-            result = asyncio.run(
-                xhs_main.xiaohongshu_setup(
-                    "missing.json",
-                    handle=False,
-                    return_detail=True,
-                )
-            )
-        self.assertFalse(result["success"])
-        self.assertEqual(result["status"], "cookie_invalid")
-
-    def test_setup_uses_login_flow_when_handle_is_true(self):
-        login_result = {
-            "success": True,
-            "status": "success",
-            "message": "ok",
-            "account_file": "account.json",
-            "qrcode": {"image_path": "qrcode.png"},
-            "current_url": "https://creator.xiaohongshu.com/",
-        }
-        with patch("uploader.xiaohongshu_uploader.main.os.path.exists", return_value=False):
-            with patch(
-                "uploader.xiaohongshu_uploader.main.xiaohongshu_cookie_gen",
-                new=AsyncMock(return_value=login_result),
-            ) as mock_login:
-                result = asyncio.run(
-                    xhs_main.xiaohongshu_setup(
-                        "account.json",
-                        handle=True,
-                        return_detail=True,
-                    )
-                )
-        self.assertTrue(result["success"])
-        mock_login.assert_awaited_once()
 
     def test_video_validate_upload_args_normalizes_video_and_thumbnail(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -270,11 +200,7 @@ class XiaohongshuUploaderTests(unittest.TestCase):
                 thumbnail_path=str(thumbnail_path),
             )
 
-            with patch(
-                "uploader.xiaohongshu_uploader.main.local_session_preflight",
-                new=AsyncMock(return_value=None),
-            ):
-                asyncio.run(app.validate_upload_args())
+            asyncio.run(app.validate_upload_args())
 
         self.assertTrue(app.file_path.endswith("demo.mp4"))
         self.assertTrue(app.thumbnail_path.endswith("demo.png"))
