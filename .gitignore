@@ -176,6 +176,9 @@ conf.py
 # 账号文件
 cookies
 
+# 本地浏览器持久化 Profile
+/browser_profiles/
+
 # Frontend
 .vite/
 dist/
