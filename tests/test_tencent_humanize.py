@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """Tencent / 视频号 人类化接线（spec §3.10 / §6.2）。
 
-三块，全部离线：
+两类，全部离线：
 
 1. 事件序列 —— 每个改 Humanizer 的点断言原语（``press`` / ``insert_text``）、
    ``after_type`` 次数、``mouse.move* → down → up``、hit-test 先于 ``down``、
    零原生 ``locator.click()``、零 ``force``。
 2. 字段值读回 —— fake 键盘把按键写回持有缓冲的 locator，断言最终值与预期
    完全相等（短标题与描述是两个字段；预填的小时 picker 必须整体替换）。
-3. 平台静态门 —— 包内跑 spec §4.2–4.5 的 A–E 门。
 
 覆盖 ``HUMANIZE=0`` 快路径。选择器未 scripted 直接抛
 :class:`UnscriptedSelectorError`，不用 MagicMock 掩盖选择器漂移。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ import os
 import random
 import unittest
 from datetime import datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -35,7 +35,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.errors import LoginRequiredError
 from utils.humanize import HumanizeProfile, LogNormal
 
@@ -643,21 +642,6 @@ class HumanizeDisabledTests(unittest.TestCase):
         self.assertEqual(editor.click_count, 1)
         self.assertEqual(page.mouse.down_count, 0)
         self.assertEqual(app._humanizer_instance.pauses, [])
-
-
-# ---------------------------------------------------------------------------
-# 3. 平台静态门
-# ---------------------------------------------------------------------------
-
-
-class HumanizeGateTests(unittest.TestCase):
-    def test_tencent_package_passes_gates_a_to_e(self):
-        package = (
-            Path(__file__).resolve().parent.parent
-            / "uploader"
-            / "tencent_uploader"
-        )
-        assert_clean(package)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """百家号：contenteditable 清空序列 + 合集候选全等（工单 17，spec §3.2）。
 
-三块离线验收（spec §6.2，缺一不可）：
+两类离线验收（spec §6.2，缺一不可）：
 
 1. **事件序列** —— 标题保留「点标题 → Ctrl+A → Backspace」清空序列，键改由
    ``Humanizer.press`` 执行、正文逐字；封面 / 声明 / 合集 / 发布全部走
@@ -11,13 +11,14 @@
 2. **字段值读回** —— fake 键盘把按键写回持有缓冲的字段，断言标题最终值等于
    预期（页面自动填入的文件名必须被完全替换，不是追加）；合集候选取全等项，
    命中不到时沿用「警告 + Escape」跳过，不选错合集、不中止发布。
-3. **平台静态门** —— ``tests.humanize_gates.assert_clean`` 在本包上跑 A–E。
 
 另外覆盖 ``HUMANIZE=0`` 语义切换（一次 ``insert_text`` + 原生 ``locator.click``
 + 零停顿）与「一个 page 一个实例」的缓存语义。
 
 未 scripted 的选择器直接抛 :class:`UnscriptedSelectorError`，不用 MagicMock
 掩盖选择器漂移。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ import asyncio
 import os
 import random
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,7 +40,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from uploader.baijiahao_uploader.main import (
     AI_DECLARATION_OPTION_SELECTOR,
     AI_DECLARATION_TRIGGER_SELECTOR,
@@ -63,8 +62,6 @@ from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import HumanizeProfile, Humanizer, LogNormal
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
-
-PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "baijiahao_uploader"
 
 AFTER_TYPE = 5.0
 BEFORE_SUBMIT = 7.0
@@ -928,22 +925,6 @@ class BaijiahaoFieldValueTests(unittest.TestCase):
         self.assertEqual(page.mouse.down_count, 2)  # 开下拉 + 聚焦搜索框
         # 跳过策略保留：按 Escape 收起下拉，而不是选中一个不相干的合集。
         self.assertIn(("press", "Escape"), page.keyboard.actions)
-
-
-# ---------------------------------------------------------------------------
-# 3. 静态门 + HUMANIZE=0 + 实例缓存
-# ---------------------------------------------------------------------------
-
-
-class BaijiahaoStaticGateTests(unittest.TestCase):
-    def test_baijiahao_package_passes_humanize_gates_a_to_e(self):
-        assert_clean(PACKAGE)
-
-    def test_no_fill_js_click_or_force_remains_in_the_package(self):
-        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
-        self.assertNotIn("el.click()", source)
-        self.assertNotIn("force=True", source)
-        self.assertNotIn(".fill(", source)
 
 
 class BaijiahaoHumanizeDisabledTests(unittest.TestCase):

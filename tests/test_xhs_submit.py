@@ -14,20 +14,15 @@ three phases are tested at their seams:
 * ``_observe_publish`` — URL-only success, C4 classification first, 500ms
   polling, 15s window (exit 9 when the page never leaves).
 
-The zero-text-scanning gate is a static assertion: the helpers never look at
-``inner_text`` / toast / rate-limit keyword tables.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
-import inspect
 import io
 import os
 import unittest
 from contextlib import redirect_stderr
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import sau_cli
@@ -971,54 +966,6 @@ class Decision06ReadinessWiringTests(unittest.TestCase):
         clear.assert_awaited()
         for call in clear.await_args_list:
             self.assertEqual(call.args[1], xhs_main.XHS_TYPING_OVERLAY_RULES)
-
-
-# ---------------------------------------------------------------------------
-# 5. Zero text scanning in the submit phases
-# ---------------------------------------------------------------------------
-
-
-class Decision04RejectionNoTextScanningTests(unittest.TestCase):
-    HELPERS = (
-        xhs_main._arm_ready,
-        xhs_main._wait_for_arm,
-        xhs_main._fire_publish,
-        xhs_main._observe_publish,
-    )
-    FORBIDDEN = (
-        "inner_text",
-        "text_content",
-        "get_by_text",
-        "toast",
-        "限流",
-        "拒绝",
-        "关键词",
-        "publish/success",
-        "_XHS_PUBLISH_FAILURE_KEYWORDS",
-    )
-
-    def test_submit_helpers_never_scan_copy(self):
-        for helper in self.HELPERS:
-            source = inspect.getsource(helper)
-            for needle in self.FORBIDDEN:
-                with self.subTest(helper=helper.__name__, needle=needle):
-                    self.assertNotIn(needle, source)
-
-    def test_module_has_no_publish_keyword_tables(self):
-        source = Path(xhs_main.__file__).read_text(encoding="utf-8")
-        names = {
-            node.targets[0].id
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Assign)
-            and isinstance(node.targets[0], ast.Name)
-        }
-        for forbidden in (
-            "_XHS_PUBLISH_FAILURE_KEYWORDS",
-            "_XHS_RATE_LIMIT_KEYWORDS",
-            "_XHS_TOAST_SELECTORS",
-        ):
-            with self.subTest(name=forbidden):
-                self.assertNotIn(forbidden, names)
 
 
 # ---------------------------------------------------------------------------

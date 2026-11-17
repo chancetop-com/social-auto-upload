@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """Facebook Page / Meta Business Suite 人类化接线（spec §3.8 / §6.2）。
 
-三块，全部离线：
+两类，全部离线：
 
 1. 事件序列 —— 每个改 Humanizer 的点断言原语（``press`` / ``insert_text``）、
    ``after_type`` 次数、``mouse.move* → down → up``、hit-test 先于 ``down``、
    零原生 ``locator.click()``、零 ``force``。
 2. 字段值读回 —— fake 键盘把按键写回持有缓冲的 locator，断言最终值与预期
    完全相等（抓「序列对、值错」：清空不净、追加、CRLF 残留）。
-3. 平台静态门 —— 包内跑 spec §4.2–4.5 的 A–E 门。
 
 另外覆盖 ``HUMANIZE=0`` 快路径与收窄后多义硬错（``ambiguous:N``）。
 选择器未 scripted 直接抛 :class:`UnscriptedSelectorError`，不用 MagicMock。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -36,7 +37,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.errors import PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
@@ -1177,22 +1177,6 @@ class HumanizeDisabledTests(unittest.TestCase):
             self.assertEqual(combo.click_count, 1)
             self.assertEqual(option.click_count, 1)
             self.assertEqual(page.mouse.down_count, 0)
-
-
-# ---------------------------------------------------------------------------
-# 3. 平台静态门
-# ---------------------------------------------------------------------------
-
-
-class HumanizeGateTests(unittest.TestCase):
-    def test_facebook_page_package_passes_gates_a_to_e(self):
-        package = (
-            Path(__file__).resolve().parent.parent
-            / "uploader"
-            / "meta_uploader"
-            / "facebook_page_uploader"
-        )
-        assert_clean(package)
 
 
 if __name__ == "__main__":

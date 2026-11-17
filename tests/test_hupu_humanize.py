@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """虎扑 人类化接线（ticket 18, spec §3.5 / §6.2）。
 
-三块，全部离线：
+两类，全部离线：
 
 1. 事件序列 —— 标题/简介逐字（中文 ``insert_text``、ASCII 含 ``#`` 走
    ``press``）、每字段恰一次 ``after_type``、每个可见点击
@@ -10,22 +10,20 @@
 2. 字段值读回 —— fake 键盘持有键入缓冲，断言最终值与预期完全相等
    （专抓「序列对、值错」：清空不净导致追加）；简介 >1000 码点整段
    ``insert_text`` 一次。
-3. 平台静态门 —— 包内跑 spec §4.2–4.5 的 A–E 门；登录与两个文件入口
-   的原生点击标记仍在。
 
 另覆盖 AI 声明下拉的多义硬错（``ambiguous:N``）与 ``HUMANIZE=0`` 快路径。
 选择器未 scripted 直接抛 :class:`UnscriptedSelectorError`，不用 MagicMock
 掩盖选择器漂移。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import os
 import random
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -38,13 +36,10 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
-
-PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "hupu_uploader"
 
 TITLE_PLACEHOLDER = "请输入标题（最少4个字，最多40个字）"
 DESC_PLACEHOLDER = "请输入简介"
@@ -566,49 +561,6 @@ class HupuAmbiguousDeclarationTests(unittest.TestCase):
         # 多义在派发前失败：一次鼠标动作都没有，更不能取 .first。
         self.assertEqual(page.mouse.actions, [])
         self.assertEqual(ctx.exception.publish_clicked, False)
-
-
-# ---------------------------------------------------------------------------
-# 4. 静态门 + 原生标记
-# ---------------------------------------------------------------------------
-
-
-class HupuStaticGateTests(unittest.TestCase):
-    def test_hupu_package_passes_humanize_gates_a_to_e(self):
-        assert_clean(PACKAGE)
-
-    def test_no_fill_el_click_force_or_delay_retreats_remain(self):
-        offenders: list[str] = []
-        for path in sorted(PACKAGE.rglob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            if "el.click()" in source or "force=True" in source:
-                offenders.append(f"{path.name}: JS click / force")
-            tree = ast.parse(source)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                if not isinstance(func, ast.Attribute):
-                    continue
-                if func.attr == "fill":
-                    offenders.append(f"{path.name}:{node.lineno}: fill()")
-                if func.attr == "type":
-                    delays = [
-                        keyword.value.value
-                        for keyword in node.keywords
-                        if keyword.arg == "delay"
-                        and isinstance(keyword.value, ast.Constant)
-                    ]
-                    if delays:
-                        offenders.append(
-                            f"{path.name}:{node.lineno}: type(delay={delays[0]})"
-                        )
-        self.assertEqual(offenders, [])
-
-    def test_login_and_file_entry_keep_native_clicks_with_markers(self):
-        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
-        self.assertEqual(source.count("# native-click: file"), 2)
-        self.assertEqual(source.count("# native-click: login"), 1)
 
 
 # ---------------------------------------------------------------------------

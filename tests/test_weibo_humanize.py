@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """微博：双实例 + 比例落点发布的人类化交互层（工单 11，spec §3.11）。
 
-三块离线证据（spec §6.2）：
+两类离线证据（spec §6.2）：
 
 1. **事件序列** —— 标题 / 描述 / 新建合集名走 ``sel``（click → ControlOrMeta+A
    → Delete → type_text），逐字（ASCII ``press`` / 非 ASCII ``insert_text``）；
@@ -10,11 +10,12 @@
    ``el.click()``。
 2. **字段值读回** —— fake keyboard 持有每个字段的键入缓冲，断言最终值等于预期
    （抓「清空不净导致追加」与 ``#tag#`` 被抹掉）。
-3. **静态门** —— ``tests.humanize_gates.assert_clean`` 在微博包上跑 A–E。
 
 另加：首页 page 与 popup 发布 page 各持一个实例（跨页不复用）；发布按钮落点
 ``(0.65,0.5)`` → ``(0.35,0.5)`` 的单次重试与「已派发 / 可能已派发不重试」；
 封面「完成」只点一次；``HUMANIZE=0`` 语义切换。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import os
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,7 +33,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from uploader.weibo_uploader import main as weibo_main
 from uploader.weibo_uploader.main import WeiBoVideo
 from utils.browser_session import BrowserSession
@@ -41,8 +40,6 @@ from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 from uploader.publish_timeout import PublishTimeoutBudget
-
-PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "weibo_uploader"
 
 TITLE_PLACEHOLDER = "填写标题（0～30个字）"
 DESC_PLACEHOLDER = "有什么新鲜事想分享给大家？"
@@ -855,16 +852,6 @@ class WeiboHumanizeDisabledTests(unittest.TestCase):
         self.assertEqual(publish.click_count, 1)
         self.assertEqual(page.mouse.actions, [])
         self.assertEqual(humanizer.pauses, [])
-
-
-class WeiboStaticGateTests(unittest.TestCase):
-    def test_weibo_package_passes_humanize_gates_a_to_e(self):
-        assert_clean(PACKAGE)
-
-    def test_no_js_click_or_force_remains_in_the_package(self):
-        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
-        self.assertNotIn("el.click()", source)
-        self.assertNotIn("force=True", source)
 
 
 if __name__ == "__main__":

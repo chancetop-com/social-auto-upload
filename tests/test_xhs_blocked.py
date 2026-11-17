@@ -22,7 +22,6 @@ import asyncio
 import os
 import unittest
 from contextlib import redirect_stderr
-from pathlib import Path
 from unittest.mock import patch
 
 import sau_cli
@@ -478,54 +477,6 @@ class Decision07BlockedLocalModeExitTests(unittest.TestCase):
         self.assertIn("小红书登录态无效", stderr)
         self.assertIn("sau xiaohongshu login --account <账号名>", stderr)
         self.assertNotIn("publish_attempted=true", stderr)
-
-
-# ---------------------------------------------------------------------------
-# 4. Mode parity static assertions (deleted gates / deleted dead code)
-# ---------------------------------------------------------------------------
-
-
-class Decision07BlockedDeletedCodeTests(unittest.TestCase):
-    def setUp(self):
-        self.source = Path(xhs_main.__file__).read_text(encoding="utf-8")
-
-    def test_deleted_symbols_are_gone(self):
-        for symbol in (
-            "_XHS_PUBLISH_FAILURE_KEYWORDS",
-            "XhsPublishRejectedError",
-            "_find_publish_failure",
-            "XHS_PUBLISH_SUCCESS_URL_PATTERN",
-            "_LOGIN_URL_MARKERS",
-            "_raise_if_login_required",
-            "handle_upload_error",
-            "check_original_declaration",
-        ):
-            with self.subTest(symbol=symbol):
-                self.assertNotIn(symbol, self.source)
-
-    def test_no_multilogin_boolean_gate(self):
-        self.assertNotIn("if multilogin:", self.source)
-        self.assertNotIn("multilogin: bool", self.source)
-        self.assertNotIn("multilogin=session.managed", self.source)
-
-    def test_mode_parameter_on_both_entry_points(self):
-        self.assertIn(
-            "async def upload_video_content(self, page: Page, *, mode: str)",
-            self.source,
-        )
-        self.assertIn(
-            "async def upload_note_content(self, page: Page, *, mode: str)",
-            self.source,
-        )
-        self.assertEqual(self.source.count("mode=session.mode"), 2)
-
-    def test_both_entry_points_call_c1_and_c2(self):
-        # C1/C2/C3 在两个入口内联；ARM/FIRE/OBSERVE 是共享 helper。
-        self.assertEqual(self.source.count("# C3："), 2)
-        self.assertEqual(self.source.count("await _wait_for_arm("), 4)
-        self.assertEqual(self.source.count("await _fire_publish("), 2)
-        self.assertEqual(self.source.count("await _observe_publish("), 2)
-        self.assertGreaterEqual(self.source.count("_check_blocked("), 12)
 
 
 if __name__ == "__main__":

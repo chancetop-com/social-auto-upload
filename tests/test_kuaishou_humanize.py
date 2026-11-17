@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """快手视频 / 图文发布表单的人类化接线（spec §3.6 / §6.2）。
 
-三块，全部离线：
+两类，全部离线：
 
 1. **事件序列** —— 描述/正文的 ``Backspace → Control+A → Delete`` 清空序列
    逐键保留、话题逐字（含 ``#`` 与尾随空格）、每个输入恰一次 ``after_type``；
@@ -9,12 +9,13 @@
    之前先有 stillOn 命中测试），只有登录/文件入口/提示条/引导层保持原生。
 2. **字段值读回** —— fake 键盘把按键写回聚焦元素的缓冲，断言最终值与预期
    完全相等（抓「序列对、值错」：清空不净、追加、话题超过 3 个）。
-3. **平台静态门** —— 包内跑 spec §4.2–4.5 的 A–E 门。
 
 另外覆盖：零尺寸描述目标直接 ``zero-box`` 硬失败（不再用 ``force`` 造假
 成功）、定时日期仍由 JS setter 写值、``HUMANIZE=0`` 快路径。
 
 选择器未 scripted 直接抛 :class:`UnscriptedSelectorError`，不用 MagicMock。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import HumanizeProfile, LogNormal
@@ -89,8 +89,6 @@ MODAL = "div.ant-modal-confirm-centered:visible"
 MODAL_PRIMARY = "button.ant-btn-primary:visible"
 IMAGE_TAB = 'div[role="tablist"] div[role="tab"]:has-text("图文")'
 NOTE_UPLOAD = "button[class^='_upload-btn']"
-
-PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "ks_uploader"
 
 
 def _expr_kind(expression) -> str:
@@ -1009,16 +1007,6 @@ class HumanizeDisabledTests(unittest.TestCase):
             self.assertEqual(page.locator(PUBLISH).click_count, 1)
             self.assertEqual(page.mouse.down_count, 0)
             self.assertEqual(editor.buffer, "新描述\n#话题 ")
-
-
-# ---------------------------------------------------------------------------
-# 3. 平台静态门
-# ---------------------------------------------------------------------------
-
-
-class HumanizeGateTests(unittest.TestCase):
-    def test_kuaishou_package_passes_gates_a_to_e(self):
-        assert_clean(PACKAGE)
 
 
 @contextmanager

@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """抖音人类化接线（spec §3.4 / §6.2）。
 
-三块离线验收（缺一不可）：
+两类离线验收（缺一不可）：
 
 1. 事件序列 —— 每个改 Humanizer 的点断言原语（``press`` / ``insert_text``）、
    ``after_type`` 次数、``mouse.move* → down → up``、hit-test 先于 ``down``、
    零原生 ``locator.click()``、零 ``force``、零 ``el.click``。
 2. 字段值读回 —— fake 键盘把按键写回持有缓冲的 locator，断言最终值与预期
    完全相等（抓「序列对、值错」：清空不净、追加、预填未覆盖）。
-3. 平台静态门 —— 抖音包内跑 spec §4.2–4.5 的 A–E 门。
 
 另外覆盖 ``HUMANIZE=0`` 快路径与「``click_dispatched='maybe'`` 不再二次派发」。
 未 scripted 的选择器直接抛 :class:`UnscriptedSelectorError`，不用 MagicMock。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.humanize import HumanizeProfile, LogNormal
 
@@ -744,14 +744,6 @@ class HumanizeDisabledTests(unittest.TestCase):
 
 
 class HumanizeGateTests(unittest.TestCase):
-    def test_douyin_package_passes_gates_a_to_e(self):
-        package = (
-            Path(__file__).resolve().parent.parent
-            / "uploader"
-            / "douyin_uploader"
-        )
-        assert_clean(package)
-
     def test_select_all_never_uses_the_windows_only_shortcut(self):
         # spec §2.4：``Control+KeyA`` 在 macOS 上不清空预填字段（仓库
         # ``tk_uploader/main_chrome.py`` 已记录该坑）。抖音的 ``sel``（定时

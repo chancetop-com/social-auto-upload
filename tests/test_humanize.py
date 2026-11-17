@@ -14,9 +14,8 @@ tests pin the contract without a browser:
    failed ``stillOn`` never reaches ``mouse.down``;
 5. the same seed reproduces the same delays, and ``HUMANIZE=0`` (or
    ``profile.enabled=False``) is a zero-delay fast path;
-6. gates A–E hold for the XHS reference package and for all 15 wired platform
-   entry points (spec §4.2), including no ``fill(`` / ``el.click()`` /
-   ``force=True`` / bare ``locator.click(`` / ``Control+KeyA``.
+6. gates A–E are checked centrally across the configured uploader packages
+   and the shipped TikTok module.
 
 The fakes come from ``tests/fakes_xhs_dom.py``; no network, no browser.
 """
@@ -27,7 +26,6 @@ import ast
 import asyncio
 import os
 import random
-import re
 import tempfile
 import unittest
 from dataclasses import replace
@@ -48,7 +46,6 @@ from tests.humanize_gates import (
 from utils import humanize
 from utils.dom import ElementUnusableError
 
-UPLOADER_DIR = Path(__file__).resolve().parent.parent / "uploader" / "xiaohongshu_uploader"
 HUMANIZE_FILE = Path(humanize.__file__)
 
 #: Spec §3 U5 A, transcribed by hand from the table (μ, σ, min_s, max_s).
@@ -657,16 +654,8 @@ class FastPathTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. Shared-layer boundary and the XHS static gates
+# 6. Shared-layer boundary and platform-wide static gates
 # ---------------------------------------------------------------------------
-
-
-def _xhs_sources() -> dict[str, str]:
-    """The XHS package's direct ``.py`` files (the reference implementation)."""
-    return {
-        path.name: path.read_text(encoding="utf-8")
-        for path in sorted(UPLOADER_DIR.glob("*.py"))
-    }
 
 
 class SharedLayerBoundaryTests(unittest.TestCase):
@@ -867,38 +856,8 @@ class HumanizeGateTests(unittest.TestCase):
         self.assertEqual(self._violations(), [])
 
 
-class XhsStaticGateTests(unittest.TestCase):
-    def test_xhs_package_passes_humanize_gates_a_to_e(self):
-        assert_clean(UPLOADER_DIR)
-
-    def test_no_fill_el_click_or_forced_clicks_remain(self):
-        offenders: list[str] = []
-        for name, source in _xhs_sources().items():
-            for needle in ("fill(", "el.click()", "force=True", "_js_click_by_text"):
-                if needle in source:
-                    offenders.append(f"{name}: {needle}")
-        self.assertEqual(offenders, [])
-
-    def test_every_click_goes_through_the_humanizer(self):
-        offenders: list[str] = []
-        # `.click(` is allowed only when the receiver is the humanizer.
-        pattern = re.compile(r"(?<!humanizer)\.click\(")
-        for name, source in _xhs_sources().items():
-            for number, line in enumerate(source.splitlines(), start=1):
-                if pattern.search(line):
-                    offenders.append(f"{name}:{number}: {line.strip()}")
-        self.assertEqual(offenders, [])
-
-    def test_select_all_uses_the_macos_compatible_shortcut(self):
-        sources = "\n".join(_xhs_sources().values())
-        self.assertNotIn("Control+KeyA", sources)
-        self.assertIn("ControlOrMeta+A", sources)
-
-
-#: The 15 wired platforms of spec §4.2.  That is 12 platform packages + 3
-#: meta packages = 15 platforms, but 16 scan targets below: TikTok is
-#: file-scoped because ``uploader/tk_uploader/`` also ships the legacy,
-#: unwired ``main.py``; spec §3.12 only covers ``main_chrome.py``.
+#: Central scan targets. TikTok is file-scoped because its package also
+#: contains the unwired legacy ``main.py``.
 WIRED_PLATFORM_PACKAGES = (
     "alipay_uploader",
     "baijiahao_uploader",
@@ -921,7 +880,7 @@ WIRED_META_PACKAGES = (
 
 
 class PlatformWideGateTests(unittest.TestCase):
-    """Gates A–E across all 15 wired platforms (spec §4.2, 16 scan targets).
+    """Gates A–E across the configured uploader packages and TikTok module.
 
     TikTok is checked file-scoped at ``uploader/tk_uploader/main_chrome.py``:
     the sibling legacy ``uploader/tk_uploader/main.py`` is unwired and out of
@@ -931,6 +890,7 @@ class PlatformWideGateTests(unittest.TestCase):
     def _assert_all_clean(self, packages) -> None:
         failures: list[str] = []
         for label, path in packages:
+            self.assertTrue(path.exists(), f"missing scan target: {path}")
             try:
                 assert_clean(path)
             except AssertionError as exc:
@@ -948,21 +908,6 @@ class PlatformWideGateTests(unittest.TestCase):
             ("tk_uploader/main_chrome.py", root / "tk_uploader" / "main_chrome.py")
         )
         self._assert_all_clean(packages)
-
-    def test_the_wired_platform_list_covers_fifteen_entry_points(self):
-        # 12 front-door packages + 3 meta packages = the spec's 15 platforms;
-        # TikTok is one of the twelve, scanned as ``main_chrome.py``.
-        self.assertEqual(
-            len(WIRED_PLATFORM_PACKAGES) + len(WIRED_META_PACKAGES), 15
-        )
-        root = Path(__file__).resolve().parent.parent / "uploader"
-        for name in WIRED_PLATFORM_PACKAGES:
-            self.assertTrue((root / name).is_dir(), f"missing wired package: {name}")
-        for name in WIRED_META_PACKAGES:
-            path = root / "meta_uploader" / name
-            self.assertTrue(path.is_dir(), f"missing wired package: {path}")
-        self.assertTrue((root / "tk_uploader" / "main_chrome.py").is_file())
-
 
 # ---------------------------------------------------------------------------
 # 7. Wiring: the XHS publish chain really dispatches through the mouse

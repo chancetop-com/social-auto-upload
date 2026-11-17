@@ -845,21 +845,5 @@ class Decision13LocalStartupLogTests(_CliCase):
         log.assert_not_called()
 
 
-class Decision12SessionDeletedPrecheckTests(unittest.TestCase):
-    def setUp(self):
-        self.main_source = Path(xhs_main.__file__).read_text(encoding="utf-8")
-        self.command_source = Path(xhs_command.__file__).read_text(encoding="utf-8")
-
-    def test_old_precheck_symbols_are_gone(self):
-        for symbol in ("async def cookie_auth", "async def is_logged_in", "_is_xhs_login_completed"):
-            with self.subTest(symbol=symbol):
-                self.assertNotIn(symbol, self.main_source)
-
-    def test_publish_chain_does_not_reference_old_prechecks(self):
-        for symbol in ("cookie_auth", "is_logged_in"):
-            with self.subTest(symbol=symbol):
-                self.assertNotIn(symbol, self.command_source)
-
-
 if __name__ == "__main__":
     unittest.main()

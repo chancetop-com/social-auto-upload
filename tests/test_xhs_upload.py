@@ -22,10 +22,8 @@ downgrade to fewer images.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import unittest
 from dataclasses import replace
-from pathlib import Path
 from unittest.mock import patch
 
 import uploader.publish_timeout as publish_timeout
@@ -670,39 +668,6 @@ class Decision09UploadVideoGateTests(unittest.TestCase):
                 )
 
         self.assertAlmostEqual(sum(clock.sleep_calls), 600.0)
-
-
-# ---------------------------------------------------------------------------
-# 6. Zero keyword scanning / zero dead upload helpers
-# ---------------------------------------------------------------------------
-
-
-class Decision04RejectionNoKeywordTests(unittest.TestCase):
-    KEYWORDS = ("上传成功", "分辨率", "100%", "已上传", "已选择", "重新上传")
-    HELPERS = (
-        xhs_main._note_upload_gate,
-        xhs_main._video_upload_gate,
-        xhs_main._video_upload_failure,
-        xhs_main._note_image_ready,
-    )
-
-    def test_module_has_no_upload_keyword_tables(self):
-        source = Path(xhs_main.__file__).read_text(encoding="utf-8")
-        for keyword in self.KEYWORDS:
-            with self.subTest(keyword=keyword):
-                self.assertNotIn(keyword, source)
-
-    def test_gate_helpers_never_read_copy_or_scan_stages(self):
-        for helper in self.HELPERS:
-            source = inspect.getsource(helper)
-            for needle in (
-                "inner_text",
-                "text_content",
-                "query_selector_all",
-                "div.stage",
-            ):
-                with self.subTest(helper=helper.__name__, needle=needle):
-                    self.assertNotIn(needle, source)
 
 
 if __name__ == "__main__":

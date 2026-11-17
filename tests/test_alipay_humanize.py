@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """支付宝生活号发布表单的人类化接线（spec §3.1 / §6.2）。
 
-三块，全部离线：
+两类，全部离线：
 
 1. **事件序列** —— 标题/描述走 ``ControlOrMeta+A → Delete → type_text``；
    每个输入恰一次 ``after_type``；封面弹窗、合集下拉、质量提示与两处发布
@@ -9,11 +9,12 @@
    只有扫码 tab 与「上传图片」文件入口保持原生。
 2. **字段值读回** —— fake 键盘把按键写回持有缓冲的 locator，断言最终值与
    预期完全相等（抓「序列对、值错」：清空不净、追加、``\\r\\n`` 未归一）。
-3. **平台静态门** —— 包内跑 spec §4.2–4.5 的 A–E 门。
 
 另外覆盖：合集两级点击合并为一次（无 ``force``）、>1000 码点整段 bulk、
 ``HUMANIZE=0`` 快路径。选择器未 scripted 直接抛
 :class:`UnscriptedSelectorError`，不用 MagicMock 掩盖选择器漂移。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import (
@@ -64,8 +64,6 @@ COLLECTION_OPTIONS = '[role="option"]'
 PUBLISH_ROLE = "role:button:确认发布"
 POSTS_URL = "https://c.alipay.com/page/content-creation/posts"
 PUBLISH_URL = "https://c.alipay.com/page/content-creation/publish/short-video?id=1"
-
-PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "alipay_uploader"
 
 
 def _fixed(seconds: float) -> LogNormal:
@@ -1136,16 +1134,6 @@ class HumanizeDisabledTests(unittest.TestCase):
         self.assertEqual(page.mouse.down_count, 0)
         self.assertEqual(title.buffer, "标题甲 #话题")
         self.assertEqual(desc.buffer, "正文")
-
-
-# ---------------------------------------------------------------------------
-# 4. 平台静态门
-# ---------------------------------------------------------------------------
-
-
-class HumanizeGateTests(unittest.TestCase):
-    def test_alipay_package_passes_gates_a_to_e(self):
-        assert_clean(PACKAGE)
 
 
 if __name__ == "__main__":

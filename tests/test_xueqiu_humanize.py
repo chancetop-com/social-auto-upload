@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """雪球长文的人类化接线（spec §3.13 / §2.4 / §4 / §6.2）。
 
-三块，全部离线：
+两类，全部离线：
 
 1. 事件序列 —— 正文聚焦 / 工具栏传图 / 下拉与选项 / 预览与关闭遮罩 / 发布
    各点的原语（``press`` vs ``insert_text``）、``after_type`` 次数、
@@ -9,10 +9,11 @@
    零 ``force``。失焦与只读核对保持原生并带登记标记。
 2. 字段值读回 —— 标题走 ``T/none``（守卫在 ``article.py:153``，不清空），
    fake 键盘把按键写回持有缓冲的 locator；正文粘贴文本与图片标记不被改写。
-3. 平台静态门 —— 包内跑 spec §4.2–4.5 的 A–E 门。
 
 另覆盖 ``HUMANIZE=0`` 快路径与「已有草稿 → 守卫拒绝覆盖」的停工点。选择器未
 scripted 直接抛 :class:`UnscriptedSelectorError`，不用 MagicMock。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ from tests.fakes_xhs_dom import (
     RecordingPage,
     UnscriptedSelectorError,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.errors import PublishResultUnknownError
 from utils.humanize import (
@@ -818,21 +818,6 @@ class HumanizeDisabledTests(unittest.TestCase):
             self.assertEqual(publish.click_count, 1)
             self.assertEqual(page.mouse.down_count, 0)
             self.assertEqual(app._humanizer_instance.pauses, [])
-
-
-# ---------------------------------------------------------------------------
-# 3. 平台静态门
-# ---------------------------------------------------------------------------
-
-
-class HumanizeGateTests(unittest.TestCase):
-    def test_xueqiu_package_passes_gates_a_to_e(self):
-        package = (
-            Path(__file__).resolve().parent.parent
-            / "uploader"
-            / "xueqiu_uploader"
-        )
-        assert_clean(package)
 
 
 if __name__ == "__main__":

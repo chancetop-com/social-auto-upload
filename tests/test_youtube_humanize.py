@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """YouTube humanize rollout (ticket 07, spec §3.14).
 
-Three blocks, all offline (no browser, no network):
+Two blocks, all offline (no browser, no network):
 
 1. **Event sequence** — title/description are typed per character (ASCII ``press``,
    non-ASCII ``insert_text``), a ``#tag`` waits once for the autocomplete and the
@@ -10,21 +10,19 @@ Three blocks, all offline (no browser, no network):
 2. **Field-value readback** — the fake keyboard owns the focused field's buffer, so
    a clean sequence with a wrong value (clear not clean, appended text, ``#``
    dropped) still fails.
-3. **Static gates** — ``tests.humanize_gates.assert_clean`` over the package
-   (gates A–E), plus the "no retreat to ``type(delay=)``" residue checks.
 
 ``HUMANIZE=0`` is covered once: the shared layer falls back to a single native
 ``locator.click`` / ``insert_text`` with zero pauses, and the uploader must not
 bypass or second-guess that.
+
+Gates A–E are covered centrally by ``PlatformWideGateTests`` in ``tests/test_humanize.py``.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import os
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,14 +33,12 @@ from tests.fakes_xhs_dom import (
     RecordingMouse,
     RecordingPage,
 )
-from tests.humanize_gates import assert_clean
 from uploader.youtube_uploader import main as youtube_main
 from uploader.youtube_uploader.main import YouTubeVideo
 from utils.dom import ElementUnusableError
 from utils.errors import PublishResultUnknownError
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE, Humanizer
 
-PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "youtube_uploader"
 TITLE_INPUT = "#title-textarea #textbox"
 DESC_INPUT = "#description-textarea #textbox"
 AUTOCOMPLETE = youtube_main.HASHTAG_AUTOCOMPLETE
@@ -594,49 +590,6 @@ class YouTubeFieldValueTests(unittest.TestCase):
 
         self.assertEqual(keyboard.finish(), ["a,b,"])
         self.assertEqual(tag_input.click_count, 0)
-
-
-# ---------------------------------------------------------------------------
-# 3. Static gates + HUMANIZE=0
-# ---------------------------------------------------------------------------
-
-
-class YouTubeStaticGateTests(unittest.TestCase):
-    def test_youtube_package_passes_humanize_gates_a_to_e(self):
-        assert_clean(PACKAGE)
-
-    def test_no_fill_el_click_or_delay_retreats_remain(self):
-        offenders: list[str] = []
-        for path in sorted(PACKAGE.rglob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            if "el.click()" in source or "force=True" in source:
-                offenders.append(f"{path.name}: JS click / force")
-            tree = ast.parse(source)
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                if not isinstance(func, ast.Attribute):
-                    continue
-                if func.attr == "fill":
-                    offenders.append(f"{path.name}:{node.lineno}: fill()")
-                if func.attr == "type":
-                    delays = [
-                        keyword.value.value
-                        for keyword in node.keywords
-                        if keyword.arg == "delay"
-                        and isinstance(keyword.value, ast.Constant)
-                    ]
-                    if delays:
-                        offenders.append(
-                            f"{path.name}:{node.lineno}: type(delay={delays[0]})"
-                        )
-        self.assertEqual(offenders, [])
-
-    def test_every_click_if_present_call_forwards_the_humanizer(self):
-        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
-        self.assertNotIn("_click_if_present(page, selector", source)
-        self.assertIn("humanizer=humanizer", source)
 
 
 class YouTubePublishDispatchGuardTests(unittest.TestCase):

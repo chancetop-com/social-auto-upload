@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """TikTok humanized interaction layer (ticket 03).
 
-Three offline blocks, per spec §6.2:
+Two offline blocks, per spec §6.2:
 
 1. **event sequence** — every converted point uses the right primitive
    (``press`` vs ``insert_text``), one ``after_type`` per text field,
@@ -12,11 +12,11 @@ Three offline blocks, per spec §6.2:
    typed character by character, picked by exact first-line text; >1000 code
    points degrade to a single bulk ``insert_text``; ``HUMANIZE=0`` collapses
    typing and clicking to the fast path.
-3. **static gate** — ``tests.humanize_gates.assert_clean`` over the shipped
-   TikTok module (gates A–E).
 
 The doubles are local to this file, fail loudly on un-scripted selectors and
 never need a browser.
+
+Gates A–E are covered centrally by ``PlatformWideGateTests`` in ``tests/test_humanize.py``.
 """
 
 from __future__ import annotations
@@ -1214,23 +1214,6 @@ class OfflineHumanizerSeamTests(unittest.TestCase):
         self.assertIsNot(humanizer.profile, DEFAULT_PROFILE)
         # The shared parameter table itself is never mutated.
         self.assertTrue(DEFAULT_PROFILE.enabled)
-
-
-class StaticGateTests(unittest.TestCase):
-    def test_shipped_module_passes_gates_a_to_e(self):
-        from tests.humanize_gates import assert_clean
-
-        assert_clean(TK_MAIN_CHROME)
-
-    def test_package_violations_are_confined_to_the_unwired_legacy_file(self):
-        from tests.humanize_gates import gate_violations
-
-        violations = gate_violations(TK_PACKAGE)
-        for violation in violations:
-            self.assertTrue(
-                violation.startswith("uploader/tk_uploader/main.py:"),
-                violation,
-            )
 
 
 if __name__ == "__main__":

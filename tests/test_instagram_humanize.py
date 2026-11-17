@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Instagram humanize rollout (ticket 02): sequence, readback, gates, fast path.
+"""Instagram humanized interactions: sequence, readback and fast path.
 
 Everything here is browser-free.  The doubles are local to this module on
 purpose: ``tests/fakes_xhs_dom.py`` is read-only for this ticket, and the
@@ -17,18 +17,18 @@ The three required blocks are:
 ``InstagramHumanizeFieldReadbackTests``
     the fake fields keep a typing buffer, so a correct key sequence that ends
     with the wrong value (dirty clear, appended text, dropped newline) fails.
-``InstagramHumanizeGateTests`` / ``InstagramHumanizeFastPathTests``
-    spec §4 gates A–E on the package and the ``HUMANIZE=0`` fast path
+``InstagramHumanizeFastPathTests``
+    the ``HUMANIZE=0`` fast path
     (one ``insert_text`` / one ``locator.click`` / zero pauses).
+
+Gates A–E are covered centrally by ``PlatformWideGateTests`` in ``tests/test_humanize.py``.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import os
 import random
-import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,18 +67,10 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     PRESENT,
     InstagramPublishOptions,
 )
-from tests.humanize_gates import assert_clean
 from utils.dom import ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
-
-PACKAGE = (
-    Path(__file__).resolve().parent.parent
-    / "uploader"
-    / "meta_uploader"
-    / "insgraph_uploader"
-)
 
 #: Complete facts payload for ``utils.dom`` probes (one JS round-trip each).
 FACTS = {
@@ -1482,126 +1474,6 @@ class InstagramSwitchClickTargetTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("down", page.timeline.kinds())
         self.assertEqual(page.timeline.payloads("pause"), [])
         self.assertIs(await control.read(), False)
-
-
-# ---------------------------------------------------------------------------
-# 4. Package gates A–E
-# ---------------------------------------------------------------------------
-
-
-class InstagramHumanizeGateTests(unittest.TestCase):
-    """Spec §4 executable gates plus the ticket's own forbidden constructs."""
-
-    def test_gates_a_to_e_pass_on_the_instagram_package(self):
-        assert_clean(PACKAGE)
-
-    def test_no_fill_press_sequentially_or_forced_clicks_remain(self):
-        hits = []
-        for path in sorted(PACKAGE.rglob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                name = func.attr if isinstance(func, ast.Attribute) else ""
-                if name in {"fill", "press_sequentially"}:
-                    hits.append(f"{path.name}:{node.lineno}: {name}()")
-                if any(
-                    keyword.arg == "force"
-                    and isinstance(keyword.value, ast.Constant)
-                    and keyword.value.value is True
-                    for keyword in node.keywords
-                ):
-                    hits.append(f"{path.name}:{node.lineno}: force=True")
-        self.assertEqual(hits, [])
-
-    def test_both_nav_call_sites_go_through_the_hovering_helper(self):
-        """创建入口与向导 Next 都走 ``_click_nav``，helper 内 hover 先于 click。
-
-        静态哨兵：任何新增的导航点击若绕过 helper（直接 ``humanizer.click``），
-        或 helper 里 hover/click 的顺序被调换，都必须在这里失败。
-        """
-        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        functions = {
-            node.name: node
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-
-        helper_calls = sorted(
-            (node.lineno, f"{node.func.value.id}.{node.func.attr}")
-            for node in ast.walk(functions["_click_nav"])
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-        )
-        self.assertEqual(
-            [call for _line, call in helper_calls],
-            ["humanizer.hover", "humanizer.click", "humanizer.after_navigate"],
-        )
-
-        nav_sites = []
-        for name, function in functions.items():
-            for node in ast.walk(function):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "_click_nav"
-                ):
-                    nav_sites.append((node.lineno, name, ast.unparse(node.args[0])))
-        # 创建入口（_upload_files）与向导「Next」（_advance_media_editor）；
-        # 新站点若不走 helper 会在这里暴露。
-        self.assertEqual(
-            [site[1:] for site in sorted(nav_sites)],
-            [("_upload_files", "entry"), ("_advance_media_editor", "action")],
-        )
-
-        owners = set()
-        for name, function in functions.items():
-            for node in ast.walk(function):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "click"
-                    and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "humanizer"
-                ):
-                    owners.add(name)
-        self.assertEqual(
-            owners, {"_click_nav", "_click_submit", "_dismiss_optional_prompt"}
-        )
-
-    def test_caption_readback_compares_rendered_text_not_to_have_text(self):
-        """回归：``to_have_text`` 走 ``textContent``，会丢掉 Lexical 的换行。
-
-        真机 2026-11-13（ticket 05）在 ``_publish`` 的配文回读处失败：逐字输入把
-        ``\\n`` 打成 Enter，Lexical 在段间插 ``<br><br>``，``textContent`` 把
-        两行粘在一起而 ``innerText`` 保留换行。哨兵：``_publish`` 不得再对配文
-        调用 ``to_have_text``，且读回 helper 必须取渲染文本。
-        """
-        source = (PACKAGE / "main.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        functions = {
-            node.name: node
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-
-        publish_source = ast.unparse(functions["_publish"])
-        self.assertNotIn("to_have_text", publish_source)
-        self.assertIn("_read_back_caption", publish_source)
-
-        self.assertIn("inner_text()", ast.unparse(functions["_read_back_caption"]))
-
-    def test_native_clicks_are_only_the_management_path(self):
-        # Gate B already enforces markers; this pins the *set* of marked sites so
-        # a new native click cannot silently join the package.
-        marker = re.compile(r"# native-click: ([A-Za-z]+)；")
-        classes = []
-        for path in sorted(PACKAGE.rglob("*.py")):
-            classes.extend(marker.findall(path.read_text(encoding="utf-8")))
-        self.assertEqual(sorted(set(classes)), ["file", "manage"])
 
 
 # ---------------------------------------------------------------------------

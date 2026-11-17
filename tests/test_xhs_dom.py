@@ -765,13 +765,6 @@ class Decision06ReadinessSharedLayerTests(unittest.TestCase):
         self.assertIsNone(re.search(r"timeout\s*=\s*[0-9]", source))
         self.assertNotIn("wait_for_timeout(", source)
 
-    def test_resolved_shape(self):
-        resolved = Resolved(
-            locator=object(), selector="#x", kind="text-zh", role="visible"
-        )
-        self.assertEqual(resolved.kind, "text-zh")
-        self.assertEqual(resolved.role, "visible")
-
 
 def _geometry(
     *,

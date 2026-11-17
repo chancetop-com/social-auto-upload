@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Facebook 个人主页：发布流的人类化交互层（工单 08，spec §3.7）。
 
-三块离线证据（spec §6.2）：
+两类离线证据（spec §6.2）：
 
 1. **事件序列** —— 正文清空 → 逐字（ASCII ``press`` / 非 ASCII
    ``insert_text`` / 换行 ``Enter``）→ 恰一次 ``after_type``；发布点
@@ -10,12 +10,12 @@
 2. **字段值读回** —— fake 编辑器持有键入缓冲，断言最终值与 ``_caption()``
    一致（抓「清空不净导致追加」），并覆盖 >1000 码点整段 ``insert_text``
    与 ``\r`` 归一。
-3. **静态门** —— ``tests.humanize_gates.assert_clean`` 在 Facebook 包上跑
-   A–E。
 
 另加 ``HUMANIZE=0`` 语义切换用例：一次 ``insert_text``、两次原生
 ``locator.click``、零停顿。夹具按票据约定局部实现，不改共享 fakes；未
 scripted 的选择器仍然抛错。
+
+A–E 静态规则集中由 ``tests/test_humanize.py`` 的 ``PlatformWideGateTests`` 验证。
 """
 
 from __future__ import annotations
@@ -24,23 +24,14 @@ import asyncio
 import os
 import re
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from tests.fakes_xhs_dom import FakeLocator, RecordingKeyboard, RecordingMouse, RecordingPage
-from tests.humanize_gates import assert_clean
 from uploader.meta_uploader.facebook_uploader import main as facebook_main
 from utils.dom import ElementUnusableError
 from utils.errors import PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import MAYBE_DISPATCHED, MAYBE_DISPATCHED_VALUE
-
-PACKAGE = (
-    Path(__file__).resolve().parent.parent
-    / "uploader"
-    / "meta_uploader"
-    / "facebook_uploader"
-)
 
 #: 徽章账号文件不必存在：只测 ``_publish_on_page``，不走 ``_validate_media``。
 ACCOUNT = "account.json"
@@ -525,11 +516,6 @@ class FacebookHumanizeDisabledTests(unittest.TestCase):
         self.assertEqual(page.mouse.down_count, 0)
         self.assertEqual(app._humanizer_instance.pauses, [])
         self.assertTrue(page.state["published"])
-
-
-class FacebookStaticGateTests(unittest.TestCase):
-    def test_facebook_package_passes_gates_a_to_e(self):
-        assert_clean(PACKAGE)
 
 
 if __name__ == "__main__":
