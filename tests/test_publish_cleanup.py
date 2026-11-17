@@ -20,7 +20,7 @@ LOCAL_UPLOADS = (
     # Alipay persistent outcomes: test_alipay_profiles.
     # Weibo persistent outcomes: test_weibo_profiles.
     # Baijiahao persistent outcomes: test_baijiahao_profiles.
-    ("hupu", "HuPuVideo"),
+    # Hupu persistent outcomes: test_hupu_profiles.
     # Douyin persistent outcomes: test_douyin_profile_cli.
     # YouTube persistent outcomes: test_youtube_profiles.
     # Xiaohongshu persistent outcomes: test_xhs_profile_cli.

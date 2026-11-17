@@ -1,6 +1,6 @@
 # 15 — Alipay persistent Profile validation
 
-Date: 2026-11-17. Worktree: `/private/tmp/sau-local-profile-15`. Source baseline `b8be345`; latest integrated baseline during this record: `fb9be5d` (Weibo). `conf.__file__` and `conf.BASE_DIR` were verified to bind the worker, not the user's main checkout. Tests override BASE_DIR with isolated temporary directories.
+Date: 2026-11-17. Worktree: `/private/tmp/sau-local-profile-15`. Source baseline `b8be345`; latest integrated baseline during this record: `25e0f0f` (Weibo and Hupu). `conf.__file__` and `conf.BASE_DIR` were verified to bind the worker, not the user's main checkout. Tests override BASE_DIR with isolated temporary directories.
 
 ## Delivered boundaries
 
@@ -47,8 +47,8 @@ python -m unittest tests.test_alipay_profile_dom -v
 
 Ran outside the sandbox because existing browser-launch restrictions require it. The fixture intercepts **all** browser requests and uses temporary Profiles/files. No real account, upload, publish or delete operation occurs.
 
-- Chrome **157.0.8103.79**, headed: natural content window **1200×682**, actual scroll **586**.
-- Complete Chromium **156.0.8078.4**, headless with `channel=chromium`: natural content window **756×469**, actual scroll **586**.
+- Chrome **157.0.8103.79**, headed: natural content window **1200×682** initially / **1200×683** in the repeat, actual scroll **586**.
+- Complete Chromium **156.0.8078.4**, headless with `channel=chromium`: natural content window **756×469**, actual scroll **584** in the repeat.
 - Each case executes formal login then upload in a second session for the same Profile, with positive anchor, SPA navigation, video input, title/description input, cover crop overlay, collection dropdown, AI radio and the off-screen publish button/quality overlay.
 - Both locally intercepted payloads contain the expected title/description, video/cover filenames, selected collection, AI flag, and **one** main publish click. Four launches use no_viewport and no fixed viewport; all contexts disconnect at completion. No cookie directory is created.
 - Initial execution: **1 test / 2 browser configurations passed in 86.262s**. After the local quality-release safeguard and integration merge: **1 test / 2 configurations passed in 83.224s**.
@@ -57,4 +57,4 @@ This is genuine browser execution on synthetic pages, not Alipay service accepta
 
 ## Remaining rollout scope
 
-No ticket-15 blockers. At baseline fb9be5d, Hupu, Dayu, Zhihu and Xueqiu are outside this ticket's delivered scope; parallel platform merges may advance that list. One-time legacy cleanup is ticket 19; final four-platform real-account no-publish acceptance is ticket 20. Alipay has no no-publish CLI action, and this ticket did not submit a real video or operate a user account.
+No ticket-15 blockers. After merging Hupu, Dayu, Zhihu and Xueqiu remain outside the delivered platform scope. One-time legacy cleanup is ticket 19; final four-platform real-account no-publish acceptance is ticket 20. Alipay has no no-publish CLI action, and this ticket did not submit a real video or operate a user account.

@@ -45,7 +45,6 @@ from uploader.hupu_uploader.main import (
     HUPU_LAUNCH_KWARGS,
     HuPuVideo,
     is_logged_in as hupu_is_logged_in,
-    prepare_local_context,
 )
 from utils.browser_session import BrowserSession, browser_session
 from utils.errors import LoginRequiredError
@@ -156,37 +155,6 @@ class _LoginContext:
         raise AssertionError("is_logged_in must not read storage state")
 
 
-class _RecordingContext:
-    """Context double that records only the APIs local setup is allowed to use."""
-
-    def __init__(self, browser=None, state=None) -> None:
-        self.browser = browser
-        self._state = state
-        self.closed = False
-        self.storage_state_reads = 0
-        self.add_init_script_calls: list[str] = []
-
-    async def storage_state(self, **kwargs):
-        self.storage_state_reads += 1
-        return self._state
-
-    async def close(self) -> None:
-        self.closed = True
-
-    async def add_init_script(self, script: str) -> None:
-        self.add_init_script_calls.append(script)
-
-
-class _ReplacementBrowser:
-    def __init__(self) -> None:
-        self.new_context_calls: list[dict] = []
-        self.replacement = _RecordingContext(state={"cookies": []})
-
-    async def new_context(self, **kwargs):
-        self.new_context_calls.append(kwargs)
-        return self.replacement
-
-
 class _GotoPage:
     """Minimal page for mid-upload login redirect tests."""
 
@@ -225,81 +193,8 @@ def _make_article_file(tmp_dir: str) -> Path:
     return path
 
 
-class HupuLocalGoldenTests(unittest.TestCase):
-    def test_golden_constants_match_legacy_launch_and_empty_context(self):
-        legacy = hupu_main._build_launch_kwargs(headless=False)
-        expected = {k: v for k, v in legacy.items() if k != "headless"}
-        self.assertEqual(HUPU_LAUNCH_KWARGS, expected)
-        self.assertEqual(HUPU_CONTEXT_KWARGS, {})
-        self.assertFalse(HUPU_INIT_SCRIPT)
-        self.assertTrue(callable(prepare_local_context))
-
-    def test_local_upload_launch_context_and_teardown_are_unchanged(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            account = Path(tmp_dir) / "hupu_account.json"
-            account.write_text("{}", encoding="utf-8")
-            video = _make_video_file(tmp_dir)
-            app = HuPuVideo("测试标题", str(video), [], str(account), headless=False)
-            app.validate_upload_args = AsyncMock()
-            app.upload_in = AsyncMock()
-            page = MagicMock()
-
-            playwright = FakePlaywright()
-            with (
-                patch.object(hupu_main, "_new_stealth_page", AsyncMock(return_value=page)),
-                patch.object(hupu_main, "hupu_logger", MagicMock()),
-            ):
-                asyncio.run(app.upload(playwright))
-
-        self.assertEqual(
-            playwright.chromium.launch_calls,
-            [hupu_main._build_launch_kwargs(headless=False)],
-        )
-        browser = playwright.chromium.launch_browser
-        self.assertEqual(
-            browser.new_context_calls,
-            [
-                {
-                    "user_agent": hupu_main._CHROME_UA,
-                    "viewport": {"width": 1920, "height": 1080},
-                    "storage_state": str(account),
-                }
-            ],
-        )
-        context = browser.contexts[0]
-        self.assertEqual(context.storage_state_calls, [str(account)])
-        self.assertTrue(context.closed)
-        self.assertTrue(browser.closed)
-        app.upload_in.assert_awaited_once()
-        session = app.upload_in.await_args.args[0]
-        self.assertEqual(session.mode, "local")
-        self.assertIs(session.context, context)
-        self.assertIs(app.upload_in.await_args.kwargs["page"], page)
-
-
-class HupuPrepareLocalContextTests(unittest.TestCase):
-    def test_prepare_replaces_context_with_ua_viewport_and_stealth(self):
-        browser = _ReplacementBrowser()
-        original = _RecordingContext(browser=browser, state={"cookies": [{"name": "u"}]})
-
-        prepared = asyncio.run(prepare_local_context(original))
-
-        self.assertTrue(original.closed)
-        self.assertEqual(original.storage_state_reads, 1)
-        self.assertEqual(
-            browser.new_context_calls,
-            [
-                {
-                    "user_agent": hupu_main._CHROME_UA,
-                    "viewport": {"width": 1920, "height": 1080},
-                    "storage_state": {"cookies": [{"name": "u"}]},
-                }
-            ],
-        )
-        self.assertIs(prepared, browser.replacement)
-        self.assertEqual(
-            browser.replacement.add_init_script_calls, [hupu_main._STEALTH_SCRIPT]
-        )
+# Persistent local Hupu behavior is covered through CLI/browser boundaries in
+# tests.test_hupu_profiles; context replacement and Cookie snapshots are retired.
 
 
 class HupuLoginDetectionTests(unittest.TestCase):
@@ -363,13 +258,11 @@ class HupuMultiloginUploadTests(unittest.TestCase):
             with (
                 patch.object(hupu_main, "async_playwright", MagicMock()) as async_playwright,
                 patch.object(hupu_main, "cookie_auth", AsyncMock()) as cookie_auth,
-                patch.object(hupu_main, "_new_stealth_page", AsyncMock()) as stealth_page,
             ):
                 asyncio.run(app.upload(None, session=session))
 
         async_playwright.assert_not_called()
         cookie_auth.assert_not_awaited()
-        stealth_page.assert_not_awaited()
         app.validate_upload_args.assert_awaited_once_with(check_cookie=False)
         app.upload_in.assert_awaited_once_with(session)
         self.assertEqual(context.storage_state_calls, [])
@@ -488,7 +381,7 @@ class HupuCliTests(unittest.TestCase):
         code, _, _ = self._run(["hupu", "check"])
         self.assertEqual(code, 2)
 
-    def test_check_local_uses_legacy_cookie_auth(self):
+    def test_check_local_passes_effective_configuration(self):
         with (
             patch.object(
                 hupu_command, "check_hupu_account", new=AsyncMock(return_value=True)
@@ -500,7 +393,7 @@ class HupuCliTests(unittest.TestCase):
             )
         self.assertEqual(code, 0)
         self.assertIn("valid", out)
-        legacy.assert_awaited_once_with("creator")
+        legacy.assert_awaited_once_with("creator", headless=False, local_browser=None)
         factory.assert_not_called()
 
     def test_check_local_invalid_returns_1(self):
@@ -558,7 +451,7 @@ class HupuCliTests(unittest.TestCase):
         self.assertEqual(kwargs["launch_kwargs"], HUPU_LAUNCH_KWARGS)
         self.assertEqual(kwargs["context_kwargs"], HUPU_CONTEXT_KWARGS)
         self.assertFalse(kwargs["init_script"])
-        self.assertIs(kwargs["context_setup"], prepare_local_context)
+        self.assertEqual(kwargs["extra_ignored"], ("context_setup",))
         probe.assert_awaited_once_with(session.context)
         app.upload.assert_awaited_once_with(session=session)
         self.assertIsNone(builder.call_args.args[1])
@@ -663,52 +556,6 @@ class HupuCliTests(unittest.TestCase):
         self.assertIn("Hupu video upload submitted", out)
         factory.assert_not_called()
         self.assertIsNone(legacy.await_args.kwargs.get("target"))
-
-    def test_local_upload_hupu_video_uses_session_with_local_setup(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = _make_video_file(tmp_dir)
-            account = Path(tmp_dir) / "cookies" / "hupu_creator.json"
-            session = SimpleNamespace(context=object())
-            session_cm = _AsyncCM(session)
-            factory = MagicMock(return_value=session_cm)
-            app = MagicMock()
-            app.upload = AsyncMock()
-            builder = MagicMock(return_value=app)
-            request = hupu_command.HupuVideoUploadRequest(
-                account_name="creator",
-                video_file=video,
-                title="测试标题",
-                description="",
-                tags=[],
-                headless=False,
-            )
-            with (
-                patch.object(
-                    hupu_command, "async_playwright", lambda: _AsyncCM(object())
-                ),
-                patch.object(hupu_command, "browser_session", new=factory),
-                patch.object(
-                    hupu_command, "hupu_setup", new=AsyncMock(return_value=True)
-                ),
-                patch.object(
-                    hupu_command,
-                    "resolve_account_file",
-                    new=MagicMock(return_value=account),
-                ),
-                patch.object(hupu_command, "_build_uploader", new=builder),
-            ):
-                returned = asyncio.run(hupu_command.upload_hupu_video(request))
-
-        self.assertEqual(returned, account)
-        kwargs = factory.call_args.kwargs
-        self.assertEqual(kwargs["account_file"], str(account))
-        self.assertNotIn("multilogin", kwargs)
-        self.assertEqual(kwargs["launch_kwargs"], HUPU_LAUNCH_KWARGS)
-        self.assertEqual(kwargs["context_kwargs"], HUPU_CONTEXT_KWARGS)
-        self.assertFalse(kwargs["init_script"])
-        self.assertIs(kwargs["context_setup"], prepare_local_context)
-        app.upload.assert_awaited_once_with(session=session)
-        self.assertEqual(builder.call_args.args[1], str(account))
 
     def test_upload_mlx_stops_profile_exactly_once(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

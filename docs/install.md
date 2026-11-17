@@ -48,7 +48,7 @@ uv pip install -e .
 
 ### 4. 按所选浏览器准备运行环境
 
-项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、支付宝生活号 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
+项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
 
 - **Chrome 路线**：用户从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 安装适合系统的 Chrome；项目使用 `channel="chrome"`，不会自动安装或更新它。macOS 选择相应 Apple 芯片或 Intel 版本。
 - **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。未迁移平台仍可能使用 headless shell，保留它们需要的 `uv run patchright install chromium` 安装方式。
@@ -71,8 +71,8 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`：非空时优先作为实际可执行文件。
-- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、支付宝生活号 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
-- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、支付宝生活号 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、支付宝生活号 同样解析 headless，但完全忽略本地来源配置。
+- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
+- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号 同样解析 headless，但完全忽略本地来源配置。
 
 ### 6. 验证 CLI 是否可用
 
@@ -254,6 +254,10 @@ sau bilibili upload-video
 ### 微博持久化登录
 
 保留已有 `conf.py`；按上文准备所选系统 Chrome、完整 Chromium（`uv run patchright install --no-shell chromium`）或自定义路径。先 `sau weibo login --account creator --headed`，按需扫码/完成人工验证，正常关闭后以同配置 `sau weibo check --account creator`。Profile 位于 `browser_profiles/weibo/creator/<chrome|chromium>`；默认有头，显式参数优先于配置，不导入旧 JSON。别名可换号，两类浏览器各自登录。重建使用 `sau weibo reset-profile --account creator --browser-kind chrome`，不需 binary，拒绝占用，仅清空明确目标。发布要求封面，没有 no-publish 开关；安装、浏览器启动和账号登录分别验证，窗口回归只用隔离受控页面。
+
+### 虎扑 Profile 登录
+
+只准备所选系统 Chrome、完整 Chromium 或自定义路径，保留已有 conf.py；默认 Chrome 有头，显式 headed/headless 优先于配置。执行 `sau hupu login --account creator --headed` 完成 QQ 扫码或人工验证，正常关闭后同配置 `sau hupu check --account creator`。资料位于 `browser_profiles/hupu/creator/<chrome|chromium>`，旧 JSON 不参与；两种浏览器各自登录，账号别名允许换号。`sau hupu reset-profile --account creator --browser-kind chrome` 只重建该 Profile，无需安装 binary。Hupu 无 no-publish，安装与窗口验收使用隔离合成页面，不提交真实视频。
 
 ### 支付宝生活号持久化登录
 
