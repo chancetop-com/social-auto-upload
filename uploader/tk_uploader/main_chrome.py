@@ -1014,8 +1014,9 @@ async def is_logged_in(context, *, managed: bool = True) -> bool:
 
     A login page/form means ``False``; network errors, 5xx, timeouts and
     unrecognised page structures raise so the CLI can exit 1 instead of
-    misreporting "logged out".  Exactly one fresh page is opened and always
-    closed in ``finally``; existing context pages are left untouched.
+    misreporting "logged out". A fresh page leaves existing pages untouched.
+    Managed probes close that page; local pages belong to the persistent
+    context's bounded cleanup.
     """
     # Always probe on a fresh page: never navigate an injected context's
     # existing page away from whatever the caller is doing.
@@ -1054,7 +1055,8 @@ async def is_logged_in(context, *, managed: bool = True) -> bool:
             "无法识别 TikTok Studio 上传页结构（既无上传入口，也无登录表单）。"
         )
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
 def _account_alias(account_file, account_name=None):
@@ -1099,6 +1101,43 @@ async def get_tiktok_cookie(account_file=None, *, headless=None, account_name=No
                               account_name=account_name, local_browser=local_browser)
 
 
+async def _wait_for_local_login_enter():
+    """Wait for the terminal without leaving an executor blocked on input()."""
+    if sys.platform == 'win32':
+        import msvcrt
+
+        while True:
+            if msvcrt.kbhit():
+                character = msvcrt.getwche()
+                if character in ('\r', '\n'):
+                    print()
+                    return
+                if character == '\x1a':
+                    raise EOFError
+            await asyncio.sleep(0.05)
+
+    loop = asyncio.get_running_loop()
+    descriptor = sys.stdin.fileno()
+    ready = loop.create_future()
+
+    def readable():
+        if not ready.done():
+            ready.set_result(None)
+
+    loop.add_reader(descriptor, readable)
+    try:
+        while True:
+            await ready
+            character = os.read(descriptor, 1)
+            if not character:
+                raise EOFError
+            if character in (b'\r', b'\n'):
+                return
+            ready = loop.create_future()
+    finally:
+        loop.remove_reader(descriptor)
+
+
 async def login_in(session):
     """Guide login in the caller's current Profile and require positive evidence."""
     if not sys.stdin.isatty():
@@ -1108,13 +1147,17 @@ async def login_in(session):
         await page.goto('https://www.tiktok.com/login', wait_until='domcontentloaded', timeout=60_000)
         tiktok_logger.info('请在浏览器中完成 TikTok 登录；完成后回到终端按 Enter。')
         try:
-            await asyncio.to_thread(input, '')
+            if session.managed:
+                await asyncio.to_thread(input, '')
+            else:
+                await _wait_for_local_login_enter()
         except EOFError as error:
             raise RuntimeError('无法读取终端输入，TikTok 本地登录已取消。') from error
         if not await is_logged_in(session.context, managed=session.managed):
             raise LoginRequiredError('TikTok 登录尚未完成；请重新运行 login。')
     finally:
-        await close_browser_resources(page=page)
+        if session.managed:
+            await close_browser_resources(page=page)
 
 
 class TiktokBaseUploader(BaseVideoUploader):

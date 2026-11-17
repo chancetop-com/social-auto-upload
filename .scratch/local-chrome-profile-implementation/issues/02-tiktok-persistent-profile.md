@@ -61,3 +61,12 @@ TikTok 的 login、check、upload-video、upload-note 与直接 uploader 调用�
 - 仅修改该测试内的 TikTok DOM fixture：发布按钮仍返回两个匹配，登录及其他无关锚点为零。没有修改生产源码、绕开登录 guard、改变 `ambiguous:2` 断言、关闭 no-retry 保护或削弱零点击断言；其他平台 fixture 保持原样。
 - Red：上述单测试 **FAILED (errors=3)**，日志 `/private/tmp/sau-local-profile-notes/02-ambiguity-red.log`。Green：同一单测试 **1 passed**（0.035 秒），日志 `02-ambiguity-green.log`。
 - `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_publish_ambiguity tests.test_tiktok_profile_cli tests.test_tiktok_exit_codes tests.test_tiktok_no_publish -v`：**63 tests passed**（1.712 秒），日志 `/private/tmp/sau-local-profile-notes/02-ambiguity-regression.log`。包含其他平台歧义检查、TikTok 登录表单停止、真实 uploader no-publish 停止点与提交后退出码保护；没有浏览器或账号操作。`git diff --check` 通过。
+
+### 2026-11-17 — 本地探测与登录取消的生命周期修复
+
+- 在独立 ticket 02 worktree 先合并 integration `b8be345`。通过公开 `sau_cli.dispatch`，把浏览器边界的 `Page.close()` 设为永久等待，分别复现 check 与 login 在 0.2 秒后仍 pending、未到达外层 context cleanup：两个新增回归各 **1 failure**（0.219 / 0.235 秒）。本地探测页与登录页现在交给 persistent context 的有界关闭；managed 的页面关闭与 probe URL 保持原样，未修改共享 cleanup。
+- 两个相同回归修复后 **2 passed**（0.033 秒）。另从公开 dispatch 在 check/login 导航中取消任务，确认 `CancelledError` 继续传播、context 已关闭、同一 Profile 可重新取得 lease；永久等待的 page.close 不阻塞该过程。未绕过真实配置、Profile 锁或 session 编排。
+- 使用真实 POSIX PTY 和独立 Python 子进程调用 `sau_cli.main`，只替换浏览器/平台边界并使用临时 Profile。旧 `asyncio.to_thread(input)` 在 Ctrl-C 后仍超过 2 秒不退出，新增回归 **1 failure**（2.593 秒）：`asyncio.run` 等待仍阻塞于终端输入的 executor 线程。仅本地 login 改为可取消的终端读取；保留手动 Enter 确认，managed 保留原输入路径。
+- 实际 POSIX PTY 已验证 Ctrl-C 退出、Enter 完成登录检查、空输入 Ctrl-D 报取消，三者均观察到 context 已关闭。Windows 的非阻塞 console 输入分支通过公开 dispatch + `msvcrt` 外部边界 fake 验证 Enter、Ctrl-Z EOF 与取消；**没有在真实 Windows 终端运行**。普通本地登录测试也改为 OS 输入边界，不再 mock 内部输入 helper。
+- `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_tiktok_local_mode tests.test_tiktok_note_cli tests.test_tiktok_no_publish tests.test_tiktok_exit_codes tests.test_tiktok_settings tests.test_mlx_tiktok tests.test_tiktok_profile_cli tests.test_tiktok_login_terminal tests.test_tiktok_cover tests.test_tiktok_overlays tests.test_tiktok_humanize tests.test_publish_ambiguity tests.test_local_browser_session tests.test_local_profile tests.test_publish_cleanup -v`：**329 tests passed**（11.253 秒），日志 `/private/tmp/sau-local-profile-notes/02-lifecycle-regression.log`。覆盖既有 managed 页面关闭、登录分类、no-publish、提交后结果保护、共享 session 与 Profile 生命周期。
+- 本次未变更浏览器启动参数、未重复已通过的真实浏览器矩阵、未执行真实平台/账号操作；用户配置、Cookie 与实际 Profile 均未触碰。`git diff --check` 通过。

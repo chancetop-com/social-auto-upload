@@ -8,7 +8,7 @@ from unittest.mock import patch
 import conf
 from tests.fakes import FakePlaywright
 from tests.test_mlx_tiktok import _AsyncCM
-from tests.test_tiktok_profile_cli import ProbeContext
+from tests.test_tiktok_profile_cli import ProbeContext, terminal_enter
 from uploader.tk_uploader import main_chrome as tk_main
 from utils.errors import LoginRequiredError
 from utils.local_profile import acquire_local_profile
@@ -31,7 +31,7 @@ class LocalProfileHelpersTests(unittest.TestCase):
         pw = FakePlaywright()
         context = ProbeContext()
         pw.chromium.persistent_context = context
-        with tempfile.TemporaryDirectory() as root, patch.object(conf, 'BASE_DIR', Path(root)), patch.object(conf, 'LOCAL_CHROME_PATH', ''), patch.object(tk_main, 'async_playwright', lambda: _AsyncCM(pw)), patch.object(tk_main.sys.stdin, 'isatty', return_value=True), patch('builtins.input', return_value=''):
+        with tempfile.TemporaryDirectory() as root, patch.object(conf, 'BASE_DIR', Path(root)), patch.object(conf, 'LOCAL_CHROME_PATH', ''), patch.object(tk_main, 'async_playwright', lambda: _AsyncCM(pw)), terminal_enter():
             self.assertTrue(asyncio.run(tk_main.tiktok_setup(account_name='creator', handle=True, headless=True, local_browser='chromium')))
             self.assertEqual(len(pw.chromium.persistent_calls), 1)
             self.assertEqual(pw.chromium.persistent_calls[0]['channel'], 'chromium')
