@@ -14,7 +14,7 @@ sau rednote upload-note --account creator \
   --note "Photo description" --no-publish
 ```
 
-`--no-publish` 会上传素材、填写页面，在发布按钮就绪后停止；成功输出 `prepared (not published)`。省略该参数会尝试提交，仅在用户要求发布时使用。视频封面用 `--thumbnail <文件>`；标签用 `--tags tag1,tag2`。
+`--no-publish` 会上传素材、填写页面，在发布按钮就绪后停止；本地和托管模式成功时均输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。省略该参数会尝试提交，仅在用户要求发布时使用。视频封面用 `--thumbnail <文件>`；标签用 `--tags tag1,tag2`。
 
 ## 原创与内容声明
 

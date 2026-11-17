@@ -329,7 +329,9 @@ class TikTokProfileCliTests(unittest.TestCase):
         with patch.dict(os.environ, {'HUMANIZE': '0'}):
             code, out, err = self.run_cli('upload-note', '--account', 'creator', '--images', str(image), '--title', 'A title', '--note', 'A description', '--no-publish', '--headed')
         self.assertEqual(code, 0, err)
-        self.assertIn('prepared (not published)', out)
+        self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', out)
+        self.assertNotIn('prepared (not published)', out)
+        self.assertNotIn('upload submitted:', out)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 1)
         self.assertEqual(page.input_files, [str(image)])
         self.assertEqual(page.title_text, 'A title')
@@ -345,12 +347,52 @@ class TikTokProfileCliTests(unittest.TestCase):
         with patch.dict(os.environ, {'HUMANIZE': '0'}):
             code, out, err = self.run_cli('upload-video', '--account', 'creator', '--file', str(video), '--title', 'Video caption', '--no-publish')
         self.assertEqual(code, 0, err)
-        self.assertIn('prepared (not published)', out)
+        self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', out)
+        self.assertNotIn('prepared (not published)', out)
+        self.assertNotIn('upload submitted:', out)
         self.assertEqual(page.input_files, [str(video)])
         self.assertEqual(page.caption_text, 'Video caption')
         self.assertEqual(page.publish_clicks, 0)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 1)
         self.assertTrue(self.context.closed)
+
+    def test_no_publish_failures_never_print_success_or_submit(self):
+        from tests.fakes import FakeManagedProvider, FakeBrowser
+        from tests.fakes_clock import FakeClock
+        from tests.test_tiktok_note_cli import _StudioPage, _Locator
+        from uploader.tk_uploader import main_chrome as tk_main
+        import uploader.publish_timeout as timeout
+        self.profile()
+        media = self.root / 'media.mp4'; media.write_bytes(b'fixture')
+        image = self.root / 'image.png'; image.write_bytes(b'fixture')
+        is_enabled = _Locator.is_enabled
+        for action, flags in [('upload-video', ['--file', str(media)]), ('upload-note', ['--images', str(image)])]:
+            for state, managed, expected in [('unready', False, 1), ('login', False, 10), ('login', True, 10)]:
+                with self.subTest(action=action, state=state, managed=managed):
+                    page = _StudioPage() if action == 'upload-note' else self.video_page()
+                    page.readiness_reads = 0
+                    async def becomes_disabled(locator):
+                        if locator.selector in ('[data-e2e="post_video_button"]', 'role=button[name=/^Post$/]'):
+                            page.readiness_reads += 1
+                            return page.readiness_reads == 1
+                        return await is_enabled(locator)
+                    self.context.pages = [page]
+                    self.context.state = 'login' if state == 'login' else 'valid'
+                    provider = FakeManagedProvider() if managed else None
+                    if managed:
+                        self.pw.chromium.queue_connect_browser(FakeBrowser([self.context]))
+                    with patch.object(tiktok, 'resolve_managed_provider', return_value=provider), patch.object(_Locator, 'is_enabled', becomes_disabled), patch.dict(os.environ, {'HUMANIZE': '0'}), FakeClock().patch(tk_main, timeout):
+                        code, out, err = self.run_cli(action, '--account', 'creator', '--title', 'Title', '--no-publish', *flags)
+                    self.assertEqual(code, expected, err)
+                    self.assertEqual(out, '')
+                    self.assertNotIn('publish_attempted=true', err)
+                    self.assertFalse(page.publish_clicked)
+                    self.assertEqual(getattr(page, 'publish_clicks', 0), 0)
+                    if state == 'unready':
+                        self.assertIn('发布就绪超时', err)
+                        self.assertGreater(page.readiness_reads, 1)
+                    if managed:
+                        self.assertEqual(provider.stop_calls, 1)
 
     def video_page(self, outcome='success'):
         from tests.test_tiktok_note_cli import _StudioPage, _Locator
@@ -402,7 +444,9 @@ class TikTokProfileCliTests(unittest.TestCase):
                 page = self.video_page(outcome)
                 self.context.pages = [page]
                 with patch.dict(os.environ, {'HUMANIZE': '0'}):
-                    code, _, err = self.run_cli('upload-video', '--account', 'creator', '--file', str(video), '--title', 'Video caption')
+                    code, out, err = self.run_cli('upload-video', '--account', 'creator', '--file', str(video), '--title', 'Video caption')
+                if expected == 0:
+                    self.assertEqual(out, f'TikTok video upload submitted: {video}\n')
                 self.assertEqual(code, expected, err)
                 self.assertEqual(page.publish_clicks, 0 if outcome == 'modal' else 1)
                 if outcome in ('login','verification'): self.assertIn('publish_attempted=true', err)
@@ -412,21 +456,37 @@ class TikTokProfileCliTests(unittest.TestCase):
         from loguru import logger
         from tests.fakes import FakeManagedProvider, FakeBrowser
         from tests.test_tiktok_note_cli import _StudioPage
-        provider = FakeManagedProvider()
-        context = ProbeContext()
-        context.pages = [_StudioPage()]
-        self.pw.chromium.queue_connect_browser(FakeBrowser([context]))
         image = self.root / 'image.png'; image.write_bytes(b'image fixture')
-        logs = io.StringIO()
-        sink = logger.add(logs, format='{message}')
-        try:
-            with patch.object(tiktok, 'resolve_managed_provider', return_value=provider), patch.object(conf, 'LOCAL_CHROME_PATH', []), patch.dict(os.environ, {'HUMANIZE':'0'}):
-                code, out, err = self.run_cli('upload-note', '--account', 'creator', '--images', str(image), '--no-publish', '--local-browser', 'ignored')
-        finally:
-            logger.remove(sink)
-        self.assertEqual(code, 0, err)
-        self.assertIn('upload submitted:', out)
-        self.assertEqual(context.created_pages[0].url, 'https://www.tiktok.com/tiktokstudio/upload?lang=en')
-        self.assertIn('ignored=context_kwargs', logs.getvalue())
-        self.assertNotIn('launch_kwargs', logs.getvalue())
+        video = self.root / 'video.mp4'; video.write_bytes(b'video fixture')
+        for action, flags, mode in [
+            ('upload-note', ['--images', str(image)], 'multilogin'),
+            ('upload-video', ['--file', str(video)], 'adspower'),
+        ]:
+            with self.subTest(action=action, mode=mode):
+                provider = FakeManagedProvider(mode=mode)
+                context = ProbeContext()
+                page = _StudioPage() if action == 'upload-note' else self.video_page()
+                context.pages = [page]
+                browser = FakeBrowser([context])
+                self.pw.chromium.queue_connect_browser(browser)
+                logs = io.StringIO()
+                sink = logger.add(logs, format='{message}')
+                try:
+                    with patch.object(tiktok, 'resolve_managed_provider', return_value=provider), patch.object(conf, 'LOCAL_CHROME_PATH', []), patch.dict(os.environ, {'HUMANIZE':'0'}):
+                        code, out, err = self.run_cli(action, '--account', 'creator', '--title', 'Video caption', '--no-publish', '--local-browser', 'ignored', *flags)
+                finally:
+                    logger.remove(sink)
+                self.assertEqual(code, 0, err)
+                self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', out)
+                self.assertNotIn('upload submitted:', out)
+                self.assertFalse(page.publish_clicked)
+                self.assertEqual(getattr(page, 'publish_clicks', 0), 0)
+                self.assertEqual(context.created_pages[0].url, 'https://www.tiktok.com/tiktokstudio/upload?lang=en')
+                self.assertIn('ignored=context_kwargs', logs.getvalue())
+                self.assertNotIn('launch_kwargs', logs.getvalue())
+                self.assertEqual(provider.start_calls, [True])
+                self.assertEqual(provider.stop_calls, 1)
+                self.assertFalse(context.closed)
+                self.assertEqual(browser.close_calls, 1)
+        self.assertFalse(self.pw.chromium.persistent_calls)
         self.assertFalse((self.root / 'browser_profiles').exists())

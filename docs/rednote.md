@@ -35,7 +35,7 @@ sau rednote upload-note --account creator \
   --note "Photo description" --tags travel,life --no-publish
 ```
 
-`--no-publish` 仍会向 Rednote 上传素材并填写内容，到发布按钮就绪后停止，不点击发布。去掉它才会实际提交。准备成功时 CLI 输出 `prepared (not published)`。
+`--no-publish` 仍会向 Rednote 上传素材并填写内容，到发布按钮就绪后停止，不点击发布。去掉它才会实际提交。本地和托管模式成功时 CLI 均输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。
 
 第一版参数与小红书一致：视频 `--thumbnail`、原创/内容类型声明、`--schedule`（UTC、精确到分钟）、`--not-before`（UTC、可精确到秒）等。完整参数以 `sau rednote upload-video --help` / `upload-note --help` 为准。显式封面和声明必须设置、回读成功，否则停止在发布前；不静默换用首帧或省略声明。来源声明还要核对确认后显示的媒体名称或拍摄日期/地点，不能只检查类型名称。`--shoot-location` 使用候选中的完整地点名称；只匹配名称，不把地址或名称前缀的包含关系当成匹配，重名时停止。定时在填写后及发布前检查开关和分钟值。话题以最终 `data-topic` 回读为准，包括页面自动转换；错词或重复插入会停止。标题长度、正文长度、标签数及定时窗口仍沿用小红书限制。
 
