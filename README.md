@@ -169,7 +169,7 @@ sau douyin check --account creator
 
 Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；新 Profile 的真实账号验收留待最终回归。见 [Rednote 说明](./docs/rednote.md)。
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、支付宝生活号 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、支付宝生活号 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；持久化会话接入按平台分批交付。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
 
 #### 指定发布时刻（可选）
 
@@ -261,7 +261,7 @@ sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --titl
 sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 sau baijiahao upload-video --account <account_name> --file videos/demo.mp4 --thumbnail videos/demo.png --title "示例标题" --desc "示例简介" --tags tag1,tag2
 sau alipay upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
-sau weibo upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
+sau weibo upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --thumbnail covers/demo.png
 sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
 sau zhihu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --originality original --category "教育" --video-mark "内容无需标注"
@@ -438,5 +438,7 @@ Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Faceb
 抖音的本地 login/check/视频/图文现已使用独立持久化 Profile，默认 Chrome、有头，配置与显式参数优先级见 [CLI 说明](./docs/CLI.md#抖音-cli-子命令)。旧 Cookie JSON 不参与；本次验证仅为离线与受控 DOM，没有真实账号发布验收。
 
 百家号 login/check/视频及直接 uploader 已使用独立持久化 Profile。默认 Chrome 有头、可选完整 Chromium/自定义路径；只安装所选来源，旧 JSON 不读写。先 `sau baijiahao login --account creator --headed`，同配置 check；视频必须提供横版封面。验证与未登录退出 10，故障退出 1；提交后先核对作品，结果未知 9 禁止自动重发。无 no-publish 开关，本轮仅做离线和受控 DOM 验收，详见 [百家号 CLI](./docs/CLI.md#百家号-cli-子命令)。
+
+微博 login/check/视频及直接 uploader 已使用持久化 Profile，默认系统 Chrome 有头，可选完整 Chromium/自定义路径。先 login、正常关闭后同配置 check；旧 JSON 不参与。窗口保持自然尺寸，通过滚动和落点校验触达发布按钮；封面必填。未登录/验证退出 10，故障退出 1，提交后先核查作品、结果未知 9 禁止自动重发；无 no-publish，验证使用离线或受控页面。详见 [微博 CLI](./docs/CLI.md#微博-cli-子命令)。
 
 支付宝生活号 login/check/视频/reset-profile 与直接 uploader 已接入持久化 Profile，默认 Chrome 有头、可选完整 Chromium/自定义路径，旧 JSON 不读写。先 `sau alipay login --account creator --headed` 扫码，关闭后同配置 check；缺少 Profile/明确登录失效退出 10，页面与网络故障退出 1，发布结果未知退出 9 并禁止自动重发。生活号无 no-publish，使用离线/受控 DOM 验收。见 [支付宝 CLI](./docs/CLI.md#支付宝生活号-cli-子命令)。
