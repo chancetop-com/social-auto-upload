@@ -128,7 +128,7 @@ class ParserContractTests(unittest.TestCase):
                 self.assertNotIn("--folder-id", options)
                 self.assertNotIn("--profile-id", options)
 
-    def test_account_is_optional_everywhere(self):
+    def test_account_is_required_only_for_explicit_local_reset(self):
         parser = sau_cli.build_parser()
         for platform in sau_cli.PLATFORMS:
             for action in _action_names(platform):
@@ -137,7 +137,7 @@ class ParserContractTests(unittest.TestCase):
                 if account_action is None:
                     continue
                 with self.subTest(platform=platform, action=action):
-                    self.assertFalse(account_action.required)
+                    self.assertEqual(account_action.required, action == "reset-profile")
 
     def test_parse_check_without_account_keeps_flags(self):
         args = sau_cli.build_parser().parse_args(

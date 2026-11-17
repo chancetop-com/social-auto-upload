@@ -68,6 +68,25 @@ Windows 下推荐先指定镜像，再安装 Chromium：
 $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchright install chromium
 ```
 
+## 重建本地浏览器 Profile（`reset-profile`）
+
+目前 TikTok、Rednote、Instagram、小红书开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。此阶段先交付重建和占用基础设施，既有 login/check/上传/作品动作仍保持原行为；后续平台接入记录说明何时开始使用持久化 Profile。
+
+```bash
+sau tiktok reset-profile --account "creator" --browser-kind chrome
+sau rednote reset-profile --account "creator" --browser-kind chromium
+sau instagram reset-profile --account "creator" --browser-kind chrome
+sau xiaohongshu reset-profile --account "creator" --browser-kind chrome
+```
+
+`--account` 和 `--browser-kind chrome|chromium` 都必须显式提供。目标是 `browser_profiles/<平台>/<原始别名>/<种类>/`，与日常浏览器资料隔离；整个资料根不纳入版本控制。别名保留空格、大小写和 Unicode 原值，拒绝空白、路径分隔符及点目录；文件系统等价路径不能合并不同别名。此命令只按 `--browser-kind` 选择目标，忽略 `LOCAL_BROWSER` / `LOCAL_CHROME_PATH` 与安装状态，不需要安装或启动浏览器。
+
+显式执行即表示清除意图，不另行确认或备份。只清空选定的浏览器叶子目录及其重建状态，保留父级别名归属、另一种类、其他账号、历史结果和旧 Cookie/身份文件。目标不存在也返回 `0`，显示目标并提示先 login；重建不会自动登录或恢复发布任务，也不是重新提交旧任务的依据。
+
+同一 Profile 被项目进程占用时立即失败；不同别名和同别名的两种浏览器可以并行。目录归属缺失、损坏、冲突、越界/链接，或浏览器 singleton 状态表明占用或无法安全确认时退出 `1`。项目不会自动删 singleton、终止外部浏览器或接管外部会话。项目锁文件里的 PID/时间只用于诊断，残留文件本身不会阻止使用。
+
+部分删除失败返回 `1` 并标记重建未完成，后续会话拒绝使用残缺资料；修复权限等实际故障后重跑同一显式命令。用法错误返回 `2`。设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 时拒绝重建，不调用 provider；两种凭据同时设置仍按原冲突规则返回 `1`。
+
 ## 客户端发布闸门（`--not-before`）
 
 所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，保留秒级精度，不接受小数秒；`--schedule` 则要求秒/微秒为 0）：

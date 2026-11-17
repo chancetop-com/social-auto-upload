@@ -13,6 +13,7 @@ from pathlib import Path
 
 from patchright.async_api import async_playwright
 
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
@@ -142,6 +143,7 @@ def register(platform_parsers):
         "tiktok", help="TikTok operations (local or Multilogin mode)"
     )
     tiktok_actions = tiktok_parser.add_subparsers(dest="action", required=True)
+    add_reset_profile_action(tiktok_actions)
 
     for action_name in ("login", "check"):
         action_parser = tiktok_actions.add_parser(
@@ -501,6 +503,8 @@ def _raise_login_required(target) -> None:
 
 async def run(args):
     """执行本平台命令；本地 cookie 模式与 Multilogin 模式共用上传器。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
     # Reject impossible option combinations before resolving the Profile or
     # touching any browser/session state (exit 2).
     _validate_branded_content_privacy(args)
