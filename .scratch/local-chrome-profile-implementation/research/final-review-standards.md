@@ -176,3 +176,65 @@ Documentation checks preserve the original skill frontmatter/license, keep Douyi
 ### Final cumulative result
 
 The final broad isolated suite passed **2,031 tests / 126.637s: 2,029 passed, 2 existing opt-in service skips, 0 failures/errors**. The same 98 prior browser cases remain explicitly deferred. The command, manifest, failure history and evidence boundaries are recorded once in [Spec final cumulative evidence](final-review-spec.md#final-cumulative-offline-result). This final run includes every affected builder/provider/Profile/no-publish suite and the retained works-action boundary coverage above. No browser/live rerun or actual account operation was required by these fixes.
+
+
+## Original Standards reviewer recheck — complete (2026-11-17)
+
+This later independent recheck supersedes the earlier pending-recheck status above. All findings on this axis are closed on candidate `e1ed1b684fc096d5c6f177f643fc38242c2e9fe2`. Integration merge and root-owned final worktree cleanup remain pending. The original reviewer's focused evidence follows; this documentation-only closeout introduces no runtime change or repeated broad/browser run.
+
+Original integration: `cc23b9d3631bfd85980bae4f8885ffadc8233eeb`
+Candidate: `e1ed1b684fc096d5c6f177f643fc38242c2e9fe2`
+Candidate checkout: `/private/tmp/sau-local-profile-review-fixes`
+
+Read the original external Standards report and the candidate's `.scratch/local-chrome-profile-implementation/research/final-review-standards.md`, then compared `git diff cc23b9d...e1ed1b6` with current candidate source. Confirmed the checkout HEAD is the requested candidate. The candidate has no CodeGraph index, so source/diff inspection was used without indexing. No Spec-axis report was read. This recheck is read-only apart from this external report; no accounts, Profiles, repository sources, or git metadata were changed.
+
+### Verdict
+
+**S1, S2, S3, H1, H2, and H3 are closed. No unresolved Standards finding or introduced regression was established in the focused scope.** The optional heuristics remain maintenance judgments, rather than being retroactively reclassified as hard requirements.
+
+### Per-finding disposition
+
+#### S1 — Closed: Douyin instruction duplication
+
+`skills/douyin-upload/SKILL.md:65` now supplies a conditional Markdown link to `references/cli-contract.md#浏览器重建和提交结果`. The authoritative section still exists at `skills/douyin-upload/references/cli-contract.md:113`, containing the complete local Profile, browser, recovery, and reset contract. The main skill keeps its platform command/workflow guidance. The relative target stays within the installable `douyin-upload` directory, so copying/installing that directory preserves the pointer and its target; no repository-external relative link was introduced.
+
+#### S2 — Closed: copied managed-mode common contracts
+
+The identified additions were removed from Kuaishou, Weibo, Tencent, Facebook Page, TikTok, and the XHS CLI reference. Platform flags and local browser/headless/recovery instructions remain. Kuaishou's replacement pointer is at `skills/kuaishou-upload/SKILL.md:81`; the other affected documents use the same explicit lookup: the runtime project's `docs/CLI.md`, with an absolute GitHub URL as an online fallback.
+
+The canonical section exists at `docs/CLI.md:179`, headed `托管浏览器模式（通用）`; the supplied `#托管浏览器模式通用` fragment matches that heading. A standalone skill no longer has to interpret `docs/CLI.md` as a path inside its own installed directory. This verifies pointer structure and available local target content; no live HTTP availability check or marketplace release is claimed.
+
+#### S3 — Closed: stale internal-name test guards
+
+The changed `create=True` patches fabricating `resolve_account_file`, the redirected `utils.local_browser_session.resolve_local_browser` guard, and `_assert_local_helper` plus its four adapter-only tests are removed. Missing-account cases still call the public CLI and assert exit `2` and the `--account` diagnostic. No removed production symbol was restored.
+
+Read the retained behavior tests, rather than relying solely on the implementer's coverage list:
+
+- `tests/test_instagram_profile_cli.py:307`: real works CLI path under both provider environments, both verify/delete, Chromium Profile selection, proxy, current-author validation, and external delete-count observations.
+- `tests/test_facebook_profile_cli.py:286`: both provider environments and both works actions, persistent Profile use, no storage-state export, and rejection of mismatched historical author evidence.
+- `tests/test_facebook_page_profile_cli.py:170`: both provider environments and works actions, persistent lifecycle and rejection of the wrong Page.
+- `tests/test_zhihu_profiles.py:237`: real verify flow preserves historical subject/title evidence and still uses a local Profile when AdsPower is set.
+- `tests/test_xueqiu_profiles.py:245`: verify with an AdsPower environment still selects the explicit local Profile and returns the local login-required result.
+- `tests/test_dayu_profiles.py:433`: verify under AdsPower preserves the raw spaced alias and does not connect over CDP.
+
+These use the actual command/configuration/Profile/session chain with external browser fakes and isolated roots. The cleanup therefore removes duplicate implementation-coupled assertions without removing the specified behavior coverage. Unchanged historical mock-based tests were appropriately left outside this focused cleanup.
+
+#### H1 — Closed: repeated filename-to-alias adapters
+
+`utils/local_account.py:7–23` holds the shared name-only JSON adapter; fifteen platform wrappers delegate to it. TikTok, Rednote, and XHS explicitly retain suffix-only JSON compatibility. Platform-specific missing-alias messages are preserved. Dayu's `dayu_account_alias` at `uploader/dayu_uploader/session.py:158` and Xueqiu's `account_alias` at `uploader/xueqiu_uploader/session.py:70` are unchanged, preserving their intentional `Path(...).stem` behavior and `ValueError` semantics. Result-path code is not changed by this extraction.
+
+Independently compared extracted pre/post pure alias function bodies for **all 17 platform adapters across 2,210 input combinations**, with **zero mismatches**. Cases included prefixed/unprefixed paths, `Path` values, plain strings, `.json` suffixes, missing inputs, explicit empty aliases, spaces, Unicode/composed/decomposed aliases, and explicit overrides. Return values and exception types/messages matched. This probe imported no project modules, launched no browser, and accessed no credential files. The new public direct-entry characterization tests also remain at the approved browser boundary rather than testing the new helper directly.
+
+#### H2 — Closed: six no-publish sentence copies
+
+`sau_commands/output.py:3` is now the single `NO_PUBLISH_SUCCESS` definition. Its exact sentence is unchanged. The six existing success branches import/use it at `sau_commands/tiktok.py:570,594`, `sau_commands/rednote.py:487,520`, and `sau_commands/xiaohongshu.py:482,515`. The diff changes only the print argument at those sites: platform/media headings, no-publish conditions, normal publishing output, execution order, and machine-result behavior remain unchanged.
+
+#### H3 — Closed: always-None private builder argument
+
+All fourteen identified private builders in ten command modules now take the request alone and pass `None` directly to the public uploader constructor. Their production call sites have the matching signature. Independent AST comparison confirmed that **all 14 builder bodies are exactly equivalent to the original after substituting `account_file=None` and removing that parameter**. All **26 public constructor signatures in touched uploader modules are unchanged**. Provider branches still remove the local proxy where required and use the same managed session calls/options.
+
+The managed/session implementation, local Profile ownership implementation, Dayu/Xueqiu modules, and packaging configuration have no candidate diff. In particular, `utils/browser_session.py` retains the approved compatibility parameters and ignored-option/provider contract. Removed test assertions only addressed the eliminated private second argument; existing media, options, provider/session, and public-flow assertions remain.
+
+### Validation boundary
+
+The implementer's recorded cumulative result is **2,031 tests: 2,029 passed, 2 existing opt-in service skips, no failures/errors**. As requested, this review did not repeat that broad suite or any real-browser/account validation. Independent work comprised source/diff inspection, retained behavior-test inspection, the 2,210-case pure alias equivalence probe, and the AST builder/public-signature comparisons above. No additional fix is requested on this axis.

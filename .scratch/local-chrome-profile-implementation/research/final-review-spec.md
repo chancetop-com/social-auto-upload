@@ -88,3 +88,32 @@ The runner uses standard unittest discovery and the same prior selection as tick
 **Final result: 2,031 tests in 126.637s; 2,029 passed, 2 existing opt-in MLX/AdsPower live-service smoke skips, 0 failures, 0 errors.** Full log: `/private/tmp/sau-local-profile-notes/review-fix-offline.log`; selection manifest: `/private/tmp/sau-local-profile-notes/review-fix-offline-manifest.json`. The first cumulative run's stale-test errors are retained in `review-fix-offline-first.log`, not erased or counted as a pass. The net increase from 2,025 is ten added regression/characterization methods minus four redundant internal-mock methods.
 
 The ignored worker configuration and temporary test roots are isolated; no real user configuration, login state or historical results were changed. The candidate is ready for the original reviewers' focused recheck; this report does not yet claim that recheck, integration merge or cleanup completed.
+
+
+## Original Spec reviewer recheck — complete (2026-11-17)
+
+This later independent recheck supersedes the earlier pending-recheck status above. All findings on this axis are closed on candidate `e1ed1b684fc096d5c6f177f643fc38242c2e9fe2`. Integration merge and root-owned final worktree cleanup remain pending. The original reviewer's focused evidence follows; this documentation-only closeout introduces no runtime change or repeated broad/browser run.
+
+Candidate: `e1ed1b684fc096d5c6f177f643fc38242c2e9fe2`, branch `codex/local-profile-review-fixes`, worker `/private/tmp/sau-local-profile-review-fixes`.
+
+Compared `git diff cc23b9d3631bfd85980bae4f8885ffadc8233eeb...e1ed1b684fc096d5c6f177f643fc38242c2e9fe2`; read the original independent Spec report, candidate `research/final-review-spec.md` dispositions, affected current production source and regression tests. No Standards report was read. The worker has no CodeGraph index; no index was created.
+
+### Conclusions
+
+**S1 — Resolved.** Spec line 128 requires “网络、页面结构、权限、必需字段提取或 Profile 运行故障退出 `1`，不折叠成 invalid。” `utils/errors.py:33` adds the narrowly classified `PageCheckError`. Weibo's HTTP check raises it at `uploader/weibo_uploader/main.py:267`; probe and upload wrappers preserve it at lines 186 and 459. Baijiahao does the same at `uploader/baijiahao_uploader/main.py:331`, with preservation at lines 312 and 583. Explicit HTTP 403/503 failures therefore keep their HTTP diagnostic and exit 1 even with login/verification markup. Current callers of these classified checks are before submission, so the new exception bypass does not convert post-submit uncertainty into an ordinary fault.
+
+The public regressions at `tests/test_weibo_profiles.py:209` and `tests/test_baijiahao_profiles.py:218` each cover 12 combinations: check, upload preflight and upload-page navigation × HTTP 403/503 × login/verification markers, asserting exit 1, retained HTTP status, zero submit clicks and owned-context cleanup.
+
+**S2 — Resolved.** Spec line 124 permits exit 10 on “明确未登录”; line 128 requires network/page faults to remain exit 1. Alipay now gates URL and DOM authentication evidence on recognized HTTP(S) hosts before using only the parsed path (`uploader/alipay_uploader/main.py:240–254`). Baijiahao applies the same origin/path boundary at `uploader/baijiahao_uploader/main.py:338–358`. Unrelated hosts, lookalike hosts, embedded trusted URLs and authentication-looking foreign DOM no longer become platform login/verification evidence. Authentication words only in a valid page's query do not mark the account invalid. The caller's unexpected-host diagnostics remain reachable.
+
+Tests at `tests/test_alipay_profiles.py:157` and `tests/test_baijiahao_profiles.py:167` exercise those cases through public check/upload preflight. Existing trusted-origin login/verification and interrupted-navigation cases still return exit 10. Trusted verification after a possibly dispatched click still retains `publish_attempted=true`; foreign post-submit redirects preserve exit 9 and exactly one click (`tests/test_alipay_profiles.py:212`, `tests/test_baijiahao_profiles.py:244`). Weibo's generic post-submit diagnosis remains active at `uploader/weibo_uploader/main.py:461–471`, avoiding the intermediate regression described in the disposition.
+
+**No unresolved Spec findings or regression introduced by these two fixes identified.** Managed detection/provider paths are unchanged by the inspected classification changes. This is a focused closure review, not a new broad review of unrelated pre-existing behavior.
+
+### Independent validation
+
+Created `/private/tmp/sau-spec-recheck-repro` with `git archive` of the candidate and copied tracked `conf.example.py` to its local `conf.py`. Ran 13 selected public-boundary regression/control methods with the existing project virtualenv and `PYTHONDONTWRITEBYTECODE=1`. The selection includes both HTTP-marker tests, both foreign-origin/query tests, both foreign-post-submit tests, trusted authentication controls for all three platforms, trusted post-submit controls for all three, and Weibo post-submit observation-fault protection.
+
+**Result: 13 tests, all passed, 1.470 seconds.** Log: `/private/tmp/sau-local-profile-notes/review-spec-recheck-tests.log`. These methods contain multiple synthetic scenarios; the method count is not presented as a scenario count. Tests use actual temporary Profile/session orchestration with external browser/page fakes, without browsers or platform calls. The previously reported 2,031-test cumulative run was not duplicated.
+
+The original integration and candidate worker were read-only throughout. No real account/Profile/user configuration/data/git changes or actual publication/deletion. No fixes made.

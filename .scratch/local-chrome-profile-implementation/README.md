@@ -123,3 +123,5 @@ Status: resolved
 - 2026-11-17：[20 最终已解决](./issues/20-final-convergence-and-no-publish-validation.md)。21–24 的全部追加要求已合入；最终隔离离线回归 2,025 项，2,023 passed / 2 个既有 opt-in skip，0 failures/errors；98 个真实浏览器用例分列引用既有执行记录，没有再次上传。原八个 no-publish、搬迁后四次 check、受影响 creator 两次 no-publish 的历史证据完整保留，普通 Instagram 只报告受控证据。父规格与索引标记实施验收完成，最终独立两轴审查仍待 root 执行。
 
 - 2026-11-17：最终两轴独立审查完成，固定审查快照为 `cc23b9d3`。同一新的隔离实施者处理 [Spec 的 2 项 P2](./research/final-review-spec.md)和 [Standards 的 3 项 P3、3 项维护性建议](./research/final-review-standards.md)；完整离线 2,031 项（2,029 passed / 2 个既有 opt-in skip，0 failures/errors）通过，沿用 98 项既有浏览器证据，无实际账号操作。原审查者候选复核、集成合并和 root 最终工作树清理仍待执行；本条不宣称这些后续动作完成。
+
+- 2026-11-17：原两轴审查者完成对 `e1ed1b6` 的独立候选复核，Spec S1/S2 与 Standards S1–S3/H1–H3 全部关闭。Spec 13 个公共边界方法 / 1.470s 全通过；Standards 2,210 个别名组合 0 差异，14 个 builder 转换等价且 26 个公共构造签名未变。复核原文追加在 [Spec 报告](./research/final-review-spec.md#original-spec-reviewer-recheck--complete-2026-11-17) 和 [Standards 报告](./research/final-review-standards.md#original-standards-reviewer-recheck--complete-2026-11-17)。审查与修复环节完成；集成合并和 root 最终工作树清理仍待执行。

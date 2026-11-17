@@ -292,4 +292,6 @@ Source: [决策地图](./map.md)
 
 两轴独立审查已针对 `47cc1850..cc23b9d3` 完成；[Spec 原始报告和修复证据](../local-chrome-profile-implementation/research/final-review-spec.md)列出并处理 2 项 P2，[Standards 原始报告和处置](../local-chrome-profile-implementation/research/final-review-standards.md)列出并处理 3 项 P3 与 3 项可选建议。已确诊 HTTP/页面故障保留退出 1 和原因；本地认证 URL/DOM 推断限定于平台认可来源，外站 login/verify 不再误报退出 10。合法认证、提交后 attempted/unknown、托管契约与原始别名兼容保留。
 
-同一新的隔离修复实施者完成公共 CLI RED/GREEN 和最终累计离线验证：2,031 项 / 126.637s，2,029 passed、2 个既有 opt-in 服务 skip，0 failures/errors；相同 98 个真实浏览器用例继续引用既有独立执行证据，无额外真实账号或上传操作。原审查者对修复候选的复核、集成合并及 root 的最终工作树清理仍待执行。本补充更新此前“独立审查待执行”的进度，不改写历史验收事实，也不扩大普通 Instagram 的受控证据范围。
+同一新的隔离修复实施者完成公共 CLI RED/GREEN 和最终累计离线验证：2,031 项 / 126.637s，2,029 passed、2 个既有 opt-in 服务 skip，0 failures/errors；相同 98 个真实浏览器用例继续引用既有独立执行证据，无额外真实账号或上传操作。原两轴审查者已独立复核候选 `e1ed1b6` 并关闭全部发现：Spec 的 13 个公共边界方法 / 1.470s 全通过；Standards 的 17 适配器 / 2,210 个别名组合无差异，14 个 builder 转换等价且 26 个公共构造签名未变。复核原文已追加在上述两个报告。
+
+**独立审查、修复及候选复核完成；集成合并与 root 的最终工作树清理仍待执行。** 本补充更新此前“独立审查待执行”的进度，不改写历史验收事实，也不扩大普通 Instagram 的受控证据范围。
