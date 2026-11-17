@@ -48,3 +48,15 @@ raise SystemExit(not result.wasSuccessful())
 - wheel 解压到 `/private/tmp` 隔离目录，确认 `utils.browser_session` 与 `uploader.tencent_uploader` 从解压包导入后执行 `RuntimeDistributionTests`，**3 tests 通过**。检查脚本首次误写 Bilibili 文件为 `main.py`，修正为实际 `runtime.py`；另一次临时目录 `/var` 与 `/private/var` 路径归一化断言已改用解析路径，无产品改动。
 - 更新当前规格/地图/索引、CLI 和安装打包说明。现有 TikTok/Tencent skill 与 agent bootstrap 已指向正式入口，视频号明确仅支持视频，没有旧实现指导，不加入无关实现细节。21 负责目录布局更新。
 - `git diff --check` 通过。未执行真实账号、登录、素材上传、发布、删除或 Profile 移动；本票不改共享持久化启动/路径行为，无需重复已有浏览器来源矩阵。
+
+## 集成前复核
+
+源实现提交 `470ca5f` 后先与当时集成 `a61628c` 对齐，107 项核心/包/交互门禁通过。随后合入含票 24 的最新集成 `05ee329`；仅规格与索引的相邻追加段落冲突，保留 22 删除授权和 24 no-publish 文案授权及各自证据，没有选择一侧覆盖另一侧。
+
+合并后执行：
+
+```sh
+python -m unittest tests.test_runtime_distribution tests.test_browser_session tests.test_adspower_browser_session tests.test_mlx_tencent_baijiahao tests.test_douyin_upload_seam tests.test_humanize.PlatformWideGateTests tests.test_tiktok_profile_cli tests.test_rednote_profile_cli tests.test_xhs_profile_cli -q
+```
+
+**165 tests 通过（5.858s）**。`git diff --check` 通过。

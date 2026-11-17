@@ -481,8 +481,11 @@ async def run(args):
         await upload_rednote_video(
             request, target=target, ignored_keys=ignored_keys
         )
-        outcome = "prepared (not published)" if request.no_publish else "submitted"
-        print(f"Rednote video upload {outcome}: {request.video_file}")
+        if request.no_publish:
+            print(f"Rednote video upload: {request.video_file}")
+            print("素材已上传，发布前检查已通过；已停止，未点击发布按钮。")
+        else:
+            print(f"Rednote video upload submitted: {request.video_file}")
         return 0
 
     if args.action == "upload-note":
@@ -511,8 +514,11 @@ async def run(args):
         await upload_rednote_note(
             request, target=target, ignored_keys=ignored_keys
         )
-        outcome = "prepared (not published)" if request.no_publish else "submitted"
-        print(f"Rednote note upload {outcome}: {len(request.image_files)} images")
+        if request.no_publish:
+            print(f"Rednote note upload: {len(request.image_files)} images")
+            print("素材已上传，发布前检查已通过；已停止，未点击发布按钮。")
+        else:
+            print(f"Rednote note upload submitted: {len(request.image_files)} images")
         return 0
 
     raise RuntimeError(f"Unsupported Rednote action: {args.action}")
