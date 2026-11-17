@@ -16,7 +16,7 @@ from utils.errors import LoginRequiredError, PublishResultUnknownError
 LOCAL_UPLOADS = (
     ("ks", "KSVideo"),
     ("ks", "KSNote"),
-    ("tencent", "TencentVideo"),
+    # TencentVideo persistent outcomes: test_tencent_profiles.
     ("tencent", "TencentNote"),
     ("alipay", "AlipayVideo"),
     ("weibo", "WeiBoVideo"),

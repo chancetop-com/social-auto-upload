@@ -48,7 +48,7 @@ uv pip install -e .
 
 ### 4. 按所选浏览器准备运行环境
 
-项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
+项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、视频号 已迁移到持久化 Profile；默认选择系统 Chrome，其他尚未迁移的平台仍保留原有 Chromium 要求。
 
 - **Chrome 路线**：用户从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 安装适合系统的 Chrome；项目使用 `channel="chrome"`，不会自动安装或更新它。macOS 选择相应 Apple 芯片或 Intel 版本。
 - **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。未迁移平台仍可能使用 headless shell，保留它们需要的 `uv run patchright install chromium` 安装方式。
@@ -71,8 +71,8 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`：非空时优先作为实际可执行文件。
-- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
-- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page 同样解析 headless，但完全忽略本地来源配置。
+- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、视频号 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
+- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、视频号 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`；其他待迁移平台保留旧 CLI 默认。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、视频号 同样解析 headless，但完全忽略本地来源配置。
 
 ### 6. 验证 CLI 是否可用
 
@@ -246,3 +246,7 @@ sau bilibili upload-video
 ### Facebook Page 持久化登录
 
 准备所选 Chrome/完整 Chromium 或自定义可执行文件后，运行 `sau facebook-page login --account creator --headed`，在 Business Suite 完成人工登录；正常关闭后用同配置 `sau facebook-page check --account creator --headed`。一个登录 Profile 可访问多个 Page，显式 `--page` 继续核验目标；与 Facebook 账号资料隔离。只有 login 引导登录，旧 JSON 不参与。安装成功、浏览器启动、登录有效分别验证；本票离线结果不代表真实账号已登录。无头模式仍需实际选定的完整浏览器。
+
+### 视频号持久化登录
+
+准备所选系统 Chrome、完整 Chromium 或自定义 binary 后，运行 `sau tencent login --account creator --headed` 完成微信扫码；正常关闭后同配置 `sau tencent check --account creator --headed`。保持原 conf.py；headless 显式参数优先，旧 JSON 不参与。登录、检查和视频预检共用持久化 Profile；只有 login 引导扫码。视频号无 `--no-publish`，离线/受控 DOM 验证不代表真实账号发布验收。
