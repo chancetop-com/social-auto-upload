@@ -95,7 +95,7 @@ class RednoteCliTests(unittest.TestCase):
                 self.assertEqual(request.account_name, "a")
                 self.assertEqual(request.tags, ["travel", "life"])
                 self.assertTrue(request.no_publish)
-                self.assertIn("not published", stdout.getvalue())
+                self.assertIn("素材已上传，发布前检查已通过；已停止，未点击发布按钮。", stdout.getvalue())
                 self.assertNotIn("submitted", stdout.getvalue())
 
     def test_managed_check_uses_provider_without_cookie_access(self):

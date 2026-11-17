@@ -82,7 +82,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(out.strip(), 'valid')
         self.assertEqual(self.pw.chromium.persistent_calls, [{
-            'user_data_dir': str(self.root / 'browser_profiles/xiaohongshu/creator/chrome'),
+            'user_data_dir': str(self.root / 'browser_profiles/chrome/xiaohongshu/creator'),
             'channel': 'chrome', 'headless': True, 'no_viewport': True}])
         self.assertTrue(self.context.closed)
         self.assertFalse(self.context.storage_state_calls)
@@ -99,7 +99,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 call = self.pw.chromium.persistent_calls[-1]
                 self.assertEqual(call['channel'], kind)
                 self.assertEqual(call['headless'], headless)
-                self.assertTrue(call['user_data_dir'].endswith('/creator/' + kind))
+                self.assertTrue(call['user_data_dir'].endswith('/' + kind + '/xiaohongshu/creator'))
         self.assertEqual(len(self.pw.chromium.persistent_calls), 3)
         self.assertFalse(self.pw.chromium.launch_calls)
         self.assertFalse(self.context.storage_state_calls)
@@ -158,7 +158,9 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 with FakeClock().patch(xhs, timeout, dom):
                     code, out, err = self.cli(action, '--account', 'creator', '--title', 'Title', '--headed', '--no-publish', *flags)
                 self.assertEqual(code, 0, err)
-                self.assertIn('prepared (not published)', out)
+                self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', out)
+                self.assertNotIn('prepared (not published)', out)
+                self.assertNotIn('upload submitted:', out)
                 self.assertEqual(len(self.pw.chromium.persistent_calls) - before, 1)
                 self.assertFalse(self.pw.chromium.persistent_calls[-1]['headless'])
                 self.assertEqual(page.locator(xhs.XHS_UPLOAD_INPUT_SELECTOR).files, [str(file)] if action == 'upload-video' else [[str(file)]])
@@ -168,6 +170,43 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 self.assertEqual(page.mouse.down_count, 0)
                 self.assertTrue(self.context.closed)
                 self.assertFalse(self.context.storage_state_calls)
+
+    def test_no_publish_failures_never_print_success_or_submit(self):
+        from tests.fakes import FakeManagedProvider, FakeBrowser
+        from tests.fakes_clock import FakeClock
+        from tests.test_xhs_submit import _note_page, _PublishButton
+        from tests.test_xhs_session import LOGIN_URL
+        from utils import dom
+        import uploader.publish_timeout as timeout
+        self.profile()
+        media = self.root / 'media.mp4'; media.write_bytes(b'fixture')
+        image = self.root / 'image.png'; image.write_bytes(b'fixture')
+        for action, flags in [('upload-video', ['--file', str(media)]), ('upload-note', ['--images', str(image)])]:
+            for state, managed, expected in [('unready', False, 1), ('login', False, 10), ('login', True, 10)]:
+                with self.subTest(action=action, state=state, managed=managed):
+                    page = _note_page(_PublishButton(enabled=False))
+                    page._evaluate_handler = lambda expression, arg: {'since': 10_000} if 'performance.now' in str(expression) else True
+                    self.context.page_factory = lambda: page
+                    if state == 'login':
+                        navigate = page.goto
+                        async def login_redirect(url, **kwargs):
+                            await navigate(url, **kwargs)
+                            page.url = page.main_frame.url = LOGIN_URL
+                        page.goto = login_redirect
+                    provider = FakeManagedProvider() if managed else None
+                    if managed:
+                        self.pw.chromium.queue_connect_browser(FakeBrowser([self.context]))
+                    with patch.object(command, 'resolve_managed_provider', return_value=provider), FakeClock().patch(xhs, timeout, dom):
+                        code, out, err = self.cli(action, '--account', 'creator', '--title', 'Title', '--no-publish', *flags)
+                    self.assertEqual(code, expected, err)
+                    self.assertEqual(out, '')
+                    self.assertNotIn('publish_attempted=true', err)
+                    self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+                    self.assertEqual(page.mouse.down_count, 0)
+                    if state == 'unready':
+                        self.assertGreater(len(page.locator('xhs-publish-btn').evaluate_calls), 0)
+                    if managed:
+                        self.assertEqual(provider.stop_calls, 1)
 
     def test_missing_profile_and_platform_failures_have_distinct_exits(self):
         self.assertEqual(self.cli('check', '--account', 'creator')[0], 10)
@@ -257,6 +296,8 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
             with FakeClock().patch(xhs, timeout, dom):
                 code, out, err = self.cli('upload-note', '--account', 'creator', '--title', 'Title', '--images', str(image))
             self.assertEqual(code, expected, err)
+            if expected == 0:
+                self.assertEqual(out, 'Xiaohongshu note upload submitted: 1 images\n')
             self.assertEqual(button.click_count, 1)
             if expected == 10: self.assertIn('publish_attempted=true', err)
 
@@ -290,6 +331,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.context.page_factory = LoginPage
         def callback(info):
             self.assertTrue(Path(info['image_path']).exists())
+            self.assertEqual(Path(info['image_path']).parent, self.root / 'browser_profiles/chrome/xiaohongshu/creator')
             raise ValueError('QR delivery failed')
         with self.assertRaisesRegex(ValueError, 'QR delivery failed'):
             asyncio.run(xhs.xiaohongshu_setup(account_name='creator', handle=True, qrcode_callback=callback))
@@ -314,7 +356,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         call = self.pw.chromium.persistent_calls[0]
         self.assertEqual(call['executable_path'], str(executable))
         self.assertNotIn('channel', call)
-        self.assertTrue(call['user_data_dir'].endswith('/creator/chrome'))
+        self.assertTrue(call['user_data_dir'].endswith('/chrome/xiaohongshu/creator'))
 
     def test_managed_video_and_note_preserve_ignored_options_and_no_publish(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser
@@ -343,7 +385,8 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
             finally:
                 logger.remove(sink)
             self.assertEqual(code, 0, err)
-            self.assertIn('upload submitted:', out)
+            self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', out)
+            self.assertNotIn('upload submitted:', out)
             self.assertEqual(provider.start_calls, [False])
             self.assertEqual(provider.stop_calls, 1)
             self.assertFalse(context.closed)

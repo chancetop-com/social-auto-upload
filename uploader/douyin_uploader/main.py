@@ -15,7 +15,6 @@ from patchright.async_api import async_playwright
 from conf import BASE_DIR
 from uploader.base_video import BaseVideoUploader
 from utils.text_validation import validate_single_line
-from utils.base_social_media import set_init_script
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_time import page_wall_clock

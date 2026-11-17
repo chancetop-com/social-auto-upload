@@ -4,7 +4,7 @@
 
 `sau_commands/zhihu.py` 声明 CLI；本目录的 `session.py`、`article.py`、`video.py`、`schedule.py`、`verification.py` 分别处理会话、文章、视频、定时和原作品查询。使用说明见 `skills/zhihu-upload/SKILL.md`。
 
-本地会话由 `utils.local_browser_session` 持有 `browser_profiles/zhihu/<原始别名>/<chrome|chromium>/` 的锁和生命周期，预检与业务共用 context；注入 session 的调用不自行关闭。没有 Cookie JSON 恢复/导出或身份旁文件门槛。`session.py::PROFILE_IMAGE` 从当次页头读取 name/avatar_path；只校验必要字段，不作永久绑定或前后防换号比较。verify 仍核对历史结果的账号证据与标题。结果位置保持 `cookies/zhihu_results/`（直接调用保留 account_file 父目录约定）。
+本地会话由 `utils.local_browser_session` 持有 `browser_profiles/<chrome|chromium>/zhihu/<原始别名>/` 的锁和生命周期，预检与业务共用 context；注入 session 的调用不自行关闭。没有 Cookie JSON 恢复/导出或身份旁文件门槛。`session.py::PROFILE_IMAGE` 从当次页头读取 name/avatar_path；只校验必要字段，不作永久绑定或前后防换号比较。verify 仍核对历史结果的账号证据与标题。结果位置保持 `cookies/zhihu_results/`（直接调用保留 account_file 父目录约定）。
 
 默认 Chrome 有头、no_viewport；来源与 headless 均由共享解析器决定。只有 login 使用 create=True；业务明确未登录/验证退出 10，HTTP/字段/页面故障退出 1。提交后保留 publish_attempted，未知结果退出 9；所有本地页面交给持久 context 有界清理。reset-profile 使用共享精确重建入口，不自动恢复或重发旧任务。
 

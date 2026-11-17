@@ -13,7 +13,7 @@ sau rednote check --account creator
 
 有头登录保留网页默认的短信入口，用户也可以切到扫码；等待命令显示登录成功后再关闭窗口。无头登录 `--headless` 输出二维码。CLI 的测试浏览器和日常 Chrome 是不同会话，日常 Chrome 已登录不代表 CLI 已登录。
 
-本地身份只保存在 `browser_profiles/rednote/<原始别名>/<chrome|chromium>` 的专用持久化 Profile，与日常浏览器、小红书及另一浏览器种类隔离。默认系统 Chrome、有头、自然窗口尺寸；`--local-browser chromium` 选择项目 Patchright 配套的完整 Chromium，`LOCAL_CHROME_PATH` 覆盖选择。显式 `--headed` / `--headless` 优先于 `conf.py` 的 `LOCAL_CHROME_HEADLESS`，未配置时为有头；保留已有配置。登录、检查、内部预检和发布采用同一来源与 Profile。仅需安装实际选择的浏览器，安装见 [运行环境](./install.md#4-按所选浏览器准备运行环境)。
+本地身份只保存在 `browser_profiles/<chrome|chromium>/rednote/<原始别名>` 的专用持久化 Profile，与日常浏览器、小红书及另一浏览器种类隔离。默认系统 Chrome、有头、自然窗口尺寸；`--local-browser chromium` 选择项目 Patchright 配套的完整 Chromium，`LOCAL_CHROME_PATH` 覆盖选择。显式 `--headed` / `--headless` 优先于 `conf.py` 的 `LOCAL_CHROME_HEADLESS`，未配置时为有头；保留已有配置。登录、检查、内部预检和发布采用同一来源与 Profile。仅需安装实际选择的浏览器，安装见 [运行环境](./install.md#4-按所选浏览器准备运行环境)。
 
 普通命令不读取、导入、导出或删除旧 Cookie JSON。只有 `login` 引导登录；缺少 Profile、明确未登录或人机验证退出 `10`，网络、页面结构或浏览器故障退出 `1`。登录有效性由发布页上传入口确认；目录存在不代表已登录。账号别名可以重新登录其他真实账号，两种浏览器也可以使用不同账号。
 
@@ -35,7 +35,7 @@ sau rednote upload-note --account creator \
   --note "Photo description" --tags travel,life --no-publish
 ```
 
-`--no-publish` 仍会向 Rednote 上传素材并填写内容，到发布按钮就绪后停止，不点击发布。去掉它才会实际提交。准备成功时 CLI 输出 `prepared (not published)`。
+`--no-publish` 仍会向 Rednote 上传素材并填写内容，到发布按钮就绪后停止，不点击发布。去掉它才会实际提交。本地和托管模式成功时 CLI 均输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。
 
 第一版参数与小红书一致：视频 `--thumbnail`、原创/内容类型声明、`--schedule`（UTC、精确到分钟）、`--not-before`（UTC、可精确到秒）等。完整参数以 `sau rednote upload-video --help` / `upload-note --help` 为准。显式封面和声明必须设置、回读成功，否则停止在发布前；不静默换用首帧或省略声明。来源声明还要核对确认后显示的媒体名称或拍摄日期/地点，不能只检查类型名称。`--shoot-location` 使用候选中的完整地点名称；只匹配名称，不把地址或名称前缀的包含关系当成匹配，重名时停止。定时在填写后及发布前检查开关和分钟值。话题以最终 `data-topic` 回读为准，包括页面自动转换；错词或重复插入会停止。标题长度、正文长度、标签数及定时窗口仍沿用小红书限制。
 

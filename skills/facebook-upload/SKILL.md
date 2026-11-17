@@ -27,7 +27,7 @@ sau facebook upload-video --account creator --file videos/demo.mp4 --title "标�
 sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图文标题" --note "正文"
 ```
 
-登录、检查、视频/图文及作品管理均使用 `browser_profiles/facebook/<原始别名>/<chrome|chromium>`；浏览器保存登录态，旧 Cookie JSON 不读取、不导入或导出。与 `facebook-page` 的 Profile 完全隔离。别名允许重新登录其他真实账号，两类浏览器也可使用不同账号；原作者/作品证据仍须核对。`check` 验证个人主页登录态，不代表 Page 权限或作品发布结果。标题、正文、标签合并为一段配文。当前支持立即发布，未接入个人主页定时；Page 使用独立 `facebook-page` 命令。
+登录、检查、视频/图文及作品管理均使用 `browser_profiles/<chrome|chromium>/facebook/<原始别名>`；浏览器保存登录态，旧 Cookie JSON 不读取、不导入或导出。与 `facebook-page` 的 Profile 完全隔离。别名允许重新登录其他真实账号，两类浏览器也可使用不同账号；原作者/作品证据仍须核对。`check` 验证个人主页登录态，不代表 Page 权限或作品发布结果。标题、正文、标签合并为一段配文。当前支持立即发布，未接入个人主页定时；Page 使用独立 `facebook-page` 命令。
 
 取得原作品链接后管理作品：
 

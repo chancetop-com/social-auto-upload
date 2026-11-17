@@ -24,7 +24,7 @@ sau alipay upload-video --account creator --file videos/demo.mp4 --title "标题
 
 ## 本地浏览器与登录
 
-本地 login/check/upload-video 和直接 uploader 共用 `browser_profiles/alipay/<原始别名>/<chrome|chromium>`。默认系统 Chrome、有头；只需准备所选浏览器。选择完整 Chromium 时执行 `uv run patchright install --no-shell chromium` 并传 `--local-browser chromium`。`LOCAL_CHROME_PATH` 非空时优先并按实际浏览器种类选择资料；否则 `--local-browser` > `LOCAL_BROWSER` > chrome。显式 headed/headless 或直接调用布尔值 > `LOCAL_CHROME_HEADLESS` > False，保留用户现有 conf.py。失败不换来源/模式，不固定窗口或改语言；生活号 qiankun 微应用保持无 stealth。
+本地 login/check/upload-video 和直接 uploader 共用 `browser_profiles/<chrome|chromium>/alipay/<原始别名>`。默认系统 Chrome、有头；只需准备所选浏览器。选择完整 Chromium 时执行 `uv run patchright install --no-shell chromium` 并传 `--local-browser chromium`。`LOCAL_CHROME_PATH` 非空时优先并按实际浏览器种类选择资料；否则 `--local-browser` > `LOCAL_BROWSER` > chrome。显式 headed/headless 或直接调用布尔值 > `LOCAL_CHROME_HEADLESS` > False，保留用户现有 conf.py。失败不换来源/模式，不固定窗口或改语言；生活号 qiankun 微应用保持无 stealth。
 
 浏览器自行保存状态，旧 Cookie JSON 不读写、不导入、不删除。别名可以重新登录其他真实账号，两种浏览器各自登录。只有 login 引导扫码；它保留二维码回调并以内容创作入口确认成功。先 login、正常关闭，再同配置 check。缺少 Profile、登录页/iframe 或验证退出 10（验证为 reason=verification）；网络、HTTP、超时、页面结构、权限或必需字段故障退出 1。退出 10 安排人工登录/验证；若有 publish_attempted=true，先核查作品。退出 9 表示发布结果未知，禁止自动重发；已派发后只观察，不因 AIGC 提示补点发布。
 

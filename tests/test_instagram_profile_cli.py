@@ -122,7 +122,7 @@ class InstagramProfileCliTests(unittest.TestCase):
         code, _, err = self.run_cli('check', '--account', 'Creator', '--proxy', 'http://localhost:7890')
         self.assertEqual(code, 0, err)
         self.assertEqual(self.pw.chromium.persistent_calls, [{
-            'user_data_dir': str(self.root / 'browser_profiles/instagram/Creator/chrome'),
+            'user_data_dir': str(self.root / 'browser_profiles/chrome/instagram/Creator'),
             'channel':'chrome', 'headless':True, 'no_viewport':True,
             'proxy':{'server':'http://localhost:7890'},
         }])
@@ -139,7 +139,7 @@ class InstagramProfileCliTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual([c['headless'] for c in calls], [True, False, True])
         self.assertEqual(calls[0]['user_data_dir'], calls[1]['user_data_dir'])
-        self.assertTrue(calls[2]['user_data_dir'].endswith('/chromium'))
+        self.assertTrue(calls[2]['user_data_dir'].endswith('/chromium/instagram/Creator'))
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse((self.root / 'cookies').exists())
 
@@ -319,7 +319,7 @@ class InstagramProfileCliTests(unittest.TestCase):
                 self.assertEqual(self.run_cli('verify', '--post-url', 'https://www.instagram.com/p/ABC/', '--expected-text', 'original caption')[0], 2)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 4)
         for call in self.pw.chromium.persistent_calls:
-            self.assertTrue(call['user_data_dir'].endswith('/instagram/Creator/chromium'))
+            self.assertTrue(call['user_data_dir'].endswith('/chromium/instagram/Creator'))
             self.assertEqual(call['proxy'], {'server':'http://localhost:7890'})
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse((self.root / 'cookies').exists())
@@ -443,8 +443,8 @@ class InstagramProfileCliTests(unittest.TestCase):
             code, _, err = self.run_cli('reset-profile', '--account', 'Creator', '--browser-kind', 'chrome')
         self.assertEqual(code, 0, err)
         self.assertEqual(len(self.pw.chromium.persistent_calls), calls)
-        self.assertTrue((self.root / 'browser_profiles/instagram/Creator/chromium').exists())
-        self.assertFalse((self.root / 'browser_profiles/instagram/Creator/chrome').exists())
+        self.assertTrue((self.root / 'browser_profiles/chromium/instagram/Creator').exists())
+        self.assertFalse((self.root / 'browser_profiles/chrome/instagram/Creator').exists())
 
     def test_http_failure_is_not_a_valid_login_even_with_residual_navigation(self):
         self.profile()

@@ -14,7 +14,7 @@ summary: 发布雪球 HTML、Markdown 或 TXT 长文并核验结果。
 
 ## 账号及输入
 
-- 已有账号执行 `sau xueqiu check --account <别名>`。首次使用执行 `sau xueqiu login --account <别名> --expected-name "用户指定昵称"`，在所选浏览器中登录，正常关闭后用同配置 check。会话保存在 `browser_profiles/xueqiu/<原始别名>/<chrome|chromium>`；别名允许换号，旧 Cookie JSON/身份旁文件不再读写或自动迁移。`--expected-name` 核对本次明确要求，verify 仍核对历史作品作者。账号密码由用户在网页输入；Codex 内置浏览器登录不代表 CLI Profile 已登录。
+- 已有账号执行 `sau xueqiu check --account <别名>`。首次使用执行 `sau xueqiu login --account <别名> --expected-name "用户指定昵称"`，在所选浏览器中登录，正常关闭后用同配置 check。会话保存在 `browser_profiles/<chrome|chromium>/xueqiu/<原始别名>`；别名允许换号，旧 Cookie JSON/身份旁文件不再读写或自动迁移。`--expected-name` 核对本次明确要求，verify 仍核对历史作品作者。账号密码由用户在网页输入；Codex 内置浏览器登录不代表 CLI Profile 已登录。
 - 必须提供非空单行 `--title`、UTF-8 HTML/Markdown/TXT `--content-file` 和与实际创作方式相符的 `--declaration`。声明选择 `不添加创作声明` 或 `本文包含AI生成内容`，不要替用户猜测。
 - `--visibility` 为 `公开` 或 `私人`，默认公开。正文图片通过 HTML 的 `img` 或 Markdown 图片写在原稿对应位置，相对路径基于原稿目录；没有 `--images` 文末追加参数。独立封面用 `--cover`，采用平台默认裁剪。图片接受本地 GIF/JPEG/PNG，不接受远端或 data URL。
 - 雪球各级标题统一为平台小标题，保留段落、加粗、斜体、链接；列表转换为带编号或圆点的段落。自定义 CSS 不保证保留。表格、代码块等未验证结构在创建远端草稿前报错。Markdown 首次使用需运行 `sau article setup`，详见使用说明。

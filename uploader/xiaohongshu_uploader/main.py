@@ -1594,7 +1594,7 @@ async def xiaohongshu_cookie_gen(
         ) as session:
             context = session.context
             # Profile ownership has validated the raw alias before path use.
-            profile_path = Path(conf.BASE_DIR) / "browser_profiles" / "xiaohongshu" / account / config.kind
+            profile_path = Path(conf.BASE_DIR) / "browser_profiles" / config.kind / "xiaohongshu" / account
             qrcode_path = None
             try:
                 page = await context.new_page()

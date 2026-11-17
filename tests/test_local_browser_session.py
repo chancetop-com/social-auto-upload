@@ -22,7 +22,7 @@ class LocalBrowserSessionTests(unittest.IsolatedAsyncioTestCase):
             async with local_browser_session(playwright, platform='tiktok', account='Creator', headless=True, profile_root=root):
                 pass
             calls = playwright.chromium.persistent_calls
-            self.assertEqual(calls[0], {'user_data_dir': str(Path(root).resolve() / 'tiktok' / 'Creator' / 'chrome'), 'channel': 'chrome', 'headless': False, 'no_viewport': True})
+            self.assertEqual(calls[0], {'user_data_dir': str(Path(root).resolve() / 'chrome' / 'tiktok' / 'Creator'), 'channel': 'chrome', 'headless': False, 'no_viewport': True})
             self.assertEqual(calls[1]['user_data_dir'], calls[0]['user_data_dir'])
             self.assertTrue(calls[1]['headless'])
 
@@ -49,7 +49,7 @@ class LocalBrowserSessionTests(unittest.IsolatedAsyncioTestCase):
             call = playwright.chromium.persistent_calls[0]
             self.assertEqual(call['executable_path'], str(executable.resolve()))
             self.assertNotIn('channel', call)
-            self.assertTrue(call['user_data_dir'].endswith('/chromium'))
+            self.assertTrue(call['user_data_dir'].endswith('/chromium/tiktok/creator'))
 
     async def test_cleanup_failure_preserves_success_and_primary_error_then_releases_lease(self):
         from tests.fakes import FakeContext

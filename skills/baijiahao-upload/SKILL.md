@@ -20,7 +20,7 @@ sau baijiahao upload-video --account creator --file videos/demo.mp4 --thumbnail 
 
 当前仅支持视频，必须用 `--thumbnail` 指定横版封面，可选 `--collection` 指定已有合集；支持 `--not-before` 客户端发布闸门，不支持图文、原生 `--schedule` 或 `--no-publish`。登录出现二维码时把二维码图片展示给用户，等待扫码或人工验证；正常关闭后用同一配置 check。
 
-本地 login/check/upload-video 和直接调用共用 `browser_profiles/baijiahao/<原始别名>/<chrome|chromium>`，浏览器自动持久化状态；旧 JSON 不读写或迁移。默认系统 Chrome、有头；只需安装所选来源，显式 Chromium 用项目固定 Patchright 的完整浏览器：`uv run patchright install --no-shell chromium`。自定义 `LOCAL_CHROME_PATH` 优先并按实际产品种类选资料，否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。失败不回退，不修改语言或固定窗口。
+本地 login/check/upload-video 和直接调用共用 `browser_profiles/<chrome|chromium>/baijiahao/<原始别名>`，浏览器自动持久化状态；旧 JSON 不读写或迁移。默认系统 Chrome、有头；只需安装所选来源，显式 Chromium 用项目固定 Patchright 的完整浏览器：`uv run patchright install --no-shell chromium`。自定义 `LOCAL_CHROME_PATH` 优先并按实际产品种类选资料，否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。失败不回退，不修改语言或固定窗口。
 
 别名只管理资料，可以登录其他真实账号，两类浏览器各自登录。只有 login 引导登录/验证；其他动作缺少 Profile、明确未登录或验证码退出 10（验证保留 reason=verification），网络、权限、页面和必要字段故障退出 1。重建指定资料：`sau baijiahao reset-profile --account creator --browser-kind chrome`，无需 binary，保留另一浏览器、旧文件和历史结果；之后重新 login。Profile 占用时先结束占用者，不强制接管。
 

@@ -58,9 +58,9 @@ class LocalProfileTests(unittest.TestCase):
              patch.object(conf, "LOCAL_BROWSER", "invalid-unused-value", create=True):
             code, out, err = self.run_reset()
         self.assertEqual((code, err), (0, ""))
-        self.assertIn(str(self.root / "tiktok" / "Creator 名" / "chrome"), out)
+        self.assertIn(str(self.root / "chrome" / "tiktok" / "Creator 名"), out)
         self.assertIn("login", out)
-        self.assertFalse((self.root / "tiktok" / "Creator 名" / "chrome").exists())
+        self.assertFalse((self.root / "chrome" / "tiktok" / "Creator 名").exists())
 
     def test_reset_removes_only_selected_browser_and_preserves_readable_alias(self):
         from utils.local_profile import acquire_local_profile
@@ -70,7 +70,7 @@ class LocalProfileTests(unittest.TestCase):
                                       ("tiktok", "Other", "chrome"),
                                       ("rednote", account, "chrome")):
             with acquire_local_profile(platform, label, kind, create=True) as profile:
-                self.assertEqual(profile.path, self.root / platform / label / kind)
+                self.assertEqual(profile.path, self.root / kind / platform / label)
                 (profile.path / "session-data").write_text("browser state")
         legacy = self.base / "cookies" / "tiktok_old.json"
         legacy.parent.mkdir()
@@ -79,7 +79,7 @@ class LocalProfileTests(unittest.TestCase):
         result.write_text("historical work")
         code, out, err = self.run_reset(account=account)
         self.assertEqual((code, err), (0, ""))
-        self.assertFalse((self.root / "tiktok" / account / "chrome").exists())
+        self.assertFalse((self.root / "chrome" / "tiktok" / account).exists())
         for platform, label, kind in (("tiktok", account, "chromium"),
                                       ("tiktok", "Other", "chrome"),
                                       ("rednote", account, "chrome")):
@@ -101,7 +101,7 @@ class LocalProfileTests(unittest.TestCase):
         self.assertFalse(self.root.exists())
 
     def test_reset_refuses_unowned_directory_without_deleting_contents(self):
-        target = self.root / "tiktok" / "Creator 名" / "chrome"
+        target = self.root / "chrome" / "tiktok" / "Creator 名"
         target.mkdir(parents=True)
         (target / "untouched").write_text("unknown owner")
         code, out, err = self.run_reset()
@@ -113,7 +113,7 @@ class LocalProfileTests(unittest.TestCase):
         from utils.local_profile import acquire_local_profile
         with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True) as profile:
             (profile.path / "state").write_text("preserve")
-        for relative in ("", "tiktok", "tiktok/Creator 名", "tiktok/Creator 名/chrome"):
+        for relative in ("", "chrome", "chrome/tiktok", "chrome/tiktok/Creator 名", ".guards", ".guards/chrome", ".guards/chrome/tiktok", ".guards/chrome/tiktok/Creator 名"):
             target = self.root / relative
             outside = self.base / "outside"
             target.rename(outside)
@@ -166,6 +166,10 @@ class LocalProfileTests(unittest.TestCase):
         with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True) as profile:
             (profile.path / "state").write_text("partially removed")
         def partial_delete(path):
+            competitor = subprocess.run(self.child_command(mode="once"), capture_output=True,
+                                        text=True, timeout=3, cwd=Path(__file__).resolve().parents[1])
+            self.assertEqual(competitor.returncode, 1)
+            self.assertIn("占用", competitor.stderr)
             for child in Path(path).iterdir():
                 child.unlink()
             raise PermissionError("synthetic filesystem denial")
@@ -173,6 +177,10 @@ class LocalProfileTests(unittest.TestCase):
             code, out, err = self.run_reset()
         self.assertEqual(code, 1)
         self.assertIn("未完成", err)
+        competitor = subprocess.run(self.child_command(mode="once"), capture_output=True,
+                                    text=True, timeout=3, cwd=Path(__file__).resolve().parents[1])
+        self.assertEqual(competitor.returncode, 1)
+        self.assertIn("未完成", competitor.stderr)
         for create in (False, True):
             with self.assertRaisesRegex(RuntimeError, "未完成"):
                 with acquire_local_profile("tiktok", "Creator 名", "chrome", create=create):
@@ -221,7 +229,7 @@ class LocalProfileTests(unittest.TestCase):
         with acquire_local_profile("tiktok", "Creator 名", "chrome") as profile:
             self.assertTrue(profile.exists)
         # A diagnostic file remains, but it must not be interpreted as a live lock.
-        self.assertTrue(list(profile.path.parent.glob("*.lock")))
+        self.assertTrue(list(profile.guard_path.glob("*.lock")))
         self.assertEqual(self.run_reset()[0], 0)
         self.assertIsNone(other_kind.poll())
         self.assertIsNone(other_alias.poll())
@@ -231,8 +239,9 @@ class LocalProfileTests(unittest.TestCase):
         for original, alternate in (("Creator", "creator"), ("Café", unicodedata.normalize("NFD", "Café"))):
             with self.subTest(original=original):
                 first = self.start_holder(account=original)
-                alias_dir = self.root / "tiktok" / alternate
-                if alias_dir.exists():
+                alias_dir = self.root / "chrome" / "tiktok" / alternate
+                equivalent = alias_dir.exists()
+                if equivalent:
                     code, out, err = self.run_reset(account=alternate)
                     self.assertEqual(code, 1, err)
                     self.assertIn("归属冲突", err)
@@ -245,13 +254,19 @@ class LocalProfileTests(unittest.TestCase):
                         self.assertTrue(profile.exists)
                 first.communicate("release\n", timeout=5)
                 self.assertEqual(first.returncode, 0)
+                self.assertEqual(self.run_reset(account=original)[0], 0)
+                if equivalent:
+                    competitor = subprocess.run(self.child_command(account=alternate, mode="once"),
+                        capture_output=True, text=True, timeout=3, cwd=Path(__file__).resolve().parents[1])
+                    self.assertEqual(competitor.returncode, 1)
+                    self.assertIn("归属冲突", competitor.stderr)
 
     def test_missing_corrupt_or_conflicting_ownership_is_never_claimed(self):
         from utils.local_profile import acquire_local_profile
         with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True) as profile:
             (profile.path / "state").write_text("preserve")
-        for metadata in (self.root / ".tiktok.owner.json", profile.path.parent / ".sau-owner.json",
-                         profile.path / ".sau-owner.json"):
+        for metadata in (self.root / ".chrome.owner.json", self.root / ".guards/chrome/.tiktok.owner.json",
+                         profile.guard_path / ".sau-owner.json", profile.guard_path / "profile.owner.json"):
             valid = metadata.read_bytes()
             for bad in (None, b"not json", b'{"platform": "wrong"}'):
                 with self.subTest(metadata=metadata, bad=bad):
@@ -291,7 +306,7 @@ class LocalProfileTests(unittest.TestCase):
     def test_equivalent_root_spelling_cannot_bypass_profile_lock(self):
         from utils.local_profile import acquire_local_profile
         first = self.start_holder()
-        equivalent_root = self.root / "tiktok" / ".."
+        equivalent_root = self.root / "chrome" / ".."
         with self.assertRaisesRegex(RuntimeError, "占用"):
             with acquire_local_profile("tiktok", "Creator 名", "chrome", root=equivalent_root):
                 self.fail("resolved directory has an active owner")
@@ -308,18 +323,18 @@ class LocalProfileTests(unittest.TestCase):
 
     def test_metadata_names_do_not_reserve_otherwise_valid_account_aliases(self):
         from utils.local_profile import acquire_local_profile
-        for alias in (".sau-owner.json", ".layout.lock", ".chrome.lock"):
+        for alias in (".sau-owner.json", ".layout.lock", ".chrome.lock", ".guards", "profile.lock", "profile.owner.json", "resetting.json"):
             with acquire_local_profile("tiktok", alias, "chrome", create=True) as profile:
-                self.assertEqual(profile.path, self.root / "tiktok" / alias / "chrome")
+                self.assertEqual(profile.path, self.root / "chrome" / "tiktok" / alias)
             self.assertEqual(self.run_reset(account=alias)[0], 0)
 
-    def test_reset_retry_refuses_surviving_conflicting_or_corrupt_leaf_ownership(self):
+    def test_reset_retry_refuses_surviving_conflicting_or_corrupt_external_ownership(self):
         from utils.local_profile import acquire_local_profile
         with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True) as profile:
             (profile.path / "state").write_text("preserve conflicting data")
         with patch("shutil.rmtree", side_effect=PermissionError("synthetic denial")):
             self.assertEqual(self.run_reset()[0], 1)
-        metadata = profile.path / ".sau-owner.json"
+        metadata = profile.guard_path / "profile.owner.json"
         valid = metadata.read_bytes()
         for bad in (b'{"platform": "other"}', b"corrupt"):
             metadata.write_bytes(bad)
@@ -335,13 +350,25 @@ class LocalProfileTests(unittest.TestCase):
         from utils.local_profile import acquire_local_profile
         with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True) as profile:
             pass
-        metadata = profile.path / ".sau-owner.json"
+        metadata = profile.guard_path / "profile.owner.json"
         metadata.unlink()
         os.mkfifo(metadata)
         child = subprocess.run(self.child_command(mode="once"), capture_output=True, text=True,
                                timeout=3, cwd=Path(__file__).resolve().parents[1])
         self.assertEqual(child.returncode, 1)
         self.assertIn("归属", child.stderr)
+
+    def test_missing_data_never_overwrites_conflicting_external_ownership(self):
+        from utils.local_profile import acquire_local_profile
+        with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True) as profile:
+            pass
+        profile.path.rmdir()
+        metadata = profile.guard_path / "profile.owner.json"
+        metadata.write_text('{"platform":"another"}')
+        with self.assertRaisesRegex(RuntimeError, "归属冲突"):
+            with acquire_local_profile("tiktok", "Creator 名", "chrome", create=True):
+                self.fail("missing data must not overwrite contradictory ownership")
+        self.assertFalse(profile.path.exists())
 
     def test_reset_requires_explicit_target_and_has_no_browser_runtime_flags(self):
         for arguments in (("--browser-kind", "chrome"), ("--account", "Creator")):
@@ -358,7 +385,7 @@ class LocalProfileTests(unittest.TestCase):
         code, out, err = self.run_reset(account=alias)
         self.assertEqual(code, 1)
         self.assertIn(alias, err)
-        self.assertFalse(any((self.root / "tiktok").iterdir()))
+        self.assertFalse(any((self.root / "chrome" / "tiktok").iterdir()))
 
 
 if __name__ == "__main__":

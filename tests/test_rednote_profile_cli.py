@@ -160,7 +160,9 @@ class RednoteProfileCliTests(unittest.TestCase):
         self.assertGreater(button.box_calls, 0)
         self.assertEqual(button.click_count, 0)
         self.assertEqual(page.mouse.down_count, 0)
-        self.assertIn('not published', stdout)
+        self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', stdout)
+        self.assertNotIn('prepared (not published)', stdout)
+        self.assertNotIn('upload submitted:', stdout)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 1)
         self.assertFalse(self.pw.chromium.launch_calls)
         self.assertFalse(self.context.browser.new_context_calls)
@@ -176,6 +178,36 @@ class RednoteProfileCliTests(unittest.TestCase):
         code, out, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Profile note', '--note', 'Note body', '--no-publish')
         self.assertEqual(code, 0, err)
         self.assert_editor_stopped(page, media, 'Profile note', 'Note body', out)
+
+    def test_no_publish_failures_never_print_success_or_submit(self):
+        from tests.fakes import FakeManagedProvider, FakeBrowser
+        from tests.fakes_clock import FakeClock
+        from tests.test_xhs_submit import _note_page, _PublishButton
+        from utils import dom
+        import uploader.publish_timeout as timeout
+        media = self.root / 'media.mp4'; media.write_bytes(b'fixture')
+        image = self.root / 'image.png'; image.write_bytes(b'fixture')
+        for action, flags in [('upload-video', ['--file', str(media)]), ('upload-note', ['--images', str(image)])]:
+            for state, managed, expected in [('unready', False, 1), ('login', False, 10), ('login', True, 10)]:
+                with self.subTest(action=action, state=state, managed=managed):
+                    page = _note_page(_PublishButton(enabled=False))
+                    self.prepare_editor(page)
+                    self.context.created_pages = []
+                    self.context.state = 'login' if state == 'login' else 'valid'
+                    provider = FakeManagedProvider() if managed else None
+                    if managed:
+                        self.pw.chromium.queue_connect_browser(FakeBrowser([self.context]))
+                    with patch.object(command, 'resolve_managed_provider', return_value=provider), FakeClock().patch(rednote, timeout, dom):
+                        code, out, err = self.cli(action, '--account', 'creator', '--title', 'Title', '--no-publish', *flags)
+                    self.assertEqual(code, expected, err)
+                    self.assertEqual(out, '')
+                    self.assertNotIn('publish_attempted=true', err)
+                    self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+                    self.assertEqual(page.mouse.down_count, 0)
+                    if state == 'unready':
+                        self.assertGreater(page.locator('xhs-publish-btn').box_calls, 0)
+                    if managed:
+                        self.assertEqual(provider.stop_calls, 1)
 
     def test_check_distinguishes_missing_login_verification_and_probe_failures(self):
         code, _, err = self.cli('check', '--account', 'creator')
@@ -317,7 +349,9 @@ class RednoteProfileCliTests(unittest.TestCase):
                 self.context.created_pages = []
                 self.context.close_error = OSError('cleanup failed')
                 with patch.object(rednote, 'REDNOTE_OBSERVE_WINDOW_SECONDS', 0):
-                    code, _, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Title')
+                    code, out, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Title')
+                if expected == 0:
+                    self.assertEqual(out, 'Rednote note upload submitted: 1 images\n')
                 self.assertEqual(code, expected, err)
                 self.assertEqual(page._selectors['xhs-publish-btn'].click_count, 1)
                 self.assertEqual('publish_attempted=true' in err, outcome in ('login', 'verification'))
@@ -349,32 +383,42 @@ class RednoteProfileCliTests(unittest.TestCase):
     def test_managed_upload_keeps_ignored_option_logs_and_never_touches_local_profiles(self):
         from loguru import logger
         from sau_commands import browser
-        from tests.fakes import FakeAdspowerClient, FakeBrowser
+        from tests.fakes import FakeAdspowerClient, FakeMultiloginClient, FakeBrowser
         from tests.test_xhs_submit import _note_page
-        page = _note_page()
-        # This setup only scripts the remote page; remove its local seed before dispatch.
-        self.prepare_editor(page)
         import shutil
-        shutil.rmtree(self.root / 'browser_profiles')
-        self.context.created_pages = [object()]
-        connected = FakeBrowser([self.context])
-        self.pw.chromium.queue_connect_browser(connected)
-        client = FakeAdspowerClient()
-        media = self.root / 'image.png'; media.write_bytes(b'fixture')
-        logs = io.StringIO(); sink = logger.add(logs, format='{message}')
-        try:
-            with patch.dict(os.environ, {'ADSPOWER_API_KEY': 'test'}), patch.object(browser, 'AdspowerClient', return_value=client), patch.object(conf, 'LOCAL_CHROME_PATH', []):
-                code, _, err = self.cli('upload-note', '--profile-id', 'profile', '--account', 'ignored', '--images', str(media), '--title', 'Title', '--no-publish', '--local-browser', 'ignored')
-        finally:
-            logger.remove(sink)
-        self.assertEqual(code, 0, err)
-        self.assertIn('ignored=launch_kwargs, context_kwargs, init_script, account', logs.getvalue())
-        self.assertEqual(client.start_calls, [('profile', True)])
-        self.assertEqual(client.stop_calls, ['profile'])
-        self.assertFalse(self.context.closed)
-        self.assertEqual(connected.close_calls, 1)
-        self.assertFalse(self.pw.chromium.persistent_calls)
-        self.assertFalse((self.root / 'browser_profiles').exists())
+        image = self.root / 'image.png'; image.write_bytes(b'fixture')
+        video = self.root / 'video.mp4'; video.write_bytes(b'fixture')
+        for action, flags, client_type, env_name, client_name in [
+            ('upload-note', ['--images', str(image)], FakeAdspowerClient, 'ADSPOWER_API_KEY', 'AdspowerClient'),
+            ('upload-video', ['--file', str(video)], FakeMultiloginClient, 'MLX_API_TOKEN', 'MultiloginClient'),
+        ]:
+            with self.subTest(action=action):
+                page = _note_page()
+                # Script the remote page, then remove the local seed before dispatch.
+                self.prepare_editor(page)
+                shutil.rmtree(self.root / 'browser_profiles')
+                self.context.created_pages = [object()]
+                connected = FakeBrowser([self.context])
+                self.pw.chromium.queue_connect_browser(connected)
+                client = client_type()
+                logs = io.StringIO(); sink = logger.add(logs, format='{message}')
+                try:
+                    with patch.dict(os.environ, {env_name: 'test'}), patch.object(browser, client_name, return_value=client), patch.object(conf, 'LOCAL_CHROME_PATH', []):
+                        code, out, err = self.cli(action, '--folder-id', 'folder', '--profile-id', 'profile', '--account', 'ignored', '--title', 'Title', '--no-publish', '--local-browser', 'ignored', *flags)
+                finally:
+                    logger.remove(sink)
+                self.assertEqual(code, 0, err)
+                self.assertIn('素材已上传，发布前检查已通过；已停止，未点击发布按钮。', out)
+                self.assertNotIn('upload submitted:', out)
+                self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+                self.assertEqual(page.mouse.down_count, 0)
+                self.assertIn('ignored=launch_kwargs, context_kwargs, init_script, account', logs.getvalue())
+                self.assertEqual(client.start_calls[-1][-1], True)
+                self.assertEqual(client.stop_calls, ['profile'])
+                self.assertFalse(self.context.closed)
+                self.assertEqual(connected.close_calls, 1)
+                self.assertFalse(self.pw.chromium.persistent_calls)
+                self.assertFalse((self.root / 'browser_profiles').exists())
 
     def test_headless_login_uses_qr_in_the_main_profile_context(self):
         import asyncio

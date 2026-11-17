@@ -78,11 +78,11 @@ Assignee: Codex（本会话）
 一次本地浏览器 Profile 的完整定位为**平台 + 原始账号标签 + 浏览器种类**。账号命名、目录归属、路径边界和 Facebook / Facebook Page 隔离规则继续遵循[本地 Profile 的身份与旧登录态迁移](./01-profile-identity-and-migration.md)；本票将其目录布局细化为：
 
 ```text
-browser_profiles/<平台>/<账号>/chrome/
-browser_profiles/<平台>/<账号>/chromium/
+browser_profiles/chrome/<平台>/<账号>/
+browser_profiles/chromium/<平台>/<账号>/
 ```
 
-- 两个叶子目录分别是传给 `launch_persistent_context` 的 `user_data_dir`，各自拥有完整的浏览器数据；父账号目录不是浏览器 user data directory。不能把 Chrome 内部的 `Default` 子目录再当作这里的 Profile 根目录。
+- 两个叶子目录分别是传给 `launch_persistent_context` 的 `user_data_dir`，各自拥有完整的浏览器数据；种类/平台父目录不是浏览器 user data directory。不能把 Chrome 内部的 `Default` 子目录再当作这里的 Profile 根目录。
 - `chrome` / `chromium` 表示实际浏览器种类，不按系统安装、自定义路径、版本号或 headed/headless 再分目录。Chrome 的两种路径入口复用 Chrome Profile；Chromium 的两种路径入口复用 Chromium Profile。
 - 先按[本地 Chrome 启动参数与失败契约](./02-chrome-launch-contract.md)选定实际启动来源，再识别种类并定位 Profile。`LOCAL_CHROME_PATH` 非空时优先；路径指向 Chromium 即使用 `chromium/`，不能因默认 `LOCAL_BROWSER=chrome` 而打开 `chrome/`。
 - Chrome ↔ Chromium 切换只选择另一目录。首次使用由 login 建立登录态；非 login 命令遇到该种类的 Profile 未建立时仍退出 `10`。已有对应 Profile 则继续验证并复用，不复制、迁移或清除另一种浏览器的状态。
@@ -98,7 +98,7 @@ browser_profiles/<平台>/<账号>/chromium/
 
 ### 占用与跨进程生命周期
 
-- 按实际 Profile 目录互斥：同一平台、别名、种类的 login、check、发布、验证和 reset-profile 一次只允许一个命令；占用立即退出 `1`，不等待、不自动重试。不同 Profile 可并行，包含同别名的两种浏览器目录；父级别名归属元数据仍须安全创建和核对，但不存在需要协调的共享真实账号绑定。
+- 按实际 Profile 目录互斥：同一平台、别名、种类的 login、check、发布、验证和 reset-profile 一次只允许一个命令；占用立即退出 `1`，不等待、不自动重试。不同 Profile 可并行，包含同别名的两种浏览器目录；外置别名归属元数据仍须安全创建和核对，但不存在需要协调的共享真实账号绑定。
 - 目录别名和等价路径不能绕过互斥。互斥从需要创建或读取 Profile 归属之前持有，覆盖启动、内部预检、业务操作、关闭和最终状态处理；首次迁移的关闭与重启复验之间不释放。内部预检不得再次启动同目录或重新竞争自己的占用权。
 - 锁的有效性须由跨进程互斥原语维持；PID、时间戳及锁文件是否存在仅作诊断，不能凭残留文件永久判占用或直接删除文件接管。锁与重建目标分离，重建不能把自己的互斥保护一并删除。
 - 本项目持有者、外部手动打开的浏览器及无法可靠分类的启动故障分别报告已知事实。提示可包含 Profile 路径和可验证的持有者信息，不包含 Cookie 等登录凭据。无证据时不宣称“被另一个进程占用”或“已登录失效”。
@@ -131,10 +131,10 @@ browser_profiles/<平台>/<账号>/chromium/
 
 新增本地命令，规划形式为 `sau <平台> reset-profile --account <账号> --browser-kind chrome|chromium`。浏览器种类是明确的**清理目标**，不使用本次启动配置去隐式选择待删除目录；因此清理不要求安装或启动任何浏览器。
 
-- 明确指定一个平台、账号和种类；只删除对应的浏览器 Profile 叶子目录及其专属状态，不清空父账号目录，不清另一种类的 Profile。完整路径校验、账号归属和占用检查适用于删除；目录越界、身份冲突或仍被占用时拒绝执行。
+- 明确指定一个平台、账号和种类；只删除对应的浏览器 Profile 叶子目录及其专属状态，保留账号叶子之外的 guard，不清另一种类的 Profile。完整路径校验、账号归属和占用检查适用于删除；目录越界、身份冲突或仍被占用时拒绝执行。
 - 此命令的显式调用就是清除意图，不把普通 login、浏览器切换或故障处理变成隐式重建，也不额外要求交互式确认或新增备份流程。清理前后明确显示所选目标与操作结果。
 - 清理完成后退出 `0` 并提示该平台的 login 命令，由用户重新登录；不启动登录、不预先创建一个看似有效的 Profile、不续跑任何发布。目标目录不存在时视为已清空，同样提示 login。
-- 清理不保留旧 Profile 备份，也不清除父级别名归属、发布结果、另一种浏览器状态或其他别名资料。旧 Cookie 及旧身份旁文件的删除仍只由上述迁移验收触发，不由 reset-profile 顺带删除。
+- 清理不保留旧 Profile 备份，也不清除外置别名归属、发布结果、另一种浏览器状态或其他别名资料。旧 Cookie 及旧身份旁文件的删除仍只由上述迁移验收触发，不由 reset-profile 顺带删除。
 - 删除失败退出 `1`，指出未完成清理；不得报告成功或把部分删除的数据作为有效 Profile 继续使用。允许用户修复权限/占用后重跑同一显式清理，不能以恢复发布作为补救动作。
 - 这是本地操作，不能用于托管 Profile；托管模式下拒绝该新命令并说明用途，不调用 provider 的删除、启动或停止接口。具体命令接入随各平台迁移批次提供，Bilibili 不增加此入口。
 
@@ -145,3 +145,7 @@ browser_profiles/<平台>/<账号>/chromium/
 - SIGKILL、浏览器崩溃、清理失败、重建和重新登录都不是自动重发依据；本票不改变提交边界和禁止自动重发契约。
 - 离线验收须覆盖同目录跨进程竞争、不同种类分目录、占用与锁残留区分、初始化/取消/关闭失败、来源识别与路径优先级、切换后独立复用、定向 reset 及部分失败，并验证托管行为与发布结果不被覆盖。两阶段登录复验与旧资料清理在一次性迁移执行前验证，迁移后删除专用实现和测试，保留执行记录及正常 Profile 回归；最终核对旧文件不会再次触发迁移。具体平台接入和批次清单交由[分批接入的共享边界与平台例外](./04-platform-integration-boundaries.md)。
 - 本会话完成决策与资料记录，并按用户明确要求将 `/browser_profiles/` 加入 `.gitignore`；已用 `git check-ignore` 验证且该目录无已跟踪文件。没有实现新会话、锁、识别器或重建命令，也没有启动、清除真实 Profile 或执行平台登录/发布。
+
+### 2026-11-17 — 目录顺序追加修正
+
+用户最新要求与[当前规格](../spec.md#3-profile-定位元数据与别名)覆盖旧目录顺序：`browser_profiles/<chrome|chromium>/<platform>/<raw_account>`。账号叶子是浏览器数据目录；归属、锁与重建标记位于账号数据之外且不占用合法别名空间。Comments 的旧顺序保留为历史。

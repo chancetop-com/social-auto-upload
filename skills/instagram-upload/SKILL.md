@@ -21,7 +21,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
 
-所有本地动作复用 `browser_profiles/instagram/<原始别名>/<chrome|chromium>/`。别名可以重新登录其他真实账号，Chrome 与 Chromium 各自独立；正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 `login` 创建 Profile 并等待人工登录/验证；其他动作缺少 Profile、明确未登录或需要验证退出 `10`，网络/页面/必需字段故障退出 `1`，结束本次动作。
+所有本地动作复用 `browser_profiles/<chrome|chromium>/instagram/<原始别名>/`。别名可以重新登录其他真实账号，Chrome 与 Chromium 各自独立；正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 `login` 创建 Profile 并等待人工登录/验证；其他动作缺少 Profile、明确未登录或需要验证退出 `10`，网络/页面/必需字段故障退出 `1`，结束本次动作。
 
 安装保留项目固定 Patchright。系统 Chrome 由用户按官方方式安装；需要配套 Chromium 时运行 `uv run patchright install --no-shell chromium` 并传 `--local-browser chromium`。`conf.py` 中非空 `LOCAL_CHROME_PATH` 优先于命令行种类与 `LOCAL_BROWSER`；只要求选定来源，失败不回退。浏览器保留原生窗口和语言。重建明确指定一个种类：`sau instagram reset-profile --account creator --browser-kind chrome`；无需 binary，保留另一种类、历史结果与旧文件，之后重新 login。
 

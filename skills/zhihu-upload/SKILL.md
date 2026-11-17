@@ -32,7 +32,7 @@ sau zhihu login --account creator
 sau zhihu check --account creator
 ```
 
-账号密码、验证码在登录窗口输入。只有 login 引导登录；正常关闭后使用相同浏览器配置 check。登录态由 `browser_profiles/zhihu/<原始别名>/<chrome|chromium>/` 持久保存，旧 Cookie JSON 和 `.identity.json` 不读写或清理。同别名可以重新登录任意账号，两种浏览器可登录不同账号；展示名和头像路径仅是当次信息，不是永久 ID。
+账号密码、验证码在登录窗口输入。只有 login 引导登录；正常关闭后使用相同浏览器配置 check。登录态由 `browser_profiles/<chrome|chromium>/zhihu/<原始别名>/` 持久保存，旧 Cookie JSON 和 `.identity.json` 不读写或清理。同别名可以重新登录任意账号，两种浏览器可登录不同账号；展示名和头像路径仅是当次信息，不是永久 ID。
 
 本地默认系统 Chrome、有头。保留已有 `conf.py`；`LOCAL_CHROME_PATH` 非空优先，否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False；直接调用 `headless=None` 使用配置，显式 False 保持有头。只安装所选来源：Chrome 由用户准备；完整 Chromium 执行 `uv run patchright install --no-shell chromium`，或复用兼容自定义路径。失败不自动换浏览器；安装成功、可启动、已登录分别核验。
 

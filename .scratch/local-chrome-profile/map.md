@@ -60,7 +60,7 @@ Status: resolved
 
 <!-- 每项结论的完整细节仅保存在对应已关闭决策票中；此处仅记录摘要与链接。 -->
 
-- [本地 Profile 的身份与旧登录态迁移](./issues/01-profile-identity-and-migration.md)：按平台和账号使用可读专用目录，一次性迁移中重新登录并复验后删除对应旧 Cookie JSON，统一已迁移本地流程的登录态来源与状态规则。
+- [本地 Profile 的身份与旧登录态迁移](./issues/01-profile-identity-and-migration.md)：按浏览器种类、平台和原始账号使用可读专用目录，一次性迁移中重新登录并复验后删除对应旧 Cookie JSON，统一已迁移本地流程的登录态来源与状态规则。
 - [本地 Chrome 启动参数与失败契约](./issues/02-chrome-launch-contract.md)：自定义路径优先，Chrome/Chromium 均按需安装；统一选择、headless 与失败契约，托管仅调整 headless 默认来源。
 - [本地 Profile 的生命周期与并发占用](./issues/03-profile-lifecycle-and-concurrency.md)：按 Chrome/Chromium 分目录复用、同 Profile 独占；显式定向清理后重新登录。旧资料的重启复验与清理仅用于一次性迁移，迁移完成即删除相关代码。
 - [账号别名与登录态校验](./issues/05-account-binding-migration.md)：同别名可换号，退出身份防错配约束与旧身份文件；登录失效结束业务，保留显式目标及历史作品核验。
@@ -79,3 +79,11 @@ Status: resolved
 - 为其他平台获取真实账号或执行真实回归。
 - 新增 GitHub CI workflow 或由 CI 安装说明扩展出的自动验收体系；从未属于用户请求。
 - 本次建图会话直接实现迁移；实施阶段在决策完成后按上述五批推进。
+
+### 2026-11-17 — 用户目录顺序修正
+
+当前布局为 `browser_profiles/<chrome|chromium>/<platform>/<raw_account>`，覆盖原决策中的目录顺序；归属与 guard 位于可删除账号叶子之外，合法别名不因内部文件名受限。既有四份资料由[实施票 21](../local-chrome-profile-implementation/issues/21-browser-kind-first-layout.md)安全移动并正常 check，历史证据保留原路径。
+
+## 2026-11-17 用户追加：旧入口与 stealth 删除
+
+用户明确覆盖此前保留历史调用方/辅助资源的约定：删除旧 TikTok Firefox、未完成且未注册的 TencentNote、通用旧本地会话，再按引用闭包删除 stealth helper/资源/打包项/旧测试。保留正式 17 平台、Bilibili biliup、业务 JS/剪贴板/Humanizer 和完整 managed provider 契约；缺 provider 的通用调用明确失败，不猜测本地 Profile。实施及证据见[票 22](../local-chrome-profile-implementation/issues/22-remove-obsolete-browser-and-stealth.md)。早期记录描述历史事实。

@@ -16,7 +16,7 @@ summary: 发布大鱼号视频和文章，支持定时与结果核验。
 
 保留已有 conf.py 和 Patchright。默认系统 Chrome、有头、自然窗口；Chrome 由用户按官方方式安装。显式 Chromium 使用项目配套完整浏览器：`uv run patchright install --no-shell chromium`，命令追加 `--local-browser chromium`，只需安装所选来源。`LOCAL_CHROME_PATH` 非空优先；否则 `--local-browser` > `LOCAL_BROWSER` > `chrome`。`--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > `False`，也适用于登录、检查与核验；失败报告所选来源，不自动换浏览器或模式。
 
-login/check/视频/文章/verify 共用 `browser_profiles/dayu/<原始别名>/<chrome|chromium>/`，浏览器自动持久化登录态，旧 Cookie 与身份旁文件不参与。两种浏览器独立，同种路径或模式切换仍复用资料。只有 login 引导登录；缺少 Profile、明确未登录或人机验证退出 10（验证包含 reason=verification），网络/页面/权限/必需字段故障退出 1。提交后出现 publish_attempted=true 或退出 9，先核查原作品再决定后续，不能自动重发。
+login/check/视频/文章/verify 共用 `browser_profiles/<chrome|chromium>/dayu/<原始别名>/`，浏览器自动持久化登录态，旧 Cookie 与身份旁文件不参与。两种浏览器独立，同种路径或模式切换仍复用资料。只有 login 引导登录；缺少 Profile、明确未登录或人机验证退出 10（验证包含 reason=verification），网络/页面/权限/必需字段故障退出 1。提交后出现 publish_attempted=true 或退出 9，先核查原作品再决定后续，不能自动重发。
 
 重建仅在用户请求清空时执行 `sau dayu reset-profile --account <本地账号名> --browser-kind chrome`（或 chromium）。命令无需 binary、占用时拒绝，只清空指定资料，不修改历史结果；之后先 login，不能因此恢复旧提交。文章只授予 `https://mp.dayu.com` 的剪贴板读写权限，保留富文本粘贴、图片插入和内容读回；托管权限由 Profile 负责。
 

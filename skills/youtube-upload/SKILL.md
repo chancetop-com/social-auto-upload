@@ -24,7 +24,7 @@ sau youtube upload-video --account creator --file videos/demo.mp4 --title "标�
 
 先准备选定来源：默认系统 Chrome，由用户按 Google 官方方式安装；显式 Chromium 用项目环境执行 `uv run patchright install --no-shell chromium`。保留现有 `conf.py`。`LOCAL_CHROME_PATH` 非空时优先并按实际产品识别种类；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > 有头；只检查所选来源，失败不回退。检查与上传内部预检使用相同配置。
 
-账号别名定位 `browser_profiles/youtube/<原始别名>/<chrome|chromium>/`，登录、检查、上传复用它。别名可更换真实账号，两种浏览器可使用不同账号，上传使用当前频道。只在 login 中等待 Google 登录与验证；新 Profile 必须先登录，再同配置 check。常规命令不读写或删除旧 Cookie JSON。保留当前界面语言和自然窗口；需要网络代理时设置 `conf.py` 的 `YT_PROXY`，它对本地三项动作一致生效。
+账号别名定位 `browser_profiles/<chrome|chromium>/youtube/<原始别名>/`，登录、检查、上传复用它。别名可更换真实账号，两种浏览器可使用不同账号，上传使用当前频道。只在 login 中等待 Google 登录与验证；新 Profile 必须先登录，再同配置 check。常规命令不读写或删除旧 Cookie JSON。保留当前界面语言和自然窗口；需要网络代理时设置 `conf.py` 的 `YT_PROXY`，它对本地三项动作一致生效。
 
 ```bash
 sau youtube login --account creator --local-browser chromium --headed

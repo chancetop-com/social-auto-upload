@@ -7,7 +7,6 @@ Path(BASE_DIR / "cookies" / "tencent_uploader").mkdir(exist_ok=True)
 from uploader.tencent_uploader.main import TENCENT_PUBLISH_STRATEGY_IMMEDIATE
 from uploader.tencent_uploader.main import TENCENT_PUBLISH_STRATEGY_SCHEDULED
 from uploader.tencent_uploader.main import TencentBaseUploader
-from uploader.tencent_uploader.main import TencentNote
 from uploader.tencent_uploader.main import TencentVideo
 from uploader.tencent_uploader.main import cookie_auth
 from uploader.tencent_uploader.main import format_str_for_short_title
@@ -20,7 +19,6 @@ __all__ = [
     "TENCENT_PUBLISH_STRATEGY_IMMEDIATE",
     "TENCENT_PUBLISH_STRATEGY_SCHEDULED",
     "TencentBaseUploader",
-    "TencentNote",
     "TencentVideo",
     "cookie_auth",
     "format_str_for_short_title",

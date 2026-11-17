@@ -322,13 +322,11 @@ class MultiloginUploadTests(unittest.TestCase):
                 patch.object(
                     douyin_main, "async_playwright", MagicMock()
                 ) as async_playwright,
-                patch.object(douyin_main, "set_init_script", AsyncMock()) as init_script,
                 patch.object(douyin_main.asyncio, "sleep", AsyncMock()),
             ):
                 asyncio.run(video.upload(None, session=session))
 
         async_playwright.assert_not_called()
-        init_script.assert_not_awaited()
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
         self.assertEqual(context.add_init_script_calls, 0)

@@ -107,7 +107,7 @@ sau xiaohongshu upload-note \
 
 ## 本地配置与退出码
 
-login/check/视频/图文都复用 `browser_profiles/xiaohongshu/<别名>/<种类>`。`LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`；缺省 Chrome。显式 headed/headless 优先于 `LOCAL_CHROME_HEADLESS`，未配置默认有头。旧 JSON 不参与，业务不会自动扫码或恢复旧任务。
+login/check/视频/图文都复用 `browser_profiles/<种类>/xiaohongshu/<别名>`。`LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`；缺省 Chrome。显式 headed/headless 优先于 `LOCAL_CHROME_HEADLESS`，未配置默认有头。旧 JSON 不参与，业务不会自动扫码或恢复旧任务。
 
 - `0`：检查通过、登录完成或流程完成；no-publish 仅证明到达提交前停止点。
 - `1`：浏览器、网络、页面结构、必需字段或权限故障；不能据此认定登录失效。

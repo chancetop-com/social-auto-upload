@@ -1,9 +1,10 @@
 """Local browser Profile ownership, exclusive use and explicit reset.
 
-The browser-kind leaf is the user data directory. Parent ownership and OS locks
-live outside that leaf, so reset never deletes its own guard. The brief layout
-lock protects only platform/account metadata; each browser lifetime has its own
-nonblocking lock. Filesystem spelling equivalence is resolved by the filesystem,
+The raw account leaf at browser-kind/platform/account is the user data directory.
+Ownership, OS locks and reset markers live in a separate .guards tree, so reset
+never deletes its own guard and internal filenames never reserve account aliases.
+The brief layout lock protects only directory/ownership initialization; each
+browser lifetime has its own nonblocking lock. Filesystem spelling equivalence is resolved by the filesystem,
 then checked against the original alias in metadata, never by normalizing it.
 """
 from contextlib import contextmanager
@@ -29,6 +30,7 @@ BROWSER_PLATFORMS = frozenset({
 class LocalProfile:
     path: Path
     exists: bool
+    guard_path: Path
 
 
 @contextmanager
@@ -58,33 +60,42 @@ def _acquire_profile(platform, account, browser_kind, *, root=None, create=False
     _check_directory_path(root)
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    # Only layout creation/validation is serialized; browser lifetimes hold
-    # separate kind locks so other accounts and the other kind run concurrently.
+    # Account names occur only as directory leaves in both namespaces. No
+    # internal file shares a directory with arbitrary account aliases.
     with _file_lock(root / ".layout.lock", blocking=True):
-        platform_dir = root / platform
-        owner = {"platform": platform}
-        _owned_directory(platform_dir, owner, create=True, metadata=root / f".{platform}.owner.json")
-        account_dir = platform_dir / account
+        guards = root / ".guards"
+        guard_kind = guards / browser_kind
+        guard_platform = guard_kind / platform
+        for directory in (guards, guard_kind, guard_platform):
+            _check_directory_path(directory)
+            directory.mkdir(exist_ok=True)
+        kind_dir = root / browser_kind
+        owner = {"browser_kind": browser_kind}
+        _owned_directory(kind_dir, owner, create=True, metadata=root / f".{browser_kind}.owner.json")
+        platform_dir = kind_dir / platform
+        owner = {**owner, "platform": platform}
+        _owned_directory(platform_dir, owner, create=True,
+                         metadata=guard_kind / f".{platform}.owner.json")
+        guard = guard_platform / account
         owner = {**owner, "account": account}
-        _owned_directory(account_dir, owner, create=True)
-    path = account_dir / browser_kind
-    with _file_lock(account_dir / f".{browser_kind}.lock"):
-        profile_owner = {**owner, "browser_kind": browser_kind}
-        marker = account_dir / f".{browser_kind}.resetting.json"
+        _owned_directory(guard, owner, create=True)
+    path = platform_dir / account
+    with _file_lock(guard / "profile.lock"):
+        marker = guard / "resetting.json"
+        metadata = guard / "profile.owner.json"
         _check_directory_path(path)
         if marker.exists() or marker.is_symlink():
-            _check_owner(marker, profile_owner)
+            _check_owner(marker, owner)
             if not resetting:
                 raise RuntimeError(f"Profile 重建未完成，必须重跑 reset-profile: {path}")
-            # rmtree may already have removed the leaf record. If it survives,
-            # the reset marker must never override contradictory ownership.
-            leaf_metadata = path / ".sau-owner.json"
-            if leaf_metadata.exists() or leaf_metadata.is_symlink():
-                _check_owner(leaf_metadata, profile_owner)
+            # A retry may follow deletion of the data or its ownership record;
+            # any surviving ownership record must still match this identity.
+            if metadata.exists() or metadata.is_symlink():
+                _check_owner(metadata, owner)
         else:
-            _owned_directory(path, profile_owner, create=create)
+            _owned_directory(path, owner, create=create, metadata=metadata)
         _check_browser_ownership(path)
-        yield LocalProfile(path, path.exists())
+        yield LocalProfile(path, path.exists(), guard)
 
 
 @contextmanager
@@ -159,9 +170,9 @@ def _owned_directory(path: Path, owner: dict, *, create: bool, metadata: Path | 
     metadata = metadata if metadata is not None else path / ".sau-owner.json"
     if metadata.is_symlink():
         raise RuntimeError(f"Profile 归属元数据不能为符号链接: {metadata}")
-    if path.exists():
+    if path.exists() or metadata.exists():
         _check_owner(metadata, owner)
-    elif create:
+    if not path.exists() and create:
         path.mkdir()
         metadata.write_text(json.dumps(owner, ensure_ascii=False), encoding="utf-8")
 
@@ -182,7 +193,7 @@ def _check_owner(metadata: Path, owner: dict):
 
 def reset_local_profile(platform: str, account: str, browser_kind: str, *, root=None) -> Path:
     with _acquire_profile(platform, account, browser_kind, root=root, resetting=True) as profile:
-        marker = profile.path.parent / f".{browser_kind}.resetting.json"
+        marker = profile.guard_path / "resetting.json"
         try:
             if profile.exists:
                 if not marker.exists():
@@ -190,6 +201,7 @@ def reset_local_profile(platform: str, account: str, browser_kind: str, *, root=
                                                   "browser_kind": browser_kind}, ensure_ascii=False),
                                       encoding="utf-8")
                 shutil.rmtree(profile.path)
+            (profile.guard_path / "profile.owner.json").unlink(missing_ok=True)
             marker.unlink(missing_ok=True)
         except OSError as exc:
             raise RuntimeError(f"Profile 重建未完成: {profile.path}；修复后重跑 reset-profile ({exc})") from exc
