@@ -12,9 +12,17 @@ summary: 发布大鱼号视频和文章，支持定时与结果核验。
 
 使用 `sau dayu`，不另写一套网页发布逻辑。先执行 `sau dayu --help`，具体参数以 `upload-video --help`、`upload-article --help` 和 `verify --help` 为准。仓库环境在项目根目录运行；Windows 未将命令加入 PATH 时用 `.\.venv\Scripts\sau.exe`。不要依赖固定测试账号或本机路径。
 
+## 本地运行环境
+
+保留已有 conf.py 和 Patchright。默认系统 Chrome、有头、自然窗口；Chrome 由用户按官方方式安装。显式 Chromium 使用项目配套完整浏览器：`uv run patchright install --no-shell chromium`，命令追加 `--local-browser chromium`，只需安装所选来源。`LOCAL_CHROME_PATH` 非空优先；否则 `--local-browser` > `LOCAL_BROWSER` > `chrome`。`--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > `False`，也适用于登录、检查与核验；失败报告所选来源，不自动换浏览器或模式。
+
+login/check/视频/文章/verify 共用 `browser_profiles/dayu/<原始别名>/<chrome|chromium>/`，浏览器自动持久化登录态，旧 Cookie 与身份旁文件不参与。两种浏览器独立，同种路径或模式切换仍复用资料。只有 login 引导登录；缺少 Profile、明确未登录或人机验证退出 10（验证包含 reason=verification），网络/页面/权限/必需字段故障退出 1。提交后出现 publish_attempted=true 或退出 9，先核查原作品再决定后续，不能自动重发。
+
+重建仅在用户请求清空时执行 `sau dayu reset-profile --account <本地账号名> --browser-kind chrome`（或 chromium）。命令无需 binary、占用时拒绝，只清空指定资料，不修改历史结果；之后先 login，不能因此恢复旧提交。文章只授予 `https://mp.dayu.com` 的剪贴板读写权限，保留富文本粘贴、图片插入和内容读回；托管权限由 Profile 负责。
+
 ## 账号与输入
 
-1. 使用已有账号时执行 `sau dayu check --account <本地账号名>`。首次使用或登录失效时执行 `sau dayu login --account <本地账号名> --expected-name "用户指定的大鱼号名称"`，让用户在打开的 Chrome 中登录。CLI 会绑定发布主体，拒绝错号。
+1. 使用已有 Profile 时执行 `sau dayu check --account <本地账号名>`。首次使用或登录失效时执行 `sau dayu login --account <本地账号名> --headed`，在所选浏览器完成登录后同配置 check。用户明确指定名称时才增加 `--expected-name "用户指定的大鱼号名称"`，仅核对本次请求。别名可重新登录其他真实账号，历史作品核验仍要求原主体。
 2. 视频必须提供 `--file`、`--title`、`--thumbnail`、`--category`、`--source`。视频至少 5 秒；标题 5–60 字（英文按半字）；封面最大 5 MB。分类从 CLI 的 choices 中选择，不能猜测页面外的分类。
 3. 文章必须提供 `--title`、`--content-file`、`--source`。标题 5–50 字（英文按半字并向上取整），正文为 UTF-8 HTML/Markdown/TXT 文件，最多 2 万字。长文放在文件里，不拼进命令行。图片使用本地路径，相对路径以正文文件所在目录为起点，每张最大 5 MB。
 4. 信息来源必须按实际内容选择：`无需标注`、`AI生成`、`虚构演绎`、`营销信息`、`转载`、`个人观点`、`不适宜未成年人`。转载必须同时提供 `--source-url "https://原文地址"`，其他来源不传原文链接。
@@ -50,11 +58,11 @@ sau dayu verify --account <本地账号名> --result "本次结果文件.json" -
 
 结果文件会帮助核对标题、主体、作品及定时时间。也可按 ID 查询：`sau dayu verify --account <本地账号名> --type article --content-id "作品ID"`（视频用 `--type video`）。无可查询 ID 时告知具体错误，请用户核查后台；不要猜测失败并重发。
 
-只有用户明确要求核对公开内容/播放时才在查询命令添加 `--public`；主题或完整正文核对应使用原结果文件。公开检查可能等待审核或定时到点，不属于默认发表完成条件。
+只有用户明确要求核对公开内容/播放时才在查询命令添加 `--public`；主题或完整正文核对应使用原结果文件。先在主会话核对后台作品，再由同一已选浏览器创建临时匿名 context，不复制登录状态；主 Profile 保持占用，匿名步骤只关闭自身。公开检查可能等待审核或定时到点，不属于默认发表完成条件。
 
 ## 托管浏览器模式（可选）
 
-设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍为本地模式。托管模式不写入时区，填写时读取浏览器/Profile 时区。
+设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-article` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json` 或 `.identity.json`。`verify` 仍使用原始本地账号别名与上述本地浏览器配置。托管模式不写入时区，填写时读取浏览器/Profile 时区。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。

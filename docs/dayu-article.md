@@ -4,10 +4,10 @@
 
 ## 登录
 
-与视频发布共用账号，无需重复登录：
+与视频发布共用所选持久化 Profile，无需重复登录；来源、headless、换号与重建契约见 [本地账号说明](./dayu.md#首次使用)。仅创作站点 `https://mp.dayu.com` 获得剪贴板读写权限，用于富文本原生粘贴；保留图片位置、样式和正文读回检查，不授予地理位置权限。托管剪贴板设置仍由 Profile 负责：
 
 ```powershell
-sau dayu login --account creator --expected-name "你的大鱼号名称"
+sau dayu login --account creator --headed --expected-name "你的大鱼号名称"
 sau dayu check --account creator
 ```
 

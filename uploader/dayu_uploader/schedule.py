@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from patchright.async_api import BrowserContext, Page, expect
 
 from uploader.dayu_uploader.interaction import unique
+from uploader.dayu_uploader.session import raise_if_login_required
 from utils.browser_time import page_wall_clock
 from utils.humanize import Humanizer
 from utils.time_utils import (
@@ -79,10 +80,12 @@ def apply_schedule_result(
     )
 
 
-async def read_dayu_schedule(context: BrowserContext, origin_id: str, expected: str | None) -> dict:
+async def read_dayu_schedule(context: BrowserContext, origin_id: str, expected: str | None, *, local=False) -> dict:
     """读原稿的服务端保存值；查询旧结果时不再检查未来范围，也不改写平台时间。"""
     response = await context.request.get("https://mp.dayu.com/dashboard/getDraftInfo",
                                          params={"draft_id": origin_id}, timeout=30000)
+    if local:
+        await raise_if_login_required(response, managed=False)
     if not response.ok:
         raise RuntimeError(f"查询原作品定时设置失败: HTTP {response.status}")
     data = await response.json()

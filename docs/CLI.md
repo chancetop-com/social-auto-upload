@@ -70,7 +70,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、雪球 开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书、抖音、快手的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube、视频号、百家号、微博、虎扑、支付宝生活号的 login/check/upload-video 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
+目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、雪球 开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书、抖音、快手的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube、视频号、百家号、微博、虎扑、支付宝生活号的 login/check/upload-video 与直接调用也已接入；大鱼号的 login/check/视频/文章/verify 与直接调用也已接入；雪球的 login/check/文章/verify 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -238,7 +238,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、雪球 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、雪球 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -280,7 +280,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 
 ### 账号一致性风险
 
-托管模式只验证平台页面“已登录”，**Profile 即身份**。未迁移的知乎、大鱼号在本地模式下仍比对 `.identity.json` / 用户 ID；雪球已改为读取当前 Profile 所需身份并核对历史作品作者；托管模式下这些比对会跳过，CLI 仅打印一条 INFO 说明“账号一致性未校验”。请确保 `profile_id` 与目标账号匹配。
+托管模式只验证平台页面“已登录”，**Profile 即身份**。知乎尚未迁移的本地路径会比对 `.identity.json` / 用户 ID；大鱼号、雪球本地已改为当前 Profile 身份，旧绑定退出；托管模式跳过这些本地比对，CLI 仅打印一条 INFO 说明“账号一致性未校验”。请确保 `profile_id` 与目标账号匹配。
 
 已知限制：命令级 `check` / 上传前登录检测已经是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留，不代表 AdsPower 模式需要 Multilogin。
 
@@ -440,6 +440,10 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - V2 最低可用版本；`active` 在 Inactive / 多设备模式下的 `data` 形状。
 
 ## 大鱼号 CLI 子命令
+
+login/check/upload-video/upload-article/verify 共用持久化本地 Profile，旧 JSON 与身份旁文件退出。先 `sau dayu login --account creator --headed`，正常关闭后同配置 check。默认 Chrome 有头；`--local-browser chromium` 使用完整配套 Chromium，自定义 `LOCAL_CHROME_PATH` 优先；显式运行模式 > `LOCAL_CHROME_HEADLESS` > `False`。别名可换号，`--expected-name` 仅校验当次显式请求；verify 继续校验原结果主体、标题和作品 ID，换号不会改写历史结果。只有 `--public` 才在后台核对后创建同一浏览器的独立匿名 context，不复制主 Profile 状态，保持外层占用。
+
+`reset-profile --account creator --browser-kind chrome|chromium` 只清空指定种类，无需 binary。缺少 Profile/未登录/验证退出 10，故障退出 1；提交后保留 publish_attempted，未知结果 9 禁止重发。视频与文章保留 `--prepare-only`（上传并填写，不点击发表）；它不是离线模拟。当前迁移验证为离线与受控浏览器，未执行真实大鱼号账号操作。
 
 登录、分类和来源选项见 [视频发布](./dayu.md)；正文文件、格式和图片路径见 [图文发布](./dayu-article.md)。Markdown 主题及独立本地渲染命令见 [文章文件与主题渲染](./article.md)。
 
@@ -1000,7 +1004,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、雪球 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、雪球 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 

@@ -17,7 +17,9 @@ from uploader.dayu_uploader.schedule import (
     target_from_result,
     verify_saved_schedule,
 )
+from uploader.dayu_uploader.session import raise_if_login_required
 from utils.log import dayu_logger
+from utils.local_browser_session import close_persistent_context
 
 
 async def check_dayu_article_content(body: Locator, manifest: dict) -> None:
@@ -56,7 +58,7 @@ async def check_dayu_article_content(body: Locator, manifest: dict) -> None:
 async def wait_dayu_publication(context: BrowserContext, content_id: str | None = None,
                                 origin_id: str | None = None, title: str | None = None,
                                 timeout: int = 60, public: bool = False,
-                                target: datetime | None = None) -> tuple[dict, datetime | None]:
+                                target: datetime | None = None, *, local=False, publish_attempted=False) -> tuple[dict, datetime | None]:
     """默认确认原作品已提交；只有显式公开核验才等待公开，始终不重发。"""
     if not content_id and not origin_id:
         raise ValueError("核验必须提供 content_id 或 origin_id（预览时保存的草稿 ID）")
@@ -76,6 +78,8 @@ async def wait_dayu_publication(context: BrowserContext, content_id: str | None 
                         "page": page_number, "currentTab": "all", "_": int(time.time() * 1000)},
                 timeout=max(1, min(30000, int((deadline - time.monotonic()) * 1000))),
             )
+            if local:
+                await raise_if_login_required(response, managed=False, publish_attempted=publish_attempted)
             if not response.ok:
                 raise RuntimeError(f"查询大鱼号作品失败: HTTP {response.status}")
             payload = await response.json()
@@ -124,7 +128,7 @@ async def verify_dayu_video(context: BrowserContext, browser: Browser, identity:
                             schedule: str | None = None) -> dict:
     """确认原视频已提交；public=True 时额外验证匿名标题、作者及播放。"""
     target = target_from_result(schedule)
-    record, saved_actual = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, target)
+    record, saved_actual = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, target, local=True)
     result = {"success": True, "status": initial_status(record), "type": "video",
               "content_id": str(record["content_id"]), "origin_id": record["origin_id"],
               "title": record["title"], "identity": identity, "platform_status": record["status"]}
@@ -141,7 +145,7 @@ async def verify_dayu_video(context: BrowserContext, browser: Browser, identity:
         raise RuntimeError("作品公开地址的域名、主体或 origin_id 不匹配")
 
     # 新建不带 storage_state 的上下文，避免登录后的预览权限掩盖公开播放失败。
-    public_context = await browser.new_context()
+    public_context = await browser.new_context(no_viewport=True)
     try:
         public_page = await public_context.new_page()
         await public_page.goto(public_url, wait_until="domcontentloaded", timeout=45000)
@@ -158,7 +162,7 @@ async def verify_dayu_video(context: BrowserContext, browser: Browser, identity:
         )
         playback = await video.evaluate("v => ({duration: v.duration, current_time: v.currentTime, ready_state: v.readyState})")
     finally:
-        await public_context.close()
+        await close_persistent_context(public_context)
     result.update(status="published", audit_status=record.get("audit_status"),
                   audit_remark=record.get("_app_extra", {}).get("audit_remark", ""),
                   public_url=public_url, public_playback=playback)
@@ -172,7 +176,7 @@ async def verify_dayu_article(context: BrowserContext, browser: Browser, identit
                               schedule: str | None = None) -> dict:
     """确认原文章已提交；public=True 时再匿名核对正文、图片位置及格式。"""
     target = target_from_result(schedule)
-    record, saved_actual = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, target)
+    record, saved_actual = await wait_dayu_publication(context, content_id, origin_id, title, timeout, public, target, local=True)
     result = {"success": True, "status": initial_status(record), "type": "article",
               "content_id": str(record["content_id"]), "origin_id": record["origin_id"],
               "title": record["title"], "identity": identity, "platform_status": record["status"]}
@@ -185,7 +189,7 @@ async def verify_dayu_article(context: BrowserContext, browser: Browser, identit
     public_url = "https://mparticle.uc.cn/article.html?" + urlencode({
         "uc_param_str": "frdnsnpfvecpntnwprdssskt", "wm_aid": record["origin_id"],
     })
-    public_context = await browser.new_context()
+    public_context = await browser.new_context(no_viewport=True)
     try:
         page = await public_context.new_page()
         await page.goto(public_url, wait_until="domcontentloaded", timeout=45000)
@@ -210,7 +214,7 @@ async def verify_dayu_article(context: BrowserContext, browser: Browser, identit
             await check_dayu_article_content(body, manifest)
         public_article = {"image_count": await images.count(), "content_checked": bool(manifest)}
     finally:
-        await public_context.close()
+        await close_persistent_context(public_context)
     result.update(status="published", audit_status=record.get("audit_status"),
                   audit_remark=record.get("_app_extra", {}).get("audit_remark", ""),
                   public_url=public_url, public_article=public_article)
