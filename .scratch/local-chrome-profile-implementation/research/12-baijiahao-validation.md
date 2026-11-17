@@ -60,3 +60,13 @@
 补充 `tests.test_sau_browser_cli tests.test_multilogin_cli` 后，上述离线命令尾部添加这两个模块：**372 tests，12.925s，OK**。其中包含 passport URL 上可见验证的 reason 优先级回归。独立两模块曾通过 57 tests / 4.213s。
 
 最终登录等待与窗口流程再次执行受控浏览器命令：**1 test（Chrome 有头 + Chromium 无头两条完整合成流程），117.795s，OK**。最后的验证 reason 优先级改动仅影响 challenge/login URL，受控上传页面无此分支；该改动已由上述 CLI 边界回归验证。`git diff --check` 通过。
+
+## 集成合并复验
+
+实现提交 `a7034da` 后，合入 Tencent 11 集成 `a9626ca`（本分支合并提交 `0cfd5f2`），207 项百家号/视频号/托管/所有权/CLI 回归通过（17.816s）。随后合入最新集成 `02f2362`（含 Douyin 09）。共享冲突按平台并集处理：docs/config/reset 列表保留抖音、视频号、百家号；AdsPower 的本地资料禁止访问守卫覆盖各自入口；旧双重关闭测试仅移除各已迁移平台条目。
+
+```sh
+/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload/.venv/bin/python -m unittest tests.test_douyin_profile_cli tests.test_baijiahao_profiles tests.test_tencent_profiles tests.test_mlx_tencent_baijiahao tests.test_baijiahao_humanize tests.test_tencent_humanize tests.test_adspower_video_platforms tests.test_publish_cleanup tests.test_local_profile tests.test_sau_browser_cli tests.test_multilogin_cli -q
+```
+
+结果：**221 tests，20.416s，OK**。首次该组命令误写不存在的 `tests.test_douyin_profiles`，其余 207 项通过后报告单个 import error；修正为实际 `tests.test_douyin_profile_cli` 后得到上述全通过结果。合并未改百家号生产代码或浏览器夹具，沿用已完成的两条受控 DOM 证据。当前分支包含 09/11；快手仍由 10 独立交付，后续平台和 19/20 不在本票内。`git diff --check` 通过，无未解决冲突或本票阻塞。
