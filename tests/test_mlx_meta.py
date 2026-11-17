@@ -286,113 +286,7 @@ def _write_media(directory: str, name: str = "clip.mp4") -> Path:
 # ---------------------------------------------------------------------------
 
 
-class LocalGoldenTests(unittest.TestCase):
-    # Facebook local lifecycle now uses real Profiles in test_facebook_profile_cli.
-    def test_facebook_page_local_launch_and_context_are_golden(self):
-        page = _PageStub()
-        chromium, context, browser = _local_launcher(page)
-        playwright = SimpleNamespace(chromium=chromium)
-
-        asyncio.run(
-            facebook_page_main._open_business_page(
-                playwright,
-                Path("/tmp/page-cookie.json"),
-                proxy="http://proxy.example:8080",
-                headless=True,
-            )
-        )
-
-        self.assertEqual(
-            chromium.launch_calls,
-            [
-                {
-                    "headless": True,
-                    "channel": "chrome",
-                    "proxy": {"server": "http://proxy.example:8080"},
-                }
-            ],
-        )
-        self.assertEqual(
-            browser.new_context_calls,
-            [{"storage_state": "/tmp/page-cookie.json"}],
-        )
-        self.assertEqual(FACEBOOK_PAGE_LAUNCH_KWARGS, {"channel": "chrome"})
-        self.assertEqual(FACEBOOK_PAGE_CONTEXT_KWARGS, {})
-        self.assertFalse(FACEBOOK_PAGE_INIT_SCRIPT)
-
-    def test_facebook_page_local_upload_saves_cookie_then_closes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            media = _write_media(directory)
-            cookie = Path(directory) / "page.json"
-            cookie.write_text("{}", encoding="utf-8")
-            result_file = Path(directory) / "result.json"
-            page = _PageStub()
-            context = _ContextStub(page)
-            browser = _LaunchBrowser(context, page)
-            app = MetaBusinessUploader(
-                "facebook-page",
-                cookie,
-                title="标题",
-                video_file=media,
-                result_file=result_file,
-            )
-            app._publish_on_page = AsyncMock()
-
-            with patch.object(
-                facebook_page_main,
-                "_open_business_page",
-                AsyncMock(return_value=(browser, context, page)),
-            ), patch.object(
-                facebook_page_main,
-                "_is_business_logged_out",
-                AsyncMock(return_value=False),
-            ):
-                result = asyncio.run(app.upload())
-
-            self.assertTrue(result_file.is_file())
-
-        self.assertEqual(result["platform"], "facebook-page")
-        self.assertEqual(context.storage_state_calls, [str(cookie)])
-        self.assertTrue(browser.closed)
-
-    def test_facebook_page_cookie_save_failure_after_publish_is_log_only(self):
-        with tempfile.TemporaryDirectory() as directory:
-            media = _write_media(directory)
-            cookie = Path(directory) / "page.json"
-            cookie.write_text("{}", encoding="utf-8")
-            result_file = Path(directory) / "result.json"
-            page = _PageStub()
-            context = _ContextStub(page)
-            context.storage_state = AsyncMock(side_effect=OSError("磁盘已满"))
-            browser = _LaunchBrowser(context, page)
-            app = MetaBusinessUploader(
-                "facebook-page",
-                cookie,
-                title="标题",
-                video_file=media,
-                result_file=result_file,
-            )
-            app._publish_on_page = AsyncMock()
-
-            with patch.object(
-                facebook_page_main,
-                "_open_business_page",
-                AsyncMock(return_value=(browser, context, page)),
-            ), patch.object(
-                facebook_page_main,
-                "_is_business_logged_out",
-                AsyncMock(return_value=False),
-            ), patch.object(
-                facebook_page_main.logger, "warning"
-            ) as warning:
-                result = asyncio.run(app.upload())
-
-            self.assertTrue(result_file.is_file())
-
-        self.assertEqual(result["platform"], "facebook-page")
-        self.assertTrue(browser.closed)
-        warning.assert_called_once()
-
+# Local Facebook and Page lifecycles are covered by their Profile CLI suites.
 
 
 # ---------------------------------------------------------------------------
@@ -1232,7 +1126,7 @@ class FacebookPageCliTests(_CliBase):
             with patches[0], patches[1], patches[2], patch.object(
                 facebook_page_command, "_build_uploader", new=builder
             ), patch.object(
-                facebook_page_command, "resolve_account_file", new=resolve_account
+                facebook_page_command, "resolve_account_file", new=resolve_account, create=True
             ), patch.object(
                 facebook_page_command, "meta_cookie_auth", new=cookie_auth
             ):

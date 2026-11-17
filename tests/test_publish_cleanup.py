@@ -171,12 +171,6 @@ class OtherPublicationCleanupTests(unittest.IsolatedAsyncioTestCase):
             ("uploader.zhihu_uploader.video", "ZhihuVideo", "main", None),
             ("uploader.zhihu_uploader.article", "ZhihuArticle", "main", None),
             ("uploader.xueqiu_uploader.article", "XueqiuArticle", "main", None),
-            (
-                "uploader.meta_uploader.facebook_page_uploader.main",
-                "MetaBusinessUploader",
-                "upload",
-                "_open_business_page",
-            ),
         )
         for module_name, cls, entry, opener in entries:
             for outcome in (None, PublishResultUnknownError("primary unknown")):

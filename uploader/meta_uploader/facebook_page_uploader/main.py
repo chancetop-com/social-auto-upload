@@ -15,7 +15,6 @@ from loguru import logger
 from patchright.async_api import (
     BrowserContext,
     Page,
-    Playwright,
     async_playwright,
     expect,
     TimeoutError as BrowserTimeoutError,
@@ -24,6 +23,7 @@ from patchright.async_api import (
 from uploader.base_video import BaseVideoUploader
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
+from utils.local_browser_session import local_browser_session
 from utils.browser_time import page_wall_clock
 from utils.dom import ElementMissingError, ElementUnusableError
 from utils.errors import LoginRequiredError, PublishResultUnknownError
@@ -39,8 +39,8 @@ FACEBOOK_PAGE_PROXY = os.environ.get("SAU_FACEBOOK_PAGE_PROXY")
 META_BUSINESS_LOGIN_CHECK_TIMEOUT_MS = 25_000
 META_BUSINESS_LOGIN_CHECK_SETTLE_MS = 2_500
 
-# Golden local-mode browser options.  Multilogin mode reuses the same values
-# only so the call sites stay symmetric; ``browser_session`` ignores them.
+# Retain these historical options for managed ignored-option diagnostics.
+# Local sessions obtain their actual launch options from the shared resolver.
 FACEBOOK_PAGE_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
 FACEBOOK_PAGE_CONTEXT_KWARGS: dict[str, object] = {}
 FACEBOOK_PAGE_INIT_SCRIPT = False
@@ -97,18 +97,21 @@ async def _unique(locator, what: str, *, timeout_ms: int = _UNIQUE_TIMEOUT_MS):
         await asyncio.sleep(_UNIQUE_POLL_SECONDS)
 
 
-def facebook_page_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
-    """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
-    return {**FACEBOOK_PAGE_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
-
-
-def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
+def _raise_if_login_required(page: Page, *, publish_attempted: bool = False, managed: bool = True) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
     ``publish_attempted`` must be true when the redirect is observed after the
     publish click was dispatched.
     """
     current_url = str(getattr(page, "url", "") or "").lower()
+    if not managed and any(marker in current_url for marker in _META_LOGIN_URL_MARKERS):
+        verification = any(marker in current_url for marker in ('checkpoint', 'two_step_verification', '/authentication/'))
+        raise LoginRequiredError(
+            'Facebook Page 需要人工验证；请先完成验证后重新运行。' if verification else
+            'Facebook Page 登录态失效；请先运行 sau facebook-page login --account <别名>。',
+            reason='verification' if verification else 'login',
+            publish_attempted=publish_attempted,
+        )
     if any(marker in current_url for marker in _META_LOGIN_URL_MARKERS):
         raise LoginRequiredError(
             "Facebook Page 上传过程中需要重新登录（登录页/验证码/二次验证）："
@@ -127,28 +130,6 @@ def _proxy_options(proxy: str | None) -> dict[str, str] | None:
     address = (FACEBOOK_PAGE_PROXY if proxy is None else proxy) or ""
     address = address.strip()
     return {"server": address} if address else None
-
-
-async def _open_business_page(
-    playwright: Playwright,
-    account_file: Path,
-    *,
-    proxy: str | None,
-    headless: bool,
-):
-    browser = await playwright.chromium.launch(
-        headless=headless, **facebook_page_launch_kwargs(proxy)
-    )
-    try:
-        context = await browser.new_context(storage_state=str(account_file))
-        page = await context.new_page()
-        page.set_default_timeout(30_000)
-        await page.goto(META_BUSINESS_URL, wait_until="domcontentloaded", timeout=120_000)
-        await page.locator("body").wait_for(state="visible", timeout=30_000)
-        return browser, context, page
-    except Exception:
-        await close_browser_resources(browser=browser)
-        raise
 
 
 async def dismiss_guidance_cards(page: Page) -> None:
@@ -173,8 +154,28 @@ async def _is_business_logged_out(page: Page) -> bool:
 
 
 
-async def is_logged_in(context: BrowserContext) -> bool:
-    """Return whether the Multilogin Profile is logged in to Meta Business Suite.
+async def _check_local_expiry(page, *, publish_attempted=False):
+    _raise_if_login_required(page, managed=False, publish_attempted=publish_attempted)
+    email = page.locator('input[name="email"]')
+    if await email.count() and await email.first.is_visible():
+        raise LoginRequiredError('Facebook Page 登录态失效；请先运行 sau facebook-page login --account <别名>。',
+                                 publish_attempted=publish_attempted)
+
+
+async def _require_local_login(page, *, publish_attempted=False):
+    await _check_local_expiry(page, publish_attempted=publish_attempted)
+    if urlparse(str(page.url)).hostname != 'business.facebook.com':
+        raise RuntimeError('Facebook Page 登录状态检查失败：页面未停留在 business.facebook.com')
+    if not await page.locator('a[href*="/latest/home"]').filter(visible=True).count():
+        raise RuntimeError('Facebook Page 登录状态检查失败：缺少 Business Suite 导航，无法确认登录状态或权限。')
+
+
+async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
+    """Probe Business Suite without reading credentials.
+
+    Local mode raises typed login/verification or page faults and leaves page
+    cleanup to the persistent context owner. The default preserves the managed
+    True/False/raise contract and its existing created-page cleanup.
 
     Only ``context.new_page()`` / ``goto`` / ``close`` are used.  Explicit login,
     checkpoint and 2FA pages return ``False``; network failures, 5xx responses,
@@ -190,11 +191,15 @@ async def is_logged_in(context: BrowserContext) -> bool:
             timeout=META_BUSINESS_LOGIN_CHECK_TIMEOUT_MS,
         )
         status = getattr(response, "status", None)
-        if isinstance(status, int) and status >= 500:
+        if isinstance(status, int) and status >= (500 if managed else 400):
             raise RuntimeError(
                 f"Facebook Page 登录状态检查失败：HTTP {status}"
             )
 
+        if not managed:
+            await page.wait_for_timeout(META_BUSINESS_LOGIN_CHECK_SETTLE_MS)
+            await _require_local_login(page)
+            return True
         current_url = str(getattr(page, "url", "") or "")
         if "business.facebook.com" not in current_url.lower():
             raise RuntimeError(
@@ -209,67 +214,65 @@ async def is_logged_in(context: BrowserContext) -> bool:
             await wait_for_timeout(META_BUSINESS_LOGIN_CHECK_SETTLE_MS)
         return not await _is_business_logged_out(page)
     finally:
-        await close_browser_resources(page=page)
+        if managed:
+            await close_browser_resources(page=page)
 
 
-async def meta_cookie_auth(account_file: str | Path, *, proxy: str | None = None) -> bool:
-    account_file = Path(account_file)
-    if not account_file.is_file():
-        return False
+def _account_alias(account_file=None, account_name=None):
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        from utils.errors import UsageError
+        raise UsageError('本地调用需要 account_name 账号别名。')
+    name = Path(str(account_file)).name
+    if name.startswith('facebook-page_') and name.endswith('.json'):
+        return name[len('facebook-page_'):-len('.json')]
+    return str(account_file)
+
+
+async def meta_cookie_auth(account_file=None, *, account_name=None, proxy=None,
+                           headless=None, local_browser=None) -> bool:
+    """Check the selected Page Profile without reading legacy credentials."""
     async with async_playwright() as playwright:
-        browser, context, page = await _open_business_page(
-            playwright, account_file, proxy=proxy, headless=True
-        )
-        try:
-            return not await _is_business_logged_out(page)
-        finally:
-            await close_browser_resources(browser=browser)
+        async with local_browser_session(
+            playwright, platform='facebook-page', account=_account_alias(account_file, account_name),
+            headless=headless, local_browser=local_browser,
+            context_kwargs={'proxy': _proxy_options(proxy)},
+        ) as session:
+            return await is_logged_in(session.context, managed=False)
 
 
-async def meta_setup(
-    account_file: str | Path,
-    *,
-    handle: bool = False,
-    proxy: str | None = None,
-    headless: bool = False,
-    return_detail: bool = False,
-):
-    account_file = Path(account_file)
-    account_file.parent.mkdir(parents=True, exist_ok=True)
-    if await meta_cookie_auth(account_file, proxy=proxy):
-        result = {"success": True, "status": "cookie_valid", "account_file": str(account_file)}
-        return result if return_detail else True
+async def meta_setup(account_file=None, *, handle=False, proxy=None, headless=None,
+                     return_detail=False, account_name=None, local_browser=None,
+                     timeout_seconds=600):
+    """Only login creates a Profile or waits for human authentication."""
+    account = _account_alias(account_file, account_name)
     if not handle:
-        result = {"success": False, "status": "cookie_invalid", "account_file": str(account_file)}
-        return result if return_detail else False
-
+        valid = await meta_cookie_auth(account_name=account, proxy=proxy,
+                                       headless=headless, local_browser=local_browser)
+        result = {'success': valid, 'status': 'valid', 'account': account}
+        return result if return_detail else valid
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            headless=headless, **facebook_page_launch_kwargs(proxy)
-        )
-        try:
-            # 已有 Facebook 登录态可作为 Business Suite 的初始 Cookie，避免重复登录。
-            source = account_file
-            context = await browser.new_context(storage_state=str(source) if source.is_file() else None)
-            page = await context.new_page()
+        async with local_browser_session(
+            playwright, platform='facebook-page', account=account, create=True,
+            headless=headless, local_browser=local_browser,
+            context_kwargs={'proxy': _proxy_options(proxy)},
+        ) as session:
+            page = await session.context.new_page()
             page.set_default_timeout(30_000)
-            await page.goto(META_BUSINESS_URL, wait_until="domcontentloaded", timeout=120_000)
-            deadline = asyncio.get_running_loop().time() + 600
-            while asyncio.get_running_loop().time() < deadline:
-                if not await _is_business_logged_out(page):
-                    await context.storage_state(path=str(account_file))
-                    result = {
-                        "success": True,
-                        "status": "logged_in",
-                        "account_file": str(account_file),
-                        "current_url": page.url,
-                    }
-                    return result if return_detail else True
-                await page.wait_for_timeout(1000)
-            result = {"success": False, "status": "timeout", "account_file": str(account_file)}
-            return result if return_detail else False
-        finally:
-            await browser.close()
+            response = await page.goto(META_BUSINESS_URL, wait_until='domcontentloaded', timeout=120_000)
+            status = getattr(response, 'status', None)
+            if isinstance(status, int) and status >= 400:
+                raise RuntimeError(f'Facebook Page 登录页面失败：HTTP {status}')
+            try:
+                await page.locator('a[href*="/latest/home"]').filter(visible=True).wait_for(
+                    state='visible', timeout=timeout_seconds * 1000)
+            except BrowserTimeoutError:
+                await _require_local_login(page)
+                raise
+            await _require_local_login(page)
+            result = {'success': True, 'status': 'logged_in', 'account': account}
+            return result if return_detail else True
 
 
 class MetaBusinessUploader(BaseVideoUploader):
@@ -280,7 +283,7 @@ class MetaBusinessUploader(BaseVideoUploader):
     def __init__(
         self,
         platform: str,
-        account_file: str | Path,
+        account_file: str | Path | None = None,
         *,
         title: str,
         description: str = "",
@@ -290,7 +293,9 @@ class MetaBusinessUploader(BaseVideoUploader):
         schedule: datetime | int = 0,
         page_name: str | None = None,
         proxy: str | None = None,
-        headless: bool = False,
+        headless: bool | None = None,
+        account_name: str | None = None,
+        local_browser: str | None = None,
         result_file: str | Path | None = None,
     ):
         if platform not in META_PLATFORMS:
@@ -310,6 +315,7 @@ class MetaBusinessUploader(BaseVideoUploader):
         self.page_name = page_name.strip() if page_name else None
         self.proxy = proxy
         self.headless = headless
+        self.account_name, self.local_browser = account_name, local_browser
         self.result_file = Path(result_file) if result_file else Path('.local/meta-results') / f'{uuid4().hex}.json'
         self.result = {"platform": platform, "title": self.title, "status": "not_submitted"}
 
@@ -346,7 +352,12 @@ class MetaBusinessUploader(BaseVideoUploader):
         humanizer = self._humanizer(page)
         combo = page.locator('[data-surface$="bizweb_create_post:left_panel"] [role="combobox"][aria-haspopup="listbox"]').filter(has=page.locator('img[alt="Facebook"]'))
         await combo.wait_for(state="visible")
-        if self.page_name and self.page_name not in await combo.inner_text():
+        selected_name = await combo.inner_text()
+        if getattr(self, '_local_mode', False):
+            selected_name = selected_name.replace('\u200b', '').strip()
+        matches = (selected_name == self.page_name if getattr(self, '_local_mode', False)
+                   else self.page_name in selected_name if self.page_name else True)
+        if self.page_name and not matches:
             await humanizer.click(await _unique(combo, "发布主体下拉"))
             option = await _unique(
                 page.get_by_role("option", name=self.page_name, exact=True),
@@ -355,6 +366,8 @@ class MetaBusinessUploader(BaseVideoUploader):
             await humanizer.click(option)
         if self.page_name:
             await expect(combo).to_contain_text(self.page_name)
+            if getattr(self, '_local_mode', False) and (await combo.inner_text()).replace('\u200b', '').strip() != self.page_name:
+                raise RuntimeError('发布主体与请求 Page 名称不一致，未提交')
         else:
             self.page_name = (await combo.inner_text()).replace('\u200b', '').strip()
         assets = parse_qs(urlparse(page.url).query).get('asset_id', [])
@@ -567,6 +580,8 @@ class MetaBusinessUploader(BaseVideoUploader):
             label="Facebook Page 发布",
         )
         budget.check_pre_click()
+        if getattr(self, '_local_mode', False):
+            await _check_local_expiry(page)
         self.result['status'] = 'submission_unknown'
         self.result_file.parent.mkdir(parents=True, exist_ok=True)
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -581,11 +596,15 @@ class MetaBusinessUploader(BaseVideoUploader):
                     await humanizer.click(button)
                 except Exception as exc:
                     if maybe_dispatched(exc):
+                        self.publish_attempted = True
                         # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
                         raise budget.timeout_error(True) from exc
                     raise
                 publish_clicked = True
+                self.publish_attempted = True
             response = await response_info.value
+            if getattr(self, '_local_mode', False):
+                await _check_local_expiry(page, publish_attempted=True)
         except BrowserTimeoutError:
             raise budget.timeout_error(publish_clicked) from None
         try:
@@ -671,7 +690,10 @@ class MetaBusinessUploader(BaseVideoUploader):
         list_url = f'https://business.facebook.com/latest/posts/{state}?asset_id={self.result["page_id"]}'
         try:
             _, content_id, _ = await open_meta_post(page, list_url=list_url, page_name=self.page_name,
-                expected_text=self.title, content_id=self.result.get('content_id'), schedule=self.schedule)
+                expected_text=self.title, content_id=self.result.get('content_id'), schedule=self.schedule,
+                local=getattr(self, '_local_mode', False), publish_attempted=True)
+        except LoginRequiredError:
+            raise
         except Exception as error:
             # 创建响应已受理，读不回原作品只能说明结果待核验，不能当成未发布。
             raise PublishResultUnknownError(
@@ -693,13 +715,11 @@ class MetaBusinessUploader(BaseVideoUploader):
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
 
     async def _publish_on_page(self, page: Page) -> None:
-        await dismiss_guidance_cards(page)
-        await self._select_publish_location(page)
-        await self._upload_files(page)
-        await self._fill_caption(page)
-        await self._advance_reels(page)
-        await self._fill_schedule(page)
-        await self._publish(page)
+        for step in (dismiss_guidance_cards, self._select_publish_location, self._upload_files,
+                     self._fill_caption, self._advance_reels, self._fill_schedule, self._publish):
+            if getattr(self, '_local_mode', False):
+                await _check_local_expiry(page, publish_attempted=self.publish_attempted)
+            await step(page)
 
     def _write_result_safely(self) -> None:
         try:
@@ -708,15 +728,22 @@ class MetaBusinessUploader(BaseVideoUploader):
             logger.warning("Facebook Page result write-back failed; preserving upload result: {}", error)
 
     async def upload_in(self, session: BrowserSession) -> dict:
-        """Multilogin body: consume the injected context, touch no cookies."""
+        """Consume a borrowed context; its owner controls cleanup."""
+        self._local_mode = not session.managed
+        self.publish_attempted = False
         self.start_publish_budget()
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
-        await page.goto(
+        response = await page.goto(
             META_BUSINESS_URL,
             wait_until="domcontentloaded",
             timeout=self.publish_budget.clamp_ms(120_000),
         )
+        if not session.managed:
+            status = getattr(response, 'status', None)
+            if isinstance(status, int) and status >= 400:
+                raise RuntimeError(f'Facebook Page 发布页面失败：HTTP {status}')
+            await _require_local_login(page)
         if session.managed:
             _raise_if_login_required(page)
             if await _is_business_logged_out(page):
@@ -728,32 +755,32 @@ class MetaBusinessUploader(BaseVideoUploader):
             if session.managed:
                 # 发布点击已成功走完（``_publish`` 只在确认创建后才返回）。
                 _raise_if_login_required(page, publish_attempted=True)
+            if not session.managed:
+                await _check_local_expiry(page, publish_attempted=self.publish_attempted)
             return self.result
+        except Exception:
+            if not session.managed:
+                try:
+                    await _check_local_expiry(page, publish_attempted=self.publish_attempted)
+                except LoginRequiredError:
+                    raise
+                except Exception:
+                    pass
+            raise
         finally:
             self._write_result_safely()
 
     async def upload(self, *, session: BrowserSession | None = None) -> dict:
-        # Media validation is shared; cookie handling stays local-only.
+        # Validate media before acquiring an owned session. Injected sessions are borrowed.
         self._validate_media()
         if session is not None:
             return await self.upload_in(session)
 
-        self.start_publish_budget()
         async with async_playwright() as playwright:
-            browser, context, page = await _open_business_page(
-                playwright, self.account_file, proxy=self.proxy, headless=self.headless
-            )
-            try:
-                if await _is_business_logged_out(page):
-                    raise RuntimeError("Business Suite 登录态失效，请先执行对应平台 login")
-                await self._publish_on_page(page)
-                try:
-                    await context.storage_state(path=str(self.account_file))
-                except Exception as error:
-                    logger.warning(
-                        f"Facebook Page cookie 保存失败（发布已成功，不影响结果）: {error}"
-                    )
-                return self.result
-            finally:
-                self._write_result_safely()
-                await close_browser_resources(browser=browser)
+            async with local_browser_session(
+                playwright, platform='facebook-page', account=_account_alias(self.account_file, self.account_name),
+                headless=self.headless, local_browser=self.local_browser,
+                context_kwargs={'proxy': _proxy_options(self.proxy)},
+            ) as session:
+                await is_logged_in(session.context, managed=False)
+                return await self.upload_in(session)
