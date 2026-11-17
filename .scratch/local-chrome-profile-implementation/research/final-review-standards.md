@@ -1,5 +1,7 @@
 # Independent Standards review
 
+Current delivery status (2026-11-17): all Standards findings are closed, the reviewed source is merged, and all 25 task worktrees have been removed. Earlier pending statements below are historical checkpoints. See the [final integration and cleanup record](20-final-validation.md#最终交付完成合并与工作树清理2026-11-17).
+
 Pinned HEAD: `cc23b9d3631bfd85980bae4f8885ffadc8233eeb`
 Baseline: `47cc1850ede44ca822dbc7fa949970f4eed919bc`
 Diff: `git diff 47cc1850ede44ca822dbc7fa949970f4eed919bc...HEAD`
@@ -238,3 +240,9 @@ The managed/session implementation, local Profile ownership implementation, Dayu
 ### Validation boundary
 
 The implementer's recorded cumulative result is **2,031 tests: 2,029 passed, 2 existing opt-in service skips, no failures/errors**. As requested, this review did not repeat that broad suite or any real-browser/account validation. Independent work comprised source/diff inspection, retained behavior-test inspection, the 2,210-case pure alias equivalence probe, and the AST builder/public-signature comparisons above. No additional fix is requested on this axis.
+
+## Integration and cleanup closeout — complete (2026-11-17)
+
+After the independent recheck, source `350960fc755de86587130dfbb2283f4894fc9a57` was merged with `--no-ff` as `75cc278a7c90851f60ad461198379c27592eaa8d` on `codex/local-chrome-profile`, without conflicts. The merged tree exactly matched the source tree; the diff check passed and integration was clean. Root then actually removed all 25 verified task worktrees, preserving the original integration checkout and both pre-existing external worktrees. The four original Profiles, user configuration and historical results were outside the cleanup scope and remain preserved. The closeout author independently confirmed the remaining worktree inventory.
+
+The [cumulative closeout](20-final-validation.md#最终交付完成合并与工作树清理2026-11-17) records the merge/tree identities, cleanup execution record and preserved paths. This addition records completed delivery operations; it introduces no runtime change, new test result or account operation. The original independent review and recheck evidence above is unchanged. No merge or cleanup work remains pending.

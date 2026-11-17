@@ -1,5 +1,7 @@
 # Independent Spec review
 
+Current delivery status (2026-11-17): both Spec findings are closed, the reviewed source is merged, and all 25 task worktrees have been removed. Earlier pending statements below are historical checkpoints. See the [final integration and cleanup record](20-final-validation.md#最终交付完成合并与工作树清理2026-11-17).
+
 Reviewed pinned HEAD `cc23b9d3631bfd85980bae4f8885ffadc8233eeb` against baseline `47cc1850ede44ca822dbc7fa949970f4eed919bc` using `git diff 47cc1850ede44ca822dbc7fa949970f4eed919bc...HEAD`.
 
 Read `review-common.md` and `review-snapshot.md` first, then the current specification, user amendments and relevant implementation/validation records. The browser-kind-first layout, expressly requested historical-code removal, ordinary/creator Instagram compatibility and clearer local/managed no-publish summaries are authorized requirements, not scope creep. No other review axis was consulted.
@@ -117,3 +119,9 @@ Created `/private/tmp/sau-spec-recheck-repro` with `git archive` of the candidat
 **Result: 13 tests, all passed, 1.470 seconds.** Log: `/private/tmp/sau-local-profile-notes/review-spec-recheck-tests.log`. These methods contain multiple synthetic scenarios; the method count is not presented as a scenario count. Tests use actual temporary Profile/session orchestration with external browser/page fakes, without browsers or platform calls. The previously reported 2,031-test cumulative run was not duplicated.
 
 The original integration and candidate worker were read-only throughout. No real account/Profile/user configuration/data/git changes or actual publication/deletion. No fixes made.
+
+## Integration and cleanup closeout — complete (2026-11-17)
+
+After the independent recheck, source `350960fc755de86587130dfbb2283f4894fc9a57` was merged with `--no-ff` as `75cc278a7c90851f60ad461198379c27592eaa8d` on `codex/local-chrome-profile`, without conflicts. The merged tree exactly matched the source tree; the diff check passed and integration was clean. Root then actually removed all 25 verified task worktrees, preserving the original integration checkout and both pre-existing external worktrees. The four original Profiles, user configuration and historical results were outside the cleanup scope and remain preserved. The closeout author independently confirmed the remaining worktree inventory.
+
+The [cumulative closeout](20-final-validation.md#最终交付完成合并与工作树清理2026-11-17) records the merge/tree identities, cleanup execution record and preserved paths. This addition records completed delivery operations; it introduces no runtime change, new test result or account operation. The original independent review and recheck evidence above is unchanged. No merge or cleanup work remains pending.

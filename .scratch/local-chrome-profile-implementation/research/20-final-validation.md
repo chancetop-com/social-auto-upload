@@ -1,5 +1,32 @@
 # 20：累计最终验证记录
 
+## 最终交付完成：合并与工作树清理（2026-11-17）
+
+**当前状态：原 01–20、用户追加 21–24、两轴独立审查、全部修复、原审查者复核、集成合并和最终工作树清理均已完成。** 全部 24 张实施票为 resolved，无剩余实施验收、审查发现、合并或清理待办。本节更新下方历史检查点中的待执行状态，不改写原始测试、实际操作、失败或路径记录。
+
+### 实际集成合并
+
+- 分支：原仓库 `codex/local-chrome-profile`。合并前集成 `cc23b9d3631bfd85980bae4f8885ffadc8233eeb` 和源工作树均干净，源分支以该集成提交为祖先。
+- 已复核运行时代码为 `e1ed1b684fc096d5c6f177f643fc38242c2e9fe2`；源分支 `codex/local-profile-review-fixes` 的最终提交 `350960fc755de86587130dfbb2283f4894fc9a57` 只追加原审查者的独立关闭记录。
+- 使用 `git merge --no-ff` 完成无冲突合并，提交为 `75cc278a7c90851f60ad461198379c27592eaa8d`，两个父提交分别为上述集成与最终源提交。
+- 合并树与源提交树完全一致，均为 `8ef581d51d742d49f516844a8c9bb8b1d981627b`；`git diff --exit-code HEAD codex/local-profile-review-fixes` 和 `git diff --check HEAD^1 HEAD` 通过，合并后集成工作树干净。
+
+### 实际工作树清理与保留范围
+
+root 在上述合并后完成清理，外部执行记录 `/private/tmp/sau-local-profile-notes/cleanup-result.json` 的 `integration_head` 为 `75cc278a7c90851f60ad461198379c27592eaa8d`、`outcome` 为 `removed`，逐项记录了 **25 个已核验并移除的本任务工作树**：`/private/tmp/sau-local-profile-01` 至 `/private/tmp/sau-local-profile-24`，以及 `/private/tmp/sau-local-profile-review-fixes`。这些路径在早期命令中继续作为历史执行位置保留，不再是可用工作目录。
+
+清理后由收口者再次读取 `git worktree list --porcelain`，仅剩以下 3 个工作树；两个既有外部工作树均未移除：
+
+| 保留工作树 | 范围 |
+| --- | --- |
+| `/Users/chancetio/Desktop/Web/social-media-auto-upload/social-auto-upload` | 原集成仓库 |
+| `/Users/chancetio/.local/share/opencode/worktree/d25f15/playful-meadow` | 既有外部工作树 |
+| `/Users/chancetio/.local/share/opencode/worktree/d25f15/quick-meadow` | 既有外部工作树 |
+
+root 清理后独立核对原仓库四个目录仍在：`browser_profiles/chrome/tiktok/lukechen`、`browser_profiles/chrome/rednote/rednote`、`browser_profiles/chrome/instagram/luke`、`browser_profiles/chrome/xiaohongshu/180`。原仓库 Profile、`conf.py` 和 `.local` 历史结果不在工作树清理范围内，均保留；清理及本次文档收口没有操作账号、重建/移动 Profile、改写用户配置或结果，也没有发布或删除真实作品。目录存在核对不冒充新的登录有效性检查。
+
+本次 closeout 仅更新文档，没有运行新测试或浏览器。最终离线证据仍是下节的 **2,031 项：2,029 passed、2 个既有 opt-in skip、0 failures/errors**；98 项浏览器证据、四平台 8 次 no-publish、搬迁后 4 次 check 和 creator 2 次复验继续按各自已执行记录引用，普通 Instagram 的受控证据边界不变。原始历史日志与用户追加要求完整保留，没有 push。
+
 ## 独立审查后的修复记录（2026-11-17）
 
 针对固定基线 `47cc1850` 到最终审查快照 `cc23b9d3` 的两轴独立审查已完成：[Spec 报告及处置](./final-review-spec.md)记录 2 项 P2；[Standards 报告及处置](./final-review-standards.md)记录 3 项 P3 与 3 项可选维护性建议。一个新的隔离实施者已处理全部项目，保留原始报告并逐条列出处置与验证。Spec 的 HTTP/认证混合故障和跨站跳转误判先有公共 CLI RED，再修复 GREEN；托管和提交后语义保留。

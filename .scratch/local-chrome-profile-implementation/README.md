@@ -2,7 +2,7 @@
 
 Status: resolved
 
-实施与约定验收已完成，包含用户追加的 21–24；最终独立两轴代码审查仍由 root 后续执行，见 [20 累计验证记录](./research/20-final-validation.md)。resolved 不表示该独立审查或工作树清理已经完成。
+实施、约定验收、独立两轴审查、全部修复、原审查者复核、集成合并与最终工作树清理均已完成，包含用户追加的 21–24。当前状态及实际合并/清理证据见 [20 最终交付完成记录](./research/20-final-validation.md#最终交付完成合并与工作树清理2026-11-17)；下方分批记录中的待办表述保留为当时历史。
 
 批准日期：2026-11-17。
 
@@ -125,3 +125,5 @@ Status: resolved
 - 2026-11-17：最终两轴独立审查完成，固定审查快照为 `cc23b9d3`。同一新的隔离实施者处理 [Spec 的 2 项 P2](./research/final-review-spec.md)和 [Standards 的 3 项 P3、3 项维护性建议](./research/final-review-standards.md)；完整离线 2,031 项（2,029 passed / 2 个既有 opt-in skip，0 failures/errors）通过，沿用 98 项既有浏览器证据，无实际账号操作。原审查者候选复核、集成合并和 root 最终工作树清理仍待执行；本条不宣称这些后续动作完成。
 
 - 2026-11-17：原两轴审查者完成对 `e1ed1b6` 的独立候选复核，Spec S1/S2 与 Standards S1–S3/H1–H3 全部关闭。Spec 13 个公共边界方法 / 1.470s 全通过；Standards 2,210 个别名组合 0 差异，14 个 builder 转换等价且 26 个公共构造签名未变。复核原文追加在 [Spec 报告](./research/final-review-spec.md#original-spec-reviewer-recheck--complete-2026-11-17) 和 [Standards 报告](./research/final-review-standards.md#original-standards-reviewer-recheck--complete-2026-11-17)。审查与修复环节完成；集成合并和 root 最终工作树清理仍待执行。
+
+- 2026-11-17：最终交付完成。审查修复与独立复核记录以 `75cc278a7c90851f60ad461198379c27592eaa8d` 无冲突合入 `codex/local-chrome-profile`，树与已复核源提交完全一致。root 随后实际移除全部 25 个本任务工作树，保留原集成目录及 2 个既有外部工作树；原仓库四份 Profile、配置和历史结果在清理范围之外并保留。全部 24 张实施票为 resolved，无剩余实施、审查、合并或清理待办。详见 [实际合并与清理证据](./research/20-final-validation.md#最终交付完成合并与工作树清理2026-11-17)。本次只收口文档，没有新增测试或账号操作。
