@@ -46,8 +46,7 @@ class AccountCheckCleanupTests(unittest.TestCase):
 
 class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
     async def test_meta_openers_keep_setup_error_when_cleanup_also_fails(self):
-        for platform, name in (("facebook_uploader", "_open_facebook_page"),
-                               ("facebook_page_uploader", "_open_business_page")):
+        for platform, name in (("facebook_page_uploader", "_open_business_page"),):
             with self.subTest(platform=platform):
                 module = importlib.import_module(f"uploader.meta_uploader.{platform}.main")
                 original = ValueError("invalid storage state")

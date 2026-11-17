@@ -9,7 +9,11 @@ from pathlib import Path
 
 from patchright.async_api import Page, async_playwright, expect
 
-from uploader.meta_uploader.facebook_uploader.main import _open_facebook_page
+from uploader.meta_uploader.facebook_uploader.main import (
+    _account_alias, _proxy_options, _navigate_local_page, _require_local_login, _local_login_guard,
+)
+from utils.local_browser_session import local_browser_session
+from utils.errors import LoginRequiredError
 
 
 def facebook_post_id(url: str) -> str:
@@ -42,6 +46,7 @@ async def find_facebook_post(page: Page, *, post_url: str, owner_id: str, expect
     if users != {owner_id}:
         raise RuntimeError("当前 Facebook 登录用户与 owner-id 不一致")
     await page.goto(f"https://www.facebook.com/profile.php?id={owner_id}", wait_until="domcontentloaded", timeout=90000)
+    await _local_login_guard(page)
     # article 是主页作品卡片，正文只用于缩小范围；真正身份还要核对作品 ID 和作者链接。
     articles = page.get_by_role("article").filter(has_text=expected_text)
     deadline = asyncio.get_running_loop().time() + 45
@@ -79,6 +84,7 @@ async def find_trashed_facebook_post(page: Page, *, post_url: str, owner_id: str
     # 此地址来自个人主页“动态记录 → 垃圾箱”的实际导航，category_key 明确限定垃圾箱。
     await page.goto(f"https://www.facebook.com/{owner_id}/allactivity?activity_history=false&category_key=TRASH&manage_mode=true&should_load_landing_page=false",
                     wait_until="domcontentloaded", timeout=90000)
+    await _local_login_guard(page)
     # 查看链接保留原作品 ID；最近的含“更多选项”按钮的祖先就是单条活动记录。
     link = page.get_by_role('link', name='查看', exact=True).locator(f'xpath=self::a[contains(@href,"/{post_id}/") or contains(@href,"story_fbid={post_id}")]')
     await expect(link).to_have_count(1, timeout=30000)
@@ -104,6 +110,7 @@ async def trash_facebook_post(page: Page, article, *, post_url: str, owner_id: s
     # 同一确认弹窗中的“转移”才是最终提交动作，不点击全页同名按钮。
     dialog = page.get_by_role("dialog").filter(has_text="移至垃圾箱？")
     await expect(dialog).to_have_count(1)
+    await _local_login_guard(page)
     await dialog.get_by_role("button", name="转移", exact=True).click()  # native-click: manage；删除确认按钮保持原生
     # 实测没有成功 toast。等待确认窗及原卡片消失，再到垃圾箱查原 ID，不能猜成功文案。
     await expect(dialog).to_have_count(0, timeout=30000)
@@ -119,6 +126,7 @@ async def verify_facebook_deletion(page: Page, *, owner_id: str, post_url: str) 
     while asyncio.get_running_loop().time() < deadline:
         await page.goto(f"https://www.facebook.com/{owner_id}/allactivity?activity_history=false&category_key=TRASH&manage_mode=true&should_load_landing_page=false",
                         wait_until="domcontentloaded", timeout=90000)
+        await _local_login_guard(page)
         await page.get_by_text("只有你能看到垃圾箱里的内容。", exact=True).wait_for(timeout=30000)
         # 导航标题先出现，记录后到；必须等空列表文案或实际记录链接，不能把加载中当作已删除。
         empty = page.get_by_text("好冷清，一片落叶飘过~", exact=True)
@@ -141,48 +149,70 @@ async def verify_facebook_deletion(page: Page, *, owner_id: str, post_url: str) 
     raise TimeoutError("永久删除已提交，但垃圾箱仍有原 ID；结果待核实，禁止自动重试删除")
 
 
-async def facebook_post_action(account_file: Path, *, post_url: str, owner_id: str,
+async def facebook_post_action(account_file: Path | None = None, *, post_url: str, owner_id: str,
                                expected_text: str, delete: bool = False,
                                permanent: bool = False, from_trash: bool = False, deleted: bool = False,
-                               proxy: str | None = None, headless: bool = False) -> dict:
-    """CLI 的原作品查询/删除入口；只有明确的平台反馈才返回成功。"""
+                               proxy: str | None = None, headless: bool | None = None,
+                               account_name=None, local_browser=None, session=None) -> dict:
+    """Query/delete the original work using a local Profile or a borrowed session."""
     facebook_post_id(post_url)
-    async with async_playwright() as playwright:
-        browser, context, page = await _open_facebook_page(playwright, account_file, proxy=proxy, headless=headless)
-        try:
-            cookies = await context.cookies("https://www.facebook.com/")
-            if {c["value"] for c in cookies if c["name"] == "c_user"} != {owner_id}:
-                raise RuntimeError("当前 Facebook 登录用户与 owner-id 不一致")
-            if not owner_id.isdigit() or not expected_text.strip():
-                raise ValueError("owner-id 必须是数字，expected-text 不能为空")
-            if deleted:
-                if delete:
-                    raise ValueError("核实永久删除结果不能同时执行删除")
-                await verify_facebook_deletion(page, owner_id=owner_id, post_url=post_url)
-            elif from_trash:
-                article = await find_trashed_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
-            else:
-                article = await find_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
-            result = {"platform": "facebook", "owner_id": owner_id,
-                      "post_id": facebook_post_id(post_url), "post_url": post_url,
-                      "expected_text": expected_text, "status": "absent_from_trash" if deleted else "trashed" if from_trash else "found"}
+    if not owner_id.isdigit() or not expected_text.strip():
+        raise ValueError("owner-id 必须是数字，expected-text 不能为空")
+    if session is None:
+        async with async_playwright() as playwright:
+            async with local_browser_session(
+                playwright, platform="facebook", account=_account_alias(account_file, account_name),
+                headless=headless, local_browser=local_browser,
+                context_kwargs={"proxy": _proxy_options(proxy)},
+            ) as owned:
+                return await facebook_post_action(post_url=post_url, owner_id=owner_id,
+                    expected_text=expected_text, delete=delete, permanent=permanent,
+                    from_trash=from_trash, deleted=deleted, session=owned)
+    context = session.context
+    page = await context.new_page()
+    page.set_default_timeout(30_000)
+    try:
+        await _navigate_local_page(page, timeout=90_000)
+        await _require_local_login(page)
+        cookies = await context.cookies("https://www.facebook.com/")
+        if {c["value"] for c in cookies if c["name"] == "c_user"} != {owner_id}:
+            raise RuntimeError("当前 Facebook 登录用户与 owner-id 不一致")
+        if deleted:
             if delete:
-                if not from_trash:
-                    result["status"] = await trash_facebook_post(page, article, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
-                if permanent:
-                    row = await find_trashed_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
-                    # 垃圾箱单条记录的菜单与批量删除相隔离，禁止操作“全部”复选框。
-                    await row.get_by_role("button", name=re.compile(r"^针对.+的更多选项$")).click()  # native-click: manage；垃圾箱行内管理保持原生
-                    await page.get_by_role("menu").get_by_role("menuitem", name="删除", exact=True).click()  # native-click: manage；永久删除菜单项保持原生
-                    dialog = page.get_by_role("dialog").filter(has_text="确定删除？")
-                    await expect(dialog).to_contain_text("你删除的内容将无法恢复。")
-                    await dialog.get_by_role("button", name="删除", exact=True).click()  # native-click: manage；永久删除确认按钮保持原生
-                    await expect(dialog).to_have_count(0, timeout=30000)
-                    await expect(row).to_have_count(0, timeout=30000)
-                    await verify_facebook_deletion(page, owner_id=owner_id, post_url=post_url)
-                    result["status"] = "deleted"
-            result["checked_at"] = datetime.now(timezone.utc).isoformat()
-            await context.storage_state(path=str(account_file))
-            return result
-        finally:
-            await browser.close()
+                raise ValueError("核实永久删除结果不能同时执行删除")
+            await verify_facebook_deletion(page, owner_id=owner_id, post_url=post_url)
+        elif from_trash:
+            article = await find_trashed_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
+        else:
+            article = await find_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
+        result = {"platform": "facebook", "owner_id": owner_id,
+                  "post_id": facebook_post_id(post_url), "post_url": post_url,
+                  "expected_text": expected_text, "status": "absent_from_trash" if deleted else "trashed" if from_trash else "found"}
+        if delete:
+            if not from_trash:
+                result["status"] = await trash_facebook_post(page, article, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
+            if permanent:
+                row = await find_trashed_facebook_post(page, post_url=post_url, owner_id=owner_id, expected_text=expected_text)
+                # 垃圾箱单条记录的菜单与批量删除相隔离，禁止操作“全部”复选框。
+                await row.get_by_role("button", name=re.compile(r"^针对.+的更多选项$")).click()  # native-click: manage；垃圾箱行内管理保持原生
+                await page.get_by_role("menu").get_by_role("menuitem", name="删除", exact=True).click()  # native-click: manage；永久删除菜单项保持原生
+                dialog = page.get_by_role("dialog").filter(has_text="确定删除？")
+                await expect(dialog).to_contain_text("你删除的内容将无法恢复。")
+                await _local_login_guard(page)
+                await dialog.get_by_role("button", name="删除", exact=True).click()  # native-click: manage；永久删除确认按钮保持原生
+                await expect(dialog).to_have_count(0, timeout=30000)
+                await expect(row).to_have_count(0, timeout=30000)
+                await verify_facebook_deletion(page, owner_id=owner_id, post_url=post_url)
+                result["status"] = "deleted"
+        result["checked_at"] = datetime.now(timezone.utc).isoformat()
+        return result
+    except LoginRequiredError:
+        raise
+    except Exception:
+        try:
+            await _local_login_guard(page)
+        except LoginRequiredError:
+            raise
+        except Exception:
+            pass
+        raise

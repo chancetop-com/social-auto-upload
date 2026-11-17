@@ -14,9 +14,10 @@ from pathlib import Path
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
 
 from uploader.publish_timeout import PublishTimeoutBudget
-from utils.browser_cleanup import close_browser_resources, save_upload_session
+from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
-from utils.errors import LoginRequiredError
+from utils.errors import LoginRequiredError, UsageError
+from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 from utils.log import facebook_logger
@@ -39,9 +40,8 @@ FACEBOOK_PUBLISH_FORM = '[role="dialog"][aria-modal="true"] form'
 FACEBOOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
 FACEBOOK_LOGIN_CHECK_SETTLE_MS = 2_500
 
-# Golden local-mode browser options.  ``sau_commands/facebook.py`` reuses the
-# same values for ``browser_session`` in Multilogin mode, where they are
-# silently ignored (the Profile supplies channel/fingerprint/proxy).
+# Retain the managed ignored-option log contract. Local Profiles use the
+# selected browser configuration instead of these historical options.
 FACEBOOK_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
 FACEBOOK_CONTEXT_KWARGS: dict[str, object] = {}
 FACEBOOK_INIT_SCRIPT = False
@@ -54,16 +54,11 @@ _FACEBOOK_LOGIN_URL_MARKERS = (
 )
 
 
-def facebook_launch_kwargs(proxy: str | None = None) -> dict[str, object]:
-    """Exact local launch options; ``proxy`` is dropped in Multilogin mode."""
-    return {**FACEBOOK_LAUNCH_KWARGS, "proxy": _proxy_options(proxy)}
-
-
 def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
     """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
 
-    Only the Multilogin branch calls this; the local branch keeps its legacy
-    cookie-invalid error.  ``publish_attempted`` must be true when the redirect
+    Managed sessions retain their existing redirect contract; local sessions
+    use ``_local_login_guard``. ``publish_attempted`` is true when the redirect
     is observed after the publish click was dispatched.
     """
     current_url = str(getattr(page, "url", "") or "").lower()
@@ -96,24 +91,6 @@ async def _is_logged_out(page: Page) -> bool:
         return True
     # 发帖附件控件是首页 composer 已挂载的正向证据，空白页/登录中页面不能当作已登录。
     return await page.locator(FACEBOOK_MEDIA_INPUT).count() != 1
-
-
-async def _open_facebook_page(playwright: Playwright, account_file: Path, *, proxy: str | None, headless: bool):
-    """使用 storage state 打开 Facebook，并保留代理配置到浏览器进程。"""
-    browser = await playwright.chromium.launch(
-        headless=headless, **facebook_launch_kwargs(proxy)
-    )
-    try:
-        context = await browser.new_context(storage_state=str(account_file))
-        page = await context.new_page()
-        page.set_default_timeout(30_000)
-        await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded", timeout=90_000)
-        await page.locator("body").wait_for(state="visible", timeout=30_000)
-        return browser, context, page
-    except Exception:
-        # 导航或 storage state 失败时，浏览器已经属于本函数，必须在抛错前释放。
-        await close_browser_resources(browser=browser)
-        raise
 
 
 async def is_logged_in(context: BrowserContext) -> bool:
@@ -154,86 +131,100 @@ async def is_logged_in(context: BrowserContext) -> bool:
         await close_browser_resources(page=page)
 
 
-async def facebook_cookie_auth(account_file: str | Path, *, proxy: str | None = None) -> bool:
-    """检查保存的 Facebook storage state 是否仍能进入已登录首页。"""
-    account_file = Path(account_file)
-    if not account_file.is_file():
-        return False
-    async with async_playwright() as playwright:
-        browser, context, page = await _open_facebook_page(
-            playwright, account_file, proxy=proxy, headless=True
+def _account_alias(account_file=None, account_name=None):
+    if account_name is not None:
+        return account_name
+    if account_file is None:
+        raise UsageError("本地调用需要 account_name 账号别名。")
+    name = Path(str(account_file)).name
+    if name.startswith("facebook_") and name.endswith(".json"):
+        return name[len("facebook_"):-len(".json")]
+    return str(account_file)
+
+
+async def _local_login_guard(page, *, publish_attempted=False):
+    url = str(page.url).lower()
+    verification = any(marker in url for marker in ("checkpoint", "two_step_verification", "/authentication/", "captcha"))
+    login = "/login" in url
+    if not verification and not login:
+        email = page.locator(FACEBOOK_LOGIN_INPUT)
+        login = await email.count() and await email.first.is_visible()
+    if verification or login:
+        raise LoginRequiredError(
+            "Facebook 需要完成人机验证；请运行 sau facebook login --account <别名> 完成验证。" if verification else
+            "Facebook 未登录；请先运行 sau facebook login --account <别名>。",
+            reason="verification" if verification else "login", publish_attempted=publish_attempted,
         )
-        try:
-            return not await _is_logged_out(page)
-        finally:
-            await close_browser_resources(browser=browser)
 
 
-async def facebook_setup(
-    account_file: str | Path,
-    *,
-    handle: bool = False,
-    return_detail: bool = False,
-    headless: bool = False,
-    proxy: str | None = None,
-    timeout_seconds: int = 600,
-):
-    """校验登录态；登录命令用可见浏览器等待用户完成登录后保存状态。"""
-    account_file = Path(account_file)
-    account_file.parent.mkdir(parents=True, exist_ok=True)
-    valid = await facebook_cookie_auth(account_file, proxy=proxy)
-    if valid:
-        result = {
-            "success": True,
-            "status": "cookie_valid",
-            "message": "Facebook 登录态有效",
-            "account_file": str(account_file),
-        }
-        return result if return_detail else True
+async def _navigate_local_page(page, *, timeout=FACEBOOK_LOGIN_CHECK_TIMEOUT_MS):
+    from urllib.parse import urlsplit
+    response = await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded", timeout=timeout)
+    status = getattr(response, "status", None)
+    if isinstance(status, int) and status >= 400:
+        raise RuntimeError(f"Facebook 页面请求失败：HTTP {status}")
+    if urlsplit(str(page.url)).hostname not in {"facebook.com", "www.facebook.com"}:
+        raise RuntimeError("Facebook 页面未停留在 facebook.com")
+
+
+async def _require_local_login(page):
+    await _local_login_guard(page)
+    media = page.locator(FACEBOOK_MEDIA_INPUT)
+    try:
+        await media.first.wait_for(state="attached", timeout=FACEBOOK_LOGIN_CHECK_TIMEOUT_MS)
+    except Exception as error:
+        await _local_login_guard(page)
+        raise RuntimeError("Facebook 页面结构异常：未找到首页发帖控件") from error
+    await _local_login_guard(page)
+    if await media.count() != 1:
+        raise RuntimeError("Facebook 页面结构异常：未找到唯一首页发帖控件")
+
+
+async def facebook_cookie_auth(account_file=None, *, account_name=None, proxy=None,
+                               headless=None, local_browser=None) -> bool:
+    """Check the selected persistent Profile; the legacy filename only supplies an alias."""
+    async with async_playwright() as playwright:
+        async with local_browser_session(
+            playwright, platform="facebook", account=_account_alias(account_file, account_name),
+            headless=headless, local_browser=local_browser,
+            context_kwargs={"proxy": _proxy_options(proxy)},
+        ) as session:
+            page = await session.context.new_page()
+            await _navigate_local_page(page)
+            await _require_local_login(page)
+            return True
+
+
+async def facebook_setup(account_file=None, *, handle=False, return_detail=False,
+                         headless=None, proxy=None, timeout_seconds=600,
+                         account_name=None, local_browser=None):
+    """Only login creates a Profile and waits for interactive authentication."""
+    account = _account_alias(account_file, account_name)
     if not handle:
-        result = {
-            "success": False,
-            "status": "cookie_invalid",
-            "message": "Facebook 登录态不存在或已失效",
-            "account_file": str(account_file),
-        }
-        return result if return_detail else False
-
+        await facebook_cookie_auth(account_name=account, proxy=proxy,
+                                   headless=headless, local_browser=local_browser)
+        result = {"success": True, "status": "valid", "account": account}
+        return result if return_detail else True
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            headless=headless, **facebook_launch_kwargs(proxy)
-        )
-        try:
-            context = await browser.new_context(
-                storage_state=str(account_file) if account_file.is_file() else None
-            )
-            page = await context.new_page()
+        async with local_browser_session(
+            playwright, platform="facebook", account=account, create=True,
+            headless=headless, local_browser=local_browser,
+            context_kwargs={"proxy": _proxy_options(proxy)},
+        ) as session:
+            page = await session.context.new_page()
             page.set_default_timeout(30_000)
-            await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded", timeout=90_000)
-            facebook_logger.info("请在打开的 Facebook 浏览器中完成登录，程序会自动保存登录态")
+            await _navigate_local_page(page, timeout=90_000)
+            facebook_logger.info("请在打开的 Facebook 浏览器中完成登录；浏览器将保存 Profile 登录态")
             deadline = asyncio.get_running_loop().time() + timeout_seconds
             while asyncio.get_running_loop().time() < deadline:
                 if not await _is_logged_out(page):
-                    await context.storage_state(path=str(account_file))
-                    result = {
-                        "success": True,
-                        "status": "logged_in",
-                        "message": "Facebook 登录成功，登录态已保存",
-                        "account_file": str(account_file),
-                        "current_url": page.url,
-                    }
+                    await _require_local_login(page)
+                    result = {"success": True, "status": "logged_in", "account": account,
+                              "message": "Facebook 登录成功，登录态保存在 Profile", "current_url": page.url}
                     return result if return_detail else True
                 await page.wait_for_timeout(1000)
-            result = {
-                "success": False,
-                "status": "timeout",
-                "message": "等待 Facebook 登录超时，未保存登录态",
-                "account_file": str(account_file),
-                "current_url": page.url,
-            }
-            return result if return_detail else False
-        finally:
-            await browser.close()
+            await _local_login_guard(page)
+            raise TimeoutError("等待 Facebook 登录超时，未观察到已登录首页")
 
 
 def _composer_text(caption: str) -> str:
@@ -254,9 +245,10 @@ class FacebookPost:
         file_path: str | Path | list[Path],
         description: str,
         tags: list[str],
-        account_file: str | Path,
+        account_file: str | Path | None = None,
         proxy: str | None = None,
-        headless: bool = True,
+        headless: bool | None = None,
+        *, account_name=None, local_browser=None,
     ):
         self.title = title.strip()
         self.files = [Path(item) for item in file_path] if isinstance(file_path, list) else [Path(file_path)]
@@ -266,6 +258,8 @@ class FacebookPost:
         self.account_file = Path(account_file) if account_file is not None else None
         self.proxy = proxy
         self.headless = headless
+        self.account_name = account_name
+        self.local_browser = local_browser
 
     def _caption(self) -> str:
         """Facebook 首页没有独立视频标题字段，按项目统一约定合并为正文。"""
@@ -319,6 +313,8 @@ class FacebookPost:
         deadline = asyncio.get_running_loop().time() + budget.clamp_seconds(180)
         while asyncio.get_running_loop().time() < deadline:
             budget.check_pre_click()
+            if getattr(self, "_local_mode", False):
+                await _local_login_guard(page)
             error = page.locator('[role="dialog"] [role="alert"]')
             if await error.count() and await error.first.is_visible():
                 message = (await error.first.inner_text()).strip()
@@ -355,14 +351,26 @@ class FacebookPost:
         await humanizer.before_submit()
         # 停顿可能吃掉最后的预算：派发前再确认一次（未发布，退出 1）。
         budget.check_pre_click()
+        if getattr(self, "_local_mode", False):
+            await _local_login_guard(page)
         try:
             await humanizer.click(publish_button)
         except Exception as exc:
+            if getattr(self, "_local_mode", False):
+                try:
+                    await _local_login_guard(page, publish_attempted=maybe_dispatched(exc))
+                except LoginRequiredError:
+                    raise
+                except Exception:
+                    pass
             if maybe_dispatched(exc):
                 # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
                 raise budget.timeout_error(True) from exc
             raise
+        self._publish_attempted = True
         while budget.remaining_seconds() > 0:
+            if getattr(self, "_local_mode", False):
+                await _local_login_guard(page, publish_attempted=True)
             # 只接受状态提示或成功文案；弹窗消失本身不足以证明服务端已受理。
             success_text = page.get_by_text(success_pattern)
             if await success_text.count():
@@ -410,47 +418,50 @@ class FacebookPost:
         await self._publish_and_verify(page, budget)
 
     async def upload_in(self, session: BrowserSession) -> None:
-        """Multilogin body: consume the injected context, touch no cookies."""
+        """Consume the caller's context; its lifecycle and Profile lock stay borrowed."""
         self._ensure_publish_budget()
+        self._local_mode = not session.managed
+        self._publish_attempted = False
         page = await session.context.new_page()
         page.set_default_timeout(30_000)
-        await page.goto(
-            FACEBOOK_HOME_URL,
-            wait_until="domcontentloaded",
-            timeout=self._ensure_publish_budget().clamp_ms(90_000),
-        )
         if session.managed:
+            await page.goto(FACEBOOK_HOME_URL, wait_until="domcontentloaded",
+                            timeout=self._ensure_publish_budget().clamp_ms(90_000))
             _raise_if_login_required(page)
-        await self._publish_on_page(page)
+        else:
+            await _navigate_local_page(page, timeout=self._ensure_publish_budget().clamp_ms(90_000))
+            await _require_local_login(page)
+        try:
+            await self._publish_on_page(page)
+        except LoginRequiredError:
+            raise
+        except Exception:
+            if not session.managed:
+                try:
+                    await _local_login_guard(page, publish_attempted=self._publish_attempted)
+                except LoginRequiredError:
+                    raise
+                except Exception:
+                    pass  # A disconnected page cannot replace the primary outcome.
+                if self._publish_attempted:
+                    raise self._ensure_publish_budget().timeout_error(True)
+            raise
         if session.managed:
-            # 发布点击已成功走完（``_publish_and_verify`` 只在确认成功后才返回）。
             _raise_if_login_required(page, publish_attempted=True)
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
+        self._validate_media()
         if session is not None:
-            # Multilogin: no cookie validation/read/write, no launch, no close.
-            self._validate_media()
             await self.upload_in(session)
             return
-
         if playwright is None:
             raise ValueError("本地模式需要 Playwright 实例")
-
-        self._validate_media()
-        if self.account_file is None or not self.account_file.is_file():
-            raise RuntimeError(f"Facebook 登录态文件不存在: {self.account_file}")
-
-        self._ensure_publish_budget()
-        browser, context, page = await _open_facebook_page(
-            playwright, self.account_file, proxy=self.proxy, headless=self.headless
-        )
-        try:
-            if await _is_logged_out(page):
-                raise RuntimeError("Facebook 登录态失效，请先执行 sau facebook login")
-            await self._publish_on_page(page)
-            await save_upload_session(context, str(self.account_file))
-        finally:
-            await close_browser_resources(browser=browser)
+        async with local_browser_session(
+            playwright, platform="facebook", account=_account_alias(self.account_file, self.account_name),
+            headless=self.headless, local_browser=self.local_browser,
+            context_kwargs={"proxy": _proxy_options(self.proxy)},
+        ) as session:
+            await self.upload_in(session)
 
     async def main(self, *, session: BrowserSession | None = None) -> None:
         if session is not None:

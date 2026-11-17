@@ -76,3 +76,5 @@
 - 2026-11-17：[05 已解决](./issues/05-xiaohongshu-persistent-profile.md)。小红书全部正式本地动作与直接 uploader 已接入持久化 Profile；324 项平台回归、165 项相关/跨平台回归、7 项真实动态 DOM 测试通过，另有 4/4 受控 no_viewport 浏览器流程。证据见 [05 记录](./research/05-browser-validation.md)。未操作真实账号，平台真实 no-publish 留给 20。
 
 - 2026-11-17：[06 已解决](./issues/06-youtube-persistent-profile.md)。YouTube login/check/upload-video/reset-profile 与直接调用使用持久化 Profile；合入 04 测试修复后 273 项相关回归及完整 Chromium 自然窗口合成 DOM 实测通过，保留托管与上传结果契约。[06 验证记录](./research/06-youtube-validation.md) 区分实际合成浏览器检查与未执行的真实账号动作。
+
+- 2026-11-17：[07 已解决](./issues/07-facebook-persistent-profile.md)。Facebook全部正式本地动作、直接调用与独立作品操作接入持久化Profile，与Facebook Page隔离；保留作者/原作品/正文核验及原有托管路由。合并YouTube06后365项相关离线/共享回归、13项受控浏览器/DOM回归通过；未操作真实账号或作品。见 [07验证记录](./research/07-facebook-validation.md)。

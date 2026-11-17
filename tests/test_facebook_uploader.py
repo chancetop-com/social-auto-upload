@@ -39,7 +39,7 @@ class FacebookPageStateTests(unittest.TestCase):
         async def scenario():
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.launch(headless=True, channel="chrome")
-                page = await browser.new_page()
+                page = await browser.new_page(no_viewport=True)
                 await page.set_content('<h1>登录 Facebook</h1><input name="email">')
                 result = await _is_logged_out(page)
                 await browser.close()
@@ -51,7 +51,7 @@ class FacebookPageStateTests(unittest.TestCase):
         async def scenario():
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.launch(headless=True, channel="chrome")
-                page = await browser.new_page()
+                page = await browser.new_page(no_viewport=True)
                 await page.set_content(
                     '<main><input type="file" accept="image/*,video/*" hidden></main>'
                 )
@@ -74,7 +74,7 @@ class FacebookPageStateTests(unittest.TestCase):
         async def scenario():
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.launch(headless=True, channel="chrome")
-                page = await browser.new_page()
+                page = await browser.new_page(no_viewport=True)
                 await page.set_content("<body></body>")
                 result = await _is_logged_out(page)
                 await browser.close()
@@ -89,7 +89,7 @@ class FacebookCliTests(unittest.TestCase):
             ["facebook", "login", "--account", "creator", "--proxy", "http://proxy.example:8080"]
         )
         self.assertEqual(args.proxy, "http://proxy.example:8080")
-        self.assertFalse(args.headless)
+        self.assertIsNone(args.headless)
 
     def test_dispatch_upload_forwards_facebook_request(self):
         args = sau_cli.build_parser().parse_args(
@@ -121,13 +121,7 @@ class FacebookCliTests(unittest.TestCase):
         self.assertEqual(request.proxy, "http://proxy.example:8080")
 
 
-class FacebookStorageStateTests(unittest.TestCase):
-    def test_missing_storage_state_is_invalid_without_network(self):
-        with tempfile.TemporaryDirectory() as directory:
-            result = asyncio.run(
-                facebook_cookie_auth(Path(directory) / "missing.json", proxy="")
-            )
-        self.assertFalse(result)
+# Persistent Profile presence and error classification: test_facebook_profile_cli.
 
 
 if __name__ == "__main__":

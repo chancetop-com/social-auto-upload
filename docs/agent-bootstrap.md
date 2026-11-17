@@ -156,3 +156,5 @@
 这样比给用户准备四套平台 prompt 更稳，也更容易维护。
 
 Instagram 已迁移全部本地动作：按安装说明准备所选 Chrome/Chromium，保留已有 conf.py。先 `sau instagram login --account <alias> --headed`，等待消息入口与当前身份验证完成，再同配置 check；浏览器自动保存 Profile，无旧 Cookie 导入/导出。视频/图文回归显式 `--no-publish`，只有结果 prepared 表示到达 Share 前。verify/delete 在托管环境下仍要求原始本地账号并保留代理；原作者核验有效，不执行真实删除来验收。需要清空时显式 reset-profile 指定种类；安装成功、浏览器可启动和账号已登录分别报告。
+
+Facebook 已迁移 login/check/视频/图文/verify/delete：使用项目专用 `browser_profiles/facebook/<原始别名>/<chrome|chromium>`，与 Facebook Page 完全隔离。保留 conf.py；按所选 Chrome/完整 Chromium/自定义路径安装，显式 headed/headless 覆盖配置，未配置默认有头。先 `sau facebook login --account <alias> --headed`，正常关闭后同配置 check；旧 JSON 不读写。verify/delete 在托管环境下仍用本地原始别名，继续核对 owner-id、原作者、作品 ID 和正文；验证使用离线替身，不执行真实删除。Facebook 没有 no-publish 开关，受控 DOM 回归不等于真实账号发布验收。只有 login 引导登录；退出 10 安排人工登录/验证，提交后先核对作品，退出 9 禁止自动重发。显式 reset-profile 只重建指定资料，不能据此重新提交旧任务。

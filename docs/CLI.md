@@ -70,7 +70,7 @@ $env:PLAYWRIGHT_DOWNLOAD_HOST="https://npmmirror.com/mirrors/playwright"; patchr
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书、YouTube开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube 的 login/check/upload-video 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
+目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook开放此命令；其他平台随持久化 Profile 接入开放，Bilibili 不提供。TikTok、小红书的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube 的 login/check/upload-video 与直接调用也已接入；Facebook 的 login/check/视频/图文/verify/delete 与直接调用也已接入；其他平台仍保持旧动作行为，随各票逐步接入。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -238,7 +238,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
 
-未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+未迁移平台的本地 Cookie 回写、context/browser 关闭失败仍只记录 warning。TikTok、Rednote、Instagram、小红书、YouTube、Facebook持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -332,7 +332,7 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Rednote、Instagram、小红书、YouTube 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Rednote、Instagram、小红书、YouTube、Facebook 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
@@ -399,7 +399,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
 - `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Rednote、Instagram、小红书、YouTube 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
+- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Rednote、Instagram、小红书、YouTube、Facebook 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
 - 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
@@ -677,7 +677,7 @@ sau youtube reset-profile --account creator --browser-kind chrome
 
 ## Facebook CLI 子命令
 
-个人主页使用 `facebook`，Page 使用 `facebook-page`。默认不配置代理，浏览器按系统网络直连。需要代理时可在命令中传 `--proxy "代理地址"`，或设置 `SAU_FACEBOOK_PROXY`、`SAU_FACEBOOK_PAGE_PROXY`；传 `--proxy ""` 可忽略环境变量并直连。账号文件分别保存，首次使用先登录对应入口。
+个人主页使用 `facebook`，Page 使用 `facebook-page`。默认不配置代理，浏览器按系统网络直连。需要代理时可在命令中传 `--proxy "代理地址"`，或设置 `SAU_FACEBOOK_PROXY`、`SAU_FACEBOOK_PAGE_PROXY`；传 `--proxy ""` 可忽略环境变量并直连。两种入口分别管理登录资料，首次使用先登录对应入口。
 
 ```powershell
 sau facebook login --account creator
@@ -688,6 +688,8 @@ sau facebook-page login --account creator
 sau facebook-page upload-note --account creator --page "我的 Page" --images images/1.jpg --title "图文标题" --note "正文" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
 sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
+
+Facebook 全部本地动作复用 `browser_profiles/facebook/<原始别名>/<chrome|chromium>`，与 `facebook-page` 隔离。默认系统 Chrome、有头；显式 `--local-browser chromium` 使用配套完整 Chromium，`LOCAL_CHROME_PATH` 优先于种类选择。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留已有配置。启动失败不回退，不固定 viewport、不修改语言；只需安装所选来源。先 `sau facebook login --account creator --headed`，正常关闭后同配置 check；旧 JSON 不读取、导入或导出。别名可重新登录其他账号，两类浏览器可登录不同账号。缺少 Profile 或明确未登录退出 10，验证挑战保留 verification 提示；页面/权限/网络异常退出 1。重建用 `sau facebook reset-profile --account creator --browser-kind chrome`，无需浏览器 binary，只清空指定资料；重建不是重发旧任务的许可。
 
 个人主页支持视频、图片及正文立即发布，目前未接入个人主页定时。Page 视频和图文支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，填写前按浏览器时区换算，要求至少提前 2 小时；不传即立即提交。当前实现核对页面日期/时间及原作品列表安排。`--page` 应填写准确 Page 名称。
 
@@ -702,6 +704,8 @@ sau facebook delete --account creator --post-url "原作品链接" --owner-id "�
 sau facebook-page verify --account creator --page "我的 Page" --page-id "Page数字ID" --content-id "内容编号" --expected-text "原作品正文" --scheduled
 sau facebook-page delete --account creator --page "我的 Page" --page-id "Page数字ID" --content-id "内容编号" --expected-text "原作品正文" --scheduled --result .local/delete-result.json
 ```
+
+Facebook 的 verify/delete 即使存在托管环境变量仍使用原始本地 `--account`、所选浏览器及代理。换号不改写历史作品证据，owner-id、原作品编号、作者链接和 expected-text 仍须同时匹配。
 
 个人主页删除默认移至垃圾箱；加 `--permanent` 可永久删除，已经在垃圾箱中的作品再加 `--from-trash`。查询垃圾箱同样使用 `verify --from-trash`。`verify --deleted` 仅查询原编号是否已不在垃圾箱，返回 `absent_from_trash`，不凭“没找到”证明曾经永久删除。
 
@@ -953,7 +957,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、Rednote、Instagram、小红书、YouTube已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
+TikTok、Rednote、Instagram、小红书、YouTube、Facebook已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`；其他未迁移平台 CLI 仍默认 `False`。
 
 补充：
 

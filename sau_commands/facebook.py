@@ -20,10 +20,9 @@ from uploader.meta_uploader.facebook_uploader.main import (
 from uploader.meta_uploader.facebook_uploader.posts import facebook_post_action
 from sau_commands.arguments import (
     add_not_before_flag,
-    add_runtime_flags,
+    add_local_runtime_flags,
     existing_file_path,
     parse_tags,
-    resolve_account_file,
 )
 from sau_commands.browser import (
     add_browser_flags,
@@ -35,12 +34,15 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.local_browser import resolve_headless
+from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
 
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     facebook_parser = platform_parsers.add_parser("facebook", help="Facebook personal post operations")
     facebook_actions = facebook_parser.add_subparsers(dest="action", required=True)
+    add_reset_profile_action(facebook_actions)
 
     for action in ("verify", "delete"):
         post_parser = facebook_actions.add_parser(action, help="核对原作品" if action == "verify" else "核对原作品后移至垃圾箱（30 天后平台删除）")
@@ -55,8 +57,7 @@ def register(platform_parsers):
         else:
             post_parser.add_argument("--deleted", action="store_true", help="只查询垃圾箱原 ID 是否已删除，不执行删除")
         post_parser.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
-        add_runtime_flags(post_parser)
-        post_parser.set_defaults(headless=False)
+        add_local_runtime_flags(post_parser)
 
     for action_name in ("login", "check"):
         action_parser = facebook_actions.add_parser(action_name, help=f"Facebook {action_name}")
@@ -67,11 +68,9 @@ def register(platform_parsers):
             help="浏览器代理地址；不传时直连，传空字符串可覆盖环境变量并直连",
         )
         if action_name == "login":
-            add_runtime_flags(action_parser)
-            # Facebook 登录必须在可见 Chrome 中完成，避免无头模式下用户看不到登录挑战。
-            action_parser.set_defaults(headless=False)
+            add_local_runtime_flags(action_parser)
         else:
-            add_runtime_flags(action_parser)
+            add_local_runtime_flags(action_parser)
             add_browser_flags(action_parser)
 
     facebook_upload_video_parser = facebook_actions.add_parser(
@@ -88,7 +87,7 @@ def register(platform_parsers):
         help="浏览器代理地址；不传时直连，传空字符串可覆盖环境变量并直连",
     )
     add_not_before_flag(facebook_upload_video_parser)
-    add_runtime_flags(facebook_upload_video_parser)
+    add_local_runtime_flags(facebook_upload_video_parser)
     add_browser_flags(facebook_upload_video_parser)
 
     facebook_note = facebook_actions.add_parser("upload-note", help="向个人主页发布图片及正文")
@@ -99,9 +98,8 @@ def register(platform_parsers):
     facebook_note.add_argument("--tags", default="")
     facebook_note.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
     add_not_before_flag(facebook_note)
-    add_runtime_flags(facebook_note)
+    add_local_runtime_flags(facebook_note)
     add_browser_flags(facebook_note)
-    facebook_note.set_defaults(headless=False)
 
 
 @dataclass(slots=True)
@@ -113,16 +111,17 @@ class FacebookVideoUploadRequest:
     tags: list[str]
     proxy: str | None = FACEBOOK_PROXY
     debug: bool = True
-    headless: bool = True
+    headless: bool | None = None
     publish_not_before: datetime | None = None
+    local_browser: str | None = None
 
 
 async def login_facebook_account(
-    account_name: str, *, headless: bool = False, proxy: str | None = FACEBOOK_PROXY
+    account_name: str, *, headless: bool | None = None, proxy: str | None = FACEBOOK_PROXY,
+    local_browser=None
 ) -> dict:
-    account_file = resolve_account_file("facebook", account_name)
     return await facebook_setup(
-        account_file,
+        account_name=account_name, local_browser=local_browser,
         handle=True,
         return_detail=True,
         headless=headless,
@@ -131,12 +130,11 @@ async def login_facebook_account(
 
 
 async def check_facebook_account(
-    account_name: str, *, proxy: str | None = FACEBOOK_PROXY
+    account_name: str, *, proxy: str | None = FACEBOOK_PROXY,
+    headless: bool | None = None, local_browser=None,
 ) -> bool:
-    account_file = resolve_account_file("facebook", account_name)
-    if not account_file.exists():
-        return False
-    return await facebook_cookie_auth(account_file, proxy=proxy)
+    return await facebook_cookie_auth(account_name=account_name, proxy=proxy,
+                                      headless=headless, local_browser=local_browser)
 
 
 def _raise_login_required(target) -> None:
@@ -152,6 +150,7 @@ async def _upload_facebook_mlx(
     ``--proxy``/``SAU_FACEBOOK_PROXY`` are not forwarded: the Profile owns the
     egress IP.  No cookie file is resolved or read.
     """
+    headless = resolve_headless(headless)
     app = FacebookPost(
         title=title,
         file_path=files,
@@ -179,7 +178,7 @@ async def _upload_facebook_mlx(
 
 async def upload_facebook_video(
     request: FacebookVideoUploadRequest, *, target=None
-) -> Path | None:
+) -> None:
     if target is not None:
         await _upload_facebook_mlx(
             target,
@@ -192,49 +191,41 @@ async def upload_facebook_video(
         )
         return None
 
-    account_file = resolve_account_file("facebook", request.account_name)
-    is_ready = await facebook_setup(
-        account_file,
-        handle=False,
-        proxy=request.proxy,
-    )
-    if not is_ready:
-        raise RuntimeError(
-            f"Facebook 登录态不存在或已失效: {account_file}. "
-            f"请先执行 `sau facebook login --account {request.account_name}`。"
-        )
-
     app = FacebookVideo(
         title=request.title,
         file_path=request.video_file,
         description=request.description,
         tags=request.tags,
-        account_file=account_file,
+        account_name=request.account_name,
+        local_browser=request.local_browser,
         proxy=request.proxy,
         headless=request.headless,
     )
     app.publish_not_before = request.publish_not_before
     await app.main()
-    return account_file
+    return None
 
 
 async def run(args):
     """执行本平台命令；发布结果由平台实现核验。"""
+    if args.action == "reset-profile":
+        return run_reset_profile(args)
+    args.headless = resolve_headless(args.headless)
     if args.action == "login":
         reject_managed_login("facebook", args)
         require_local_account(args)
         result = await login_facebook_account(
-            args.account, headless=args.headless, proxy=args.proxy
+            args.account, headless=args.headless, proxy=args.proxy, local_browser=args.local_browser
         )
         if not result["success"]:
             raise RuntimeError(result["message"])
-        print(f"Facebook login flow completed: {result['account_file']}")
+        print(f"Facebook login flow completed: {result['account']}")
         return 0
 
     if args.action in {"verify", "delete"}:
         require_account(args)
         result = await facebook_post_action(
-            resolve_account_file("facebook", args.account), post_url=args.post_url,
+            account_name=args.account, local_browser=args.local_browser, post_url=args.post_url,
             owner_id=args.owner_id, expected_text=args.expected_text,
             delete=args.action == "delete", proxy=args.proxy, headless=args.headless,
             permanent=getattr(args, "permanent", False), from_trash=args.from_trash,
@@ -267,7 +258,8 @@ async def run(args):
             print("valid")
             return 0
 
-        is_valid = await check_facebook_account(account_label, proxy=args.proxy)
+        is_valid = await check_facebook_account(args.account, proxy=args.proxy,
+                                                headless=args.headless, local_browser=args.local_browser)
         print("valid" if is_valid else "invalid")
         return 0 if is_valid else 1
 
@@ -288,7 +280,7 @@ async def run(args):
             return 0
 
         app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
-                           resolve_account_file("facebook", account_label), proxy=args.proxy, headless=args.headless)
+                           account_name=args.account, proxy=args.proxy, headless=args.headless, local_browser=args.local_browser)
         app.publish_not_before = args.not_before
         await app.main()
         print("Facebook image post submitted")
@@ -304,6 +296,7 @@ async def run(args):
             proxy=args.proxy,
             debug=args.debug,
             headless=args.headless,
+            local_browser=args.local_browser,
             publish_not_before=args.not_before,
         )
         await upload_facebook_video(request, target=target)

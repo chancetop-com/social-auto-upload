@@ -24,7 +24,7 @@ class FacebookPostIdentityTests(unittest.TestCase):
         async def scenario():
             async with async_playwright() as p:
                 browser = await p.chromium.launch(channel='chrome', headless=True)
-                context = await browser.new_context()
+                context = await browser.new_context(no_viewport=True)
                 await context.add_cookies([{'name': 'c_user', 'value': '42', 'domain': '.facebook.com', 'path': '/'}])
                 page = await context.new_page()
                 html = '''<article role="article"><span>same caption</span><a href="/profile.php?id=42">Author</a><a href="/reel/111/">old</a></article>
