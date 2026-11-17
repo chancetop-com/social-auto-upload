@@ -26,3 +26,6 @@
 ## Comments
 
 - 2026-11-17: Claimed in `codex/local-profile-15`. Applying TDD at the approved formal CLI → real configuration/Profile/session seam, replacing only browser/platform/provider boundaries. `conf.py` imports and BASE_DIR bind this isolated worktree.
+
+- TDD red/green covered persistent login/check, one-session upload, iframe/verification phase, HTTP fault precedence, required cover/collection faults, QR cleanup, and single-dispatch/result-unknown protections. See [validation evidence](../research/15-alipay-validation.md) for actual red observations and commands.
+- Merged integration `fb9be5d` into the ticket branch as `5ca6e01`, preserving Weibo/Alipay shared test and documentation unions. At that merge, 303 related offline tests passed; controlled real Chrome headed and full Chromium headless DOM flows passed in 83.224s after the final interaction safeguards. No real account operation was performed.

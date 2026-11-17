@@ -481,3 +481,21 @@ class AlipayProfilesTests(unittest.TestCase):
         self.assertEqual(result[0], 1, result)
         self.assertIn('collection control failed', result[2])
         self.assertEqual(page.selectors['publish'].click_count, 0)
+
+    def test_not_before_defers_dispatch_while_profile_stays_owned(self):
+        from datetime import datetime, timedelta, timezone
+        self.profile()
+        page = UploadPage()
+        self.context.next_page = page
+        target = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=2)
+        observed = []
+        async def click(**_):
+            observed.append(datetime.now(timezone.utc))
+            with self.assertRaisesRegex(RuntimeError, '占用'):
+                with acquire_local_profile('alipay', 'Creator', 'chrome'): pass
+            page.url = uploader.ALIPAY_POSTS_URL
+        page.selectors['publish'].click = click
+        result = self.upload('--not-before', target.strftime('%Y-%m-%dT%H:%M:%SZ'))
+        self.assertEqual(result[0], 0, result)
+        self.assertEqual(len(observed), 1)
+        self.assertGreaterEqual(observed[0], target)

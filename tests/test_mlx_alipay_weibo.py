@@ -30,7 +30,6 @@ from sau_commands import weibo as weibo_command
 from tests.fakes import FakeContext, FakeMultiloginClient, FakePlaywright
 from uploader.alipay_uploader import main as alipay_main
 from uploader.alipay_uploader.main import (
-    ALIPAY_CONTEXT_KWARGS,
     ALIPAY_INIT_SCRIPT,
     ALIPAY_LAUNCH_KWARGS,
     ALIPAY_LIFE_ACCOUNT_URL,
@@ -307,7 +306,7 @@ def _target() -> MultiloginTarget:
 
 
 # ---------------------------------------------------------------------------
-# Alipay — local golden path
+# Alipay — preserved managed options
 # ---------------------------------------------------------------------------
 
 
@@ -319,7 +318,6 @@ class AlipayManagedOptionsTests(unittest.TestCase):
         }
         self.assertEqual(ALIPAY_LAUNCH_KWARGS, expected_without_headless)
         self.assertNotIn("headless", ALIPAY_LAUNCH_KWARGS)
-        self.assertEqual(ALIPAY_CONTEXT_KWARGS, {"permissions": ["geolocation"]})
         self.assertFalse(ALIPAY_INIT_SCRIPT)
 
     # Persistent local behavior is exercised through the CLI in test_alipay_profiles.

@@ -81,7 +81,6 @@ def _build_launch_kwargs(headless: bool | None = None) -> dict:
 # Stealth breaks the qiankun micro-app; neither mode injects it.
 # Managed Alipay never grants geolocation permissions.
 ALIPAY_LAUNCH_KWARGS = _build_launch_kwargs()
-ALIPAY_CONTEXT_KWARGS = {"permissions": ["geolocation"]}
 ALIPAY_INIT_SCRIPT = False
 
 ALIPAY_LOGIN_CHECK_URL = ALIPAY_LIFE_ACCOUNT_URL
