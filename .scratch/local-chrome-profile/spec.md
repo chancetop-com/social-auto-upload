@@ -272,3 +272,9 @@ Source: [决策地图](./map.md)
 用户指出 Rednote、TikTok、小红书的 `prepared (not published)` 摘要容易误解；三个平台的视频与图文在媒体上传、编辑及发布就绪检查成功返回后，统一输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。保留视频路径或图片数量信息，失败/登录失效不输出成功摘要。
 
 本次明确文案要求同时适用于本地和托管 no-publish；仅此摘要覆盖原有托管输出保持条款。正常发布输出、provider 启动/ignored-option 日志、退出码、机器结果字段、显式 no-publish 参数及真实提交前停止边界保持原契约。通过公开 CLI、真实配置/Profile/session 编排和外部页面/provider 替身验证六个动作的摘要、零提交及失败分支；文案调整不要求额外真实上传。过去实测日志保留当时原文。交付与证据见 [24](../local-chrome-profile-implementation/issues/24-clarify-no-publish-output.md)。
+
+## 追加要求：Instagram 两种创建界面（2026-11-17）
+
+用户确认当前实际 Instagram 账号为 creator、此前为普通号。普通号直接进入素材编辑器与 creator 先显示 Create 子菜单的页面状态均须支持，覆盖视频和图文；账号别名不绑定账号类型。该业务兼容同样适用于托管会话，provider 路由、所有权、日志及发布结果契约保持。
+
+选择器以实际 DOM 的语义属性、链接及局部结构为依据，所有待操作目标须唯一并能正常交互。图标 `aria-label` 是已有语义属性；裁剪/编辑按钮没有专用稳定属性时，允许在当前 dialog 和正确阶段内用 role 加已观察的完整按钮名。禁止依导航次序、hash class、宽泛文案或强制/脚本点击猜目标。保留 Humanizer，普通号/creator × 视频/图文的受控 DOM 回归和当前实际 creator 的两条显式 no-publish 验收由 [23](../local-chrome-profile-implementation/issues/23-instagram-account-ui-compatibility.md) 执行；无另一个普通号 Profile 时须明确其仅有受控回归证据。

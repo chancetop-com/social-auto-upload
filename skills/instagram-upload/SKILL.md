@@ -42,7 +42,9 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 
 协作者、Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。四项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 记录 `location`、`alt_text`、`comments`、`ai_generated` 的 `requested` / `applied` / `status`（必要时含 `reason`）。
 
-选择器只在 **English 界面 + Personal 账号**验证过，中文标签为未验证回退，专业账号未验证。本地模式保留 Profile/站点语言；托管模式需把 Profile 界面保持 English（账号语言设为中文时 Instagram 仍可能渲染中文）。四项能力已在真实账号真发验收通过（2026-11-10，English UI / Personal / 本地 cookie）：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags` 发布后回读一致，均已删除。`--not-before`、`--proxy`、`--headless`、中文界面、专业账号与托管模式仍未验收，不得据此宣称支持。
+创建流程按当次页面状态兼容普通账号的直接编辑器与 creator 的“创建 → 帖子”子菜单，视频、图文及本地/托管会话共用业务选择器；账号别名不绑定账号类型。入口使用链接与图标 aria-label，目标须唯一且可交互；未知/歧义页面停止并保留证据。裁剪/编辑主按钮没有稳定专用属性时，限定当前 dialog 的 button role 与已观察的完整 Next/下一步/继续名称，最终 Share/分享/发布动作单独识别。所有可见点击和配文保留 Humanizer，HUMANIZE=0 沿用原生快速路径。
+
+历史真实发布验收仅覆盖 2026-11-10 的 English UI / Personal / 本地 cookie：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags` 发布后回读一致，均已删除。2026-11-17 的真实中文 creator 验收只到视频/图文 no-publish 停止点；普通账号本次仅复验受控 DOM，没有另一个真实 Profile。它们不证明 creator 四项高级选项、实际发布、`--not-before`、`--proxy`、`--headless` 或托管真实账号验收。界面语言由 Profile 和站点决定，未观察的语言/菜单结构可能安全失败。
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 
