@@ -317,3 +317,15 @@ def test_same_platform_can_check_two_distinct_profiles(profile):
     assert profile.stops == ['shared'] and other.stops == []
     other.finish('instagram', second)
     assert other.starts == other.stops == ['second']
+
+
+def test_simultaneous_cold_checks_start_once_for_different_platforms(profile):
+    instagram = profile.command(0, 'instagram')
+    tiktok = profile.command(1, 'tiktok')
+    profile.entered('instagram', instagram)
+    profile.entered('tiktok', tiktok)
+    assert profile.starts == ['shared']
+    profile.finish('tiktok', tiktok)
+    assert profile.stops == []
+    profile.finish('instagram', instagram)
+    assert profile.stops == ['shared']
