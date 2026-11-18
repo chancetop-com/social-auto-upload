@@ -346,3 +346,28 @@ def test_interrupt_during_stop_keeps_mutex_until_the_provider_request_finishes(p
     finally:
         release.set()
         original.communicate(timeout=10)
+
+
+def test_uncertain_stop_deadline_includes_a_stalled_provider_read(profile):
+    api = ControlledProvider(profile)
+    api.stop = lambda request: None
+    original = profile.command(0, 'instagram')
+    profile.entered('instagram', original)
+    assert '停止或清理失败' in profile.finish('instagram', original)
+    reading, release = threading.Event(), threading.Event()
+
+    def stalled():
+        reading.set()
+        release.wait(25)
+        return api.current_state()
+
+    api.observe = stalled
+    successor = profile.command(1, 'tiktok')
+    try:
+        assert reading.wait(8)
+        output = successor.communicate(timeout=12)[0]
+        assert successor.returncode == 1 and '停止' in output and '超时' in output
+        assert api.starts == api.stops == ['shared']
+        assert profile.pages_requested == ['instagram']
+    finally:
+        release.set()
