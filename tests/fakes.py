@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from utils.managed_browser import ProfileObservation
+
 
 class ForbiddenApiError(AssertionError):
     """Raised when production code calls an API that is forbidden in tests."""
@@ -236,6 +238,13 @@ class FakePlaywright:
 class FakeManagedProvider:
     """Duck-typed ``ManagedBrowserProvider`` for lifecycle tests."""
 
+    resource_identity = "test-service"
+
+    def observe(self) -> ProfileObservation:
+        if self.status_error is not None:
+            raise self.status_error
+        return ProfileObservation(self.active, self.connect_url if self.active else None)
+
     def __init__(
         self,
         *,
@@ -252,6 +261,7 @@ class FakeManagedProvider:
         self.mode = mode
         self.profile_id = profile_id
         self.connect_url = connect_url
+        self.active = False
         self.probe_error = probe_error
         self.start_error = start_error
         self.status_error = status_error
@@ -274,6 +284,7 @@ class FakeManagedProvider:
         self.events.append("start")
         if self.start_error is not None:
             raise self.start_error
+        self.active = True
         return self.connect_url
 
     def status(self) -> str:
@@ -288,6 +299,7 @@ class FakeManagedProvider:
         self.events.append("stop")
         if self.stop_error is not None:
             raise self.stop_error
+        self.active = False
 
 
 class FakeAdspowerClient:
@@ -300,12 +312,10 @@ class FakeAdspowerClient:
 
     resource_identity = "http://localhost:50325"
 
-    def observe(self, profile_id):
-        from utils.managed_browser import ProfileObservation
-
+    def observe(self, profile_id) -> ProfileObservation:
         if self.status_error is not None:
             raise self.status_error
-        return ProfileObservation(bool(self.start_calls), self.ws_url if self.start_calls else None)
+        return ProfileObservation(self.active, self.ws_url if self.active else None)
 
     def __init__(
         self,
@@ -319,6 +329,7 @@ class FakeAdspowerClient:
         events: list[str] | None = None,
     ) -> None:
         self.ws_url = ws_url
+        self.active = False
         self.probe_error = probe_error
         self.start_error = start_error
         self.status_error = status_error
@@ -344,6 +355,7 @@ class FakeAdspowerClient:
         self.start_calls.append((profile_id, headless))
         if self.start_error is not None:
             raise self.start_error
+        self.active = True
         return self.ws_url
 
     def status(self, profile_id: str) -> str:
@@ -360,6 +372,7 @@ class FakeAdspowerClient:
         self.stop_calls.append(profile_id)
         if self.stop_error is not None:
             raise self.stop_error
+        self.active = False
 
 
 class FakeMultiloginClient:
