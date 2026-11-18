@@ -127,7 +127,8 @@ def test_join_waits_for_last_stop_after_its_response_is_lost(profile, finishes):
         assert profile.pages_requested == ['instagram'] and api.state == 'Active'
 
 
-def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profile(profile):
+@pytest.mark.parametrize('previously_lost', [False, True], ids=['start-ack', 'active-observed'])
+def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profile(profile, previously_lost):
     api = ControlledProvider(profile)
     attaching = threading.Event()
 
@@ -138,14 +139,20 @@ def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profil
 
     port = profile.stack.enter_context(serve(DepartedBrowser))
     api.endpoint = f'ws://127.0.0.1:{port}/devtools/browser/previous'
+    if previously_lost:
+        api.start = lambda request: None
+        lost = profile.command(1, 'instagram')
+        assert 'start' in lost.communicate(timeout=8)[0] and lost.returncode == 1
+        api.start = api.start_ok
+        api.state = 'Active'
     interrupted = profile.command(0, 'instagram')
     assert attaching.wait(10)
     interrupted.kill()
     interrupted.communicate(timeout=8)
     assert api.starts == ['shared'] and api.stops == [] and not profile.pages_requested
 
-    # AdsPower acknowledged the last Start with its CDP endpoint. The desktop
-    # has since closed that browser, before the killed client could open a tab.
+    # Start or a fresh authenticated Active supplied the previous run's endpoint.
+    # The desktop has since closed it, before the killed client could open a tab.
     api.state = 'Inactive'
     api.endpoint = profile.endpoint
     next_command = profile.command(1, 'instagram')

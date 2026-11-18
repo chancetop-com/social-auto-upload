@@ -109,8 +109,6 @@ class ManagedCommand:
                     raise RuntimeError(f"{self.mode} Profile 的当前连接与同行不符。")
                 if setting is None:
                     setting = record.get("headless")
-            if self.explicit_headless is not None and setting is not self.explicit_headless:
-                raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         else:
             if peers or (record and record["phase"] == "starting"):
                 raise RuntimeError(f"{self.mode} Profile 上次启动或当前连接尚未确认。")
@@ -125,10 +123,12 @@ class ManagedCommand:
             raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
         active_record = {"resource": resource, "phase": "active",
                          "endpoint": _digest(endpoint), "headless": setting}
-        if not state.active:
-            # Start completed independently of this command's CDP handshake.
-            # Death during attachment must not leave a pending Start behind.
+        if not state.active or (record and record["phase"] == "starting"):
+            # A Start response or a later authenticated Active can establish
+            # completion before compatibility checks and the CDP connection.
             self.store.write_record(active_record)
+        if state.active and self.explicit_headless is not None and setting is not self.explicit_headless:
+            raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         return endpoint, active_record
 
     @asynccontextmanager
