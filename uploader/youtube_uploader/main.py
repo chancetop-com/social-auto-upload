@@ -21,7 +21,7 @@ from uploader.publish_timeout import PublishTimeoutBudget
 from utils.local_account import local_account_alias
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.browser_cleanup import close_browser_resources
-from utils.browser_session import BrowserSession
+from utils.browser_session import BrowserSession, provider_label
 from utils.errors import LoginRequiredError
 from utils.local_browser_session import local_browser_session
 from utils.humanize import (
@@ -87,27 +87,15 @@ def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 
 
-def _raise_if_login_required(page: Page) -> None:
-    """Map a mid-upload login/captcha/2FA redirect to ``LoginRequiredError``.
-
-    Only the managed branch calls this; its existing provider contract is preserved.
-    """
-    url = str(getattr(page, "url", "") or "").lower()
-    if not url:
-        return
-    if any(marker in url for marker in _LOGIN_URL_MARKERS):
-        raise LoginRequiredError(
-            "YouTube 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。"
-        )
-
-
-def _raise_if_local_login_required(page, *, publish_attempted=False):
+def _raise_if_login_required(page, *, mode="local", publish_attempted=False):
     url = str(getattr(page, "url", "") or "").lower()
     if not any(marker in url for marker in _LOGIN_URL_MARKERS):
         return
     verification = any(marker in url for marker in ("captcha", "challenge", "two-factor", "2fa", "verify"))
     remedy = "请在所选 Profile 完成人机验证 (reason=verification)" if verification else "请运行 sau youtube login"
+    if mode != "local":
+        action = "完成人机验证 (reason=verification)" if verification else "登录 Profile"
+        remedy = f"请在 {provider_label(mode)} 应用中{action}"
     stage = "；发布可能已提交，请先核查作品，禁止自动重发" if publish_attempted else ""
     raise LoginRequiredError(f"YouTube 需要登录或验证；{remedy}{stage}。",
                              reason="verification" if verification else "login",
@@ -159,7 +147,7 @@ async def is_logged_in(context: BrowserContext, *, managed=True) -> bool:
             raise RuntimeError("YouTube 登录状态检查失败：页面 URL 为空")
 
         if not managed:
-            _raise_if_local_login_required(page)
+            _raise_if_login_required(page)
 
         # Explicit sign-in / consent / account chooser pages.
         if any(
@@ -474,25 +462,21 @@ class YouTubeVideo(BaseVideoUploader):
         self._humanizer(page)
 
         youtube_logger.info(_msg("🎬", f"开始上传: {Path(self.file_path).name}"))
-        multilogin = session.managed
-        self._local_profile_upload = not multilogin
         self._publish_attempted = False
         try:
             response = await page.goto(UPLOAD_URL, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
-            if multilogin:
-                _raise_if_login_required(page)
-            else:
+            if not session.managed:
                 status = getattr(response, "status", None)
                 if isinstance(status, int) and status >= 400:
                     raise RuntimeError(f"YouTube 上传页面失败：HTTP {status}")
-                _raise_if_local_login_required(page)
-            await self._upload_video_on_page(page, multilogin=multilogin)
+            _raise_if_login_required(page, mode=session.mode)
+            await self._upload_video_on_page(page, mode=session.mode)
         except LoginRequiredError:
             raise
         except Exception as error:
-            if not multilogin:
-                _raise_if_local_login_required(page, publish_attempted=self._publish_attempted)
+            if not session.managed:
+                _raise_if_login_required(page, publish_attempted=self._publish_attempted)
                 if self._publish_attempted:
                     raise self.publish_budget.timeout_error(True) from error
             raise
@@ -537,19 +521,15 @@ class YouTubeVideo(BaseVideoUploader):
         payload = ",".join(str(tag) for tag in self.tags)[:500] + ","
         await humanizer.type_text(_normalise_text(payload, multiline=False))
 
-    async def _upload_video_on_page(self, page: Page, *, multilogin: bool = False) -> None:
-        if multilogin:
-            _raise_if_login_required(page)
+    async def _upload_video_on_page(self, page: Page, *, mode: str = "local") -> None:
+        _raise_if_login_required(page, mode=mode)
         humanizer = self._humanizer(page)
 
         # 1) 选择视频文件
         file_input = page.locator('input[type="file"]').first
         await file_input.wait_for(state="attached", timeout=60000)
         await file_input.set_input_files(self.file_path)
-        if multilogin:
-            _raise_if_login_required(page)
-        elif getattr(self, "_local_profile_upload", False):
-            _raise_if_local_login_required(page)
+        _raise_if_login_required(page, mode=mode)
 
         # 2) 等详情对话框
         await page.locator("#title-textarea").wait_for(
@@ -647,11 +627,7 @@ class YouTubeVideo(BaseVideoUploader):
         budget = self.publish_budget
         youtube_logger.info(_msg("📤", "等待上传完成（传完才发布）…"))
         await _wait_upload_complete(page, budget=budget)
-        if multilogin:
-            _raise_if_login_required(page)
-
-        if getattr(self, "_local_profile_upload", False):
-            _raise_if_local_login_required(page)
+        _raise_if_login_required(page, mode=mode)
 
         # 11) 发布
         await budget.wait_until_allowed(
@@ -677,8 +653,7 @@ class YouTubeVideo(BaseVideoUploader):
         else:
             self._publish_attempted = True
             await page.wait_for_timeout(4000)
-            if getattr(self, "_local_profile_upload", False):
-                _raise_if_local_login_required(page, publish_attempted=True)
+            _raise_if_login_required(page, mode=mode, publish_attempted=True)
             video_url = ""
             try:
                 link = page.locator("a[href*='youtu.be'], a[href*='watch?v=']").first
