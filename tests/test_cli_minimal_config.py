@@ -33,3 +33,26 @@ raise SystemExit(main(['--help']))
             'article', 'facebook', 'facebook-page', 'instagram', 'rednote',
             'tiktok', 'xiaohongshu', 'youtube',
         })
+
+    def test_retired_platforms_fail_during_argument_parsing_in_every_mode(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from unittest.mock import AsyncMock, patch
+
+        from sau_cli import main
+
+        retired = (
+            'douyin', 'kuaishou', 'bilibili', 'tencent', 'dayu', 'baijiahao',
+            'alipay', 'weibo', 'hupu', 'xueqiu', 'zhihu',
+        )
+        for credentials in ({}, {'MLX_API_TOKEN': 'test'}, {'ADSPOWER_API_KEY': 'test'}):
+            with patch.dict(os.environ, credentials, clear=True):
+                for platform in retired:
+                    with self.subTest(platform=platform, provider=list(credentials)):
+                        error = StringIO()
+                        with patch('sau_cli.dispatch', new_callable=AsyncMock) as dispatch:
+                            with redirect_stderr(error), self.assertRaises(SystemExit) as caught:
+                                main([platform, 'check', '--account', 'existing'])
+                            dispatch.assert_not_called()
+                        self.assertEqual(caught.exception.code, 2)
+                        self.assertIn(f"invalid choice: '{platform}'", error.getvalue())

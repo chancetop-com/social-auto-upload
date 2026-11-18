@@ -859,17 +859,7 @@ class HumanizeGateTests(unittest.TestCase):
 #: Central scan targets. TikTok is file-scoped because its package also
 #: contains the unwired legacy ``main.py``.
 WIRED_PLATFORM_PACKAGES = (
-    "alipay_uploader",
-    "baijiahao_uploader",
-    "dayu_uploader",
-    "douyin_uploader",
-    "hupu_uploader",
-    "ks_uploader",
-    "tencent_uploader",
-    "weibo_uploader",
-    "xueqiu_uploader",
     "youtube_uploader",
-    "zhihu_uploader",
     "xiaohongshu_uploader",
 )
 WIRED_META_PACKAGES = (

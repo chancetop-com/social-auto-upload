@@ -55,7 +55,9 @@ class _AsyncCM:
 
 
 def _run(argv):
-    with patch.dict(os.environ, {"ADSPOWER_API_KEY": KEY}, clear=True):
+    with tempfile.TemporaryDirectory() as home, patch.dict(
+        os.environ, {"ADSPOWER_API_KEY": KEY, "HOME": home, "USERPROFILE": home}, clear=True
+    ):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(
             io.StringIO()
         ) as err:

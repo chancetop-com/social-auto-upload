@@ -7,7 +7,8 @@ import sys
 from typing import Sequence
 
 from sau_commands import article, facebook, facebook_page, instagram, rednote, tiktok, xiaohongshu, youtube
-from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, credentials_conflict
+from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict
+from utils.managed_sharing import managed_command
 from utils.errors import (
     LoginRequiredError,
     PublishResultUnknownError,
@@ -53,6 +54,10 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     if args.platform not in PLATFORMS:
         raise RuntimeError(f"Unsupported platform: {args.platform}")
+    mode = active_mode()
+    if mode == "adspower" and args.action in {"check", "upload-video", "upload-note"} and args.profile_id:
+        async with managed_command(args.platform, mode, args.profile_id.strip(), getattr(args, "headless", None)):
+            return await PLATFORMS[args.platform].run(args)
     return await PLATFORMS[args.platform].run(args)
 
 

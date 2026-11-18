@@ -5,7 +5,6 @@ from pathlib import Path
 
 from sau_cli import build_parser
 from conf import BASE_DIR
-from uploader.dayu_uploader.article_content import load_dayu_article
 from utils.article_render import ARTICLE_THEMES, load_article, render_article_file
 
 
@@ -58,14 +57,11 @@ class ArticleRenderTests(unittest.TestCase):
         self.assertIn('color:red;border-left:3px solid blue', doc.content_html)
         with self.assertRaisesRegex(ValueError, "仅适用于 Markdown"):
             load_article(source, "grace")
-        self.assertEqual(load_dayu_article(source).content_html, doc.content_html)
 
-    def test_large_markdown_uses_file_and_platform_checks_its_own_limit(self):
+    def test_large_markdown_preserves_every_paragraph(self):
         self.source.write_text('正文段落。\n\n' * 6000, encoding="utf-8")
         doc = load_article(self.source, "plain")
         self.assertEqual("".join(doc.text).count("正文段落。"), 6000)
-        with self.assertRaisesRegex(ValueError, "20000"):
-            load_dayu_article(self.source)
 
     def test_output_never_overwrites_source_or_existing_file_implicitly(self):
         self.source.write_text('正文', encoding="utf-8")
@@ -90,35 +86,19 @@ class ArticleRenderTests(unittest.TestCase):
                 with self.assertRaises((ValueError, RuntimeError)):
                     load_article(self.source, "plain")
 
-    def test_dayu_markdown_renders_selected_theme_without_plain_downgrade(self):
-        self.source.write_text('# 标题\n\n## 次标题\n\n正文**重点**\n\n> 引用\n\n- 第一项\n- 第二项\n\n---\n', encoding="utf-8")
-        doc = load_dayu_article(self.source)
-        self.assertEqual(doc.theme, "default")
-        self.assertIn('style=', doc.content_html)
-        self.assertEqual(doc.formats["h2"], 1)
-        self.assertEqual(doc.formats["li"], 2)
-        self.assertEqual(load_dayu_article(self.source, "grace").content_html,
-                         load_article(self.source, "grace").content_html)
-        self.assertNotIn('style=', load_dayu_article(self.source, "plain").content_html)
-        self.source.write_text('正文*斜体*', encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "em"):
-            load_dayu_article(self.source)
 
-    def test_cli_exposes_shared_themes_and_platform_choices(self):
+    def test_cli_parses_the_selected_theme(self):
         self.source.write_text('正文', encoding="utf-8")
         parser = build_parser()
         args = parser.parse_args(['article', 'render', '--content-file', str(self.source),
                                   '--theme', 'modern', '--output', str(self.root / 'out.html')])
         self.assertEqual(args.theme, 'modern')
-        args = parser.parse_args(['dayu', 'upload-article', '--account', 'creator', '--title', '测试文章标题',
-                                  '--content-file', str(self.source), '--source', 'AI生成', '--theme', 'modern'])
-        self.assertEqual(args.theme, 'modern')
 
-    def test_dayu_accepts_exported_theme_html_with_the_same_text_and_image_order(self):
+    def test_exported_theme_html_preserves_the_example_text_and_image_order(self):
         output = self.root / 'preview' / 'modern.html'
         render_article_file(BASE_DIR / 'examples/article.md', output, 'modern')
-        direct = load_dayu_article(BASE_DIR / 'examples/article.md', 'modern')
-        exported = load_dayu_article(output)
+        direct = load_article(BASE_DIR / 'examples/article.md', 'modern')
+        exported = load_article(output)
         self.assertEqual(exported.content_html, direct.content_html)
         self.assertEqual(exported.images, direct.images)
         self.assertEqual(exported.manifest, direct.manifest)
