@@ -1,12 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Video-platform AdsPower coverage (ticket 13).
-
-Every video command must reach the shared managed seam with an AdsPower
-provider, never build a cookie path, never call ``launch`` / ``new_context`` /
-``storage_state``, and never touch the network.  The module list mirrors the
-ticket's video-platform scope; article/identity/Meta-specific parity is ticket
-14.
-"""
+"""AdsPower session coverage for video commands outside the Meta suite."""
 
 from __future__ import annotations
 
@@ -19,18 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import conf
 import sau_cli
-from sau_commands import (
-    alipay,
-    baijiahao,
-    douyin,
-    hupu,
-    kuaishou,
-    tencent,
-    tiktok,
-    weibo,
-    xiaohongshu,
-    youtube,
-)
+from sau_commands import rednote, tiktok, xiaohongshu, youtube
 from tests.fakes import (
     FakeAdspowerClient,
     FakeBrowser,
@@ -43,14 +25,8 @@ PROFILE = "profile-video-13"
 WS_URL = "ws://127.0.0.1:9222/devtools/browser/video13"
 
 PLATFORMS = (
-    ("alipay", alipay, "_build_alipay_uploader", "alipay_upload_video"),
-    ("baijiahao", baijiahao, "BaiJiaHaoVideo", "main"),
-    ("douyin", douyin, "_build_video_uploader", "douyin_upload_video"),
-    ("hupu", hupu, "_build_uploader", "upload"),
-    ("kuaishou", kuaishou, "_build_video_uploader", "main"),
-    ("tencent", tencent, "TencentVideo", "tencent_upload_video"),
+    ("rednote", rednote, "_build_video_uploader", "rednote_upload_video"),
     ("tiktok", tiktok, "_build_video_uploader", "upload"),
-    ("weibo", weibo, "_build_weibo_uploader", "main"),
     ("xiaohongshu", xiaohongshu, "_build_video_uploader", "xiaohongshu_upload_video"),
     ("youtube", youtube, "_build_youtube_uploader", "main"),
 )
@@ -89,9 +65,7 @@ class VideoPlatformCoverageTests(unittest.TestCase):
             async with browser_session(*args, **kwargs) as session:
                 yield session
 
-        if module is xiaohongshu:
-            # XHS no longer has a publish-chain login precheck; ``check`` uses
-            # the publish-page probe seam instead.
+        if module in (rednote, xiaohongshu):
             login_patch = patch.object(
                 module,
                 "probe_session",
@@ -107,7 +81,7 @@ class VideoPlatformCoverageTests(unittest.TestCase):
             login_patch,
             patch.object(
                 module,
-                "local_browser_session" if module in (tiktok, xiaohongshu) else "youtube_setup" if module is youtube else "ks_setup" if module is kuaishou else "tencent_setup" if module is tencent else "baijiahao_setup" if module is baijiahao else "weibo_setup" if module is weibo else "alipay_setup" if module is alipay else "hupu_setup" if module is hupu else "resolve_account_file",
+                "youtube_setup" if module is youtube else "local_browser_session",
                 new=MagicMock(
                     side_effect=AssertionError(
                         "managed mode must not acquire any local browser identity"

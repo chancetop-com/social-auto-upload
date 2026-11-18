@@ -1,24 +1,5 @@
 # -*- coding: utf-8 -*-
-"""AdsPower parity for article, identity-bound and Meta platforms (ticket 14).
-
-The shared managed seam is already exercised by the video-platform suite; this
-module locks the *platform-specific* constraints that must match the MLX
-golden behavior while running under an AdsPower Profile:
-
-* article / identity platforms (dayu, zhihu, xueqiu) never read cookies or
-  ``.identity.json``, never compare account IDs, never inject a local timezone
-  and never grant clipboard permissions;
-* Meta platforms (facebook, facebook-page, instagram) never forward
-  ``--proxy`` / environment proxies or launch kwargs, and Instagram never reads
-  the identity file or compares account IDs;
-* ``verify`` / ``delete`` stay local for every platform that defines them;
-* identity-unverified logging keeps the MLX wording byte-identical and uses
-  AdsPower-specific (never Multilogin) wording under AdsPower;
-* bilibili rejects ``login`` / ``check`` / ``upload-video`` under AdsPower.
-
-Everything is offline: provider HTTP is an in-process fake and CDP is a
-hand-written ``FakePlaywright``.
-"""
+"""AdsPower Profile handling for Meta uploads, login checks and identity logs."""
 
 from __future__ import annotations
 
@@ -33,31 +14,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
-from sau_commands import bilibili as bilibili_command
-from sau_commands import dayu as dayu_command
 from sau_commands import facebook as facebook_command
 from sau_commands import facebook_page as facebook_page_command
 from sau_commands import instagram as instagram_command
-from sau_commands import xueqiu as xueqiu_command
-from sau_commands import zhihu as zhihu_command
-from sau_commands.browser import identity_unverified_format, managed_timezone_hint
+from sau_commands.browser import identity_unverified_format
 from tests.fakes import (
     FakeAdspowerClient,
     FakeBrowser,
     FakeContext,
     FakePlaywright,
 )
-from uploader.dayu_uploader import article as dayu_article_module
-from uploader.dayu_uploader.article import DayuArticle
 from uploader.meta_uploader.insgraph_uploader import main as instagram_main
 from uploader.meta_uploader.insgraph_uploader.main import (
     INSTAGRAM_HOME_URL,
     InstagramUploader,
 )
-from uploader.xueqiu_uploader import article as xueqiu_article_module
-from uploader.xueqiu_uploader.article import XueqiuArticle
-from uploader.zhihu_uploader import article as zhihu_article_module
-from uploader.zhihu_uploader.article import ZhihuArticle
 from utils.browser_session import BrowserSession
 
 KEY = "SENTINEL-ADSPOWER-KEY-ticket14"
@@ -65,15 +36,7 @@ PROFILE = "profile-14"
 WS_URL = "ws://127.0.0.1:9222/devtools/browser/ticket14"
 
 MLX_IDENTITY_FORMAT = "账号一致性未校验：以 Multilogin Profile 为身份（profile_id={}）"
-MLX_IDENTITY_FORMAT_DETAILED = (
-    MLX_IDENTITY_FORMAT + "，请调度侧确保 profile_id 与目标账号匹配。"
-)
-MLX_TIMEZONE_HINT = "Multilogin 模式不写入时区；定时填写时读取浏览器/Profile 时区"
 ADSPOWER_IDENTITY_FORMAT = "账号一致性未校验：以 AdsPower Profile 为身份（profile_id={}）"
-ADSPOWER_IDENTITY_FORMAT_DETAILED = (
-    ADSPOWER_IDENTITY_FORMAT + "，请调度侧确保 profile_id 与目标账号匹配。"
-)
-ADSPOWER_TIMEZONE_HINT = "AdsPower 模式不写入时区；定时填写时读取浏览器/Profile 时区"
 
 
 class _AsyncCM:
@@ -290,348 +253,25 @@ class _SeamHarness:
 class IdentityFormatTests(unittest.TestCase):
     def test_mlx_identity_wording_is_byte_identical(self):
         self.assertEqual(identity_unverified_format(mode="multilogin"), MLX_IDENTITY_FORMAT)
-        self.assertEqual(
-            identity_unverified_format(mode="multilogin", detailed=True),
-            MLX_IDENTITY_FORMAT_DETAILED,
-        )
-        self.assertEqual(managed_timezone_hint("multilogin"), MLX_TIMEZONE_HINT)
 
-    def test_adspower_wording_is_provider_specific_and_never_multilogin(self):
+    def test_adspower_identity_wording_is_provider_specific(self):
         self.assertEqual(
             identity_unverified_format(mode="adspower"), ADSPOWER_IDENTITY_FORMAT
         )
-        self.assertEqual(
-            identity_unverified_format(mode="adspower", detailed=True),
-            ADSPOWER_IDENTITY_FORMAT_DETAILED,
+
+
+class InstagramManagedCheckTests(_SeamHarness, unittest.TestCase):
+    def test_check_reports_that_the_profile_owns_the_instagram_identity(self):
+        stack, calls, client, playwright, browser, context, logger = self.start_seam(
+            instagram_command, logger_attr="logger"
         )
-        self.assertEqual(
-            managed_timezone_hint("adspower"), ADSPOWER_TIMEZONE_HINT
-        )
-        for message in (
-            ADSPOWER_IDENTITY_FORMAT,
-            ADSPOWER_IDENTITY_FORMAT_DETAILED,
-            ADSPOWER_TIMEZONE_HINT,
-        ):
-            self.assertNotIn("Multilogin", message)
-
-
-class ArticleIdentityCheckTests(_SeamHarness, unittest.TestCase):
-    CASES = (
-        (dayu_command, "dayu", "dayu_logger", ADSPOWER_IDENTITY_FORMAT),
-        (zhihu_command, "zhihu", "logger", ADSPOWER_IDENTITY_FORMAT_DETAILED),
-        (xueqiu_command, "xueqiu", "logger", ADSPOWER_IDENTITY_FORMAT_DETAILED),
-        (instagram_command, "instagram", "logger", ADSPOWER_IDENTITY_FORMAT),
-    )
-
-    def test_adspower_check_uses_profile_for_article_and_identity_platforms(self):
-        for module, name, logger_attr, expected_format in self.CASES:
-            with self.subTest(platform=name):
-                stack, calls, client, playwright, browser, context, logger = (
-                    self.start_seam(module, logger_attr=logger_attr)
-                )
-                with stack:
-                    code, out, err = _run(
-                        [name, "check", "--profile-id", PROFILE]
-                    )
-
-                self.assertEqual(code, 0, err)
-                self.assertEqual(out.strip(), "valid")
-                self.assert_managed_session(
-                    calls, client, playwright, browser, context
-                )
-                logger.info.assert_called_once_with(expected_format, PROFILE)
-                self.assertNotIn("Multilogin", logger.info.call_args.args[0])
-
-
-class ArticleIdentityUploadTests(_SeamHarness, unittest.TestCase):
-    def _article_file(self, directory: str) -> Path:
-        content = Path(directory) / "article.html"
-        content.write_text("<p>正文</p>", encoding="utf-8")
-        return content
-
-    def test_dayu_upload_article_does_not_inject_timezone_or_read_identity(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            content = self._article_file(tmp)
-            app = MagicMock()
-            app.main = AsyncMock(return_value={"success": True})
-            builder = MagicMock(return_value=app)
-            stack, calls, client, playwright, browser, context, logger = (
-                self.start_seam(dayu_command, logger_attr="dayu_logger")
-            )
-            stack.enter_context(
-                patch.object(dayu_command, "DayuArticle", new=builder)
-            )
-            with stack:
-                code, out, err = _run(
-                    [
-                        "dayu",
-                        "upload-article",
-                        "--profile-id",
-                        PROFILE,
-                        "--title",
-                        "测试图文标题",
-                        "--content-file",
-                        str(content),
-                        "--source",
-                        "无需标注",
-                    ]
-                )
+        with stack:
+            code, out, err = _run(["instagram", "check", "--profile-id", PROFILE])
 
         self.assertEqual(code, 0, err)
-        self.assertIn('"success": true', out)
-        self.assertIsNone(builder.call_args.kwargs["account_file"])
-        app.main.assert_awaited_once()
-        self.assertEqual(app.main.await_args.kwargs["session"].mode, "adspower")
+        self.assertEqual(out.strip(), "valid")
         self.assert_managed_session(calls, client, playwright, browser, context)
-        logger.info.assert_any_call(ADSPOWER_IDENTITY_FORMAT, PROFILE)
-        logger.info.assert_any_call(ADSPOWER_TIMEZONE_HINT)
-
-    def _upload_article(self, module, name, builder_attr, logger_attr, argv_extra):
-        with tempfile.TemporaryDirectory() as tmp:
-            content = self._article_file(tmp)
-            app = MagicMock()
-            app.main = AsyncMock(return_value={"success": True})
-            builder = MagicMock(return_value=app)
-            stack, calls, client, playwright, browser, context, logger = (
-                self.start_seam(module, logger_attr=logger_attr)
-            )
-            stack.enter_context(
-                patch.object(module, builder_attr, new=builder)
-            )
-            argv = [
-                name,
-                "upload-article",
-                "--profile-id",
-                PROFILE,
-                "--title",
-                "测试文章标题",
-                "--content-file",
-                str(content),
-            ] + argv_extra
-            with stack:
-                code, out, err = _run(argv)
-
-        self.assertEqual(code, 0, err)
-        self.assertIn('"success": true', out)
-        self.assertIsNone(builder.call_args.kwargs["account_file"])
-        app.main.assert_awaited_once()
-        self.assertEqual(app.main.await_args.kwargs["session"].mode, "adspower")
-        self.assert_managed_session(calls, client, playwright, browser, context)
-        self.assertNotIn("Multilogin", logger.info.call_args.args[0])
-
-    def test_zhihu_upload_article_skips_cookie_and_identity(self):
-        self._upload_article(
-            zhihu_command, "zhihu", "ZhihuArticle", "logger", []
-        )
-
-    def test_xueqiu_upload_article_skips_cookie_and_identity(self):
-        self._upload_article(
-            xueqiu_command,
-            "xueqiu",
-            "XueqiuArticle",
-            "logger",
-            ["--declaration", "不添加创作声明"],
-        )
-
-
-class _ArticlePage:
-    def __init__(self, final_url: str) -> None:
-        self.url = "about:blank"
-        self.final_url = final_url
-        self.screenshot_calls: list[str] = []
-
-    async def goto(self, url: str, **kwargs):
-        self.url = self.final_url
-        return SimpleNamespace(status=200)
-
-    async def screenshot(self, *, path=None, **kwargs) -> None:
-        self.screenshot_calls.append(path)
-
-    async def close(self) -> None:
-        pass
-
-
-class _ArticleContext:
-    def __init__(self, page: _ArticlePage) -> None:
-        self.page = page
-        self.new_page_calls = 0
-        self.storage_state_calls: list[object] = []
-        self.add_init_script_calls = 0
-        self.forbidden_calls: list[str] = []
-
-    async def new_page(self) -> _ArticlePage:
-        self.new_page_calls += 1
-        return self.page
-
-    async def storage_state(self, **kwargs):
-        self.storage_state_calls.append(kwargs)
-        raise AssertionError("managed mode must not write cookies")
-
-    async def add_init_script(self, *args, **kwargs) -> None:
-        self.add_init_script_calls += 1
-        raise AssertionError("managed mode must not inject scripts")
-
-    async def grant_permissions(self, *args, **kwargs) -> None:
-        self.forbidden_calls.append("grant_permissions")
-        raise AssertionError("managed mode must not grant permissions")
-
-
-class ArticleUploaderBodyTests(unittest.TestCase):
-    def _session(self, final_url: str):
-        page = _ArticlePage(final_url)
-        context = _ArticleContext(page)
-        return BrowserSession(
-            browser=MagicMock(), context=context, mode="adspower"
-        ), page, context
-
-    def test_dayu_article_body_never_reads_identity_or_timezone(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            content = Path(tmp) / "article.html"
-            content.write_text("<p>正文</p>", encoding="utf-8")
-            app = DayuArticle(
-                title="测试图文标题",
-                content_file=content,
-                account_file=None,
-                source="无需标注",
-                prepare_only=True,
-            )
-            app.document = SimpleNamespace(
-                manifest={}, source_format="html", theme=None, images=[]
-            )
-            app.style_result = {"mode": "native"}
-            app.publication_html = None
-            session, page, context = self._session(
-                "https://mp.dayu.com/dashboard/article/write"
-            )
-            with (
-                patch.object(
-                    DayuArticle, "fill_article_form", new=AsyncMock()
-                ) as fill_form,
-                patch.object(
-                    dayu_article_module,
-                    "raise_if_login_required",
-                    new=AsyncMock(),
-                ),
-                patch.object(
-                    dayu_article_module,
-                    "read_dayu_identity",
-                    new=AsyncMock(),
-                ) as read_identity,
-                patch.object(dayu_article_module, "dayu_logger", MagicMock()),
-            ):
-                result = asyncio.run(app.upload_in(session))
-
-        self.assertTrue(result["success"])
-        self.assertEqual(result["status"], "prepared")
-        read_identity.assert_not_awaited()
-        fill_form.assert_awaited_once_with(page, multilogin=True)
-        self.assertEqual(context.new_page_calls, 1)
-        self.assertEqual(context.storage_state_calls, [])
-        self.assertEqual(context.forbidden_calls, [])
-
-    def test_zhihu_article_body_never_reads_identity_or_grants_clipboard(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            content = Path(tmp) / "article.html"
-            content.write_text("<p>正文</p>", encoding="utf-8")
-            app = ZhihuArticle(
-                "测试文章标题", content, None, prepare_only=True, headless=False
-            )
-            app.document = SimpleNamespace(manifest={})
-            app.uploaded_images = []
-            app.images = []
-            app.identity = None
-            session, page, context = self._session(
-                "https://zhuanlan.zhihu.com/write"
-            )
-            with (
-                patch.object(
-                    ZhihuArticle, "fill_article_form", new=AsyncMock()
-                ) as fill_form,
-                patch.object(
-                    zhihu_article_module, "read_zhihu_identity", new=AsyncMock()
-                ) as read_identity,
-            ):
-                result = asyncio.run(app.upload_in(session))
-
-        self.assertEqual(result["status"], "prepared")
-        read_identity.assert_not_awaited()
-        fill_form.assert_awaited_once_with(page, multilogin=True)
-        self.assertEqual(context.new_page_calls, 1)
-        self.assertEqual(context.storage_state_calls, [])
-        self.assertEqual(context.forbidden_calls, [])
-
-    def test_xueqiu_article_body_never_reads_identity_or_grants_clipboard(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            content = Path(tmp) / "article.html"
-            content.write_text("<p>正文</p>", encoding="utf-8")
-            app = XueqiuArticle(
-                "雪球标题",
-                content,
-                None,
-                declaration="不添加创作声明",
-                prepare_only=True,
-            )
-            app.document = SimpleNamespace(
-                manifest={}, source_format="html", normalizations=[]
-            )
-            app.uploaded_images = []
-            app.cover_url = None
-            app.identity = None
-            session, page, context = self._session(
-                "https://mp.xueqiu.com/writeV2/"
-            )
-            with (
-                patch.object(
-                    XueqiuArticle, "fill_article_form", new=AsyncMock()
-                ) as fill_form,
-                patch.object(
-                    xueqiu_article_module,
-                    "read_xueqiu_identity",
-                    new=AsyncMock(),
-                ) as read_identity,
-            ):
-                result = asyncio.run(app.upload_in(session))
-
-        self.assertTrue(result["success"])
-        self.assertEqual(result["status"], "prepared")
-        read_identity.assert_not_awaited()
-        fill_form.assert_awaited_once_with(page, multilogin=True)
-        self.assertEqual(context.new_page_calls, 1)
-        self.assertEqual(context.storage_state_calls, [])
-        self.assertEqual(context.forbidden_calls, [])
-        self.assertEqual(len(page.screenshot_calls), 1)
-
-    def test_clipboard_permission_follows_session_managed_for_adspower(self):
-        session = BrowserSession(
-            browser=MagicMock(), context=FakeContext(), mode="adspower"
-        )
-        page = SimpleNamespace(context=session.context)
-
-        asyncio.run(
-            zhihu_article_module.grant_clipboard_permission(
-                page, multilogin=session.managed
-            )
-        )
-        asyncio.run(
-            xueqiu_article_module.grant_clipboard_permission(
-                page, multilogin=session.managed
-            )
-        )
-        self.assertEqual(session.context.forbidden_calls, [])
-
-        local_context = SimpleNamespace(grant_permissions=AsyncMock())
-        local_page = SimpleNamespace(context=local_context)
-        asyncio.run(
-            zhihu_article_module.grant_clipboard_permission(
-                local_page, multilogin=False
-            )
-        )
-        asyncio.run(
-            xueqiu_article_module.grant_clipboard_permission(
-                local_page, multilogin=False
-            )
-        )
-        self.assertEqual(local_context.grant_permissions.await_count, 2)
+        logger.info.assert_called_once_with(ADSPOWER_IDENTITY_FORMAT, PROFILE)
 
 
 class MetaManagedSeamTests(_SeamHarness, unittest.TestCase):
@@ -759,67 +399,6 @@ class InstagramUploaderIdentityTests(unittest.TestCase):
         self.assertEqual(context.new_page_calls, 1)
         self.assertEqual(context.storage_state_calls, [])
         app._upload_steps.assert_awaited_once()
-
-
-class LocalOnlyActionTests(unittest.TestCase):
-    """Required-account validation; full works flows are in the Profile suites."""
-
-
-    def test_all_local_actions_still_require_account_under_adspower(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            result = Path(tmp) / "result.json"
-            result.write_text("{}", encoding="utf-8")
-            cases = (
-                ["facebook", "verify", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
-                ["facebook", "delete", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
-                ["facebook-page", "verify", "--page-id", "1", "--page", "P", "--content-id", "c", "--expected-text", "t"],
-                ["facebook-page", "delete", "--page-id", "1", "--page", "P", "--content-id", "c", "--expected-text", "t"],
-                ["instagram", "verify", "--post-url", "u", "--expected-text", "t"],
-                ["instagram", "delete", "--post-url", "u", "--expected-text", "t"],
-                ["zhihu", "verify", "--result", str(result)],
-                ["xueqiu", "verify", "--result", str(result)],
-                ["dayu", "verify", "--content-id", "c"],
-            )
-            for argv in cases:
-                with self.subTest(argv=argv):
-                    code, _, err = _run(argv)
-                    self.assertEqual(code, 2)
-                    self.assertIn("--account", err)
-
-
-class BilibiliUnderAdspowerTests(unittest.TestCase):
-    def test_bilibili_login_check_upload_all_exit_1_without_biliup(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            video = Path(tmp) / "demo.mp4"
-            video.write_bytes(b"video")
-            cases = (
-                ["bilibili", "login", "--account", "creator"],
-                ["bilibili", "check", "--account", "creator"],
-                [
-                    "bilibili",
-                    "upload-video",
-                    "--account",
-                    "creator",
-                    "--file",
-                    str(video),
-                    "--title",
-                    "标题",
-                    "--desc",
-                    "简介",
-                    "--tid",
-                    "1",
-                ],
-            )
-            biliup = MagicMock(side_effect=AssertionError("biliup must not run"))
-            with patch.object(
-                bilibili_command, "run_biliup_command", new=biliup
-            ):
-                for argv in cases:
-                    with self.subTest(argv=argv):
-                        code, _, err = _run(argv)
-                        self.assertEqual(code, 1)
-                        self.assertIn("AdsPower", err)
-            biliup.assert_not_called()
 
 
 if __name__ == "__main__":

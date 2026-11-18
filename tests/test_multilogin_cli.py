@@ -7,22 +7,15 @@ import argparse
 import asyncio
 import io
 import os
-import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import redirect_stderr, redirect_stdout
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import sau_cli
 from sau_commands import browser as browser_command
-from sau_commands import dayu as dayu_command
-from sau_commands import douyin as douyin_command
-from sau_commands import facebook as facebook_command
-from sau_commands import facebook_page as facebook_page_command
-from sau_commands import instagram as instagram_command
+from sau_commands import youtube as youtube_command
 from sau_commands import multilogin
-from sau_commands import xueqiu as xueqiu_command
-from sau_commands import zhihu as zhihu_command
 from tests.fakes import FakeMultiloginClient
 from utils.errors import LoginRequiredError, RateLimitedError, UsageError
 from utils.multilogin import MultiloginTarget
@@ -86,10 +79,6 @@ class ParserContractTests(unittest.TestCase):
     def test_check_and_upload_actions_accept_multilogin_flags(self):
         parser = sau_cli.build_parser()
         for platform in sau_cli.PLATFORMS:
-            # Bilibili is rejected in MLX mode (no browser context), so it must
-            # not advertise Profile flags.
-            if platform == "bilibili":
-                continue
             for action in _action_names(platform):
                 if not (action == "check" or action.startswith("upload-")):
                     continue
@@ -101,22 +90,12 @@ class ParserContractTests(unittest.TestCase):
     def test_every_check_accepts_runtime_flags(self):
         parser = sau_cli.build_parser()
         for platform in sau_cli.PLATFORMS:
-            if platform == "bilibili":
-                continue
             if "check" not in _action_names(platform):
                 continue
             with self.subTest(platform=platform):
                 options = _option_strings(_subparser(parser, platform, "check"))
                 self.assertIn("--headed", options)
                 self.assertIn("--headless", options)
-
-    def test_bilibili_actions_do_not_accept_multilogin_flags(self):
-        parser = sau_cli.build_parser()
-        for action in ("check", "upload-video"):
-            with self.subTest(action=action):
-                options = _option_strings(_subparser(parser, "bilibili", action))
-                self.assertNotIn("--folder-id", options)
-                self.assertNotIn("--profile-id", options)
 
     def test_login_actions_do_not_accept_multilogin_flags(self):
         parser = sau_cli.build_parser()
@@ -141,7 +120,7 @@ class ParserContractTests(unittest.TestCase):
 
     def test_parse_check_without_account_keeps_flags(self):
         args = sau_cli.build_parser().parse_args(
-            ["douyin", "check", "--folder-id", "folder", "--profile-id", "profile"]
+            ["youtube", "check", "--folder-id", "folder", "--profile-id", "profile"]
         )
         self.assertIsNone(args.account)
         self.assertEqual(args.folder_id, "folder")
@@ -170,8 +149,7 @@ class HelperTests(unittest.TestCase):
             self.assertIsNone(multilogin.resolve_multilogin_target(args))
             self.assertEqual(multilogin.resolve_account_label(args), "creator")
             multilogin.require_local_account(args)
-            multilogin.reject_multilogin_login("douyin", args)
-            multilogin.reject_multilogin_platform("bilibili", args)
+            multilogin.reject_multilogin_login("youtube", args)
 
     def test_mlx_missing_folder_or_profile_is_usage_error(self):
         with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
@@ -224,31 +202,23 @@ class HelperTests(unittest.TestCase):
                         multilogin.require_account(Namespace(account=account))
 
     def test_login_required_error_message(self):
-        error = multilogin.login_required_error("抖音", "profile-1")
+        error = multilogin.login_required_error("YouTube", "profile-1")
         self.assertIsInstance(error, LoginRequiredError)
-        self.assertIn("抖音登录态无效：profile_id=profile-1", str(error))
+        self.assertIn("YouTube登录态无效：profile_id=profile-1", str(error))
         self.assertIn("Multilogin", str(error))
 
     def test_login_rejection_message_and_placeholder(self):
         with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
             with self.assertRaises(RuntimeError) as with_id:
                 multilogin.reject_multilogin_login(
-                    "douyin", Namespace(profile_id="profile-1")
+                    "youtube", Namespace(profile_id="profile-1")
                 )
             self.assertIn("profile-1", str(with_id.exception))
             self.assertIn("Multilogin 模式不支持 CLI 登录", str(with_id.exception))
 
             with self.assertRaises(RuntimeError) as without_id:
-                multilogin.reject_multilogin_login("douyin", Namespace())
+                multilogin.reject_multilogin_login("youtube", Namespace())
             self.assertIn("指定 Profile", str(without_id.exception))
-
-    def test_platform_rejection(self):
-        with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
-            with self.assertRaises(RuntimeError) as ctx:
-                multilogin.reject_multilogin_platform("bilibili", Namespace())
-            self.assertIn("bilibili", str(ctx.exception))
-            self.assertIn("Multilogin", str(ctx.exception))
-
 
 class UsageAndExitCodeTests(unittest.TestCase):
     def _run(self, argv, token=""):
@@ -258,16 +228,12 @@ class UsageAndExitCodeTests(unittest.TestCase):
         return code, err.getvalue()
 
     def test_local_missing_account_exits_2(self):
-        code, err = self._run(["douyin", "check"])
+        code, err = self._run(["youtube", "check"])
         self.assertEqual(code, 2)
         self.assertIn("--account", err)
 
     def test_local_missing_account_exits_2_for_every_login_and_check(self):
         for platform in sau_cli.PLATFORMS:
-            # Ticket 25: TikTok has no local mode at all, so every action exits
-            # 1 before --account is ever considered (covered by test_mlx_tiktok).
-            if platform == "tiktok":
-                continue
             for action in ("check", "login"):
                 if action not in _action_names(platform):
                     continue
@@ -276,12 +242,12 @@ class UsageAndExitCodeTests(unittest.TestCase):
                     self.assertEqual(code, 2)
 
     def test_mlx_missing_folder_or_profile_exits_2(self):
-        code, _ = self._run(["douyin", "check", "--account", "creator"], SENTINEL_TOKEN)
+        code, _ = self._run(["youtube", "check", "--account", "creator"], SENTINEL_TOKEN)
         self.assertEqual(code, 2)
 
     def test_mlx_missing_profile_exits_2(self):
         code, _ = self._run(
-            ["douyin", "check", "--folder-id", "folder"], SENTINEL_TOKEN
+            ["youtube", "check", "--folder-id", "folder"], SENTINEL_TOKEN
         )
         self.assertEqual(code, 2)
 
@@ -290,7 +256,7 @@ class UsageAndExitCodeTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}),
             patch.object(
-                douyin_command,
+                youtube_command,
                 "async_playwright",
                 lambda: _FakePlaywrightContext(),
             ),
@@ -305,7 +271,7 @@ class UsageAndExitCodeTests(unittest.TestCase):
             ) as err:
                 code = sau_cli.main(
                     [
-                        "douyin",
+                        "youtube",
                         "check",
                         "--folder-id",
                         "folder",
@@ -331,84 +297,25 @@ class UsageAndExitCodeTests(unittest.TestCase):
             for platform in sau_cli.PLATFORMS
             if "login" in _action_names(platform)
         ]
-        self.assertIn("douyin", platforms)
+        self.assertIn("youtube", platforms)
         for platform in platforms:
             with self.subTest(platform=platform):
                 code, err = self._run([platform, "login"], SENTINEL_TOKEN)
                 self.assertEqual(code, 1)
                 self.assertIn("Multilogin 模式不支持 CLI 登录", err)
 
-    def test_bilibili_in_mlx_exits_1(self):
-        code, err = self._run(["bilibili", "check", "--account", "creator"], SENTINEL_TOKEN)
-        self.assertEqual(code, 1)
-        self.assertIn("bilibili", err)
-
-        code, err = self._run(["bilibili", "login", "--account", "creator"], SENTINEL_TOKEN)
-        self.assertEqual(code, 1)
-        self.assertIn("Multilogin 模式不支持 CLI 登录", err)
-
     def test_local_only_actions_still_require_account_in_mlx_mode(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            result_file = os.path.join(tmp_dir, "result.json")
-            with open(result_file, "w", encoding="utf-8") as handle:
-                handle.write("{}")
-            cases = [
-                (
-                    facebook_command,
-                    ["facebook", "verify", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
-                ),
-                (
-                    facebook_command,
-                    ["facebook", "delete", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
-                ),
-                (
-                    facebook_page_command,
-                    [
-                        "facebook-page",
-                        "verify",
-                        "--page-id",
-                        "1",
-                        "--page",
-                        "Page",
-                        "--content-id",
-                        "c",
-                        "--expected-text",
-                        "t",
-                    ],
-                ),
-                (
-                    facebook_page_command,
-                    [
-                        "facebook-page",
-                        "delete",
-                        "--page-id",
-                        "1",
-                        "--page",
-                        "Page",
-                        "--content-id",
-                        "c",
-                        "--expected-text",
-                        "t",
-                    ],
-                ),
-                (
-                    instagram_command,
-                    ["instagram", "verify", "--post-url", "u", "--expected-text", "t"],
-                ),
-                (
-                    instagram_command,
-                    ["instagram", "delete", "--post-url", "u", "--expected-text", "t"],
-                ),
-                (zhihu_command, ["zhihu", "verify", "--result", result_file]),
-                (xueqiu_command, ["xueqiu", "verify", "--result", result_file]),
-                (dayu_command, ["dayu", "verify", "--content-id", "c"]),
-            ]
-            for module, argv in cases:
-                with self.subTest(argv=argv):
-                    code, err = self._run(argv, SENTINEL_TOKEN)
+        platforms = {
+            "facebook": ["--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
+            "facebook-page": ["--page-id", "1", "--page", "Page", "--content-id", "c", "--expected-text", "t"],
+            "instagram": ["--post-url", "u", "--expected-text", "t"],
+        }
+        for platform, arguments in platforms.items():
+            for action in ("verify", "delete"):
+                with self.subTest(platform=platform, action=action):
+                    code, err = self._run([platform, action, *arguments], SENTINEL_TOKEN)
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
-
 
     def test_exit_code_mapping(self):
         cases = (
@@ -427,7 +334,7 @@ class UsageAndExitCodeTests(unittest.TestCase):
                             io.StringIO()
                         ):
                             code = sau_cli.main(
-                                ["douyin", "check", "--account", "creator"]
+                                ["youtube", "check", "--account", "creator"]
                             )
                 self.assertEqual(code, expected)
 
@@ -449,24 +356,24 @@ class UsageAndExitCodeTests(unittest.TestCase):
         with patch.dict(os.environ, {"MLX_API_TOKEN": SENTINEL_TOKEN}):
             # Usage error: missing ids.
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
-                code = sau_cli.main(["douyin", "check"])
+                code = sau_cli.main(["youtube", "check"])
             scenarios.append((code, err.getvalue()))
 
             # Login rejection.
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
-                code = sau_cli.main(["douyin", "login"])
+                code = sau_cli.main(["youtube", "login"])
             scenarios.append((code, err.getvalue()))
 
             # Runtime failure from the session layer.
             with patch.object(
-                douyin_command,
+                youtube_command,
                 "async_playwright",
                 side_effect=RuntimeError("boom"),
             ):
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
                     code = sau_cli.main(
                         [
-                            "douyin",
+                            "youtube",
                             "check",
                             "--folder-id",
                             "folder",

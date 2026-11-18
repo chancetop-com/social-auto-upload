@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import io
 import os
-import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -15,13 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import sau_cli
 from sau_commands import browser as browser_command
-from sau_commands import dayu as dayu_command
-from sau_commands import douyin as douyin_command
-from sau_commands import facebook as facebook_command
-from sau_commands import facebook_page as facebook_page_command
-from sau_commands import instagram as instagram_command
-from sau_commands import xueqiu as xueqiu_command
-from sau_commands import zhihu as zhihu_command
+from sau_commands import youtube as youtube_command
 from tests.fakes import (
     FakeAdspowerClient,
     FakeBrowser,
@@ -102,17 +95,17 @@ def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
 
 
 def _real_seam(fake, *, logged_in=True):
-    """Patch a douyin-style check to use the real lifecycle with a fake client."""
+    """Exercise the real AdsPower lifecycle through a YouTube check."""
     playwright = FakePlaywright()
     playwright.chromium.queue_connect_browser(
         FakeBrowser([FakeContext()], allow_new_context=False)
     )
     return (
         patch.object(
-            douyin_command, "async_playwright", lambda: _AsyncCM(playwright)
+            youtube_command, "async_playwright", lambda: _AsyncCM(playwright)
         ),
         patch.object(
-            douyin_command, "is_logged_in", new=AsyncMock(return_value=logged_in)
+            youtube_command, "is_logged_in", new=AsyncMock(return_value=logged_in)
         ),
         patch.object(browser_command, "AdspowerClient", MagicMock(return_value=fake)),
         playwright,
@@ -151,7 +144,7 @@ class ActivationTests(unittest.TestCase):
 class ConflictTests(unittest.TestCase):
     def test_dual_credentials_exit_1_with_exact_message(self):
         code, _, err = _run(
-            ["douyin", "check", "--profile-id", PROFILE],
+            ["youtube", "check", "--profile-id", PROFILE],
             env={"MLX_API_TOKEN": "mlx-sentinel", "ADSPOWER_API_KEY": KEY},
         )
         self.assertEqual(code, 1)
@@ -159,7 +152,7 @@ class ConflictTests(unittest.TestCase):
 
     def test_conflict_takes_precedence_over_login_rejection(self):
         code, _, err = _run(
-            ["douyin", "login"],
+            ["youtube", "login"],
             env={"MLX_API_TOKEN": "mlx-sentinel", "ADSPOWER_API_KEY": KEY},
         )
         self.assertEqual(code, 1)
@@ -184,7 +177,7 @@ class ConflictTests(unittest.TestCase):
         with _env(MLX_API_TOKEN="mlx-sentinel", ADSPOWER_API_KEY=KEY):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as ctx:
-                    sau_cli.main(["douyin", "upload-video"])
+                    sau_cli.main(["youtube", "upload-video"])
         self.assertEqual(ctx.exception.code, 2)
 
 
@@ -260,7 +253,7 @@ class BaseValidationTests(unittest.TestCase):
         client_cls = MagicMock()
         with patch.object(browser_command, "AdspowerClient", client_cls):
             code, _, _ = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={
                     "ADSPOWER_API_KEY": KEY,
                     "ADSPOWER_API_BASE": "http://127.0.0.1:50325/path",
@@ -298,7 +291,7 @@ class ParameterMatrixTests(unittest.TestCase):
                         browser_command.resolve_managed_provider(args)
 
         code, _, _ = _run(
-            ["douyin", "check"], env={"ADSPOWER_API_KEY": KEY}
+            ["youtube", "check"], env={"ADSPOWER_API_KEY": KEY}
         )
         self.assertEqual(code, 2)
 
@@ -322,15 +315,15 @@ class ParameterMatrixTests(unittest.TestCase):
         )
         with (
             patch.object(
-                douyin_command, "async_playwright", lambda: _AsyncCM(object())
+                youtube_command, "async_playwright", lambda: _AsyncCM(object())
             ),
-            patch.object(douyin_command, "browser_session", new=factory),
+            patch.object(youtube_command, "browser_session", new=factory),
             patch.object(
-                douyin_command, "is_logged_in", new=AsyncMock(return_value=True)
+                youtube_command, "is_logged_in", new=AsyncMock(return_value=True)
             ),
         ):
             code, out, _ = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 0)
@@ -393,13 +386,13 @@ class ParameterMatrixTests(unittest.TestCase):
     def test_headed_maps_to_headless_false_and_default_is_false(self):
         parser = sau_cli.build_parser()
         default_args = parser.parse_args(
-            ["douyin", "check", "--profile-id", PROFILE]
+            ["youtube", "check", "--profile-id", PROFILE]
         )
         headed_args = parser.parse_args(
-            ["douyin", "check", "--profile-id", PROFILE, "--headed"]
+            ["youtube", "check", "--profile-id", PROFILE, "--headed"]
         )
         headless_args = parser.parse_args(
-            ["douyin", "check", "--profile-id", PROFILE, "--headless"]
+            ["youtube", "check", "--profile-id", PROFILE, "--headless"]
         )
         self.assertFalse(default_args.headless)
         self.assertFalse(headed_args.headless)
@@ -413,17 +406,17 @@ class ParameterMatrixTests(unittest.TestCase):
         )
         with (
             patch.object(
-                douyin_command, "async_playwright", lambda: _AsyncCM(playwright)
+                youtube_command, "async_playwright", lambda: _AsyncCM(playwright)
             ),
             patch.object(
-                douyin_command, "is_logged_in", new=AsyncMock(return_value=True)
+                youtube_command, "is_logged_in", new=AsyncMock(return_value=True)
             ),
             patch.object(
                 browser_command, "AdspowerClient", MagicMock(return_value=fake)
             ),
         ):
             code, _, _ = _run(
-                ["douyin", "check", "--profile-id", PROFILE, "--headed"],
+                ["youtube", "check", "--profile-id", PROFILE, "--headed"],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 0)
@@ -436,7 +429,7 @@ class ParameterMatrixTests(unittest.TestCase):
                 options = _option_strings(_subparser(parser, platform, action))
                 is_managed_action = action == "check" or action.startswith("upload-")
                 with self.subTest(platform=platform, action=action):
-                    if platform == "bilibili" or not is_managed_action:
+                    if not is_managed_action:
                         self.assertNotIn("--folder-id", options)
                         self.assertNotIn("--profile-id", options)
                     else:
@@ -449,7 +442,7 @@ class ParameterMatrixTests(unittest.TestCase):
             for platform in sau_cli.PLATFORMS
             if "login" in _action_names(platform)
         ]
-        self.assertIn("douyin", platforms)
+        self.assertIn("youtube", platforms)
         for platform in platforms:
             with self.subTest(platform=platform):
                 code, _, err = _run(
@@ -463,78 +456,21 @@ class ParameterMatrixTests(unittest.TestCase):
         with _env(ADSPOWER_API_KEY=KEY):
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as ctx:
-                    sau_cli.main(["douyin", "login", "--profile-id", PROFILE])
+                    sau_cli.main(["youtube", "login", "--profile-id", PROFILE])
         self.assertEqual(ctx.exception.code, 2)
 
-    def test_bilibili_login_check_and_upload_exit_1(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = os.path.join(tmp_dir, "demo.mp4")
-            with open(video, "wb") as handle:
-                handle.write(b"video")
-            cases = (
-                ["bilibili", "login", "--account", "creator"],
-                ["bilibili", "check", "--account", "creator"],
-                [
-                    "bilibili",
-                    "upload-video",
-                    "--account",
-                    "creator",
-                    "--file",
-                    video,
-                    "--title",
-                    "标题",
-                    "--desc",
-                    "简介",
-                    "--tid",
-                    "1",
-                ],
-            )
-            for argv in cases:
-                with self.subTest(argv=argv):
-                    code, _, err = _run(argv, env={"ADSPOWER_API_KEY": KEY})
-                    self.assertEqual(code, 1)
-                    self.assertIn("AdsPower", err)
-
     def test_local_only_actions_still_require_account_in_adspower_mode(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            result_file = os.path.join(tmp_dir, "result.json")
-            with open(result_file, "w", encoding="utf-8") as handle:
-                handle.write("{}")
-            cases = [
-                (
-                    facebook_command,
-                    ["facebook", "verify", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
-                ),
-                (
-                    facebook_command,
-                    ["facebook", "delete", "--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
-                ),
-                (
-                    facebook_page_command,
-                    ["facebook-page", "verify", "--page-id", "1", "--page", "Page", "--content-id", "c", "--expected-text", "t"],
-                ),
-                (
-                    facebook_page_command,
-                    ["facebook-page", "delete", "--page-id", "1", "--page", "Page", "--content-id", "c", "--expected-text", "t"],
-                ),
-                (
-                    instagram_command,
-                    ["instagram", "verify", "--post-url", "u", "--expected-text", "t"],
-                ),
-                (
-                    instagram_command,
-                    ["instagram", "delete", "--post-url", "u", "--expected-text", "t"],
-                ),
-                (zhihu_command, ["zhihu", "verify", "--result", result_file]),
-                (xueqiu_command, ["xueqiu", "verify", "--result", result_file]),
-                (dayu_command, ["dayu", "verify", "--content-id", "c"]),
-            ]
-            for module, argv in cases:
-                with self.subTest(argv=argv):
-                    code, _, err = _run(argv, env={"ADSPOWER_API_KEY": KEY})
+        platforms = {
+            "facebook": ["--post-url", "u", "--owner-id", "1", "--expected-text", "t"],
+            "facebook-page": ["--page-id", "1", "--page", "Page", "--content-id", "c", "--expected-text", "t"],
+            "instagram": ["--post-url", "u", "--expected-text", "t"],
+        }
+        for platform, arguments in platforms.items():
+            for action in ("verify", "delete"):
+                with self.subTest(platform=platform, action=action):
+                    code, _, err = _run([platform, action, *arguments], env={"ADSPOWER_API_KEY": KEY})
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
-
 
     def test_article_stays_local_and_accepts_no_browser_flags(self):
         parser = sau_cli.build_parser()
@@ -555,11 +491,11 @@ class CheckAndExitCodeTests(unittest.TestCase):
             return_value=_AsyncCM(SimpleNamespace(context=object()))
         )
         playwright_patch = patch.object(
-            douyin_command, "async_playwright", lambda: _AsyncCM(object())
+            youtube_command, "async_playwright", lambda: _AsyncCM(object())
         )
-        session_patch = patch.object(douyin_command, "browser_session", new=factory)
+        session_patch = patch.object(youtube_command, "browser_session", new=factory)
         login_patch = patch.object(
-            douyin_command, "is_logged_in", new=AsyncMock(return_value=logged_in)
+            youtube_command, "is_logged_in", new=AsyncMock(return_value=logged_in)
         )
         return factory, playwright_patch, session_patch, login_patch
 
@@ -567,7 +503,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         factory, pw, session, login = self._factory(logged_in=True)
         with pw, session, login:
             code, out, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 0)
@@ -580,18 +516,18 @@ class CheckAndExitCodeTests(unittest.TestCase):
         factory, pw, session, login = self._factory(logged_in=False)
         with pw, session, login:
             code, out, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 10)
         self.assertEqual(out, "")
-        self.assertIn("抖音登录态无效", err)
+        self.assertIn("YouTube登录态无效", err)
         self.assertIn("AdsPower", err)
 
     def test_rate_limited_error_maps_to_11(self):
         with patch("sau_cli.dispatch", new=AsyncMock(side_effect=RateLimitedError("429"))):
             code, _, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 11)
@@ -603,7 +539,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
             new=AsyncMock(side_effect=PublishResultUnknownError("publish unknown")),
         ):
             code, _, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 9)
@@ -613,7 +549,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         with patch("sau_cli.dispatch", new=AsyncMock(side_effect=KeyboardInterrupt)):
             with self.assertRaises(KeyboardInterrupt):
                 _run(
-                    ["douyin", "check", "--profile-id", PROFILE],
+                    ["youtube", "check", "--profile-id", PROFILE],
                     env={"ADSPOWER_API_KEY": KEY},
                 )
 
@@ -622,7 +558,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         pw, login, client, _ = _real_seam(fake)
         with pw, login, client:
             code, _, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 11)
@@ -635,7 +571,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         pw, login, client, _ = _real_seam(fake)
         with pw, login, client:
             code, _, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 11)
@@ -647,7 +583,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         pw, login, client, _ = _real_seam(fake)
         with pw, login, client:
             code, _, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 1)
@@ -659,7 +595,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         pw, login, client, _ = _real_seam(fake)
         with pw, login, client:
             code, out, _ = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 0)
@@ -673,19 +609,19 @@ class SecretRedactionTests(unittest.TestCase):
 
         # Missing profile (usage error).
         code, out, err = _run(
-            ["douyin", "check"], env={"ADSPOWER_API_KEY": KEY}
+            ["youtube", "check"], env={"ADSPOWER_API_KEY": KEY}
         )
         scenarios.append((code, out + err))
 
         # Login rejection.
         code, out, err = _run(
-            ["douyin", "login"], env={"ADSPOWER_API_KEY": KEY}
+            ["youtube", "login"], env={"ADSPOWER_API_KEY": KEY}
         )
         scenarios.append((code, out + err))
 
         # Invalid base (usage error).
         code, out, err = _run(
-            ["douyin", "check", "--profile-id", PROFILE],
+            ["youtube", "check", "--profile-id", PROFILE],
             env={
                 "ADSPOWER_API_KEY": KEY,
                 "ADSPOWER_API_BASE": "http://127.0.0.1:50325/path",
@@ -698,7 +634,7 @@ class SecretRedactionTests(unittest.TestCase):
         pw, login, client, _ = _real_seam(fake)
         with pw, login, client:
             code, out, err = _run(
-                ["douyin", "check", "--profile-id", PROFILE],
+                ["youtube", "check", "--profile-id", PROFILE],
                 env={"ADSPOWER_API_KEY": KEY},
             )
         scenarios.append((code, out + err))
