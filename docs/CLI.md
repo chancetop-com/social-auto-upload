@@ -306,6 +306,12 @@ sau xiaohongshu check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" --headed
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
 
+### MLX 中断后恢复
+
+Start 响应丢失时，下一条命令使用自己的凭据查询同一 Profile 和 folder。若 Launcher 报告 `browser_running`，CLI 会核对 Mimic 的当前本机 CDP 实例，连接成功后另开页面。若 CLI 已核对过这次运行的实例，后来又观察到 `stopped`，即可确认先前启动已结束，允许一次新的 Start。Launcher 的状态记录只覆盖当前 Agent 会话。单独的 `stopped` 快照、变化的时间戳或空历史都无法确认上一条请求的结果，此时命令退出 `1`。 [Launcher 状态接口](https://documenter.getpostman.com/view/28533318/2s946h9Cv9#0ad3f26d-ae66-459c-8db6-7c5fa5a90198)
+
+Stop 成功响应可能先于浏览器退出。后来者会等待旧实例消失，再按当前状态启动或加入。Stop 响应丢失时，即使桌面出现另一个活动实例，也要等到观察到空闲才能重启。等待超时的命令退出 `1`。若发布过程中进程被强杀，应保留已有结果，先核对平台作品再决定是否重跑。
+
 ### MLX 部署前提
 
 1. CLI 与 Multilogin 桌面应用在**同一台 macOS/Windows 机器**上，桌面应用已启动，45001/45003 未被占用。

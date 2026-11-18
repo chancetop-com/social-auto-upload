@@ -239,6 +239,7 @@ class FakeManagedProvider:
     """Duck-typed ``ManagedBrowserProvider`` for lifecycle tests."""
 
     resource_identity = "test-service"
+    asynchronous_stop = False
 
     def observe(self) -> ProfileObservation:
         if self.status_error is not None:

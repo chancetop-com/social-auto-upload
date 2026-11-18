@@ -18,12 +18,12 @@ PROFILE = '5f25f9eb-2d65-4440-9d66-dcec611b4f29'
 
 
 class LauncherProfile(OfflineProfile):
+    default_profile_id = PROFILE
+
     def __init__(self, root, stack, entries, playwright, *, sites=None):
         super().__init__(root, stack, entries, playwright, sites=sites)
         self.folder = FOLDER
         self.start_fields = {}
-        self.start_response = None
-        self.stop_response = None
         self.denied_tokens = set()
         self.status_code = 200
         self.top_status = {'error_code': '', 'http_code': 200, 'message': ''}
@@ -97,13 +97,13 @@ class LauncherProfile(OfflineProfile):
             "multilogin.PROFILE_METAS_URL = os.environ['OFFLINE_LAUNCHER'] + '/profile/metas'\n")
 
     def command(self, installation, platform, *flags, profile_id=PROFILE, folder_id=FOLDER,
-                action='check'):
-        env = {**os.environ, 'HOME': str(self.home), 'ADSPOWER_API_KEY': '',
+                action='check', env=None):
+        command_env = {'HOME': str(self.home), 'ADSPOWER_API_KEY': '',
                'MLX_API_TOKEN': f'offline-key-{installation}', 'PYTHONPATH': str(self.routing),
                'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1',
-               'OFFLINE_LAUNCHER': f'http://127.0.0.1:{self.launcher_port}'}
+               'OFFLINE_LAUNCHER': f'http://127.0.0.1:{self.launcher_port}', **(env or {})}
         return super().command(installation, platform, '--folder-id', folder_id, *flags,
-                               action=action, profile_id=profile_id, env=env)
+                               action=action, profile_id=profile_id, env=command_env)
 
 
 @pytest.fixture

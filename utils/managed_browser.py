@@ -44,6 +44,9 @@ class ManagedBrowserProvider(Protocol):
 
 
 class SharedBrowserProvider(ManagedBrowserProvider, Protocol):
+    # Some desktop APIs acknowledge Stop before the browser actually exits.
+    asynchronous_stop: bool
+
     @property
     def resource_identity(self) -> str:
         """Canonical identity of the service or folder containing the profile."""
