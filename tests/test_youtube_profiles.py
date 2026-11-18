@@ -80,7 +80,7 @@ class YouTubeProfilesTests(unittest.TestCase):
         self.playwright.chromium.persistent_context = self.context
         for key, value in {'BASE_DIR': self.root, 'LOCAL_CHROME_PATH': '', 'LOCAL_CHROME_HEADLESS': False, 'LOCAL_BROWSER': 'chrome'}.items():
             self.stack.enter_context(patch.object(conf, key, value, create=True))
-        self.stack.enter_context(patch.dict(os.environ, {'MLX_API_TOKEN': '', 'ADSPOWER_API_KEY': '', 'HUMANIZE': '0'}))
+        self.stack.enter_context(patch.dict(os.environ, {'HOME': str(self.root), 'MLX_API_TOKEN': '', 'ADSPOWER_API_KEY': '', 'HUMANIZE': '0'}))
         for module in (command, uploader):
             self.stack.enter_context(patch.object(module, 'async_playwright', lambda: PlaywrightCM(self.playwright)))
         self.video = self.root / 'video.mp4'

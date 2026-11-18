@@ -272,7 +272,7 @@ class MultiloginUploadTests(unittest.TestCase):
         self.assertEqual(context.storage_state_calls, [])
         self.assertEqual(context.add_init_script_calls, 0)
         self.assertEqual(page.goto_calls[0][0], UPLOAD_URL)
-        page_ops.assert_awaited_once_with(page, multilogin=True)
+        page_ops.assert_awaited_once_with(page, mode="multilogin")
         self.assertIsNone(video.account_file)
 
     def test_mlx_mid_upload_login_captcha_and_2fa_raise_login_required(self):
@@ -332,7 +332,9 @@ class MultiloginUploadTests(unittest.TestCase):
 
 class YouTubeMlxCliTests(unittest.TestCase):
     def _run(self, argv, token=TOKEN):
-        with patch.dict(os.environ, {"MLX_API_TOKEN": token}):
+        with tempfile.TemporaryDirectory() as home, patch.dict(
+            os.environ, {"HOME": home, "ADSPOWER_API_KEY": "", "MLX_API_TOKEN": token}
+        ):
             with redirect_stdout(io.StringIO()) as out, redirect_stderr(
                 io.StringIO()
             ) as err:
