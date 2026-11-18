@@ -1,6 +1,6 @@
 # 托管 Profile 默认共享
 
-Status: ready-for-agent
+Status: needs-info
 
 ## Problem Statement
 
@@ -118,3 +118,5 @@ TikTok 如果在丢页后选中了 Instagram 的标签，可能会更改另一�
 同一提交构建的 wheel 分别安装到 Python 3.10.16 和 3.12.9。两套安装均通过七个平台的 20 个入口、11 个旧名称在三种配置下的 33 次拒绝和本地文章渲染检查。另在 Python 3.12 安装中实际升级旧版 wheel，四类已有用户数据逐字节一致。两个不同版本的 CLI 共用测试 Profile 时，冷启动共 1 次 Start，加入已打开的 Profile 共 0 次 Start；先离开的命令保留同行编辑器，最后离开的命令发 1 次 Stop。工单中的实施记录列有平台和故障用例。[平台移除](issues/20-remove-platforms.md) · [AdsPower 双进程](issues/08-adspower-shared-check.md) · [MLX 中断恢复](issues/13-mlx-interrupted-session.md)
 
 MLX 已通过模拟 Launcher 验证。首次接管或 Start 回包丢失后缺少既有实例记录时，CLI 依赖本机 Launcher 正确报告目标 Profile 的运行状态及端口。已有实例记录时，端口被另一浏览器复用且启动历史未变化，会在开页前拒绝。真实 MLX 桌面和 Windows、Linux 的原生双进程验收留待相应环境。[MLX 连接规则](../../README.md) · [真实 AdsPower 验收工单](issues/14-adspower-macos-acceptance.md)
+
+真实 AdsPower 首次冷启动未进入编辑器。历史测试 Profile 在已通过鉴权的两套列表查询中均无匹配；#14 等待操作者确认当前测试 Profile。 [实机时间线](research/14-macos.md)

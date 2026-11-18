@@ -19,4 +19,4 @@ Blocked by: 09, 11
 
 ## Comments
 
-已在 macOS 26.6.2、AdsPower Global 8.9.23 上尝试冷启动。Instagram 和 TikTok 的两个正式命令都传入 `--no-publish`，进入时间相差约 11 毫秒。合计发出 1 次 Start、0 次 Stop，两个命令均在编辑器打开前以 1 退出；随后两次状态查询均为 `Inactive`。当前 API Key 可以访问本机 API。针对历史验收里使用的同一标识，V1 和 V2 的按 ID 查询均成功返回 0 条匹配。已向操作者请求当前同时登录两个平台的测试 Profile ID 或环境序号，以继续冷启动、桌面已打开和强杀恢复的真实草稿验收。
+已在 macOS 26.6.2、AdsPower Global 8.9.23 上尝试冷启动。Instagram 和 TikTok 的两个正式命令都传入 `--no-publish`，进入时间相差约 10 毫秒。合计发出 1 次 Start、0 次 Stop，两个命令均在编辑器打开前以 1 退出；随后两次状态查询均为 `Inactive`。当前 API Key 可以访问本机 API。针对历史验收里使用的同一标识，V1 和 V2 的按 ID 查询均成功返回 0 条匹配。已向操作者请求当前同时登录两个平台的测试 Profile ID 或环境序号，以继续冷启动、桌面已打开和强杀恢复的真实草稿验收。 [实机时间线](../research/14-macos.md)
