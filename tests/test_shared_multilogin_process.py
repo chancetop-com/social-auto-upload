@@ -95,8 +95,8 @@ class LauncherProfile(OfflineProfile):
                'MLX_API_TOKEN': f'offline-key-{installation}', 'PYTHONPATH': str(self.routing),
                'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1',
                'OFFLINE_LAUNCHER': f'http://127.0.0.1:{self.launcher_port}'}
-        return self.spawn(installation, env, platform, action, '--folder-id', folder_id,
-                          '--profile-id', profile_id, *flags)
+        return super().command(installation, platform, '--folder-id', folder_id, *flags,
+                               action=action, profile_id=profile_id, env=env)
 
 
 @pytest.fixture

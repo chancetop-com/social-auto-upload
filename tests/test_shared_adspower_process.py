@@ -72,7 +72,7 @@ def installations(tmp_path_factory):
 
 
 class OfflineProfile:
-    def __init__(self, root, stack, entries, playwright):
+    def __init__(self, root, stack, entries, playwright, *, sites=None):
         self.root = root
         self.stack = stack
         self.entries = entries
@@ -111,7 +111,10 @@ class OfflineProfile:
         tls.load_cert_chain(cert, key)
         site_port = stack.enter_context(serve(Site, tls))
         user_data = root / 'chromium'
-        rules = ', '.join([f'MAP www.{name}.com 127.0.0.1:{site_port}' for name in self.gates]
+        ports = {f'www.{name}.com': site_port for name in self.gates}
+        for hostname, handler in (sites or {}).items():
+            ports[hostname] = stack.enter_context(serve(handler, tls))
+        rules = ', '.join([f'MAP {host} 127.0.0.1:{port}' for host, port in ports.items()]
                           + ['MAP * ~NOTFOUND'])
         self.chrome = subprocess.Popen([
             playwright.chromium.executable_path, '--headless', '--remote-debugging-port=0',
@@ -167,17 +170,16 @@ class OfflineProfile:
             self.chrome.terminate()
             self.chrome.wait(timeout=10)
 
-    def command(self, installation, platform, *flags, host='127.0.0.1', profile_id='shared'):
-        env = {**os.environ, 'HOME': str(self.home), 'ADSPOWER_API_KEY': f'offline-key-{installation}',
-               'ADSPOWER_API_BASE': f'http://{host}:{self.api_port}/', 'MLX_API_TOKEN': '',
-               'PYTHONPATH': '', 'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1'}
-        return self.spawn(installation, env, platform, 'check', '--profile-id', profile_id, *flags)
-
-    def spawn(self, installation, env, *arguments):
+    def command(self, installation, platform, *flags, host='127.0.0.1', profile_id='shared',
+                action='check', env=None):
         work = self.root / f'cwd-{installation}'
         work.mkdir(exist_ok=True)
-        child = subprocess.Popen([self.entries[installation], *arguments], env=env, cwd=work,
-                                 text=True, stdout=subprocess.PIPE,
+        command_env = {**os.environ, 'HOME': str(self.home), 'ADSPOWER_API_KEY': f'offline-key-{installation}',
+               'ADSPOWER_API_BASE': f'http://{host}:{self.api_port}/', 'MLX_API_TOKEN': '',
+               'PYTHONPATH': '', 'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1',
+               **(env or {})}
+        child = subprocess.Popen([self.entries[installation], platform, action, '--profile-id', profile_id,
+                                  *flags], env=command_env, cwd=work, text=True, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT)
         self.stack.callback(self.reap, child)
         return child
