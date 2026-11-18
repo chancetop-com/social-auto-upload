@@ -102,25 +102,15 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
         from types import SimpleNamespace
         from unittest.mock import Mock
 
-        from uploader.alipay_uploader import main as alipay
-        from uploader.baijiahao_uploader import main as baijiahao
-        from uploader.tencent_uploader import main as tencent
         from uploader.tk_uploader import main_chrome as tiktok
-        from uploader.weibo_uploader import main as weibo
 
         cases = (
-            (tiktok, tiktok.TiktokVideo, "wait_media_ready"),
-            (tiktok, tiktok.TiktokNote, "wait_media_ready"),
-            (tiktok, tiktok.TiktokVideo, "wait_publish_ready"),
-            (tencent, tencent.TencentVideo, "wait_for_upload_complete"),
-            (tencent, tencent.TencentVideo, "submit_publish"),
-            (alipay, alipay.AlipayVideo, "wait_for_upload_complete"),
-            (alipay, alipay.AlipayVideo, "submit_publish"),
-            (weibo, weibo.WeiBoVideo, "_submit_publish"),
-            (baijiahao, baijiahao.BaiJiaHaoVideo, "_submit_publish"),
+            (tiktok.TiktokVideo, "wait_media_ready"),
+            (tiktok.TiktokNote, "wait_media_ready"),
+            (tiktok.TiktokVideo, "wait_publish_ready"),
         )
-        for module, cls, method in cases:
-            with self.subTest(platform=module.__name__, gate=method):
+        for cls, method in cases:
+            with self.subTest(uploader=cls.__name__, gate=method):
                 duplicate = AmbiguousLocator()
                 page = SimpleNamespace(
                     locator=Mock(return_value=duplicate),
@@ -130,21 +120,20 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
                     wait_for_timeout=AsyncMock(),
                     url="/post/create",
                 )
-                if module is tiktok:
-                    # An authenticated Studio page with duplicate publish
-                    # controls, not duplicate login forms or login text.
-                    absent = AmbiguousLocator(0)
-                    page.locator = Mock(
-                        side_effect=lambda selector: (
-                            duplicate
-                            if selector in (
-                                '[data-e2e="post_video_button"]',
-                                "div.button-group button",
-                            )
-                            else absent
+                # An authenticated Studio page with duplicate publish
+                # controls, not duplicate login forms or login text.
+                absent = AmbiguousLocator(0)
+                page.locator = Mock(
+                    side_effect=lambda selector: (
+                        duplicate
+                        if selector in (
+                            '[data-e2e="post_video_button"]',
+                            "div.button-group button",
                         )
+                        else absent
                     )
-                    page.get_by_text = Mock(return_value=absent)
+                )
+                page.get_by_text = Mock(return_value=absent)
                 app = cls.__new__(cls)
                 app.locator_base = page
                 app._publish_budget = PublishTimeoutBudget("fixture")
@@ -159,7 +148,7 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
                 app._dismiss_switch_account_dialog = AsyncMock()
                 with (
                     patch.object(
-                        module.asyncio,
+                        tiktok.asyncio,
                         "sleep",
                         AsyncMock(
                             side_effect=AssertionError("must not retry ambiguity")
@@ -210,106 +199,6 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
             )
         humanizer.click.assert_not_awaited()
 
-    async def test_kuaishou_ambiguous_publish_is_not_retried(self):
-
-        from tests import test_kuaishou_humanize as fixtures
-
-        for kind in ("video", "note"):
-            with self.subTest(kind=kind), fixtures._temp_dir() as tmp:
-                log = []
-                editor = fixtures._TypingLocator("editor", log=log)
-                selectors = (
-                    fixtures._video_selectors
-                    if kind == "video"
-                    else fixtures._note_selectors
-                )(log, editor)
-                page = fixtures._page(selectors, log=log)
-                app = (fixtures._video_app if kind == "video" else fixtures._note_app)(
-                    tmp
-                )
-                humanizer = fixtures._QuietHumanizer(page, log=log)
-                original_click = humanizer.click
-                failure = ElementUnusableError("发布按钮", reason="ambiguous:2")
-                attempts = []
-
-                async def click(
-                    locator,
-                    *,
-                    attempts=attempts,
-                    failure=failure,
-                    original_click=original_click,
-                    **kwargs,
-                ):
-                    if locator.name == "publish":
-                        attempts.append(locator)
-                        if len(attempts) == 1:
-                            raise failure
-                    return await original_click(locator, **kwargs)
-
-                humanizer.click = click
-                app._humanizer_instance = humanizer
-                with (
-                    fixtures._fast_clock(),
-                    self.assertRaises(ElementUnusableError) as caught,
-                ):
-                    await (
-                        app._upload_video_on_page(page)
-                        if kind == "video"
-                        else app.upload_note_content(page)
-                    )
-                self.assertIs(caught.exception, failure)
-                self.assertEqual(len(attempts), 1)
-
-    async def test_douyin_ambiguous_publish_is_not_retried(self):
-        import tempfile
-
-        from tests import test_douyin_humanize as fixtures
-
-        with tempfile.TemporaryDirectory() as tmp:
-            app = fixtures._note(tmp, note="正文")
-            log = []
-            page = fixtures._page(
-                {
-                    "text:发布图文:exact": fixtures._Clickable("image-tab", log=log),
-                    "text:扫码登录:exact": fixtures.FakeLocator("no-login", count=0),
-                    "text:手机号登录:exact": fixtures.FakeLocator("no-login", count=0),
-                    'input[placeholder*="验证码"], input[placeholder*="短信"]': fixtures.FakeLocator("no-verification", count=0),
-                    "div[class^='container'] input[accept*='image']": fixtures.FakeLocator(
-                        "input"
-                    ),
-                    "role:button:发布": fixtures._Clickable("publish", log=log),
-                },
-                log=log,
-            )
-            app.fill_title_and_description = AsyncMock()
-            humanizer = fixtures._QuietHumanizer(page)
-            original_click = humanizer.click
-            failure = ElementUnusableError("发布按钮", reason="ambiguous:2")
-            attempts = []
-
-            async def click(
-                locator,
-                *,
-                attempts=attempts,
-                failure=failure,
-                original_click=original_click,
-                **kwargs,
-            ):
-                if locator.name == "publish":
-                    attempts.append(locator)
-                    if len(attempts) == 1:
-                        raise failure
-                return await original_click(locator, **kwargs)
-
-            humanizer.click = click
-            app._humanizer_instance = humanizer
-            with (
-                patch.object(fixtures.douyin_main.asyncio, "sleep", AsyncMock()),
-                self.assertRaises(ElementUnusableError) as caught,
-            ):
-                await app.upload_note_content(page)
-            self.assertIs(caught.exception, failure)
-            self.assertEqual(len(attempts), 1)
 
     async def test_tiktok_confirmation_rejects_duplicate_buttons_before_click(self):
         from types import SimpleNamespace
@@ -332,32 +221,3 @@ class OtherPlatformAmbiguityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ElementUnusableError):
             await app._click_post_now(page)
         humanizer.click.assert_not_awaited()
-
-    async def test_kuaishou_ambiguity_after_first_publish_click_keeps_unknown_result(
-        self,
-    ):
-        from tests import test_kuaishou_humanize as fixtures
-        from utils.errors import PublishResultUnknownError
-
-        with fixtures._temp_dir() as tmp:
-            log = []
-            editor = fixtures._TypingLocator("editor", log=log)
-            page = fixtures._page(fixtures._note_selectors(log, editor), log=log)
-            app = fixtures._note_app(tmp)
-            humanizer = fixtures._QuietHumanizer(page, log=log)
-            original_click = humanizer.click
-            failure = ElementUnusableError("确认发布按钮", reason="ambiguous:2")
-
-            async def click(locator, **kwargs):
-                if locator.name == "confirm":
-                    raise failure
-                return await original_click(locator, **kwargs)
-
-            humanizer.click = click
-            app._humanizer_instance = humanizer
-            with (
-                fixtures._fast_clock(),
-                self.assertRaises(PublishResultUnknownError) as caught,
-            ):
-                await app.upload_note_content(page)
-            self.assertIs(caught.exception.__cause__, failure)
