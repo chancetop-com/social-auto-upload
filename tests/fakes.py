@@ -27,8 +27,15 @@ class FakePage:
         self.closed = False
         self.events = events if events is not None else []
         self.goto_calls: list[tuple[str, dict[str, Any]]] = []
+        self.handlers: dict[str, list] = {}
         self.user_agent = user_agent
         self.evaluate_calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    def on(self, event: str, handler) -> None:
+        self.handlers.setdefault(event, []).append(handler)
+
+    def is_closed(self) -> bool:
+        return self.closed
 
     async def goto(self, url: str, **kwargs: Any) -> None:
         self.url = url
