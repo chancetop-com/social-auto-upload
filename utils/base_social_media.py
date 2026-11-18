@@ -5,8 +5,8 @@ SOCIAL_MEDIA_TIKTOK = "tiktok"
 
 def get_supported_social_media() -> List[str]:
     return [
-        "instagram", SOCIAL_MEDIA_TIKTOK, "xiaohongshu", "rednote",
-        "facebook", "facebook-page", "youtube",
+        "xiaohongshu", "rednote", "facebook", "facebook-page",
+        "instagram", "youtube", SOCIAL_MEDIA_TIKTOK,
     ]
 
 

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from importlib import import_module
 import sys
 from typing import Sequence
 
-from sau_commands import article, facebook, facebook_page, instagram, rednote, tiktok, xiaohongshu, youtube
+from sau_commands import article
+from utils.base_social_media import get_supported_social_media
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict, resolve_multilogin_target
 from utils.managed_sharing import managed_command
 from utils.errors import (
@@ -17,16 +19,9 @@ from utils.errors import (
 )
 
 
-PLATFORMS = {
-    "article": article,
-    "xiaohongshu": xiaohongshu,
-    "rednote": rednote,
-    "facebook": facebook,
-    "facebook-page": facebook_page,
-    "instagram": instagram,
-    "youtube": youtube,
-    "tiktok": tiktok,
-}
+PLATFORMS = {"article": article}
+for name in get_supported_social_media():
+    PLATFORMS[name] = import_module("sau_commands." + name.replace("-", "_"))
 
 
 def build_parser() -> argparse.ArgumentParser:
