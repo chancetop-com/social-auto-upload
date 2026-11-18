@@ -345,12 +345,8 @@ class MetaBusinessUploader(BaseVideoUploader):
         humanizer = self._humanizer(page)
         combo = page.locator('[data-surface$="bizweb_create_post:left_panel"] [role="combobox"][aria-haspopup="listbox"]').filter(has=page.locator('img[alt="Facebook"]'))
         await combo.wait_for(state="visible")
-        selected_name = await combo.inner_text()
-        if getattr(self, '_local_mode', False):
-            selected_name = selected_name.replace('\u200b', '').strip()
-        matches = (selected_name == self.page_name if getattr(self, '_local_mode', False)
-                   else self.page_name in selected_name if self.page_name else True)
-        if self.page_name and not matches:
+        selected_name = (await combo.inner_text()).replace('\u200b', '').strip()
+        if self.page_name and self.page_name != selected_name:
             await humanizer.click(await _unique(combo, "发布主体下拉"))
             option = await _unique(
                 page.get_by_role("option", name=self.page_name, exact=True),
@@ -359,10 +355,10 @@ class MetaBusinessUploader(BaseVideoUploader):
             await humanizer.click(option)
         if self.page_name:
             await expect(combo).to_contain_text(self.page_name)
-            if getattr(self, '_local_mode', False) and (await combo.inner_text()).replace('\u200b', '').strip() != self.page_name:
+            if (await combo.inner_text()).replace('\u200b', '').strip() != self.page_name:
                 raise RuntimeError('发布主体与请求 Page 名称不一致，未提交')
         else:
-            self.page_name = (await combo.inner_text()).replace('\u200b', '').strip()
+            self.page_name = selected_name
         assets = parse_qs(urlparse(page.url).query).get('asset_id', [])
         if len(assets) != 1 or not assets[0].isdigit():
             raise RuntimeError("无法核实当前 Page asset_id，未提交")
