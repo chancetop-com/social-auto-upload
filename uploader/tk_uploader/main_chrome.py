@@ -953,15 +953,15 @@ async def _guard_login(page, *, publish_attempted=False):
         raise LoginRequiredError(message, publish_attempted=publish_attempted)
 
 
-async def _select_probe_page(context):
-    """Reuse a matching page, else ``pages[0]``, else open exactly one page."""
+async def _local_upload_page(context):
+    """Keep the established tab selection for a local, exclusive Profile."""
     pages = list(getattr(context, "pages", []) or [])
     for page in pages:
         if TIKTOK_LOGIN_CHECK_URL in str(getattr(page, "url", "") or ""):
-            return page, False
+            return page
     if pages:
-        return pages[0], False
-    return await context.new_page(), True
+        return pages[0]
+    return await context.new_page()
 
 
 _LOGIN_TEXT_SIGNALS = ("Log in", "登录", "扫码登录")
@@ -1224,10 +1224,11 @@ class TiktokBaseUploader(BaseVideoUploader):
 
     async def upload_in(self, session: BrowserSession) -> None:
         """Upload through an injected session without owning its lifecycle."""
-        # Ticket 13 §3: reuse a URL-matching page, then pages[0], and only
-        # create a page when the context has none.
-        page, _owned = await _select_probe_page(session.context)
         multilogin = session.managed
+        if multilogin:
+            page = await session.context.new_page()
+        else:
+            page = await _local_upload_page(session.context)
         budget = self.start_publish_budget()
         self._publish_attempted = False
         try:

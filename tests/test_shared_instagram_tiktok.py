@@ -3,10 +3,12 @@ import json
 import sys
 import time
 from contextlib import ExitStack
+from pathlib import Path
 
 import pytest
 from patchright.sync_api import Error, sync_playwright
 
+from tests.shared_publish_sites import InstagramSite, TikTokSite
 from tests.test_shared_adspower_process import Handler, OfflineProfile, installations
 
 
@@ -59,8 +61,6 @@ def test_tiktok_login_expiry_leaves_peer_draft_editable(tmp_path, installations)
 
 
 def test_instagram_note_result_only_contains_its_own_submission(tmp_path, installations):
-    from tests.shared_publish_sites import InstagramSite
-
     site = InstagramSite()
     with ExitStack() as stack:
         playwright = stack.enter_context(sync_playwright())
@@ -92,8 +92,6 @@ def test_instagram_note_result_only_contains_its_own_submission(tmp_path, instal
 
 
 def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tmp_path, installations):
-    from tests.shared_publish_sites import InstagramSite, TikTokSite
-
     instagram = InstagramSite()
     tiktok = TikTokSite(ready=False)
     with ExitStack() as stack:
@@ -142,4 +140,110 @@ def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tm
         assert ig.returncode == 0, output
         assert json.loads(result.read_text())["status"] == "prepared"
         assert instagram.submissions == []
+        assert profile.starts == profile.stops == ["shared"]
+
+
+def wait_for_event(observed, child, timeout=15):
+    deadline = time.monotonic() + timeout
+    while not observed():
+        if child.poll() is not None:
+            pytest.fail(child.communicate()[0])
+        if time.monotonic() >= deadline:
+            pytest.fail("Offline command did not reach the expected state")
+        time.sleep(.02)
+
+
+def test_waiting_instagram_and_earlier_tiktok_publish_their_own_drafts(tmp_path, installations):
+    epoch = 1893456000  # 2030-01-01 00:00:00 UTC
+    clock = tmp_path / "clock"
+
+    def advance(seconds):
+        pending = clock.with_suffix(".tmp")
+        pending.write_text(str(epoch + seconds))
+        pending.replace(clock)
+
+    def gate(platform):
+        return {"HUMANIZE": "0", "SAU_TEST_CLOCK": str(clock),
+                "SAU_TEST_GATE_ENTERED": str(tmp_path / platform),
+                "PYTHONPATH": str(Path(__file__).parent / "fixtures/publish_clock")}
+
+    advance(0)
+    instagram = InstagramSite(now=lambda: int(clock.read_text()))
+    tiktok = TikTokSite(now=lambda: int(clock.read_text()))
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = OfflineProfile(tmp_path, stack, installations, playwright,
+                                 sites={"www.instagram.com": instagram.handler(),
+                                        "www.tiktok.com": tiktok.handler()})
+        photo = tmp_path / "IG.png"
+        video = tmp_path / "TT.mp4"
+        photo.touch()
+        video.touch()
+        ig = profile.command(0, "instagram", "--images", str(photo), "--title", "IG on time",
+                             "--not-before", "2030-01-01T00:00:20Z", action="upload-note", env=gate("ig"))
+        wait_for_event((tmp_path / "ig").exists, ig)
+        draft = matching_page(profile, lambda p: "instagram.com" in p.url, ig)
+        location = draft.url
+        assert draft.locator("[contenteditable]").inner_text() == "IG on time"
+
+        tt = profile.command(1, "tiktok", "--file", str(video), "--title", "TT first",
+                             "--not-before", "2030-01-01T00:00:10Z", action="upload-video",
+                             env=gate("tt"))
+        wait_for_event((tmp_path / "tt").exists, tt)
+        assert instagram.submissions == tiktok.submissions == []
+        advance(10)
+        output = tt.communicate(timeout=15)[0]
+        assert tt.returncode == 0 and "submitted" in output and "8042" in output, output
+        assert tiktok.submissions == [{"caption": "TT first", "files": ["TT.mp4"]}]
+        assert tiktok.submitted_at == [epoch + 10]
+        assert instagram.submissions == [] and profile.stops == []
+        assert draft.url == location and draft.locator("[contenteditable]").inner_text() == "IG on time"
+        draft.locator("[contenteditable]").fill("IG still editable")
+        draft.locator("[contenteditable]").fill("IG on time")
+        assert profile.browser.contexts[0].pages == [profile.browser.contexts[0].pages[0], draft]
+
+        advance(20)
+        output = ig.communicate(timeout=10)[0]
+        assert ig.returncode == 0, output
+        record, = (tmp_path / "cwd-0/.local/instagram-results").glob("*.json")
+        assert json.loads(record.read_text())["post_url"] == "https://www.instagram.com/p/offline-fixture/"
+        assert instagram.submissions == [{"caption": "IG on time", "files": ["IG.png"]}]
+        assert instagram.submitted_at == [epoch + 20]
+        assert profile.starts == profile.stops == ["shared"]
+
+
+@pytest.mark.parametrize(("outcome", "code"), [("lost", 9), ("login", 10)])
+def test_tiktok_outcome_after_one_dispatch_preserves_waiting_peer(tmp_path, installations, outcome, code):
+    instagram = InstagramSite()
+    tiktok = TikTokSite(outcome=outcome)
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = OfflineProfile(tmp_path, stack, installations, playwright,
+                                 sites={"www.instagram.com": instagram.handler(block_share=True),
+                                        "www.tiktok.com": tiktok.handler()})
+        photo = tmp_path / "draft.png"
+        photo.touch()
+        result = tmp_path / "peer.json"
+        ig = profile.command(0, "instagram", "--images", str(photo), "--title", "Editable peer",
+                             "--no-publish", "--result", str(result), action="upload-note", env={"HUMANIZE": "0"})
+        ig_page = matching_page(profile, lambda p: p.locator("[contenteditable]").count() and
+                               p.locator("[contenteditable]").inner_text() == "Editable peer", ig)
+        location = ig_page.url
+        tt = profile.command(1, "tiktok", "--images", str(photo), "--title", "TT submitted",
+                             action="upload-note", env={"HUMANIZE": "0"})
+        if outcome == "lost":
+            wait_for_event(lambda: bool(tiktok.submissions), tt)
+            page = matching_page(profile, lambda p: "tiktokstudio/upload?tab=photo" in p.url, tt)
+            page.close()
+        output = tt.communicate(timeout=10)[0]
+        assert tt.returncode == code, output
+        assert ("publish_attempted=true" in output.splitlines()) == (code == 10)
+        assert tiktok.submissions == [{"caption": "TT submitted", "files": ["draft.png"]}]
+        assert not profile.stops and not instagram.submissions
+        assert ig_page.url == location and ig_page.locator("[contenteditable]").inner_text() == "Editable peer"
+        ig_page.locator("[contenteditable]").fill("Still editing")
+        ig_page.locator("[data-share-blocker]").evaluate("el => el.remove()")
+        output = ig.communicate(timeout=8)[0]
+        assert ig.returncode == 0, output
+        assert json.loads(result.read_text())["status"] == "prepared"
         assert profile.starts == profile.stops == ["shared"]
