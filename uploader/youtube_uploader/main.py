@@ -475,10 +475,9 @@ class YouTubeVideo(BaseVideoUploader):
         except LoginRequiredError:
             raise
         except Exception as error:
-            if not session.managed:
-                _raise_if_login_required(page, publish_attempted=self._publish_attempted)
-                if self._publish_attempted:
-                    raise self.publish_budget.timeout_error(True) from error
+            _raise_if_login_required(page, mode=session.mode, publish_attempted=self._publish_attempted)
+            if self._publish_attempted:
+                raise self.publish_budget.timeout_error(True) from error
             raise
 
         return page

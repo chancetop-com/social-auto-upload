@@ -1,5 +1,6 @@
 """Installed YouTube commands using an offline Studio and a live peer draft."""
 from contextlib import ExitStack
+import threading
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -13,6 +14,7 @@ class Studio:
         self.outcome = outcome
         self.requests = []
         self.submissions = []
+        self.submitted = threading.Event()
 
     def site(self):
         studio = self
@@ -31,12 +33,14 @@ class Studio:
                     fields = parse_qs(urlsplit(self.path).query)
                     studio.submissions.append((fields["title"][0], fields["file"][0]))
                     self.respond(b"OK", "text/plain")
+                    studio.submitted.set()
                 else:
                     self.respond(b"<p>Offline Studio</p>", "text/html")
 
         return Site
 
     def editor(self):
+        result = ("history.pushState({}, '', '/signin');" if self.outcome == "post-login" else "")
         return """
             <input type=file>
             <div id=title-textarea><div id=textbox contenteditable=true>old title</div></div>
@@ -49,7 +53,7 @@ class Studio:
                 const title = document.querySelector('#textbox').innerText;
                 const file = document.querySelector('input').files[0].name;
                 await fetch('/record?' + new URLSearchParams({title, file}));
-                history.pushState({}, '', '/signin');
+                """ + result + """
                 document.body.innerHTML = '<button id=close-button>Close</button>';
             };
             </script>
@@ -84,16 +88,34 @@ def studio_profile(request, tmp_path, installations):
         assert profile.stops == ["shared"]
 
 
+def start_video(profile):
+    video = profile.root / "synthetic.mp4"
+    video.write_bytes(b"offline fixture")
+    return profile.command(1, "youtube", "--file", str(video), "--title", "YouTube marker",
+                           action="upload-video", env={"HUMANIZE": "0"})
+
+
 @pytest.mark.parametrize("studio_profile", ["post-login"], indirect=True)
 def test_video_reports_post_submit_login_and_preserves_peer(studio_profile):
     studio, profile = studio_profile
-    video = profile.root / "synthetic.mp4"
-    video.write_bytes(b"offline fixture")
-    child = profile.command(1, "youtube", "--file", str(video), "--title", "YouTube marker",
-                            action="upload-video", env={"HUMANIZE": "0"})
+    child = start_video(profile)
     output = child.communicate(timeout=32)[0]
     assert child.returncode == 10, output
     assert "publish_attempted=true" in output.splitlines()
     assert "AdsPower" in output
     assert "YouTube video upload submitted" not in output
-    assert studio.submissions == [("YouTube marker", video.name)]
+    assert studio.submissions == [("YouTube marker", "synthetic.mp4")]
+
+
+@pytest.mark.parametrize("studio_profile", ["page-lost"], indirect=True)
+def test_lost_result_page_reports_unknown_without_submitting_again(studio_profile):
+    studio, profile = studio_profile
+    child = start_video(profile)
+    assert studio.submitted.wait(20)
+    profile.browser.new_browser_cdp_session().send("Target.getTargets")
+    upload, = [page for page in profile.browser.contexts[0].pages if "youtube.com/upload" in page.url]
+    upload.close()
+    output = child.communicate(timeout=12)[0]
+    assert child.returncode == 9, output
+    assert "禁止自动重发" in output and "YouTube video upload submitted" not in output
+    assert studio.submissions == [("YouTube marker", "synthetic.mp4")]
