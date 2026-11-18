@@ -365,6 +365,8 @@ class FacebookPost:
         while budget.remaining_seconds() > 0:
             if getattr(self, "_local_mode", False):
                 await _local_login_guard(page, publish_attempted=True)
+            else:
+                _raise_if_login_required(page, publish_attempted=True)
             # 只接受状态提示或成功文案；弹窗消失本身不足以证明服务端已受理。
             success_text = page.get_by_text(success_pattern)
             if await success_text.count():
@@ -437,8 +439,8 @@ class FacebookPost:
                     raise
                 except Exception:
                     pass  # A disconnected page cannot replace the primary outcome.
-                if self._publish_attempted:
-                    raise self._ensure_publish_budget().timeout_error(True)
+            if self._publish_attempted:
+                raise self._ensure_publish_budget().timeout_error(True)
             raise
         if session.managed:
             _raise_if_login_required(page, publish_attempted=True)

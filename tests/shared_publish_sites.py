@@ -16,9 +16,9 @@ class InstagramSite:
         return {"media": {"id": "201_42", "code": "offline-fixture", "user": {"pk": "42"},
                           "caption": {"text": submission["caption"]}}}
 
-    def handler(self):
+    def handler(self, *, block_share=False):
         html = (Path(__file__).parent / "fixtures/instagram_composer.html").read_text(encoding="utf-8")
-        html = html.replace("CONFIG", "{}") + """
+        html = html.replace("CONFIG", json.dumps({"blockedShare": block_share})) + """
         <script>
           document.cookie = 'ds_user_id=42;path=/';
           document.addEventListener('click', event => {
@@ -46,3 +46,37 @@ class InstagramSite:
                 self.respond(json.dumps(site.configure(submission)).encode(), "application/json")
 
         return Instagram
+
+
+class TikTokSite:
+    def __init__(self, *, ready=True, outcome="content"):
+        self.ready = ready
+        self.outcome = outcome
+        self.submissions = []
+        self.submitted_at = []
+
+    def handler(self):
+        site = self
+
+        class TikTok(Handler):
+            def do_GET(self):
+                if self.path.startswith("/tiktokstudio/upload"):
+                    document = (Path(__file__).parent / "fixtures/tiktok_composer.html").read_text()
+                    document = document.replace("BUTTON_STATE", "" if site.ready else "disabled")
+                    self.respond(document.encode(), "text/html; charset=utf-8")
+                elif self.path.startswith("/tiktokstudio/content"):
+                    self.respond(b'<a href="/video/8042"></a><script>document.querySelector("a").textContent = sessionStorage.caption</script>',
+                                 "text/html")
+                elif self.path.startswith("/login"):
+                    self.respond(b'<form action="/login"><input name="username"></form>', "text/html")
+                else:
+                    self.send_error(404)
+
+            def do_POST(self):
+                if self.path != "/offline-submit":
+                    return self.send_error(404)
+                site.submissions.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                site.submitted_at.append(time.time())
+                self.respond(site.outcome.encode(), "text/plain")
+
+        return TikTok
