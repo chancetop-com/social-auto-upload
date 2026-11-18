@@ -21,3 +21,22 @@ if "SAU_TEST_CLOCK" in os.environ:
     publish_gate.wait_until_publish_allowed = partial(
         publish_gate.wait_until_publish_allowed, now=now, sleep=sleep
     )
+
+# Interrupt the requested result write at the OS boundary. Other CLI processes
+# and Chromium keep their normal limits.
+if "SAU_TEST_RESULT_LIMIT" in os.environ:
+    import resource
+    import signal
+    import sys
+
+    result_dir = os.environ["SAU_TEST_RESULT_LIMIT"]
+    signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+
+    def interrupt_result(event, args):
+        if event == "open":
+            path, _, flags = args
+            if (isinstance(path, str) and os.path.dirname(path) == result_dir
+                    and flags & (os.O_WRONLY | os.O_RDWR)):
+                resource.setrlimit(resource.RLIMIT_FSIZE, (32, 32))
+
+    sys.addaudithook(interrupt_result)

@@ -1,7 +1,6 @@
 """Instagram 原作品核验及移至最近删除。"""
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from urllib.parse import urlparse
@@ -10,6 +9,7 @@ from uuid import uuid4
 from patchright.async_api import Page, async_playwright, expect
 
 from loguru import logger
+from utils.result_file import write_result
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.local_browser_session import local_browser_session
 from .main import (_navigate_local_page, _account_alias, _proxy_options,
@@ -125,8 +125,7 @@ async def instagram_post_action(account_file=None, *, post_url: str, expected_te
                 1, timeout=_CONFIRM_TIMEOUT_MS
             )
             result['status'] = 'deletion_unknown'
-            result_file.parent.mkdir(parents=True, exist_ok=True)
-            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+            write_result(result_file, result)
             target = f"/api/v1/web/create/{result['content_id']}/delete/"
             async with page.expect_response(lambda r: urlparse(r.url).path == target and r.request.method == 'POST', timeout=_DELETE_RESPONSE_TIMEOUT_MS) as event:
                 await delete_confirm.press('Enter')
@@ -134,16 +133,14 @@ async def instagram_post_action(account_file=None, *, post_url: str, expected_te
             if payload.get('payload', {}).get('did_delete') is not True:
                 raise RuntimeError('Instagram 未确认目标作品删除成功')
             result['status'] = 'deleted'
-        result_file.parent.mkdir(parents=True, exist_ok=True)
-        result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        write_result(result_file, result)
         return result
     except Exception as error:
         try:
             folder = Path('.local/instagram-errors') / uuid4().hex
             folder.mkdir(parents=True)
             result.update(error=str(error), evidence_dir=str(folder))
-            result_file.parent.mkdir(parents=True, exist_ok=True)
-            result_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+            write_result(result_file, result)
             await page.screenshot(path=str(folder/'page.png'))
             (folder/'page.html').write_text(await page.content(), encoding='utf-8')
         except Exception as capture_error:

@@ -48,6 +48,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     validate_publish_options,
 )
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.result_file import write_result
 from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -599,8 +600,7 @@ class InstagramUploader:
 
     def _write_result(self) -> None:
         """落盘当前结果；输出字节与既有内联写法一致，且不吞异常。"""
-        self.result_file.parent.mkdir(parents=True, exist_ok=True)
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        write_result(self.result_file, self.result)
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(

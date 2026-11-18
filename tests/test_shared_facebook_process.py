@@ -1,5 +1,6 @@
 """Installed Facebook commands sharing an offline Profile and real Chromium pages."""
 import json
+import signal
 import sys
 import threading
 from contextlib import ExitStack, contextmanager
@@ -161,7 +162,7 @@ def test_facebook_checks_only_close_their_own_probe(facebook_profile, platform, 
         assert site.visits == [path]
 
 
-def waiting_note(profile, installation, platform, *, when, title, extra=()):
+def waiting_note(profile, installation, platform, *, when, title, extra=(), env=None):
     media = profile.root / (platform + '.png')
     media.touch()
     gate = profile.root / ('waiting-' + platform)
@@ -169,7 +170,7 @@ def waiting_note(profile, installation, platform, *, when, title, extra=()):
         installation, platform, '--images', str(media), '--title', title,
         '--not-before', f'2030-01-01T00:00:{when:02d}Z', *extra, action='upload-note',
         env={'HUMANIZE': '0', 'PYTHONPATH': str(FIXTURES.parent / 'publish_clock'),
-             'SAU_TEST_CLOCK': str(profile.root / 'clock'), 'SAU_TEST_GATE_ENTERED': str(gate)},
+             'SAU_TEST_CLOCK': str(profile.root / 'clock'), 'SAU_TEST_GATE_ENTERED': str(gate), **(env or {})},
     )
     wait_for(gate.exists, child)
     return child
@@ -253,7 +254,7 @@ def test_personal_submission_losing_its_page_is_unknown_and_never_retried(facebo
         assert [post['clicks'] for post in site.personal_posts] == [1]
 
 
-@pytest.mark.parametrize('paths', ['defaults', 'explicit', 'same'])
+@pytest.mark.parametrize('paths', ['defaults', 'explicit', 'same', 'interrupted', 'simultaneous'])
 def test_instagram_and_page_results_follow_each_independent_command(tmp_path, installations, paths):
     with ExitStack() as stack:
         instagram, facebook = InstagramSite(), FacebookSite()
@@ -261,14 +262,47 @@ def test_instagram_and_page_results_follow_each_independent_command(tmp_path, in
             'www.instagram.com': instagram.handler(), 'business.facebook.com': facebook.handler(),
         })
         advance(profile, 0)
-        ig_path = tmp_path / 'ig.json'
-        page_path = ig_path if paths == 'same' else tmp_path / 'business.json'
+        records = tmp_path / 'results'
+        records.mkdir()
+        ig_path = records / 'ig.json'
+        page_path = ig_path if paths in ('same', 'interrupted', 'simultaneous') else tmp_path / 'business.json'
         ig_flags = () if paths == 'defaults' else ('--result', str(ig_path))
         page_flags = () if paths == 'defaults' else ('--result', str(page_path))
         ig = waiting_note(profile, 0, 'instagram', when=10, title='Instagram photo', extra=ig_flags)
-        page = waiting_note(profile, 0, 'facebook-page', when=20, title='Page photo',
-                            extra=('--page', 'Page A', *page_flags))
+        page_title = 'Page photo' * 16 if paths == 'simultaneous' else 'Page photo'
+        page = waiting_note(profile, 0, 'facebook-page', when=10 if paths == 'simultaneous' else 20, title=page_title,
+                            extra=('--page', 'Page A', *page_flags),
+                            env={'SAU_TEST_RESULT_LIMIT': str(records)} if paths == 'interrupted' else None)
         assert not instagram.submissions and not facebook.posts
+
+        if paths == 'simultaneous':
+            observations = []
+            stopped = threading.Event()
+
+            def read_results():
+                while not stopped.wait(.001):
+                    if page_path.exists():
+                        observations.append(page_path.read_bytes())
+
+            reader = threading.Thread(target=read_results)
+            reader.start()
+            try:
+                advance(profile, 10)
+                finish(ig, 0)
+                finish(page, 0)
+            finally:
+                stopped.set()
+                reader.join()
+            observations.append(page_path.read_bytes())
+            titles = {'instagram': 'Instagram photo', 'facebook-page': page_title}
+            for raw in set(observations):
+                record = json.loads(raw)
+                assert record['title'] == titles[record['platform']]
+            assert json.loads(observations[-1])['status'] == 'published'
+            assert [p['caption'] for p in facebook.posts] == [page_title]
+            assert [p['caption'] for p in instagram.submissions] == ['Instagram photo']
+            assert profile.starts == profile.stops == ['shared']
+            return
 
         advance(profile, 10)
         finish(ig, 0)
@@ -281,7 +315,14 @@ def test_instagram_and_page_results_follow_each_independent_command(tmp_path, in
         assert (ig_record['platform'], ig_record['status'], ig_record['title']) == (
             'instagram', 'published', 'Instagram photo')
 
+        previous = ig_path.read_bytes()
         advance(profile, 20)
+        if paths == 'interrupted':
+            page.communicate(timeout=15)
+            assert page.returncode == -signal.SIGXFSZ
+            assert page_path.read_bytes() == previous
+            assert not facebook.posts
+            return
         finish(page, 0)
         if paths == 'defaults':
             page_path, = (tmp_path / 'cwd-0/.local/meta-results').glob('*.json')

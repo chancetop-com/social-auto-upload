@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 from datetime import datetime
@@ -21,6 +20,7 @@ from patchright.async_api import (
 )
 
 from uploader.base_video import BaseVideoUploader
+from utils.result_file import write_result
 from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -577,8 +577,7 @@ class MetaBusinessUploader(BaseVideoUploader):
             if assets != [self.result['page_id']]:
                 raise RuntimeError('等待后无法确认原定 Page 的 asset_id，未提交')
         self.result['status'] = 'submission_unknown'
-        self.result_file.parent.mkdir(parents=True, exist_ok=True)
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        self._write_result()
         # 只捕获本次点击触发的创建作品响应；上传素材 ID 和广告建议中的 story ID 都不能代替内容编号。
         publish_clicked = False
         try:
@@ -647,7 +646,7 @@ class MetaBusinessUploader(BaseVideoUploader):
             raise PublishResultUnknownError(
                 '平台创建响应无法解析；帖子可能已经发布，请查原记录，勿重复提交'
             ) from error
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        self._write_result()
         if self.video_file:
             # 创建响应后页面仍执行后续发布步骤，不能立即导航走；实测完成框带本次标题、
             # 作品预览及关闭/完成两个动作。标题是本次业务参数，非某种语言的成功文案。
@@ -677,7 +676,7 @@ class MetaBusinessUploader(BaseVideoUploader):
                 # 完成弹窗和无错误的创建响应已经是“提交成功、正在处理”的业务证据；编号只用于后续核验/删除，不能阻断发布结果。
                 self.result['status'] = 'processing'
                 self.result['schedule'] = None
-                self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+                self._write_result()
                 return
         # 创建响应明确受理后按 Page 和原作品编号查询；不依赖任何语言的成功提示。
         # 定时作品必须读回排期；图文立即发布必须读回原作品；这两类结果不能只凭弹窗判断。
@@ -707,8 +706,7 @@ class MetaBusinessUploader(BaseVideoUploader):
             self.validate_image_file(path)
 
     def _write_result(self) -> None:
-        self.result_file.parent.mkdir(parents=True, exist_ok=True)
-        self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
+        write_result(self.result_file, self.result)
 
     async def _publish_on_page(self, page: Page) -> None:
         for step in (dismiss_guidance_cards, self._select_publish_location, self._upload_files,

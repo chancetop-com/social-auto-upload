@@ -34,6 +34,7 @@ from sau_commands.browser import (
     resolve_account_label,
     resolve_managed_provider,
 )
+from utils.result_file import write_result
 from utils.browser_session import browser_session
 from utils.local_browser import resolve_headless
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
@@ -197,8 +198,7 @@ async def run(args):
             delete=args.action == "delete", proxy=args.proxy, headless=args.headless,
         )
         if args.result:
-            args.result.parent.mkdir(parents=True, exist_ok=True)
-            args.result.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            write_result(args.result, result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
