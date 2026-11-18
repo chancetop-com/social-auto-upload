@@ -9,9 +9,19 @@ deliberately no ABC and no ``@runtime_checkable``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 ProviderMode = Literal["multilogin", "adspower"]
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileObservation:
+    """Authenticated observation of the requested profile's current run."""
+
+    active: bool
+    endpoint: str | None = field(default=None, repr=False)
+    headless: bool | None = None
 
 
 class ManagedBrowserProvider(Protocol):
@@ -33,4 +43,13 @@ class ManagedBrowserProvider(Protocol):
         """Return diagnostic profile state; never used for control flow."""
 
 
-__all__ = ["ManagedBrowserProvider", "ProviderMode"]
+class SharedBrowserProvider(ManagedBrowserProvider, Protocol):
+    @property
+    def resource_identity(self) -> str:
+        """Canonical identity of the service or folder containing the profile."""
+
+    def observe(self) -> ProfileObservation:
+        """Report the current run, or raise when its identity/state is uncertain."""
+
+
+__all__ = ["ManagedBrowserProvider", "SharedBrowserProvider", "ProfileObservation", "ProviderMode"]

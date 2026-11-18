@@ -15,12 +15,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
 from utils.errors import RateLimitedError, StartIncompleteError
-from utils.managed_browser import ProviderMode
+from utils.managed_browser import ProfileObservation, ProviderMode
 
 PROBE_TIMEOUT_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 30
@@ -281,8 +281,16 @@ class AdspowerClient:
                 STOP_ACTION, payload, self._status_code(response)
             )
 
-    def status(self, profile_id: str) -> str:
-        """Return the profile's V2 ``/active`` status; diagnostic only."""
+    @property
+    def resource_identity(self) -> str:
+        parts = urlsplit(self._base)
+        host = (parts.hostname or "").lower().rstrip(".")
+        if host in {"localhost", "127.0.0.1", "::1"}:
+            host = "localhost"
+        port = parts.port if parts.port is not None else (443 if parts.scheme == "https" else 80)
+        return f"{parts.scheme}://[{host}]:{port}"
+
+    def _active_data(self, profile_id: str) -> dict:
         path = (
             "/api/v2/browser-profile/active"
             f"?profile_id={quote(str(profile_id), safe='')}"
@@ -309,10 +317,34 @@ class AdspowerClient:
                 STATUS_ACTION, payload, self._status_code(response)
             )
         data = payload.get("data")
-        if not isinstance(data, dict):
-            return "unknown"
-        value = data.get("status")
+        return data if isinstance(data, dict) else {}
+
+    def status(self, profile_id: str) -> str:
+        value = self._active_data(profile_id).get("status")
         return str(value) if value is not None else "unknown"
+
+    def observe(self, profile_id: str) -> ProfileObservation:
+        data = self._active_data(profile_id)
+        # The V2 request is scoped by profile_id. Some releases also echo it.
+        for key in ("profile_id", "user_id"):
+            if key in data and data[key] != profile_id:
+                raise RuntimeError("AdsPower 返回的 Profile 身份不符。")
+        state = data.get("status")
+        if state == "Inactive":
+            return ProfileObservation(False)
+        if state != "Active":
+            raise RuntimeError("AdsPower Profile 的当前状态未知。")
+        ws = data.get("ws")
+        endpoint = ws.get("puppeteer") if isinstance(ws, dict) else None
+        if not isinstance(endpoint, str) or urlsplit(endpoint).scheme not in ("ws", "wss") or not urlsplit(endpoint).hostname:
+            raise RuntimeError("AdsPower 当前连接不可用。")
+        setting = data.get("headless")
+        headless = None
+        if setting in (True, 1, "1"):
+            headless = True
+        elif setting in (False, 0, "0"):
+            headless = False
+        return ProfileObservation(True, endpoint, headless)
 
 
 class AdspowerProvider:
@@ -339,6 +371,13 @@ class AdspowerProvider:
     @property
     def profile_id(self) -> str:
         return self._target.profile_id
+
+    @property
+    def resource_identity(self) -> str:
+        return self._client.resource_identity
+
+    def observe(self) -> ProfileObservation:
+        return self._client.observe(self.profile_id)
 
     def probe(self) -> None:
         self._client.probe()
