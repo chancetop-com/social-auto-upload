@@ -62,6 +62,14 @@ class ProviderRequestRejected(RuntimeError):
     """The provider explicitly refused the request before performing it."""
 
 
+class ProfileStartingError(RuntimeError):
+    """The provider identifies an unfinished startup phase."""
+
+
+class ProfileConnectionUnavailableError(RuntimeError):
+    """The provider cannot supply a usable connection to the current run."""
+
+
 class StartIncompleteError(RuntimeError):
     """A managed profile was started but the start response was unusable.
 

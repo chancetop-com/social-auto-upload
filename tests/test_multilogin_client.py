@@ -233,6 +233,13 @@ class MultiloginClientStopTests(unittest.TestCase):
         self.assertIn("500", str(caught.exception))
         self.assertIn("failed", str(caught.exception))
 
+    def test_stop_500_requires_an_explicit_already_stopped_outcome(self):
+        client, _ = self._client(FakeResponse(500, {
+            "status": {"message": "unable to determine if profile already stopped"}
+        }))
+        with self.assertRaises(RuntimeError):
+            client.stop(PROFILE_ID)
+
     def test_stop_500_error_code_already_stopped_is_success(self):
         client, _ = self._client(
             FakeResponse(500, {"status": {"error_code": "PROFILE_ALREADY_STOPPED"}})
@@ -315,7 +322,7 @@ class MultiloginProviderTests(unittest.TestCase):
         http_get = FakeHttpGet(
             [
                 FakeResponse(200, {"data": {"status": "browser_running"}}),
-                FakeResponse(200, {"status": {"message": "ok"}}),
+                FakeResponse(200, load_fixture("stop_ok.json")),
             ]
         )
         target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)

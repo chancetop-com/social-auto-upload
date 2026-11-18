@@ -4,15 +4,29 @@ import signal
 import subprocess
 import sys
 import threading
+from contextlib import ExitStack
 import time
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from patchright.sync_api import sync_playwright
 
 from tests.test_shared_adspower_process import Handler, OfflineProfile, installations, profile, serve
+from tests.test_shared_multilogin_process import LauncherProfile
 
 
 pytestmark = pytest.mark.skipif(sys.platform == 'win32', reason='POSIX console-script fixture')
+
+
+@pytest.fixture(params=[OfflineProfile, LauncherProfile], ids=['adspower', 'multilogin'])
+def recovery_browser(request, tmp_path, installations):
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+
+        def create(root=tmp_path, *, sites=None):
+            return request.param(root, stack, installations, playwright, sites=sites)
+
+        yield create
 
 
 class ControlledProvider:
@@ -207,7 +221,9 @@ def kill_cli(child):
     assert child.returncode == -signal.SIGKILL
 
 
-def test_killing_one_cli_releases_only_its_platform_and_preserves_both_drafts(profile):
+def test_killing_one_cli_releases_only_its_platform_and_preserves_both_drafts(recovery_browser):
+    profile = recovery_browser()
+    profile_id = profile.default_profile_id
     first = profile.command(0, 'instagram')
     profile.entered('instagram', first)
     peer = profile.command(1, 'tiktok')
@@ -236,15 +252,17 @@ def test_killing_one_cli_releases_only_its_platform_and_preserves_both_drafts(pr
     assert new.locator('textarea').input_value() == 'draft'
     assert old.locator('textarea').input_value() == 'killed command draft'
     profile.finish('instagram', next_command)
-    assert profile.starts == ['shared'] and profile.stops == []
+    assert profile.starts == [profile_id] and profile.stops == []
     assert peer_page.locator('textarea').input_value() == 'edited after crash'
     assert old.locator('textarea').input_value() == 'killed command draft'
     profile.finish('tiktok', peer)
-    assert profile.stops == ['shared'] and not profile.active
+    assert profile.stops == [profile_id] and not profile.active
 
 
 @pytest.mark.parametrize('reopened', [False, True], ids=['original-browser', 'desktop-reopened'])
-def test_all_killed_commands_recover_from_the_current_profile(profile, reopened):
+def test_all_killed_commands_recover_from_the_current_profile(recovery_browser, reopened):
+    profile = recovery_browser()
+    profile_id = profile.default_profile_id
     first = profile.command(0, 'instagram')
     profile.entered('instagram', first)
     peer = profile.command(1, 'tiktok')
@@ -261,12 +279,10 @@ def test_all_killed_commands_recover_from_the_current_profile(profile, reopened)
         profile.close_browser()
         root = profile.root / 'manually-reopened'
         root.mkdir()
-        current = OfflineProfile(root, profile.stack, profile.entries, profile.playwright)
-        current.home = profile.home
-        current.api_port = profile.api_port
+        current = recovery_browser(root)
         current.active = True
         assert current.endpoint != profile.endpoint
-        profile.profiles['shared'] = current
+        profile.profiles[profile_id] = current
         marked = current.browser.contexts[0].pages[0]
         marked.set_content('<textarea>desktop draft</textarea>')
     else:
@@ -276,13 +292,13 @@ def test_all_killed_commands_recover_from_the_current_profile(profile, reopened)
         current.gates['instagram'].clear()
         marked = old
 
-    recovered = current.command(1, 'instagram')
+    recovered = profile.command(1, 'instagram')
     current.entered('instagram', recovered)
     editor, = [p for p in platform_pages(current, 'instagram') if p != marked]
     assert editor.locator('textarea').input_value() == 'draft'
     assert marked.locator('textarea').input_value() == ('desktop draft' if reopened else 'original browser draft')
     current.finish('instagram', recovered)
-    assert profile.starts == ['shared'] and current.stops == ['shared']
+    assert profile.starts == [profile_id] and current.stops == [profile_id]
     if reopened:
         assert not current.starts and not profile.stops
     assert not current.active and current.chrome.poll() is not None

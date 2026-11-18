@@ -9,6 +9,7 @@ header; it is never included in reprs, exception messages, or dataclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 from typing import Any, Callable
 from urllib.parse import quote, urlsplit
@@ -16,7 +17,9 @@ from uuid import UUID
 
 import requests
 
-from utils.errors import RateLimitedError
+from utils.errors import (
+    ProfileConnectionUnavailableError, ProfileStartingError, ProviderRequestRejected, RateLimitedError,
+)
 from utils.managed_browser import ProfileObservation, ProviderMode
 
 PROFILE_METAS_URL = "https://api.multilogin.com/profile/metas"
@@ -24,6 +27,12 @@ LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
 
 PROBE_TIMEOUT_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 30
+
+_STARTING_STATES = {
+    "download_browser_profile_metadata", "download_browser_profile_data", "download_browser_core",
+    "download_finished", "download_meta_finished", "download_data_finished", "download_core_finished",
+    "validate_proxy", "start_browser",
+}
 
 # Fixed text from spec §10.  Kept verbatim so callers can rely on it.
 _LAUNCHER_UNREACHABLE_MESSAGE = (
@@ -66,10 +75,10 @@ def _successful_data(payload: dict) -> dict:
 def _automation_port(value) -> str:
     # Launcher returns a decimal port. An arbitrary string must never become a URL.
     if not isinstance(value, (str, int)) or not re.fullmatch(r"[0-9]{1,5}", str(value)):
-        raise RuntimeError("Multilogin Profile 缺少有效的 CDP 端口（port）。")
+        raise ProfileConnectionUnavailableError("Multilogin Profile 缺少有效的 CDP 端口（port）。")
     port = int(value)
     if not 1 <= port <= 65535:
-        raise RuntimeError("Multilogin Profile 的 CDP 端口（port）超出范围。")
+        raise ProfileConnectionUnavailableError("Multilogin Profile 的 CDP 端口（port）超出范围。")
     return str(port)
 
 
@@ -138,6 +147,8 @@ class MultiloginClient:
         if status_code == 429:
             # Shared rate-limit contract: the CLI maps this to exit code 11.
             return RateLimitedError("；".join(parts))
+        if status_code in (401, 403):
+            return ProviderRequestRejected("；".join(parts))
         return RuntimeError("；".join(parts))
 
     # ------------------------------------------------------------- Endpoints
@@ -192,19 +203,23 @@ class MultiloginClient:
         status_code = getattr(response, "status_code", None)
 
         if status_code == 200:
-            return
+            status = (self._parse_json(response) or {}).get("status")
+            if isinstance(status, dict) and status.get("http_code") == 200 and not status.get("error_code"):
+                return
+            raise RuntimeError("Multilogin Launcher 未确认停止 Profile。")
 
         if status_code == 500:
-            payload = self._parse_json(response) or {}
-            status = payload.get("status")
-            if not isinstance(status, dict):
-                status = {}
-            message = str(status.get("message") or "")
-            error_code = str(status.get("error_code") or "")
-            body = self._response_text(response)
-            haystack = " ".join((message, error_code, body)).lower().replace("_", " ")
-            if "profile already stopped" in haystack:
-                return
+            payload = self._parse_json(response)
+            if payload is None:
+                try:
+                    payload = json.loads(self._response_text(response))
+                except ValueError:
+                    payload = None
+            status = payload.get("status") if isinstance(payload, dict) else None
+            if isinstance(status, dict):
+                if (str(status.get("message")).strip().lower() == "profile already stopped"
+                        or status.get("error_code") == "PROFILE_ALREADY_STOPPED"):
+                    return
 
         raise self._http_error("停止 Multilogin Profile", response)
 
@@ -234,6 +249,8 @@ class MultiloginClient:
             raise RuntimeError("仅支持 Multilogin Mimic 的已保存 Profile。")
         if data.get("status") == "stopped":
             return ProfileObservation(False)
+        if data.get("status") in _STARTING_STATES:
+            raise ProfileStartingError("Multilogin Profile 正在启动。")
         if data.get("status") != "browser_running":
             raise RuntimeError("Multilogin Profile 状态未知。")
         port = _automation_port(data.get("message"))
@@ -252,7 +269,11 @@ class MultiloginClient:
         item = profiles[0]
         if not isinstance(item, dict) or item.get("id") != profile_id or item.get("folder_id") != folder_id:
             raise RuntimeError("Multilogin Profile 元数据与请求身份不符。")
-        return ProfileObservation(True, self.browser_endpoint(port))
+        try:
+            endpoint = self.browser_endpoint(port)
+        except (requests.RequestException, RuntimeError, KeyError, ValueError, TypeError):
+            raise ProfileConnectionUnavailableError("Multilogin Profile 的当前连接不可用。") from None
+        return ProfileObservation(True, endpoint)
 
     def browser_endpoint(self, port: str) -> str:
         """Resolve a Launcher port to the immutable WebSocket for this browser run."""
@@ -323,6 +344,8 @@ class MultiloginProvider:
 
 class SharedMultiloginProvider(MultiloginProvider):
     """Command-scoped adapter that identifies a browser run across processes."""
+
+    asynchronous_stop = True
 
     @property
     def resource_identity(self) -> str:

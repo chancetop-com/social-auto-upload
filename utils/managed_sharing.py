@@ -12,7 +12,9 @@ from time import monotonic, sleep
 from loguru import logger
 
 from utils.base_social_media import get_supported_social_media
-from utils.errors import ProviderRequestRejected, RateLimitedError
+from utils.errors import (
+    ProfileConnectionUnavailableError, ProfileStartingError, ProviderRequestRejected, RateLimitedError,
+)
 from utils.managed_browser import SharedBrowserProvider
 from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
@@ -40,6 +42,10 @@ def _provider_request(provider, operation, *args):
         raise RateLimitedError(f"{provider.mode} {operation} 请求过于频繁（HTTP 429）。") from None
     except ProviderRequestRejected:
         raise ProviderRequestRejected(f"{provider.mode} {operation} 请求被拒绝。") from None
+    except ProfileStartingError:
+        raise RuntimeError(f"{provider.mode} {operation}：Profile 正在启动。") from None
+    except ProfileConnectionUnavailableError:
+        raise ProfileConnectionUnavailableError(f"{provider.mode} {operation}：Profile 的当前连接不可用。") from None
     except Exception:
         raise RuntimeError(f"{provider.mode} {operation} 失败，无法确认 Profile 当前状态或连接。") from None
 
@@ -48,7 +54,15 @@ async def _provider_call(provider, operation, *args):
     return await asyncio.to_thread(_provider_request, provider, operation, *args)
 
 
-async def _wait_for_stopped(provider, deadline):
+def _stop_finished(state, acknowledged_endpoint):
+    # A replacement instance establishes completion only after a successful
+    # Stop reply. A lost request can still execute against a reopened profile.
+    return not state.active or (
+        acknowledged_endpoint is not None and bool(state.endpoint) and _digest(state.endpoint) != acknowledged_endpoint
+    )
+
+
+async def _wait_for_stopped(provider, deadline, acknowledged_endpoint=None):
     # Only read operations may outlive the deadline. asyncio.run joins its
     # default executor on exit, so a stalled HTTP read needs a daemon thread.
     outcome = Future()
@@ -58,10 +72,14 @@ async def _wait_for_stopped(provider, deadline):
         try:
             _provider_request(provider, "probe")
             while monotonic() < deadline:
-                state = _provider_request(provider, "observe")
-                if not state.active:
-                    outcome.set_result(state)
-                    return
+                try:
+                    state = _provider_request(provider, "observe")
+                except ProfileConnectionUnavailableError:
+                    pass  # CDP can disappear before Launcher changes its status.
+                else:
+                    if _stop_finished(state, acknowledged_endpoint):
+                        outcome.set_result(state)
+                        return
                 sleep(min(0.5, max(0, deadline - monotonic())))
             raise asyncio.TimeoutError
         except Exception as exc:
@@ -120,12 +138,12 @@ class ManagedCommand:
         peers = self.has_members()
         if peers and (not record or record.get("phase") != "active"):
             raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
-        if record and record.get("phase") not in {"active", "starting", "stopping"}:
+        if record and record.get("phase") not in {"active", "starting", "stopping", "stop_acknowledged"}:
             raise RuntimeError("托管 Profile 的共享记录无效。")
 
-        if record and record["phase"] == "stopping":
-            # A reopened browser can also be Active. Never resend a lost Stop.
-            state = await _wait_for_stopped(provider, deadline)
+        if record and record["phase"] in {"stopping", "stop_acknowledged"}:
+            old_endpoint = record.get("endpoint") if record["phase"] == "stop_acknowledged" else None
+            state = await _wait_for_stopped(provider, deadline, old_endpoint)
         else:
             await _provider_call(provider, "probe")
             state = await _provider_call(provider, "observe")
@@ -229,6 +247,11 @@ class ManagedCommand:
         except (RateLimitedError, ProviderRequestRejected):
             self.store.clear_record()
             raise
+        if self.provider.asynchronous_stop:
+            self.store.write_record({**record, "phase": "stop_acknowledged"})
+            state = _provider_request(self.provider, "observe")
+            if not _stop_finished(state, record["endpoint"]):
+                return
         self.store.clear_record()
 
 

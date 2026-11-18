@@ -369,6 +369,7 @@ class AdspowerProvider:
     """Compose an AdsPower profile identity with its Local API client."""
 
     mode: ProviderMode = "adspower"
+    asynchronous_stop = False
 
     __slots__ = ("_target", "_client")
 

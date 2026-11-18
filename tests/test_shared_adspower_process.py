@@ -73,6 +73,8 @@ def installations(tmp_path_factory):
 
 
 class OfflineProfile:
+    default_profile_id = 'shared'
+
     def __init__(self, root, stack, entries, playwright, *, sites=None):
         self.root = root
         self.stack = stack
@@ -81,6 +83,8 @@ class OfflineProfile:
         self.keys = []
         self.starts = []
         self.stops = []
+        self.start_response = None
+        self.stop_response = None
         self.active = False
         self.observation_fields = {}
         self.profiles = {}
@@ -168,10 +172,14 @@ class OfflineProfile:
                 target = profile.profiles.get(body['profile_id'], profile)
                 if self.path.endswith('/start'):
                     target.starts.append(body['profile_id'])
+                    if target.start_response is not None:
+                        return target.start_response(self)
                     target.active = True
                 else:
                     assert self.path.endswith('/stop')
                     target.stops.append(body['profile_id'])
+                    if target.stop_response is not None:
+                        return target.stop_response(self)
                     target.close_browser()
                     target.active = False
                 self.respond(json.dumps({'code': 0, 'data': {'ws': {'puppeteer': target.endpoint}}}).encode(),

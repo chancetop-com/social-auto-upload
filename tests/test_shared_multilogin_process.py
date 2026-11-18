@@ -18,6 +18,8 @@ PROFILE = '5f25f9eb-2d65-4440-9d66-dcec611b4f29'
 
 
 class LauncherProfile(OfflineProfile):
+    default_profile_id = PROFILE
+
     def __init__(self, root, stack, entries, playwright, *, sites=None):
         super().__init__(root, stack, entries, playwright, sites=sites)
         self.folder = FOLDER
@@ -67,6 +69,8 @@ class LauncherProfile(OfflineProfile):
                     target = profile.profiles.get(profile_id, profile)
                     profile.requests.append(('stop', token))
                     target.stops.append(profile_id)
+                    if target.stop_response is not None:
+                        return target.stop_response(self)
                     target.close_browser()
                     target.active = False
                     return self.respond_json({})
@@ -77,6 +81,8 @@ class LauncherProfile(OfflineProfile):
                 assert folder_id == target.folder
                 profile.requests.append(('start', token))
                 target.starts.append(profile_id)
+                if target.start_response is not None:
+                    return target.start_response(self)
                 target.active = True
                 self.respond_json({'id': profile_id, 'is_quick': False, 'browser_type': 'mimic',
                                    'port': str(urlsplit(target.endpoint).port), **target.start_fields})
@@ -91,13 +97,13 @@ class LauncherProfile(OfflineProfile):
             "multilogin.PROFILE_METAS_URL = os.environ['OFFLINE_LAUNCHER'] + '/profile/metas'\n")
 
     def command(self, installation, platform, *flags, profile_id=PROFILE, folder_id=FOLDER,
-                action='check'):
-        env = {**os.environ, 'HOME': str(self.home), 'ADSPOWER_API_KEY': '',
+                action='check', env=None):
+        command_env = {'HOME': str(self.home), 'ADSPOWER_API_KEY': '',
                'MLX_API_TOKEN': f'offline-key-{installation}', 'PYTHONPATH': str(self.routing),
                'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1',
-               'OFFLINE_LAUNCHER': f'http://127.0.0.1:{self.launcher_port}'}
+               'OFFLINE_LAUNCHER': f'http://127.0.0.1:{self.launcher_port}', **(env or {})}
         return super().command(installation, platform, '--folder-id', folder_id, *flags,
-                               action=action, profile_id=profile_id, env=env)
+                               action=action, profile_id=profile_id, env=command_env)
 
 
 @pytest.fixture
