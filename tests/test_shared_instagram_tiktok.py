@@ -5,7 +5,7 @@ import time
 from contextlib import ExitStack
 
 import pytest
-from patchright.sync_api import sync_playwright
+from patchright.sync_api import Error, sync_playwright
 
 from tests.test_shared_adspower_process import Handler, OfflineProfile, installations
 
@@ -19,8 +19,12 @@ def matching_page(profile, predicate, child):
     while time.monotonic() < deadline:
         context.pages[0].wait_for_timeout(50)
         for page in context.pages:
-            if predicate(page):
-                return page
+            try:
+                if predicate(page):
+                    return page
+            except Error:
+                if not page.is_closed():
+                    raise
         if child.poll() is not None:
             pytest.fail(child.communicate()[0])
     pytest.fail(f"Missing editor among {[p.url for p in context.pages]}")
@@ -85,3 +89,57 @@ def test_instagram_note_result_only_contains_its_own_submission(tmp_path, instal
         assert not profile.stops
         profile.finish("tiktok", peer)
         assert profile.stops == ["shared"]
+
+
+def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tmp_path, installations):
+    from tests.shared_publish_sites import InstagramSite, TikTokSite
+
+    instagram = InstagramSite()
+    tiktok = TikTokSite(ready=False)
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = OfflineProfile(tmp_path, stack, installations, playwright,
+                                 sites={"www.instagram.com": instagram.handler(block_share=True),
+                                        "www.tiktok.com": tiktok.handler()})
+        video = tmp_path / "ig.mp4"
+        photo = tmp_path / "tt.png"
+        video.touch()
+        photo.touch()
+        result = tmp_path / "video.json"
+        ig = profile.command(0, "instagram", "--file", str(video), "--title", "IG video",
+                             "--no-publish", "--result", str(result), action="upload-video",
+                             env={"HUMANIZE": "0"})
+        ig_page = matching_page(profile, lambda p: p.locator("[contenteditable]").count() and
+                               p.locator("[contenteditable]").inner_text() == "IG video", ig)
+        ig_url = ig_page.url
+        with ig_page.expect_popup() as popup:
+            ig_page.evaluate("window.open('https://www.tiktok.com/tiktokstudio/upload?tab=photo')")
+        lookalike = popup.value
+        lookalike.locator("input[placeholder]").fill("Instagram preview")
+        tt = profile.command(1, "tiktok", "--images", str(photo), "--title", "TT photo",
+                             action="upload-note", env={"HUMANIZE": "0"})
+        tt_page = matching_page(profile, lambda p: p != lookalike and p.url == lookalike.url and
+                               p.locator("input[placeholder]").input_value() == "TT photo", tt)
+        # Both probes have closed, and even closing a preview cannot free its platform.
+        with tt_page.expect_popup() as tt_popup:
+            tt_page.evaluate("window.open('about:blank')")
+        tt_popup.value.close()
+        for platform in ("instagram", "tiktok"):
+            competing = profile.command(1, platform)
+            output = competing.communicate(timeout=8)[0]
+            assert competing.returncode == 1 and platform in output and "占用" in output, output
+
+        tt_page.close()
+        output = tt.communicate(timeout=7)[0]
+        assert tt.returncode == 1 and "publish_attempted=true" not in output, output
+        assert tiktok.submissions == []
+        assert lookalike.locator("input[placeholder]").input_value() == "Instagram preview"
+        assert ig_page.url == ig_url and ig_page.locator("[contenteditable]").inner_text() == "IG video"
+        ig_page.locator("[contenteditable]").fill("IG video continued")
+        assert not profile.stops
+        ig_page.locator("[data-share-blocker]").evaluate("el => el.remove()")
+        output = ig.communicate(timeout=8)[0]
+        assert ig.returncode == 0, output
+        assert json.loads(result.read_text())["status"] == "prepared"
+        assert instagram.submissions == []
+        assert profile.starts == profile.stops == ["shared"]
