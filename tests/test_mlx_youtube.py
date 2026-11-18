@@ -332,7 +332,9 @@ class MultiloginUploadTests(unittest.TestCase):
 
 class YouTubeMlxCliTests(unittest.TestCase):
     def _run(self, argv, token=TOKEN):
-        with patch.dict(os.environ, {"MLX_API_TOKEN": token}):
+        with tempfile.TemporaryDirectory() as home, patch.dict(
+            os.environ, {"HOME": home, "ADSPOWER_API_KEY": "", "MLX_API_TOKEN": token}
+        ):
             with redirect_stdout(io.StringIO()) as out, redirect_stderr(
                 io.StringIO()
             ) as err:

@@ -1,11 +1,15 @@
 """Installed YouTube commands using an offline Studio and a live peer draft."""
 from contextlib import ExitStack
+import json
 import threading
+import time
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from patchright.sync_api import sync_playwright
 
+from tests.shared_publish_sites import InstagramSite
 from tests.test_shared_adspower_process import Handler, OfflineProfile, installations, pytestmark
 
 
@@ -25,7 +29,7 @@ class Studio:
                 studio.requests.append((self.headers["Host"], path))
                 if path == "/":
                     self.send_response(302)
-                    self.send_header("Location", "/channel/offline")
+                    self.send_header("Location", "/signin" if studio.outcome == "pre-login" else "/channel/offline")
                     self.end_headers()
                 elif path == "/upload":
                     self.respond(studio.editor().encode(), "text/html")
@@ -40,21 +44,27 @@ class Studio:
         return Site
 
     def editor(self):
-        result = ("history.pushState({}, '', '/signin');" if self.outcome == "post-login" else "")
         return """
             <input type=file>
             <div id=title-textarea><div id=textbox contenteditable=true>old title</div></div>
             <tp-yt-paper-radio-button name=VIDEO_MADE_FOR_KIDS_NOT_MFK>Adults</tp-yt-paper-radio-button>
             <tp-yt-paper-radio-button name=PUBLIC>Public</tp-yt-paper-radio-button>
             <span class=progress-label>Checks complete</span>
+            <a href="https://youtu.be/offline">Draft link</a>
             <button id=done-button>Publish</button>
             <script>
+            const outcome = """ + json.dumps(self.outcome) + """;
+            if (outcome === 'pre-failure') {
+                document.body.prepend(document.querySelector('#done-button').cloneNode(true));
+            }
             document.querySelector('#done-button').onclick = async () => {
                 const title = document.querySelector('#textbox').innerText;
                 const file = document.querySelector('input').files[0].name;
                 await fetch('/record?' + new URLSearchParams({title, file}));
-                """ + result + """
-                document.body.innerHTML = '<button id=close-button>Close</button>';
+                if (outcome === 'unconfirmed' || outcome === 'page-lost') return;
+                if (outcome === 'post-login') history.pushState({}, '', '/signin');
+                document.body.innerHTML = '<div role=dialog><a href="https://youtu.be/offline">Video</a>' +
+                                          '<button id=close-button>Close</button></div>';
             };
             </script>
         """
@@ -66,25 +76,54 @@ def studio_profile(request, tmp_path, installations):
     site = studio.site()
     with ExitStack() as stack:
         playwright = stack.enter_context(sync_playwright())
+        instagram = InstagramSite()
         profile = OfflineProfile(tmp_path, stack, installations, playwright,
-                                 sites={"studio.youtube.com": site, "www.youtube.com": site})
-        peer = profile.command(0, "instagram")
-        profile.entered("instagram", peer)
+                                 sites={"studio.youtube.com": site, "www.youtube.com": site,
+                                        "www.instagram.com": instagram.handler()})
+        photo = tmp_path / "peer.png"
+        photo.touch()
+        result = tmp_path / "peer-result.json"
+        clock = tmp_path / "clock"
+        gate = tmp_path / "peer-ready"
+        clock.write_text("1893456000")
+        peer = profile.command(0, "instagram", "--images", str(photo), "--title", "peer draft",
+                               "--result", str(result), "--not-before", "2030-01-01T00:00:10Z",
+                               action="upload-note", env={"HUMANIZE": "0",
+                                   "PYTHONPATH": str(Path(__file__).with_name("fixtures") / "publish_clock"),
+                                   "SAU_TEST_CLOCK": str(clock), "SAU_TEST_GATE_ENTERED": str(gate)})
+        deadline = time.monotonic() + 20
+        while not gate.exists():
+            if peer.poll() is not None:
+                pytest.fail(peer.communicate()[0])
+            if time.monotonic() >= deadline:
+                pytest.fail("Instagram did not reach its publish gate")
+            time.sleep(.05)
+
         context = profile.browser.contexts[0]
         # A protocol turn delivers new-target events from the independent CLI connection.
-        profile.browser.new_browser_cdp_session().send("Target.getTargets")
+        inspector = profile.browser.new_browser_cdp_session()
+        inspector.send("Target.getTargets")
+        inspector.detach()
         draft, = [p for p in context.pages if "instagram.com" in p.url]
+        caption = draft.locator("[contenteditable]")
         original_pages = set(context.pages)
         original_url = draft.url
-        draft.locator("textarea").fill("peer draft")
+        assert caption.inner_text() == "peer draft"
         yield studio, profile
-        assert draft.url == original_url
-        assert draft.locator("textarea").input_value() == "peer draft"
-        draft.locator("textarea").fill("peer still editing")
-        assert draft.locator("textarea").input_value() == "peer still editing"
+
+        assert draft.url == original_url and caption.inner_text() == "peer draft"
+        caption.fill("peer still editing")
+        assert caption.inner_text() == "peer still editing"
+        caption.fill("peer draft")
         assert set(context.pages) == original_pages
-        assert profile.starts == ["shared"] and not profile.stops
-        profile.finish("instagram", peer)
+        assert profile.starts == ["shared"] and not profile.stops and not instagram.submissions
+        advanced = tmp_path / "advanced"
+        advanced.write_text("1893456010")
+        advanced.replace(clock)
+        output = peer.communicate(timeout=18)[0]
+        assert peer.returncode == 0, output
+        assert instagram.submissions == [{"caption": "peer draft", "files": ["peer.png"]}]
+        assert json.loads(result.read_text())["status"] == "published"
         assert profile.stops == ["shared"]
 
 
@@ -119,3 +158,35 @@ def test_lost_result_page_reports_unknown_without_submitting_again(studio_profil
     assert child.returncode == 9, output
     assert "禁止自动重发" in output and "YouTube video upload submitted" not in output
     assert studio.submissions == [("YouTube marker", "synthetic.mp4")]
+
+
+@pytest.mark.parametrize(("studio_profile", "code", "diagnostic", "submitted"), [
+    ("success", 0, "YouTube video upload submitted", True),
+    ("unconfirmed", 9, "禁止自动重发", True),
+    ("pre-failure", 1, "ambiguous", False),
+    ("pre-login", 10, "AdsPower", False),
+], indirect=["studio_profile"])
+def test_video_outcome_reflects_only_its_own_editor(studio_profile, code, diagnostic, submitted):
+    studio, profile = studio_profile
+    child = start_video(profile)
+    output = child.communicate(timeout=32)[0]
+    assert child.returncode == code, output
+    assert diagnostic in output and "publish_attempted=true" not in output.splitlines()
+    assert ("YouTube video upload submitted" in output) == (code == 0)
+    assert studio.submissions == ([("YouTube marker", "synthetic.mp4")] if submitted else [])
+    assert studio.requests.count(("studio.youtube.com", "/")) == 1
+    assert studio.requests.count(("www.youtube.com", "/upload")) == int(studio.outcome != "pre-login")
+
+
+@pytest.mark.parametrize(("studio_profile", "code", "diagnostic"), [
+    ("success", 0, "valid"), ("pre-login", 10, "AdsPower"),
+], indirect=["studio_profile"])
+def test_login_probe_closes_its_own_page(studio_profile, code, diagnostic):
+    studio, profile = studio_profile
+    child = profile.command(1, "youtube")
+    output = child.communicate(timeout=16)[0]
+    assert child.returncode == code, output
+    assert diagnostic in output
+    assert ("valid" in output.splitlines()) == (code == 0)
+    assert studio.requests.count(("studio.youtube.com", "/")) == 1
+    assert studio.submissions == []

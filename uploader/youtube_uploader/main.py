@@ -48,6 +48,16 @@ YOUTUBE_LOGIN_CHECK_URL = STUDIO_URL
 YOUTUBE_LOGIN_CHECK_TIMEOUT_MS = 20_000
 YOUTUBE_LOGIN_CHECK_SETTLE_MS = 3_000
 
+# Studio can show the video's URL while it is still a draft. Only the
+# post-submit share dialog (or its dialog controls and link) confirms success.
+YOUTUBE_PUBLISH_CONFIRMATION = (
+    "ytcp-video-share-dialog:visible, "
+    ":is([role=dialog], tp-yt-paper-dialog, ytcp-dialog):visible"
+    ":not(:has(#done-button:visible))"
+    ":has(a:is([href*='youtu.be/'], [href*='watch?v=']):visible)"
+    ":has(#close-button:visible)"
+)
+
 #: `# 话题` 补全容器（YouTube Studio 的 hashtag 建议列表）。
 HASHTAG_AUTOCOMPLETE = "ytcp-hashtag-autocomplete"
 #: 可能处于打开状态的浮层；只用于「确认有浮层」时才按 Escape。
@@ -653,6 +663,10 @@ class YouTubeVideo(BaseVideoUploader):
             self._publish_attempted = True
             await page.wait_for_timeout(4000)
             _raise_if_login_required(page, mode=mode, publish_attempted=True)
+            if mode != "local":
+                await page.locator(YOUTUBE_PUBLISH_CONFIRMATION).first.wait_for(
+                    state="visible", timeout=budget.post_click_timeout_ms(8000)
+                )
             video_url = ""
             try:
                 link = page.locator("a[href*='youtu.be'], a[href*='watch?v=']").first
