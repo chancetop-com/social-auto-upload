@@ -1,7 +1,7 @@
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.resolve()
-# Applies to every formal local browser platform; Bilibili uses biliup.
+# Applies to all local browser platforms.
 # A compatible custom executable wins over --local-browser / LOCAL_BROWSER.
 LOCAL_CHROME_PATH = ""  # e.g. C:/Program Files/Google/Chrome/Application/chrome.exe
 LOCAL_BROWSER = "chrome"  # chrome or chromium; explicit --local-browser wins

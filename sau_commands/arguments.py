@@ -1,11 +1,9 @@
 """CLI 共用的路径、标签和时间参数规则。"""
 from __future__ import annotations
 import argparse
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
-from conf import BASE_DIR
 from utils.time_utils import parse_aware_iso
 from utils.text_validation import validate_single_line
 
@@ -15,16 +13,6 @@ SCHEDULE_HELP = f"Schedule time in {SCHEDULE_EXAMPLE} (UTC)"
 SCHEDULE_HELP_ZH = f"定时发布时间，格式 {SCHEDULE_EXAMPLE}（UTC）"
 #: ``--not-before`` 同样使用 UTC 绝对时刻，但保留秒级精度。
 NOT_BEFORE_EXAMPLE = "YYYY-MM-DDTHH:MM:SSZ"
-
-def has_interactive_terminal() -> bool:
-    return sys.stdin.isatty() and sys.stdout.isatty()
-
-
-def resolve_account_file(platform: str, account_name: str) -> Path:
-    account_file = Path(BASE_DIR) / "cookies" / f"{platform}_{account_name}.json"
-    account_file.parent.mkdir(exist_ok=True)
-    return account_file
-
 
 def parse_tags(raw_tags: str | None) -> list[str]:
     if not raw_tags:

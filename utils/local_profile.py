@@ -17,13 +17,11 @@ import shutil
 import stat
 
 import conf
+from utils.base_social_media import get_supported_social_media
 from utils.errors import UsageError
 
 
-BROWSER_PLATFORMS = frozenset({
-    "tiktok", "rednote", "instagram", "xiaohongshu", "youtube", "facebook", "facebook-page",
-    "douyin", "kuaishou", "tencent", "baijiahao", "weibo", "hupu", "alipay", "dayu", "zhihu", "xueqiu",
-})
+BROWSER_PLATFORMS = frozenset(get_supported_social_media())
 
 
 @dataclass(frozen=True)
