@@ -41,6 +41,21 @@ class PrivateProfileStoreTests(unittest.TestCase):
             self.assertIsNotNone(recovered)
             recovered.close()
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS extended ACLs")
+    def test_extended_acl_cannot_expose_records_or_replace_profile_directory(self):
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, HOME=home):
+            store = ProfileStore("adspower", "acl-test")
+            store.write_record({"phase": "active"})
+            record, = Path(home).rglob("session.json")
+            subprocess.run(["chmod", "+a", "everyone allow read", record], check=True)
+            self.assertEqual(stat.S_IMODE(record.stat().st_mode), 0o600)
+            with self.assertRaises(PermissionError):
+                store.read_record()
+
+            subprocess.run(["chmod", "+a", "everyone allow delete_child", home], check=True)
+            with self.assertRaises(PermissionError):
+                ProfileStore("adspower", "new-profile")
+
     def test_reopening_private_record_rejects_unsafe_permissions_and_links(self):
         with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, HOME=home):
             store = ProfileStore("adspower", "../untrusted/id")
