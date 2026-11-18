@@ -1,6 +1,7 @@
 """Installed Facebook commands sharing an offline Profile and real Chromium pages."""
 import json
 import sys
+import threading
 from contextlib import ExitStack, contextmanager
 from html import escape
 from pathlib import Path
@@ -23,6 +24,8 @@ FIXTURES = Path(__file__).parent / 'fixtures' / 'facebook'
 class FacebookSite:
     def __init__(self):
         self.posts = []
+        self.page_response = threading.Event()
+        self.page_response.set()
         self.page_unknown = False
         self.page_expires_on_submit = False
         self.visits = []
@@ -78,9 +81,13 @@ class FacebookSite:
                 assert self.path == '/api/graphql'
                 data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
                 site.posts.append({k: v[0] for k, v in data.items() if k != 'fb_api_req_friendly_name'})
+                site.page_response.wait(20)
                 creation = {} if site.page_unknown else {'items': [{'pending_publish_content_id': '543'}]}
-                self.respond(json.dumps({'data': {'xfamily_content_create': creation}}).encode(),
-                             'application/json')
+                try:
+                    self.respond(json.dumps({'data': {'xfamily_content_create': creation}}).encode(),
+                                 'application/json')
+                except OSError:
+                    pass  # The response may have been deliberately interrupted by closing its tab.
 
         return Pages
 
@@ -316,3 +323,26 @@ def test_page_submission_detects_login_redirect_and_keeps_attempt_marker(faceboo
         output = finish(child, 10)
         assert 'publish_attempted=true' in output.splitlines()
         assert [post['caption'] for post in site.posts] == ['Expiring Page']
+
+
+@pytest.mark.parametrize('login, code', [(False, 9), (True, 10)])
+def test_page_target_lost_while_waiting_for_creation_response(facebook_profile, login, code):
+    profile, site = facebook_profile
+    site.page_expires_on_submit = login
+    site.page_response.clear()
+    photo = profile.root / 'photo.png'
+    photo.touch()
+    result = profile.root / 'page.json'
+    with peer_draft(profile):
+        child = profile.command(1, 'facebook-page', '--images', str(photo), '--title', 'Page note',
+                                '--result', str(result), action='upload-note', env={'HUMANIZE': '0'})
+        try:
+            wait_for(lambda: bool(site.posts), child)
+            page = matching_page(profile, lambda p: 'business.facebook.com' in p.url, child)
+            page.close()
+            output = finish(child, code)
+        finally:
+            site.page_response.set()
+        assert ('publish_attempted=true' in output.splitlines()) == login
+        assert json.loads(result.read_text())['status'] == 'submission_unknown'
+        assert [post['caption'] for post in site.posts] == ['Page note']

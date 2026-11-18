@@ -754,14 +754,22 @@ class MetaBusinessUploader(BaseVideoUploader):
             if not session.managed:
                 await _check_local_expiry(page, publish_attempted=self.publish_attempted)
             return self.result
-        except Exception:
-            if not session.managed:
+        except LoginRequiredError:
+            raise
+        except Exception as error:
+            if session.managed:
+                _raise_if_login_required(page, publish_attempted=self.publish_attempted)
+            else:
                 try:
                     await _check_local_expiry(page, publish_attempted=self.publish_attempted)
                 except LoginRequiredError:
                     raise
                 except Exception:
                     pass
+            if self.publish_attempted and not isinstance(error, PublishResultUnknownError):
+                raise PublishResultUnknownError(
+                    "Facebook Page 已提交但无法确认发布结果；请查原记录，勿重复提交。"
+                ) from error
             raise
         finally:
             self._write_result_safely()
