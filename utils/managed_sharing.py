@@ -152,11 +152,12 @@ class ManagedCommand:
                 raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
             endpoint = state.endpoint
             setting = state.headless
-            if peers:
-                if record.get("endpoint") != _digest(endpoint):
-                    raise RuntimeError(f"{self.mode} Profile 的当前连接与同行不符。")
-                if setting is None:
-                    setting = record.get("headless")
+            same_instance = (record is not None and record["phase"] == "active"
+                             and record.get("endpoint") == _digest(endpoint))
+            if peers and not same_instance:
+                raise RuntimeError(f"{self.mode} Profile 的当前连接与同行不符。")
+            if same_instance and setting is None:
+                setting = record.get("headless")
         else:
             if peers or (record and record["phase"] == "starting"):
                 raise RuntimeError(f"{self.mode} Profile 上次启动或当前连接尚未确认。")

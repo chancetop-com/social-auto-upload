@@ -263,7 +263,7 @@ def test_killing_one_cli_releases_only_its_platform_and_preserves_both_drafts(re
 def test_all_killed_commands_recover_from_the_current_profile(recovery_browser, reopened):
     profile = recovery_browser()
     profile_id = profile.default_profile_id
-    first = profile.command(0, 'instagram')
+    first = profile.command(0, 'instagram', '--headed')
     profile.entered('instagram', first)
     peer = profile.command(1, 'tiktok')
     profile.entered('tiktok', peer)
@@ -292,7 +292,14 @@ def test_all_killed_commands_recover_from_the_current_profile(recovery_browser, 
         current.gates['instagram'].clear()
         marked = old
 
-    recovered = profile.command(1, 'instagram')
+    if reopened:
+        # The provider cannot identify launch settings on a fresh desktop instance.
+        denied = profile.command(1, 'instagram', '--headed')
+        output = denied.communicate(timeout=8)[0]
+        assert denied.returncode == 1 and 'headless' in output, output
+        assert current.pages_requested == [] and current.stops == []
+    flags = [] if reopened else ['--headed']
+    recovered = profile.command(1, 'instagram', *flags)
     current.entered('instagram', recovered)
     editor, = [p for p in platform_pages(current, 'instagram') if p != marked]
     assert editor.locator('textarea').input_value() == 'draft'
