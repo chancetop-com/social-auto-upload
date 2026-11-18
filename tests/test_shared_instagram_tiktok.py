@@ -250,7 +250,8 @@ def test_tiktok_outcome_after_one_dispatch_preserves_waiting_peer(tmp_path, inst
         assert profile.starts == profile.stops == ["shared"]
 
 
-def test_instagram_login_after_dispatch_retains_result_and_attempt_signal(tmp_path, installations):
+@pytest.mark.parametrize(("outcome", "code"), [("login", 10), ("lost", 9)])
+def test_instagram_after_dispatch_retains_result_and_attempt_signal(tmp_path, installations, outcome, code):
     release = threading.Event()
 
     class UnconfirmedInstagram(InstagramSite):
@@ -277,10 +278,14 @@ def test_instagram_login_after_dispatch_retains_result_and_attempt_signal(tmp_pa
         stack.callback(release.set)
         wait_for_event(lambda: bool(instagram.submissions), ig)
         ig_page = matching_page(profile, lambda p: "instagram.com" in p.url, ig)
-        ig_page.evaluate("history.replaceState(null, '', '/accounts/login/')")
+        if outcome == "login":
+            ig_page.evaluate("history.replaceState(null, '', '/accounts/login/')")
+        else:
+            ig_page.close()
+        output = ig.communicate(timeout=8)[0]
         release.set()
-        output = ig.communicate(timeout=10)[0]
-        assert ig.returncode == 10 and "publish_attempted=true" in output.splitlines(), output
+        assert ig.returncode == code, output
+        assert ("publish_attempted=true" in output.splitlines()) == (code == 10)
         assert instagram.submissions == [{"caption": "IG sent", "files": ["ig.mp4"]}]
         assert json.loads(result.read_text())["status"] == "submission_unknown"
         assert not profile.stops and peer_page.url == location and editor.input_value() == "Peer draft"

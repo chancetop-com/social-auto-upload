@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from loguru import logger
+from patchright.async_api import Error as BrowserError
 from patchright.async_api import (
     BrowserContext,
     Locator,
@@ -566,6 +567,7 @@ class InstagramUploader:
         # 发布点击是否真的发出：登录跳转的 publish_attempted 只认这个标志，
         # 不再由 status=submission_unknown 推断（提交前失败也会写那个状态）。
         self.publish_clicked = False
+        self._managed = False
         if not self.title:
             raise ValueError('标题不能为空')
         # 素材互斥 / 封面适用性 / 配文长度统一走共享纯函数（UsageError → 退出码 2）。
@@ -1044,7 +1046,19 @@ class InstagramUploader:
         def on_response(response):
             if response.request.method == 'POST' and urlparse(response.url).path.startswith('/api/v1/media/configure'):
                 responses.put_nowait(response)
+        def on_close(_page):
+            responses.put_nowait(budget.timeout_error(True))
+
+        def on_navigation(frame):
+            if frame == page.main_frame:
+                try:
+                    _raise_if_login_required(page, publish_attempted=True, managed=self._managed)
+                except LoginRequiredError as error:
+                    responses.put_nowait(error)
+
         page.on('response', on_response)
+        page.on('close', on_close)
+        page.on('framenavigated', on_navigation)
         try:
             try:
                 await _click_submit(action, humanizer)
@@ -1066,14 +1080,16 @@ class InstagramUploader:
                     response = await asyncio.wait_for(
                         responses.get(), timeout=remaining
                     )
+                    if isinstance(response, Exception):
+                        raise response
                     remaining = result_deadline - time.monotonic()
                     if remaining <= 0:
                         raise budget.timeout_error(True)
                     text = await asyncio.wait_for(
                         response.text(), timeout=remaining
                     )
-                except asyncio.TimeoutError:
-                    raise budget.timeout_error(True) from None
+                except (asyncio.TimeoutError, BrowserError) as exc:
+                    raise budget.timeout_error(True) from exc
                 try:
                     payload = instagram_response_payload(text)
                     body = payload.get('payload', payload)
@@ -1090,6 +1106,8 @@ class InstagramUploader:
                     raise budget.timeout_error(True) from error
         finally:
             page.remove_listener('response', on_response)
+            page.remove_listener('close', on_close)
+            page.remove_listener('framenavigated', on_navigation)
         kind = 'reel' if self.video_file else 'p'
         self.result.update(status='published', content_id=media['id'], post_id=media['code'],
                            post_url=f"{INSTAGRAM_HOME_URL}{kind}/{media['code']}/", schedule=None,
