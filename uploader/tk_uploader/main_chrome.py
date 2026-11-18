@@ -944,6 +944,8 @@ def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
 
 async def _guard_login(page, *, publish_attempted=False):
     _raise_if_login_required(page, publish_attempted=publish_attempted)
+    if not publish_attempted and getattr(type(page), "is_closed", None) and page.is_closed():
+        raise RuntimeError("TikTok 编辑页已关闭，尚未点击发布。")
     if await _login_form_present(page):
         message = 'TikTok 需要登录；本地请运行 sau tiktok login --account <name>，托管请在浏览器管理应用登录。'
         if publish_attempted:

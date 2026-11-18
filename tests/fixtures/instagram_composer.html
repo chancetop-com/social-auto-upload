@@ -37,7 +37,7 @@ function edit(step){
  if(config.blockedShare&&step===2){
   const rect=advance.getBoundingClientRect(), blocker=document.createElement('div');
   Object.assign(blocker.style,{position:'fixed',left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:rect.height+'px',background:'black',zIndex:99});
-  surface.appendChild(blocker);
+  blocker.dataset.shareBlocker='';surface.appendChild(blocker);
  }
 }
 function menu(){

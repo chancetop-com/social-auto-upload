@@ -390,6 +390,7 @@ class FakeMultiloginClient:
         events: list[str] | None = None,
     ) -> None:
         self.port = port
+        self.active = False
         self.probe_error = probe_error
         self.start_error = start_error
         self.status_error = status_error
@@ -415,7 +416,16 @@ class FakeMultiloginClient:
         self.start_calls.append((folder_id, profile_id, headless))
         if self.start_error is not None:
             raise self.start_error
+        self.active = True
         return self.port
+
+    def browser_endpoint(self, port: str) -> str:
+        return f"ws://127.0.0.1:{port}/devtools/browser/cccccccc-0000-4000-8000-000000000001"
+
+    def observe(self, folder_id: str, profile_id: str) -> ProfileObservation:
+        if self.status_error is not None:
+            raise self.status_error
+        return ProfileObservation(self.active, self.browser_endpoint(self.port) if self.active else None)
 
     def status(self, profile_id: str) -> str:
         self.calls.append("status")
@@ -431,6 +441,7 @@ class FakeMultiloginClient:
         self.stop_calls.append(profile_id)
         if self.stop_error is not None:
             raise self.stop_error
+        self.active = False
 
 
 class FakeResponse:

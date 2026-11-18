@@ -9,14 +9,17 @@ header; it is never included in reprs, exception messages, or dataclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
+from uuid import UUID
 
 import requests
 
 from utils.errors import RateLimitedError
-from utils.managed_browser import ProviderMode
+from utils.managed_browser import ProfileObservation, ProviderMode
 
+PROFILE_METAS_URL = "https://api.multilogin.com/profile/metas"
 LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
 
 PROBE_TIMEOUT_SECONDS = 3
@@ -42,6 +45,32 @@ class MultiloginTarget:
 
     folder_id: str
     profile_id: str
+
+
+def canonical_id(value: str) -> str:
+    """Use the same UUID spelling for local admission and Launcher requests."""
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return value
+
+
+def _successful_data(payload: dict) -> dict:
+    status = payload.get("status")
+    if (not isinstance(status, dict) or status.get("http_code") != 200
+            or status.get("error_code") or not isinstance(payload.get("data"), dict)):
+        raise RuntimeError("Multilogin 未返回成功的 Profile 数据。")
+    return payload["data"]
+
+
+def _automation_port(value) -> str:
+    # Launcher returns a decimal port. An arbitrary string must never become a URL.
+    if not isinstance(value, (str, int)) or not re.fullmatch(r"[0-9]{1,5}", str(value)):
+        raise RuntimeError("Multilogin Profile 缺少有效的 CDP 端口（port）。")
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise RuntimeError("Multilogin Profile 的 CDP 端口（port）超出范围。")
+    return str(port)
 
 
 class MultiloginClient:
@@ -146,14 +175,12 @@ class MultiloginClient:
         if getattr(response, "status_code", None) != 200:
             raise self._http_error("启动 Multilogin Profile", response)
 
-        payload = self._parse_json(response) or {}
-        data = payload.get("data")
-        port = data.get("port") if isinstance(data, dict) else None
-        if port is None or str(port).strip() == "":
-            raise RuntimeError(
-                "启动 Multilogin Profile 失败：响应缺少 data.port"
-            )
-        return str(port).strip()
+        data = _successful_data(self._parse_json(response) or {})
+        port = _automation_port(data.get("port"))
+        if (data.get("id") != profile_id or data.get("folder_id", folder_id) != folder_id
+                or data.get("browser_type") != "mimic" or data.get("is_quick", False) is not False):
+            raise RuntimeError("启动 Multilogin Profile 返回的浏览器身份与请求不符。")
+        return port
 
     def stop(self, profile_id: str) -> None:
         """Stop a profile.  ``profile already stopped`` counts as success."""
@@ -183,6 +210,13 @@ class MultiloginClient:
 
     def status(self, profile_id: str) -> str:
         """Return the launcher's last-known profile status string."""
+        data = self._status_payload(profile_id).get("data")
+        if not isinstance(data, dict):
+            return "unknown"
+        value = data.get("status")
+        return str(value) if value is not None else "unknown"
+
+    def _status_payload(self, profile_id: str) -> dict:
         path = f"/api/v1/profile/status/p/{quote(str(profile_id), safe='')}"
         try:
             response = self._get(path, timeout=REQUEST_TIMEOUT_SECONDS)
@@ -190,13 +224,50 @@ class MultiloginClient:
             raise RuntimeError(f"查询 Multilogin Profile 状态失败：{exc}") from exc
         if getattr(response, "status_code", None) != 200:
             raise self._http_error("查询 Multilogin Profile 状态", response)
+        return self._parse_json(response) or {}
 
-        payload = self._parse_json(response) or {}
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            return "unknown"
-        value = data.get("status")
-        return str(value) if value is not None else "unknown"
+    def observe(self, folder_id: str, profile_id: str) -> ProfileObservation:
+        data = _successful_data(self._status_payload(profile_id))
+        if data.get("profile_id") != profile_id or data.get("folder_id") != folder_id:
+            raise RuntimeError("无法确认 Multilogin Profile 与文件夹。")
+        if data.get("browser_type") != "mimic" or data.get("is_quick", False) is not False:
+            raise RuntimeError("仅支持 Multilogin Mimic 的已保存 Profile。")
+        if data.get("status") == "stopped":
+            return ProfileObservation(False)
+        if data.get("status") != "browser_running":
+            raise RuntimeError("Multilogin Profile 状态未知。")
+        port = _automation_port(data.get("message"))
+        # Launcher status is last-session history. Verify this credential's current
+        # access to the profile before using its locally advertised automation port.
+        response = requests.post(
+            PROFILE_METAS_URL, headers=self._headers(), json={"ids": [profile_id]},
+            timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=False,
+        )
+        if response.status_code != 200:
+            raise self._http_error("核对 Multilogin Profile 访问权限", response)
+        metadata = _successful_data(self._parse_json(response) or {})
+        profiles = metadata.get("profiles")
+        if not isinstance(profiles, list) or len(profiles) != 1:
+            raise RuntimeError("无法确认 Multilogin Profile 访问权限。")
+        item = profiles[0]
+        if not isinstance(item, dict) or item.get("id") != profile_id or item.get("folder_id") != folder_id:
+            raise RuntimeError("Multilogin Profile 元数据与请求身份不符。")
+        return ProfileObservation(True, self.browser_endpoint(port))
+
+    def browser_endpoint(self, port: str) -> str:
+        """Resolve a Launcher port to the immutable WebSocket for this browser run."""
+        host = f"127.0.0.1:{_automation_port(port)}"
+        with requests.Session() as local:
+            local.trust_env = False
+            response = local.get(f"http://{host}/json/version", timeout=PROBE_TIMEOUT_SECONDS, allow_redirects=False)
+            if response.status_code != 200:
+                raise RuntimeError("无法读取 Multilogin 浏览器实例。")
+            url = response.json()["webSocketDebuggerUrl"]
+        parts = urlsplit(url)
+        if (parts.scheme != "ws" or parts.netloc != host or parts.query or parts.fragment
+                or not re.fullmatch(r"/devtools/browser/[0-9a-fA-F-]{36}", parts.path)):
+            raise RuntimeError("Multilogin Profile 的 CDP 浏览器实例不符。")
+        return url
 
 
 class MultiloginProvider:
@@ -250,9 +321,25 @@ class MultiloginProvider:
         return self._client.status(self._target.profile_id)
 
 
+class SharedMultiloginProvider(MultiloginProvider):
+    """Command-scoped adapter that identifies a browser run across processes."""
+
+    @property
+    def resource_identity(self) -> str:
+        return self.folder_id
+
+    def start(self, headless: bool) -> str:
+        port = self._client.start(self.folder_id, self.profile_id, headless)
+        return self._client.browser_endpoint(port)
+
+    def observe(self) -> ProfileObservation:
+        return self._client.observe(self.folder_id, self.profile_id)
+
+
 __all__ = [
     "LAUNCHER_BASE_URL",
     "MultiloginClient",
     "MultiloginProvider",
     "MultiloginTarget",
+    "SharedMultiloginProvider",
 ]
