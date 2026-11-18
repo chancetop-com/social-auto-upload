@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -64,6 +65,7 @@ class ControlledProvider:
         request.reply({'code': 0, 'data': {'ws': {'puppeteer': self.endpoint}}})
 
     def stop_ok(self, request):
+        self.browser.close_browser()
         self.state = 'Inactive'
         request.reply({'code': 0})
 
@@ -371,3 +373,47 @@ def test_uncertain_stop_deadline_includes_a_stalled_provider_read(profile):
         assert profile.pages_requested == ['instagram']
     finally:
         release.set()
+
+def test_free_platform_waits_during_stop_then_starts_again_after_confirmation(profile):
+    api = ControlledProvider(profile)
+    root = profile.root / 'next-browser'
+    root.mkdir()
+    current = OfflineProfile(root, profile.stack, profile.entries, profile.playwright)
+    current.home = profile.home
+    current.api_port = profile.api_port
+    stopping, release = threading.Event(), threading.Event()
+
+    def delayed_stop(request):
+        stopping.set()
+        release.wait(20)
+        profile.close_browser()
+        api.state = 'Inactive'
+        api.browser, api.endpoint = current, current.endpoint
+        request.reply({'code': 0})
+
+    api.stop = delayed_stop
+    departing = profile.command(0, 'instagram')
+    profile.entered('instagram', departing)
+    profile.gates['instagram'].set()
+    assert stopping.wait(10)
+    api.stop = api.stop_ok
+    try:
+        candidates = [current.command(i, 'instagram') for i in (0, 1)]
+        # One contender's immediate busy outcome demonstrates that its peer
+        # reserved the released platform before the old Stop returned.
+        deadline = time.monotonic() + 7
+        while all(p.poll() is None for p in candidates) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        waiting, = [p for p in candidates if p.poll() is None]
+        busy, = [p for p in candidates if p.poll() is not None]
+        assert busy.returncode == 1 and '占用' in busy.communicate()[0]
+        assert not current.pages_requested and api.starts == api.stops == ['shared']
+    finally:
+        release.set()
+
+    profile.finish('instagram', departing)
+    current.entered('instagram', waiting)
+    assert api.state == 'Active' and api.starts == ['shared', 'shared']
+    current.finish('instagram', waiting)
+    assert api.stops == ['shared', 'shared'] and api.state == 'Inactive'
+    assert current.chrome.poll() is not None
