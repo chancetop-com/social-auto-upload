@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import tempfile
 from typing import BinaryIO
 
@@ -21,6 +22,9 @@ def _private(path: Path, info: os.stat_result, *, directory: bool) -> None:
         check_private(path)
     elif info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise PermissionError("托管会话目录和文件必须仅当前用户可访问。")
+    elif sys.platform == "darwin":
+        from utils.macos_profile_security import check_private
+        check_private(path)
 
 
 def _private_directory(path: Path) -> None:
@@ -67,6 +71,9 @@ class ProfileStore:
             info = home.stat()
             if info.st_uid != os.geteuid() or info.st_mode & 0o022:
                 raise PermissionError("主目录无法保护托管会话文件。")
+            if sys.platform == "darwin":
+                from utils.macos_profile_security import check_private
+                check_private(home, home=True)
         root = home / ".sau-managed-profiles"
         _private_directory(root)
         identity = json.dumps([provider, profile_id], ensure_ascii=True).encode("ascii")

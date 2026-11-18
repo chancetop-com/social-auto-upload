@@ -1,0 +1,68 @@
+<!doctype html><meta charset="utf-8"><style>
+a,[role=button],[data-action=post],[data-action=wrong]{display:inline-block;padding:16px;margin:8px}
+[role=dialog]{padding:20px} [contenteditable]{min-height:45px;width:400px}
+</style><body>
+<a href="/direct/inbox/">Inbox</a>
+<a href="/fixture/"><span aria-selected="false"><img alt="profile" width="24" height="24"></span></a>
+<a href="#" data-action="create"><span aria-selected="false"><svg aria-label="New post" width="24" height="24"></svg></span></a>
+<section id="surface"></section>
+<script>
+const config = CONFIG;
+let events=[], files=[], wrongClicks=0, shareClicks=0;
+function snapshot(){document.body.dataset.observed=JSON.stringify({events,files,wrongClicks,shareClicks});}
+snapshot();
+for(const name of ['pointermove','pointerdown','click','keydown','input','change']){
+ document.addEventListener(name, e=>{
+  const target=e.target.closest('[data-action]');
+  if(name==='change'&&e.target.type==='file') files=Array.from(e.target.files).map(f=>f.name);
+  events.push({name, target:target?.dataset.action||e.target.getAttribute('role'), key:e.key, trusted:e.isTrusted});
+  queueMicrotask(snapshot);
+ });
+}
+function composer(){
+ surface.innerHTML='<div role="dialog"><input type="file" multiple accept="image/jpeg,video/mp4" hidden></div>';
+ surface.querySelector('input').onchange=e=>{
+  files=Array.from(e.target.files).map(f=>f.name); edit(0); snapshot();
+ };
+}
+function edit(step){
+ const label=step<2 ? (config.creator&&!config.english?'继续':'Next') : 'Share';
+ const action=config.earlyShare&&step===0?'Share':label;
+ surface.innerHTML='<div role="dialog"><div role="heading">'+['Crop','Edit','Create new post'][step]+'</div>'+
+ '<div role="button" tabindex="0" data-action="advance">'+action+'</div>'+
+ (step===2?'<div contenteditable="true" role="textbox" data-lexical-editor="true"></div>':'')+'</div>';
+ const advance=surface.querySelector('[data-action=advance]');
+ advance.onclick=()=>{if(step===2||config.earlyShare){shareClicks++;return;}edit(step+1);};
+ if(config.duplicateNext&&step===0) advance.after(advance.cloneNode(true));
+ if(config.blockedShare&&step===2){
+  const rect=advance.getBoundingClientRect(), blocker=document.createElement('div');
+  Object.assign(blocker.style,{position:'fixed',left:rect.x+'px',top:rect.y+'px',width:rect.width+'px',height:rect.height+'px',background:'black',zIndex:99});
+  blocker.dataset.shareBlocker='';surface.appendChild(blocker);
+ }
+}
+function menu(){
+ const labels=config.english?['Post','Live video','Ad']:['帖子','直播视频','广告'];
+ const tag=config.english?'div':'a', attrs=config.english?'':' href="#"';
+ surface.innerHTML=(config.english?'<div>':'<div aria-hidden="false">')+
+ labels.map((label,i)=>'<'+tag+attrs+' data-action="'+(i===0?'post':'wrong')+'"><svg aria-label="'+label+'" width="24" height="24"></svg><span>'+label+'</span></'+tag+'>').join('')+'</div>';
+ // Feed text also says Post: it must never substitute for the menu icon.
+ surface.insertAdjacentHTML('beforeend','<button data-action="wrong">Post</button>');
+ const post=surface.querySelector('[data-action=post]');
+ if(config.duplicatePost) post.after(post.cloneNode(true));
+ if(config.mixedPost) surface.insertAdjacentHTML('beforeend','<div aria-hidden="false"><a href="#" data-action="post"><svg aria-label="帖子" width="24" height="24"></svg></a></div>');
+ if(config.blockedPost) post.setAttribute('aria-disabled','true');
+ if(config.disablePostOnHover) post.onpointerenter=()=>post.setAttribute('aria-disabled','true');
+ if(config.offscreenPost) surface.style.marginTop='1600px';
+ if(config.missingPost) post.remove();
+ if(config.driftPost) post.onpointerenter=()=>{if(!post.dataset.moved){post.dataset.moved='1';post.style.transform='translateX(35px)';}};
+ if(config.bothStates) surface.insertAdjacentHTML('beforeend','<div role="dialog"><input type="file"></div>');
+ surface.onclick=e=>{const action=e.target.closest('[data-action="post"],[data-action="wrong"]');if(!action)return;e.preventDefault();if(action.dataset.action==='post'){if(!config.stalledPost)composer();}else wrongClicks++;};
+}
+const create=document.querySelector('[data-action=create]');
+create.onclick=e=>{e.preventDefault();config.creator?menu():composer();};
+if(config.duplicateCreate){const duplicate=create.cloneNode(true);duplicate.querySelector('svg').setAttribute('aria-label','创建');create.after(duplicate);}
+if(config.missingCreate){
+ create.querySelector('svg').remove();
+ for(let i=0;i<3;i++)create.after(create.cloneNode(true));
+}
+</script>
