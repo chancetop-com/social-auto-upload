@@ -119,4 +119,4 @@ TikTok 如果在丢页后选中了 Instagram 的标签，可能会更改另一�
 
 MLX 已通过模拟 Launcher 验证。首次接管或 Start 回包丢失后缺少既有实例记录时，CLI 依赖本机 Launcher 正确报告目标 Profile 的运行状态及端口。已有实例记录时，端口被另一浏览器复用且启动历史未变化，会在开页前拒绝。真实 MLX 桌面和 Windows、Linux 的原生双进程验收留待相应环境。[MLX 连接规则](../../README.md) · [真实 AdsPower 验收工单](issues/14-adspower-macos-acceptance.md)
 
-真实 AdsPower 首次冷启动未进入编辑器。历史测试 Profile 在已通过鉴权的两套列表查询中均无匹配；#14 等待操作者确认当前测试 Profile。 [实机时间线](research/14-macos.md)
+真实 AdsPower 的冷启动和强杀后保留浏览器两项已通过。强杀后手动重开的场景已确认原草稿留在活动 Profile，待操作者在桌面关闭并重开后验证恢复。桌面预先打开且保留原标签的场景也待验。[实机时间线](research/14-macos.md)
