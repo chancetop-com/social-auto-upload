@@ -127,3 +127,36 @@ def test_cli_members_leave_only_their_own_pages_until_last_stop(mlx, desktop):
     assert ('status', 'Bearer offline-key-0') in mlx.requests
     assert ('status', 'Bearer offline-key-1') in mlx.requests
     assert ('stop', 'Bearer offline-key-1') in mlx.requests
+
+
+def test_cli_revalidates_membership_with_each_callers_credential(mlx):
+    first = mlx.command(0, 'instagram', '--headed', '--account', 'first')
+    mlx.entered('instagram', first)
+    record, = mlx.home.rglob('*.json')
+    for path in (record, record.parent, record.parent.parent):
+        assert path.stat().st_uid == os.getuid()
+        assert path.stat().st_mode & 0o777 == (0o600 if path.is_file() else 0o700)
+    original = record.read_bytes()
+    assert b'offline-key-' not in original and mlx.endpoint.encode() not in original
+
+    def rejected(platform, *flags, **kwargs):
+        child = mlx.command(1, platform, *flags, **kwargs)
+        output = child.communicate(timeout=8)[0]
+        assert child.returncode == 1, output
+        assert 'offline-key-' not in output and urlsplit(mlx.endpoint).netloc not in output
+        assert record.read_bytes() == original
+        assert mlx.pages_requested == ['instagram'] and mlx.stops == []
+        return output
+
+    # Local status only describes Agent history. The active browser still appears even
+    # when the profile API denies access with this command's credential.
+    mlx.denied_tokens.add('Bearer offline-key-1')
+    rejected('tiktok')
+    assert ('metas', 'Bearer offline-key-1') in mlx.requests
+    mlx.denied_tokens.clear()
+    assert 'headless' in rejected('tiktok', '--headless')
+    assert '文件夹' in rejected('tiktok', folder_id='different')
+    assert 'instagram' in rejected('instagram', '--account', 'alias', folder_id=FOLDER.upper(),
+                                   profile_id=PROFILE.upper())
+    mlx.finish('instagram', first)
+    assert mlx.starts == mlx.stops == [PROFILE]

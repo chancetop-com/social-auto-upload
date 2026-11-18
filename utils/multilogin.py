@@ -11,12 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import quote, urlsplit
+from uuid import UUID
 
 import requests
 
 from utils.errors import RateLimitedError
 from utils.managed_browser import ProfileObservation, ProviderMode
 
+PROFILE_METAS_URL = "https://api.multilogin.com/profile/metas"
 LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
 
 PROBE_TIMEOUT_SECONDS = 3
@@ -42,6 +44,14 @@ class MultiloginTarget:
 
     folder_id: str
     profile_id: str
+
+
+def canonical_id(value: str) -> str:
+    """Use the same UUID spelling for local admission and Launcher requests."""
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return value
 
 
 class MultiloginClient:
@@ -209,6 +219,21 @@ class MultiloginClient:
             return ProfileObservation(False)
         if data.get("status") != "browser_running":
             raise RuntimeError("Multilogin Profile 状态未知。")
+        # Launcher status is last-session history. Verify this credential's current
+        # access to the profile before using its locally advertised automation port.
+        response = requests.post(
+            PROFILE_METAS_URL, headers=self._headers(), json={"ids": [profile_id]},
+            timeout=REQUEST_TIMEOUT_SECONDS, allow_redirects=False,
+        )
+        if response.status_code != 200:
+            raise self._http_error("核对 Multilogin Profile 访问权限", response)
+        metadata = (self._parse_json(response) or {}).get("data")
+        profiles = metadata.get("profiles") if isinstance(metadata, dict) else None
+        if not isinstance(profiles, list) or len(profiles) != 1:
+            raise RuntimeError("无法确认 Multilogin Profile 访问权限。")
+        item = profiles[0]
+        if not isinstance(item, dict) or item.get("id") != profile_id or item.get("folder_id") != folder_id:
+            raise RuntimeError("Multilogin Profile 元数据与请求身份不符。")
         return ProfileObservation(True, self.browser_endpoint(data.get("message")))
 
     def browser_endpoint(self, port: str) -> str:

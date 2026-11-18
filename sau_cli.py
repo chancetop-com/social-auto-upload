@@ -7,7 +7,7 @@ import sys
 from typing import Sequence
 
 from sau_commands import article, facebook, facebook_page, instagram, rednote, tiktok, xiaohongshu, youtube
-from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict
+from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict, resolve_multilogin_target
 from utils.managed_sharing import managed_command
 from utils.errors import (
     LoginRequiredError,
@@ -56,7 +56,10 @@ async def dispatch(args: argparse.Namespace) -> int:
         raise RuntimeError(f"Unsupported platform: {args.platform}")
     mode = active_mode()
     if mode is not None and args.action in {"check", "upload-video", "upload-note"} and args.profile_id:
-        async with managed_command(args.platform, mode, args.profile_id.strip(), getattr(args, "headless", None)):
+        profile_id = args.profile_id.strip()
+        if mode == "multilogin":
+            profile_id = resolve_multilogin_target(args).profile_id
+        async with managed_command(args.platform, mode, profile_id, getattr(args, "headless", None)):
             return await PLATFORMS[args.platform].run(args)
     return await PLATFORMS[args.platform].run(args)
 
