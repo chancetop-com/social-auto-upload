@@ -303,7 +303,7 @@ class MultiloginProviderTests(unittest.TestCase):
         http_get = FakeHttpGet(
             [
                 FakeResponse(200, {"data": {"status": "browser_running"}}),
-                FakeResponse(200, {"status": {"message": "ok"}}),
+                FakeResponse(200, load_fixture("stop_ok.json")),
             ]
         )
         target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)

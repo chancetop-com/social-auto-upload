@@ -21,6 +21,8 @@ class LauncherProfile(OfflineProfile):
         super().__init__(root, stack, entries, playwright)
         self.folder = FOLDER
         self.start_fields = {}
+        self.start_response = None
+        self.stop_response = None
         self.denied_tokens = set()
         self.status_code = 200
         self.top_status = {'error_code': '', 'http_code': 200, 'message': ''}
@@ -66,6 +68,8 @@ class LauncherProfile(OfflineProfile):
                     target = profile.profiles.get(profile_id, profile)
                     profile.requests.append(('stop', token))
                     target.stops.append(profile_id)
+                    if target.stop_response is not None:
+                        return target.stop_response(self)
                     target.close_browser()
                     target.active = False
                     return self.respond_json({})
@@ -76,6 +80,8 @@ class LauncherProfile(OfflineProfile):
                 assert folder_id == target.folder
                 profile.requests.append(('start', token))
                 target.starts.append(profile_id)
+                if target.start_response is not None:
+                    return target.start_response(self)
                 target.active = True
                 self.respond_json({'id': profile_id, 'is_quick': False, 'browser_type': 'mimic',
                                    'port': str(urlsplit(target.endpoint).port), **target.start_fields})

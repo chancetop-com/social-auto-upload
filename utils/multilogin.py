@@ -15,7 +15,7 @@ from uuid import UUID
 
 import requests
 
-from utils.errors import RateLimitedError
+from utils.errors import ProviderRequestRejected, RateLimitedError
 from utils.managed_browser import ProfileObservation, ProviderMode
 
 PROFILE_METAS_URL = "https://api.multilogin.com/profile/metas"
@@ -119,6 +119,8 @@ class MultiloginClient:
         if status_code == 429:
             # Shared rate-limit contract: the CLI maps this to exit code 11.
             return RateLimitedError("；".join(parts))
+        if status_code in (401, 403):
+            return ProviderRequestRejected("；".join(parts))
         return RuntimeError("；".join(parts))
 
     # ------------------------------------------------------------- Endpoints
@@ -175,7 +177,10 @@ class MultiloginClient:
         status_code = getattr(response, "status_code", None)
 
         if status_code == 200:
-            return
+            status = (self._parse_json(response) or {}).get("status")
+            if isinstance(status, dict) and status.get("http_code") == 200 and not status.get("error_code"):
+                return
+            raise RuntimeError("Multilogin Launcher 未确认停止 Profile。")
 
         if status_code == 500:
             payload = self._parse_json(response) or {}
