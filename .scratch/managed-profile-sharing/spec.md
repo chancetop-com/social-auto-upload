@@ -111,4 +111,10 @@ TikTok 如果在丢页后选中了 Instagram 的标签，可能会更改另一�
 
 实施与验收以本规格的共享规则为准；既有 AdsPower 和 MLX 规格中由调用方串行同一 Profile、由启动者停止 Profile 的规则已被取代。若桌面实测显示产品版本间有差异，再根据实际观察决定兼容处理。[托管 Profile 默认共享决策地图](map.md)
 
-本规格记录实施后的通过条件。现有 macOS 双进程示例和 AdsPower 启动调查仅提供局部证据；完整功能的实测结果待实施后记录。[双进程示例](../../examples/shared_profile_demo.py) · [AdsPower 实机调查](research/06-crash-ownership.md) · [哪些证据足以验收托管 Profile 默认共享](issues/05-acceptance.md)
+## 验收记录
+
+2026-11-18，在 macOS 26.6.2 上从提交 `3936aae` 的三个干净副本执行全量离线测试。平台发布组通过 49 项，双进程及恢复组通过 53 项，既有回归通过 1,447 项，合计 **1,549 项通过**，另有 792 个子用例通过。5 项 Windows 权限用例与 2 项按需开启的真实服务 smoke 在本次离线运行中跳过。
+
+同一提交构建的 wheel 分别安装到 Python 3.10.16 和 3.12.9。两套安装均通过七个平台的 20 个入口、11 个旧名称在三种配置下的 33 次拒绝和本地文章渲染检查。另在 Python 3.12 安装中实际升级旧版 wheel，四类已有用户数据逐字节一致。两个不同版本的 CLI 共用测试 Profile 时，冷启动共 1 次 Start，加入已打开的 Profile 共 0 次 Start；先离开的命令保留同行编辑器，最后离开的命令发 1 次 Stop。工单中的实施记录列有平台和故障用例。[平台移除](issues/20-remove-platforms.md) · [AdsPower 双进程](issues/08-adspower-shared-check.md) · [MLX 中断恢复](issues/13-mlx-interrupted-session.md)
+
+MLX 已通过模拟 Launcher 验证。首次接管或 Start 回包丢失后缺少既有实例记录时，CLI 依赖本机 Launcher 正确报告目标 Profile 的运行状态及端口。已有实例记录时，端口被另一浏览器复用且启动历史未变化，会在开页前拒绝。真实 MLX 桌面和 Windows、Linux 的原生双进程验收留待相应环境。[MLX 连接规则](../../README.md) · [真实 AdsPower 验收工单](issues/14-adspower-macos-acceptance.md)
