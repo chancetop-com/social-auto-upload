@@ -4,6 +4,7 @@ import os
 import shutil
 import site
 import ssl
+import stat
 import subprocess
 import sys
 import threading
@@ -75,10 +76,13 @@ class OfflineProfile:
         self.root = root
         self.stack = stack
         self.entries = entries
+        self.playwright = playwright
         self.keys = []
         self.starts = []
         self.stops = []
         self.active = False
+        self.observation_fields = {}
+        self.profiles = {}
         self.pages_requested = []
         self.gates = {name: threading.Event() for name in ('instagram', 'tiktok')}
         self.arrived = {name: threading.Event() for name in self.gates}
@@ -134,22 +138,24 @@ class OfflineProfile:
                     url = urlsplit(self.path)
                     assert url.path == '/api/v2/browser-profile/active'
                     profile_id, = parse_qs(url.query)['profile_id']
-                    data = {'profile_id': profile_id, 'status': 'Active' if profile.active else 'Inactive',
-                            'ws': {'puppeteer': profile.reported_endpoint}}
+                    target = profile.profiles.get(profile_id, profile)
+                    data = {'status': 'Active' if target.active else 'Inactive',
+                            'ws': {'puppeteer': target.reported_endpoint}, **target.observation_fields}
                 self.respond(json.dumps({'code': 0, 'data': data}).encode(), 'application/json')
 
             def do_POST(self):
                 profile.keys.append(self.headers['Authorization'])
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                target = profile.profiles.get(body['profile_id'], profile)
                 if self.path.endswith('/start'):
-                    profile.starts.append(body['profile_id'])
-                    profile.active = True
+                    target.starts.append(body['profile_id'])
+                    target.active = True
                 else:
                     assert self.path.endswith('/stop')
-                    profile.stops.append(body['profile_id'])
-                    profile.close_browser()
-                    profile.active = False
-                self.respond(json.dumps({'code': 0, 'data': {'ws': {'puppeteer': profile.endpoint}}}).encode(),
+                    target.stops.append(body['profile_id'])
+                    target.close_browser()
+                    target.active = False
+                self.respond(json.dumps({'code': 0, 'data': {'ws': {'puppeteer': target.endpoint}}}).encode(),
                              'application/json')
 
         self.api_port = stack.enter_context(serve(Provider))
@@ -191,7 +197,7 @@ class OfflineProfile:
         self.gates[platform].set()
         output = child.communicate(timeout=12)[0]
         assert (child.returncode, 'valid' in output.splitlines()) == (0, True), output
-        assert 'offline-key-' not in output and self.endpoint not in output
+        assert 'offline-key-' not in output and urlsplit(self.endpoint).netloc not in output
         return output
 
 
@@ -202,14 +208,22 @@ def profile(tmp_path, installations):
         yield OfflineProfile(tmp_path, stack, installations, playwright)
 
 
-def test_checks_share_cold_profile_until_both_leave(profile):
+@pytest.mark.parametrize('desktop', [False, True], ids=['cold', 'already-open'])
+def test_checks_share_profile_until_both_leave(profile, desktop):
+    if desktop:
+        profile.active = True
+        marked = profile.browser.contexts[0].pages[0]
+        marked.set_content('<textarea>desktop draft</textarea>')
     first = profile.command(0, 'instagram')
     profile.entered('instagram', first)
     second = profile.command(1, 'tiktok', host='LOCALHOST')
     profile.entered('tiktok', second)
-    assert profile.starts == ['shared']
+    assert profile.starts == ([] if desktop else ['shared'])
     profile.finish('instagram', first)
     assert profile.stops == []
+    if desktop:
+        assert marked.locator('textarea').input_value() == 'desktop draft'
+        marked.locator('textarea').fill('desktop still editable')
     # Sync Playwright only dispatches incoming page events during a protocol turn.
     inspector = profile.browser.new_browser_cdp_session()
     inspector.send("Target.getTargets")
@@ -223,3 +237,78 @@ def test_checks_share_cold_profile_until_both_leave(profile):
     profile.finish('tiktok', second)
     assert profile.stops == ['shared'] and not profile.active
     assert set(profile.keys) == {'Bearer offline-key-0', 'Bearer offline-key-1'}
+
+
+def test_simultaneous_checks_have_one_winner_per_platform(profile):
+    children = [profile.command(i, 'instagram', '--account', f'alias-{i}') for i in (0, 1)]
+    assert profile.arrived['instagram'].wait(12)
+    deadline = time.monotonic() + 5
+    while all(child.poll() is None for child in children) and time.monotonic() < deadline:
+        time.sleep(.02)
+    winner, = [child for child in children if child.poll() is None]
+    loser, = [child for child in children if child.poll() is not None]
+    output = loser.communicate()[0]
+    assert loser.returncode == 1 and 'instagram' in output and '占用' in output
+    assert profile.starts == ['shared'] and profile.stops == []
+    assert profile.pages_requested == ['instagram']
+    profile.finish('instagram', winner)
+    assert profile.stops == ['shared']
+
+
+def test_failed_join_leaves_the_peer_and_private_record_intact(profile):
+    first = profile.command(0, 'instagram', '--headed')
+    profile.entered('instagram', first)
+    records = [p for p in profile.home.rglob('*.json') if p.is_file()]
+    assert len(records) == 1
+    record, = records
+    for path in (record, record.parent, record.parent.parent):
+        assert path.stat().st_uid == os.getuid()
+        assert stat.S_IMODE(path.stat().st_mode) == (0o600 if path.is_file() else 0o700)
+    original = record.read_bytes()
+    assert b'offline-key-' not in original and b'ws://' not in original
+    assert profile.endpoint.encode() not in original
+
+    def rejected(*flags, host='127.0.0.1'):
+        child = profile.command(1, 'tiktok', *flags, host=host)
+        output = child.communicate(timeout=8)[0]
+        assert child.returncode == 1, output
+        assert 'offline-key-' not in output and urlsplit(profile.endpoint).netloc not in output
+        assert record.read_bytes() == original
+        assert first.poll() is None
+        assert profile.pages_requested == ['instagram'] and not profile.stops
+        return output
+
+    assert 'headless' in rejected('--headless')
+    assert '服务' in rejected(host='127.0.0.2')
+    profile.observation_fields['profile_id'] = 'wrong-profile'
+    assert 'observe' in rejected()
+    profile.observation_fields.clear()
+    profile.reported_endpoint = ''
+    assert 'observe' in rejected()
+    profile.reported_endpoint = profile.endpoint + '?cred=offline-key-untrusted'
+    assert '连接' in rejected()
+    profile.reported_endpoint = profile.endpoint
+    record.chmod(0o644)
+    try:
+        assert '访问' in rejected()
+    finally:
+        record.chmod(0o600)
+    profile.finish('instagram', first)
+    assert profile.starts == profile.stops == ['shared']
+
+
+def test_same_platform_can_check_two_distinct_profiles(profile):
+    other_root = profile.root / 'other'
+    other_root.mkdir()
+    other = OfflineProfile(other_root, profile.stack, profile.entries, profile.playwright)
+    other.home = profile.home
+    other.api_port = profile.api_port
+    profile.profiles['second'] = other
+    first = profile.command(0, 'instagram')
+    second = other.command(1, 'instagram', profile_id='second')
+    profile.entered('instagram', first)
+    other.entered('instagram', second)
+    profile.finish('instagram', first)
+    assert profile.stops == ['shared'] and other.stops == []
+    other.finish('instagram', second)
+    assert other.starts == other.stops == ['second']

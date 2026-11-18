@@ -291,6 +291,15 @@ class FakeAdspowerClient:
     asserted without reaching into the session template.
     """
 
+    resource_identity = "http://localhost:50325"
+
+    def observe(self, profile_id):
+        from utils.managed_browser import ProfileObservation
+
+        if self.status_error is not None:
+            raise self.status_error
+        return ProfileObservation(bool(self.start_calls), self.ws_url if self.start_calls else None)
+
     def __init__(
         self,
         *,

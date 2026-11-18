@@ -115,7 +115,7 @@ class ManagedCommand:
                           "endpoint": _digest(endpoint), "headless": setting}
 
     @asynccontextmanager
-    async def session(self, playwright, provider, headless):
+    async def session(self, playwright, provider, headless, connect):
         if (provider.mode, provider.profile_id) != (self.mode, self.profile_id):
             raise RuntimeError("托管命令请求的 Profile 与平台资格不符。")
         browser = None
@@ -123,8 +123,7 @@ class ManagedCommand:
             async with self.lifecycle():
                 endpoint, record = await self.connection(provider, headless)
                 try:
-                    browser = await playwright.chromium.connect_over_cdp(
-                        endpoint, timeout=10_000, no_defaults=True)
+                    browser = await connect(playwright, provider, endpoint)
                     contexts = browser.contexts
                 except Exception:
                     raise RuntimeError(f"{self.mode} 无法通过 CDP 连接当前 Profile。") from None

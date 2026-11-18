@@ -221,7 +221,7 @@ async def browser_session(
 
     command = current_command()
     if command is not None:
-        async with command.session(playwright, managed, headless) as (browser, pages):
+        async with command.session(playwright, managed, headless, _connect_over_cdp) as (browser, pages):
             yield BrowserSession(browser=browser, context=pages, mode=managed.mode)
         return
 
