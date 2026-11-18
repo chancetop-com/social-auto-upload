@@ -92,9 +92,10 @@ def test_instagram_note_result_only_contains_its_own_submission(tmp_path, instal
         assert profile.stops == ["shared"]
 
 
-def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tmp_path, installations):
+@pytest.mark.parametrize("phase", ["processing", "gate"])
+def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tmp_path, installations, phase):
     instagram = InstagramSite()
-    tiktok = TikTokSite(ready=False)
+    tiktok = TikTokSite(ready=phase == "gate")
     with ExitStack() as stack:
         playwright = stack.enter_context(sync_playwright())
         profile = OfflineProfile(tmp_path, stack, installations, playwright,
@@ -115,8 +116,19 @@ def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tm
             ig_page.evaluate("window.open('https://www.tiktok.com/tiktokstudio/upload?tab=photo')")
         lookalike = popup.value
         lookalike.locator("input[placeholder]").fill("Instagram preview")
+        gate_flags = []
+        env = {"HUMANIZE": "0"}
+        entered = tmp_path / "tt-waiting"
+        if phase == "gate":
+            clock = tmp_path / "clock"
+            clock.write_text("1893456000")
+            env.update(SAU_TEST_CLOCK=str(clock), SAU_TEST_GATE_ENTERED=str(entered),
+                       PYTHONPATH=str(Path(__file__).parent / "fixtures/publish_clock"))
+            gate_flags = ["--not-before", "2030-01-01T01:00:00Z"]
         tt = profile.command(1, "tiktok", "--images", str(photo), "--title", "TT photo",
-                             action="upload-note", env={"HUMANIZE": "0"})
+                             *gate_flags, action="upload-note", env=env)
+        if phase == "gate":
+            wait_for_event(entered.exists, tt)
         tt_page = matching_page(profile, lambda p: p != lookalike and p.url == lookalike.url and
                                p.locator("input[placeholder]").input_value() == "TT photo", tt)
         # Both probes have closed, and even closing a preview cannot free its platform.
@@ -132,6 +144,9 @@ def test_lost_tiktok_photo_editor_leaves_instagram_video_and_lookalike_intact(tm
         output = tt.communicate(timeout=7)[0]
         assert tt.returncode == 1 and "publish_attempted=true" not in output, output
         assert tiktok.submissions == []
+        replacement = profile.command(1, "tiktok")
+        output = replacement.communicate(timeout=8)[0]
+        assert replacement.returncode == 0 and "valid" in output.splitlines(), output
         assert lookalike.locator("input[placeholder]").input_value() == "Instagram preview"
         assert ig_page.url == ig_url and ig_page.locator("[contenteditable]").inner_text() == "IG video"
         ig_page.locator("[contenteditable]").fill("IG video continued")

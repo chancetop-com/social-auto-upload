@@ -320,6 +320,8 @@ _PUBLISH_RESULT_UNKNOWN_MESSAGE = (
     "按标题与发布时间核对；已存在则不要重发，不存在才可人工重试。"
 )
 
+_EDITOR_CLOSED_MESSAGE = "TikTok 编辑页已关闭，尚未点击发布。"
+
 _PRE_PUBLISH_TIMEOUT_MESSAGE = (
     "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
 )
@@ -945,12 +947,32 @@ def _raise_if_login_required(page, *, publish_attempted: bool = False) -> None:
 async def _guard_login(page, *, publish_attempted=False):
     _raise_if_login_required(page, publish_attempted=publish_attempted)
     if not publish_attempted and getattr(type(page), "is_closed", None) and page.is_closed():
-        raise RuntimeError("TikTok 编辑页已关闭，尚未点击发布。")
+        raise RuntimeError(_EDITOR_CLOSED_MESSAGE)
     if await _login_form_present(page):
         message = 'TikTok 需要登录；本地请运行 sau tiktok login --account <name>，托管请在浏览器管理应用登录。'
         if publish_attempted:
             message += _TIKTOK_PUBLISH_ATTEMPTED_SUFFIX
         raise LoginRequiredError(message, publish_attempted=publish_attempted)
+
+
+async def _wait_with_editor_open(page, gate):
+    """Wake a scheduled sender when its own editor disappears during the wait."""
+    waiting = asyncio.create_task(gate)
+
+    def cancel_wait(_page):
+        waiting.cancel()
+
+    page.on("close", cancel_wait)
+    try:
+        if page.is_closed():
+            waiting.cancel()
+        await waiting
+    except asyncio.CancelledError:
+        if page.is_closed():
+            raise RuntimeError(_EDITOR_CLOSED_MESSAGE) from None
+        raise
+    finally:
+        page.remove_listener("close", cancel_wait)
 
 
 async def _local_upload_page(context):
@@ -2614,11 +2636,12 @@ class TiktokBaseUploader(BaseVideoUploader):
         multilogin: bool = False,
     ):
         budget = self._coerce_budget(deadline)
-        await budget.wait_until_allowed(
-            getattr(self, "publish_not_before", None),
-            logger=tiktok_logger,
-            label="TikTok 发布",
-        )
+        target = getattr(self, "publish_not_before", None)
+        gate = budget.wait_until_allowed(target, logger=tiktok_logger, label="TikTok 发布")
+        if multilogin and target is not None:
+            await _wait_with_editor_open(page, gate)
+        else:
+            await gate
         budget.check_pre_click()
         humanizer = self._humanizer(page)
         # ``publish_clicked`` means "a click may have reached the page".  It
