@@ -37,7 +37,7 @@ MISSING_MLX_TARGET_MESSAGE = (
 MISSING_MLX_TOKEN_MESSAGE = "未设置 MLX_API_TOKEN，无法使用 Multilogin 模式。"
 MISSING_ADSPOWER_PROFILE_MESSAGE = "AdsPower 模式需要提供 --profile-id。"
 INVALID_ADSPOWER_BASE_MESSAGE = (
-    "ADSPOWER_API_BASE 不合法：{base}。"
+    "ADSPOWER_API_BASE 不合法。"
     "仅支持 http/https、主机名与可选端口，"
     "且不得包含用户信息、路径、查询或片段。"
 )
@@ -174,7 +174,7 @@ def _resolve_adspower_base() -> str:
         # ports; that is exactly the rejection we want.
         parts.port
     except ValueError:
-        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE.format(base=raw)) from None
+        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE) from None
 
     invalid = (
         parts.scheme not in ("http", "https")
@@ -187,7 +187,7 @@ def _resolve_adspower_base() -> str:
         or parts.netloc.endswith(":")
     )
     if invalid:
-        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE.format(base=raw))
+        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE)
 
     # Rebuild from the validated pieces so a single trailing ``/`` is dropped
     # without touching the host or port spelling.

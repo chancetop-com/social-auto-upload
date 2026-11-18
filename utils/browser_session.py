@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 from loguru import logger
 
 from utils.errors import StartIncompleteError
+from utils.managed_sharing import current_command
 from utils.managed_browser import ManagedBrowserProvider
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps imports light
@@ -217,6 +218,12 @@ async def browser_session(
     )
     if ignored:
         logger.warning(MANAGED_IGNORED_WARNING.format(keys=", ".join(ignored)))
+
+    command = current_command()
+    if command is not None:
+        async with command.session(playwright, managed, headless, _connect_over_cdp) as (browser, pages):
+            yield BrowserSession(browser=browser, context=pages, mode=managed.mode)
+        return
 
     async with _managed_session(
         playwright,

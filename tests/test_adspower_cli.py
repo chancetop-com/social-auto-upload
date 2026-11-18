@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import tempfile
 import unittest
 from argparse import Namespace
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -61,7 +62,7 @@ def _env(**values):
 
 
 def _run(argv, *, env=None):
-    with _env(**(env or {})):
+    with tempfile.TemporaryDirectory() as home, _env(HOME=home, USERPROFILE=home, **(env or {})):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(
             io.StringIO()
         ) as err:
@@ -578,7 +579,7 @@ class CheckAndExitCodeTests(unittest.TestCase):
         self.assertIn("429", err)
         self.assertEqual(fake.stop_calls, [])
 
-    def test_start_incomplete_stops_profile_then_exits_1(self):
+    def test_shared_cli_leaves_incomplete_start_for_recovery(self):
         fake = FakeAdspowerClient(start_error=StartIncompleteError("bad start"))
         pw, login, client, _ = _real_seam(fake)
         with pw, login, client:
@@ -587,8 +588,9 @@ class CheckAndExitCodeTests(unittest.TestCase):
                 env={"ADSPOWER_API_KEY": KEY},
             )
         self.assertEqual(code, 1)
-        self.assertIn("bad start", err)
-        self.assertEqual(fake.stop_calls, [PROFILE])
+        self.assertIn("start", err)
+        self.assertNotIn("bad start", err)
+        self.assertEqual(fake.stop_calls, [])
 
     def test_rate_limited_during_stop_keeps_success_exit_code(self):
         fake = FakeAdspowerClient(stop_error=RateLimitedError("stop 429"))
