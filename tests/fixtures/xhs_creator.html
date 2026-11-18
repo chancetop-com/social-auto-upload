@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  input, .tiptap, xhs-publish-btn { display: block; min-height: 32px; width: 280px; }
+  xhs-publish-btn { background: salmon; }
+</style>
+<div class="upload-content"><input class="upload-input" type="file"></div>
+<div class="img-preview-area"></div>
+<div class="d-input"><input id="title" aria-label="Draft title"></div>
+<div class="tiptap" role="textbox" aria-label="Draft body" contenteditable="true"></div>
+<xhs-publish-btn>Publish</xhs-publish-btn>
+<script>
+  const file = document.querySelector('input[type=file]');
+  file.onchange = () => {
+    const tile = document.createElement('div');
+    tile.className = 'pr';
+    document.querySelector('.img-preview-area').append(tile);
+  };
+  document.querySelector('xhs-publish-btn').onclick = async () => {
+    const result = await fetch('/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        target: new URL(location).searchParams.get('target'),
+        title: document.querySelector('#title').value,
+        body: document.querySelector('.tiptap').innerText.trim(),
+        file: file.files[0]?.name
+      })
+    });
+    const {next} = await result.json();
+    if (next) history.pushState({}, '', next);
+  };
+</script>
+<script defer src="/ready.js"></script>

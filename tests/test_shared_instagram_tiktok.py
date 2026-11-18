@@ -1,4 +1,5 @@
 """Installed publishing commands with independent connections to a loopback Chromium."""
+import json
 import sys
 import time
 from contextlib import ExitStack
@@ -50,4 +51,37 @@ def test_tiktok_login_expiry_leaves_peer_draft_editable(tmp_path, installations)
         editor.fill("Instagram draft continued")
         assert not profile.stops
         profile.finish("instagram", peer)
+        assert profile.stops == ["shared"]
+
+
+def test_instagram_note_result_only_contains_its_own_submission(tmp_path, installations):
+    from tests.shared_publish_sites import InstagramSite
+
+    site = InstagramSite()
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = OfflineProfile(tmp_path, stack, installations, playwright,
+                                 sites={"www.instagram.com": site.handler()})
+        peer = profile.command(1, "tiktok")
+        profile.entered("tiktok", peer)
+        page = matching_page(profile, lambda p: "tiktok.com" in p.url, peer)
+        editor = page.locator("textarea")
+        editor.fill("TikTok draft")
+        original_url = page.url
+
+        photo = tmp_path / "carousel.png"
+        photo.touch()
+        result = tmp_path / "instagram.json"
+        child = profile.command(0, "instagram", "--images", str(photo), "--title", "IG carousel",
+                                "--result", str(result), action="upload-note", env={"HUMANIZE": "0"})
+        output = child.communicate(timeout=15)[0]
+        assert child.returncode == 0, output
+        assert site.submissions == [{"caption": "IG carousel", "files": ["carousel.png"]}]
+        record = json.loads(result.read_text())
+        assert (record["status"], record["post_id"], record["title"]) == (
+            "published", "offline-fixture", "IG carousel")
+        assert page.url == original_url and editor.input_value() == "TikTok draft"
+        editor.fill("peer continues")
+        assert not profile.stops
+        profile.finish("tiktok", peer)
         assert profile.stops == ["shared"]
