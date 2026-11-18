@@ -49,3 +49,17 @@
 **再次从桌面手动打开，单轮通过。** 操作者在 AdsPower 桌面打开 2 号后，22:03:46 状态接口返回 `Active`。22:03:47 在两条 CLI 进入前读到本轮桌面标记。两条命令随后加入，均带 `--no-publish`。22:04:14 在三张不同标签分别读到桌面、Instagram 图文和 TikTok 视频的标记。
 
 Instagram 于 22:04:14.385 以 `0` 退出，此时 Stop 为 0。22:04:14.974 复核桌面原标签和 TikTok 原编辑页仍在，标签标识均与退出前一致。22:04:15.533 在 TikTok 原页追加并回读文字，同时读回桌面标记。TikTok 于 22:04:15.721 发出唯一的 Stop，随后以 `0` 退出。22:04:18.244 确认 `Inactive`。本轮两条 CLI 合计 0 次 Start、1 次 Stop，均停在最终发布前。
+
+### 逐轮页面内容标记
+
+| 轮次 | 页面回读或就绪事件 | 合成标记 |
+| --- | --- | --- |
+| 历史 Profile 首次尝试 | 两条命令均未就绪，无页面标记可核对。 | — |
+| 冷启动首轮 | 仅 TikTok 就绪事件记录了标记，本轮没有独立页面回读。 | `SAU-tiktok-80105342` |
+| 冷启动复测 | 两张编辑页均回读成功。启动者退出后再次从 Instagram 原页读到标记。 | `SAU-instagram-14227bf1`、`SAU-tiktok-14227bf1` |
+| 强杀后保留浏览器 | 强杀前后均从两张原编辑页读到标记。 | `SAU-instagram-0e0b97f8`、`SAU-tiktok-0e0b97f8` |
+| 保留浏览器后再加入 | 从新页读到 Instagram 新标记，同次观察也读到上一行两份旧标记。 | `SAU-instagram-bebf5d2f` |
+| 强杀后手动重开，关闭前 | 强杀前后均从两张原编辑页读到标记。 | `SAU-instagram-38ced14c`、`SAU-tiktok-38ced14c` |
+| 手动重开后加入 | 加入前读到桌面标记。两份草稿就绪后，从三张页面同时读到以下标记。 | `SAU-desktop-e0e68e15`、`SAU-instagram-e0e68e15`、`SAU-tiktok-e0e68e15` |
+| Local API 预开补验 | 从三张页面读到本轮标记。Instagram 退出后再次读到桌面和 TikTok 标记。 | `SAU-desktop-ba3ab251`、`SAU-instagram-ba3ab251`、`SAU-tiktok-ba3ab251` |
+| 桌面再次手动打开 | 从三张页面读到本轮标记。Instagram 退出后再次读到桌面和 TikTok 标记。 | `SAU-desktop-6cf7f280`、`SAU-instagram-6cf7f280`、`SAU-tiktok-6cf7f280` |

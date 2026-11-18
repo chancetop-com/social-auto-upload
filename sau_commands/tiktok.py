@@ -137,7 +137,7 @@ def _add_publish_option_flags(parser, *, include_reuse: bool) -> None:
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     tiktok_parser = platform_parsers.add_parser(
-        "tiktok", help="TikTok operations (local or Multilogin mode)"
+        "tiktok", help="TikTok operations (local, Multilogin X, or AdsPower)"
     )
     tiktok_actions = tiktok_parser.add_subparsers(dest="action", required=True)
     add_reset_profile_action(tiktok_actions)
