@@ -16,6 +16,9 @@ from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
 
 LIFECYCLE_TIMEOUT = 10.0
+# An admitted member must outlast a contender's provider reads, CDP retries
+# and final status query before giving up the obligation to stop the browser.
+DEPARTURE_TIMEOUT = 180.0
 _current = ContextVar("managed_command", default=None)
 
 
@@ -53,8 +56,8 @@ class ManagedCommand:
         self.provider = None
 
     @asynccontextmanager
-    async def lifecycle(self):
-        deadline = monotonic() + LIFECYCLE_TIMEOUT
+    async def lifecycle(self, timeout=LIFECYCLE_TIMEOUT):
+        deadline = monotonic() + timeout
         lock = self.store.try_lock("lifecycle")
         while lock is None:
             if monotonic() >= deadline:
@@ -106,8 +109,6 @@ class ManagedCommand:
                     raise RuntimeError(f"{self.mode} Profile 的当前连接与同行不符。")
                 if setting is None:
                     setting = record.get("headless")
-            if self.explicit_headless is not None and setting is not self.explicit_headless:
-                raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         else:
             if peers or (record and record["phase"] == "starting"):
                 raise RuntimeError(f"{self.mode} Profile 上次启动或当前连接尚未确认。")
@@ -122,10 +123,12 @@ class ManagedCommand:
             raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
         active_record = {"resource": resource, "phase": "active",
                          "endpoint": _digest(endpoint), "headless": setting}
-        if not state.active:
-            # Start completed independently of this command's CDP handshake.
-            # Death during attachment must not leave a pending Start behind.
+        if not state.active or (record and record["phase"] == "starting"):
+            # A Start response or a later authenticated Active can establish
+            # completion before compatibility checks and the CDP connection.
             self.store.write_record(active_record)
+        if state.active and self.explicit_headless is not None and setting is not self.explicit_headless:
+            raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         return endpoint, active_record
 
     @asynccontextmanager
@@ -163,7 +166,7 @@ class ManagedCommand:
         try:
             if self.member is None:
                 return
-            async with self.lifecycle():
+            async with self.lifecycle(timeout=DEPARTURE_TIMEOUT):
                 self.member.close()
                 self.member = None
                 self.reservation.close()
@@ -197,4 +200,11 @@ async def managed_command(platform, mode, profile_id, explicit_headless):
         yield
     finally:
         _current.reset(token)
-        await command.leave()
+        # Cancellation cannot cancel a synchronous provider request. Keep its
+        # lifecycle lock and finish recording the response before propagating it.
+        departure = asyncio.create_task(command.leave())
+        try:
+            await asyncio.shield(departure)
+        except asyncio.CancelledError:
+            await departure
+            raise
