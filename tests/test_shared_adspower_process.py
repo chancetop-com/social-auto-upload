@@ -117,9 +117,12 @@ class OfflineProfile:
             ports[hostname] = stack.enter_context(serve(handler, tls))
         rules = ', '.join([f'MAP {host} 127.0.0.1:{port}' for host, port in ports.items()]
                           + ['MAP * ~NOTFOUND'])
+        # Offline browsers share only their test profile. Keep credentials out of the OS keychain.
+        keychain_flags = ['--use-mock-keychain'] if sys.platform == 'darwin' else []
         self.chrome = subprocess.Popen([
             playwright.chromium.executable_path, '--headless', '--remote-debugging-port=0',
             f'--user-data-dir={user_data}', '--no-first-run', '--disable-background-networking',
+            '--password-store=basic', *keychain_flags,
             '--no-proxy-server', '--ignore-certificate-errors', f'--host-resolver-rules={rules}',
             'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         stack.callback(self.close_browser)
