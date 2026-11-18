@@ -9,8 +9,17 @@ import pywintypes
 import win32api
 import win32con
 import win32file
+import win32profile
 import win32security
 import winerror
+
+
+def user_profile_directory() -> Path:
+    token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+    try:
+        return Path(win32profile.GetUserProfileDirectory(token))
+    finally:
+        token.Close()
 
 
 def _user_sid():

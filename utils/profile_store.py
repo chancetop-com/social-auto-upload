@@ -57,11 +57,19 @@ def _open_file(path: Path, flags: int) -> int:
     return fd
 
 
+def _user_profile_directory() -> Path:
+    if os.name == "nt":
+        from utils.windows_profile_security import user_profile_directory
+        return user_profile_directory()
+    import pwd
+    return Path(pwd.getpwuid(os.geteuid()).pw_dir)
+
+
 class ProfileStore:
     """Only lock files are permanent. Replacing one could split its kernel lock."""
 
     def __init__(self, provider: str, profile_id: str):
-        home = Path.home()
+        home = _user_profile_directory()
         if not home.is_absolute():
             raise PermissionError("无法确认当前用户的主目录。")
         if os.name == "nt":

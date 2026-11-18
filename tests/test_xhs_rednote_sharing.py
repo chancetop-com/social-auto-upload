@@ -320,7 +320,7 @@ def test_platform_stays_busy_while_its_browser_disconnects(creators, platform, m
     # Hold the browser connection at the end of the first actual command.
     # The second installation and the observer use their own connections.
     monkeypatch.setattr(Browser, "close", delayed_disconnect)
-    monkeypatch.setenv("HOME", str(profile.home))
+    monkeypatch.setattr("utils.profile_store._user_profile_directory", lambda: profile.home)
     monkeypatch.setenv("MLX_API_TOKEN", "")
     monkeypatch.setenv("ADSPOWER_API_KEY", "offline-key-0")
     monkeypatch.setenv("ADSPOWER_API_BASE", f"http://127.0.0.1:{profile.api_port}")

@@ -15,15 +15,18 @@ from utils.profile_store import ProfileStore
 @unittest.skipIf(os.name == "nt", "POSIX permissions and signals")
 class PrivateProfileStoreTests(unittest.TestCase):
     def test_two_processes_contend_until_holder_is_killed(self):
-        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, HOME=home):
+        with tempfile.TemporaryDirectory() as home, patch("utils.profile_store._user_profile_directory", return_value=Path(home)):
             child = subprocess.Popen(
                 [sys.executable, "-c",
                  "from utils.profile_store import ProfileStore\n"
-                 "import signal\n"
+                 "from pathlib import Path\n"
+                 "import signal, sys\n"
+                 "from unittest.mock import patch\n"
+                 "patch('utils.profile_store._user_profile_directory', return_value=Path(sys.argv[1])).start()\n"
                  "lock = ProfileStore('adspower', 'testing').try_lock('platform-instagram')\n"
                  "assert lock is not None\n"
                  "print('reserved', flush=True)\n"
-                 "signal.pause()"],
+                 "signal.pause()", home],
                 stdout=subprocess.PIPE, text=True,
             )
             with child:
@@ -43,7 +46,7 @@ class PrivateProfileStoreTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "darwin", "macOS extended ACLs")
     def test_extended_acl_cannot_expose_records_or_replace_profile_directory(self):
-        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, HOME=home):
+        with tempfile.TemporaryDirectory() as home, patch("utils.profile_store._user_profile_directory", return_value=Path(home)):
             store = ProfileStore("adspower", "acl-test")
             store.write_record({"phase": "active"})
             record, = Path(home).rglob("session.json")
@@ -57,7 +60,7 @@ class PrivateProfileStoreTests(unittest.TestCase):
                 ProfileStore("adspower", "new-profile")
 
     def test_reopening_private_record_rejects_unsafe_permissions_and_links(self):
-        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, HOME=home):
+        with tempfile.TemporaryDirectory() as home, patch("utils.profile_store._user_profile_directory", return_value=Path(home)):
             store = ProfileStore("adspower", "../untrusted/id")
             self.assertIsNone(store.read_record())
             store.write_record({"phase":"active"})

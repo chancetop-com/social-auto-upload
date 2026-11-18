@@ -66,7 +66,9 @@ def installations(tmp_path_factory):
         shutil.copyfile(SOURCE / 'conf.example.py', packages / 'conf.py')
         (packages / 'dependencies.pth').write_text('\n'.join(site.getsitepackages()) + '\n')
         entry = prefix / 'bin/sau'
-        entry.write_text(f'#!{prefix}/bin/python\nfrom sau_cli import main\nraise SystemExit(main())\n')
+        shutil.copyfile(SOURCE / 'tests/fixtures/offline_account.py', packages / 'offline_account.py')
+        entry.write_text(f'#!{prefix}/bin/python\nimport offline_account\nfrom sau_cli import main\n'
+                         'raise SystemExit(main())\n')
         entry.chmod(0o700)
         entries.append(entry)
     return entries
@@ -187,7 +189,7 @@ class OfflineProfile:
 
         self.api_port = stack.enter_context(serve(Provider))
         self.home = root / 'home'
-        self.home.mkdir()
+        self.home.mkdir(mode=0o700)
 
     def close_browser(self):
         if self.chrome.poll() is None:
@@ -200,7 +202,7 @@ class OfflineProfile:
         work.mkdir(exist_ok=True)
         command_env = {**os.environ, 'HOME': str(self.home), 'ADSPOWER_API_KEY': f'offline-key-{installation}',
                'ADSPOWER_API_BASE': f'http://{host}:{self.api_port}/', 'MLX_API_TOKEN': '',
-               'PYTHONPATH': '', 'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1',
+               'OFFLINE_OS_PROFILE': str(self.home), 'PYTHONPATH': '', 'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1',
                **(env or {})}
         child = subprocess.Popen([self.entries[installation], platform, action, '--profile-id', profile_id,
                                   *flags], env=command_env, cwd=work, text=True, stdout=subprocess.PIPE,
@@ -269,7 +271,10 @@ def test_checks_share_profile_until_both_leave(profile, desktop):
 
 
 def test_simultaneous_checks_have_one_winner_per_platform(profile):
-    children = [profile.command(i, 'instagram', '--account', f'alias-{i}') for i in (0, 1)]
+    alternate_home = profile.root / 'alternate-home'
+    alternate_home.mkdir(mode=0o700)
+    children = [profile.command(i, 'instagram', '--account', f'alias-{i}', env={'HOME': str(home)})
+                for i, home in enumerate((profile.home, alternate_home))]
     assert profile.arrived['instagram'].wait(12)
     deadline = time.monotonic() + 5
     while all(child.poll() is None for child in children) and time.monotonic() < deadline:
@@ -280,8 +285,12 @@ def test_simultaneous_checks_have_one_winner_per_platform(profile):
     assert loser.returncode == 1 and 'instagram' in output and '占用' in output
     assert profile.starts == ['shared'] and profile.stops == []
     assert profile.pages_requested == ['instagram']
+    peer = profile.command(1, 'tiktok', env={'HOME': str(alternate_home)})
+    profile.entered('tiktok', peer)
     profile.finish('instagram', winner)
-    assert profile.stops == ['shared']
+    assert not profile.stops
+    profile.finish('tiktok', peer)
+    assert profile.starts == profile.stops == ['shared']
 
 
 def test_failed_join_leaves_the_peer_and_private_record_intact(profile):
