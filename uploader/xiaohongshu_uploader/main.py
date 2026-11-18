@@ -706,10 +706,14 @@ async def _observe_publish(
     """
     started = time.monotonic()
     while True:
-        await _check_blocked(page, mode, publish_attempted=publish_clicked)
-
+        # 查询登录框期间可能跳转。只在同一路径完成分类后才认定发布成功。
         path = _current_path(page)
-        if path is not None and XHS_PUBLISH_PATH not in path:
+        await _check_blocked(page, mode, publish_attempted=publish_clicked)
+        if (
+            path is not None
+            and XHS_PUBLISH_PATH not in path
+            and _current_path(page) == path
+        ):
             return
 
         elapsed = time.monotonic() - started
