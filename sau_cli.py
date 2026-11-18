@@ -6,12 +6,7 @@ import asyncio
 import sys
 from typing import Sequence
 
-from sau_commands import (
-    article, douyin, kuaishou, xiaohongshu, bilibili, tencent, alipay, weibo,
-    hupu, facebook, facebook_page, instagram, youtube, baijiahao, dayu, xueqiu, zhihu,
-    tiktok, rednote,
-)
-from sau_commands.arguments import resolve_account_file
+from sau_commands import article, facebook, facebook_page, instagram, rednote, tiktok, xiaohongshu, youtube
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, credentials_conflict
 from utils.errors import (
     LoginRequiredError,
@@ -23,23 +18,12 @@ from utils.errors import (
 
 PLATFORMS = {
     "article": article,
-    "douyin": douyin,
-    "kuaishou": kuaishou,
     "xiaohongshu": xiaohongshu,
     "rednote": rednote,
-    "bilibili": bilibili,
-    "tencent": tencent,
-    "alipay": alipay,
-    "weibo": weibo,
-    "hupu": hupu,
     "facebook": facebook,
     "facebook-page": facebook_page,
     "instagram": instagram,
     "youtube": youtube,
-    "baijiahao": baijiahao,
-    "dayu": dayu,
-    "xueqiu": xueqiu,
-    "zhihu": zhihu,
     "tiktok": tiktok,
 }
 

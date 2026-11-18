@@ -1,5 +1,6 @@
 """The installed public CLI accepts existing configurations with optional fields absent."""
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -26,5 +27,9 @@ raise SystemExit(main(['--help']))
                 text=True, capture_output=True, timeout=30,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('tiktok', result.stdout)
-        self.assertIn('xueqiu', result.stdout)
+        choices = re.search(r'\{([^}]+)\}', result.stdout)
+        self.assertIsNotNone(choices, result.stdout)
+        self.assertEqual(set(choices.group(1).split(',')), {
+            'article', 'facebook', 'facebook-page', 'instagram', 'rednote',
+            'tiktok', 'xiaohongshu', 'youtube',
+        })
