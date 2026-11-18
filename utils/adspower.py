@@ -44,6 +44,20 @@ HttpGet = Callable[..., Any]
 HttpPost = Callable[..., Any]
 
 
+def _browser_endpoint(data: Any) -> str | None:
+    ws = data.get("ws") if isinstance(data, dict) else None
+    endpoint = ws.get("puppeteer") if isinstance(ws, dict) else None
+    if not isinstance(endpoint, str):
+        return None
+    try:
+        parts = urlsplit(endpoint.strip())
+        if parts.scheme in ("ws", "wss") and parts.hostname and parts.port != 0:
+            return endpoint
+    except ValueError:
+        pass
+    return None
+
+
 def _unreachable_message(base: str) -> str:
     return (
         f"无法连接 AdsPower Local API（{base}）。\n"
@@ -247,12 +261,10 @@ class AdspowerClient:
                 START_ACTION, payload, self._status_code(response)
             )
 
-        data = payload.get("data")
-        ws = data.get("ws") if isinstance(data, dict) else None
-        ws_url = ws.get("puppeteer") if isinstance(ws, dict) else None
-        if not isinstance(ws_url, str) or not ws_url.strip():
+        ws_url = _browser_endpoint(payload.get("data"))
+        if ws_url is None:
             raise StartIncompleteError(
-                f"{START_ACTION}失败：响应缺少 data.ws.puppeteer"
+                f"{START_ACTION}失败：响应缺少可用的 data.ws.puppeteer"
             )
         return ws_url
 
@@ -335,9 +347,8 @@ class AdspowerClient:
             return ProfileObservation(False)
         if state != "Active":
             raise RuntimeError("AdsPower Profile 的当前状态未知。")
-        ws = data.get("ws")
-        endpoint = ws.get("puppeteer") if isinstance(ws, dict) else None
-        if not isinstance(endpoint, str) or urlsplit(endpoint).scheme not in ("ws", "wss") or not urlsplit(endpoint).hostname:
+        endpoint = _browser_endpoint(data)
+        if endpoint is None:
             raise RuntimeError("AdsPower 当前连接不可用。")
         setting = data.get("headless")
         headless = None

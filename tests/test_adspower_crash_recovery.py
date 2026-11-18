@@ -145,3 +145,34 @@ def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profil
     profile.entered('instagram', next_command)
     profile.finish('instagram', next_command)
     assert api.starts == ['shared', 'shared'] and api.stops == ['shared']
+
+
+@pytest.mark.parametrize('reply', ['lost', 'missing-ws', 'malformed-ws'])
+def test_uncertain_start_preserves_browser_until_current_connection_is_available(profile, reply):
+    api = ControlledProvider(profile)
+    if reply == 'lost':
+        api.start = lambda request: None
+    else:
+        ws = {'puppeteer': 'invalid-cdp-endpoint'} if reply == 'malformed-ws' else {}
+        api.start = lambda request: request.reply({'code': 0, 'data': {'ws': ws}})
+
+    def refused():
+        child = profile.command(1, 'tiktok')
+        output = child.communicate(timeout=18)[0]
+        assert child.returncode == 1, output
+        assert 'offline-key-' not in output and profile.endpoint not in output
+        assert profile.pages_requested == [] and api.stops == []
+        return output
+
+    assert 'start' in refused()
+    for state, endpoint in [('Inactive', ''), ('Starting', ''), ('Unknown', ''), ('Active', '')]:
+        api.state, api.endpoint = state, endpoint
+        reason = '尚未确认' if state == 'Inactive' else 'observe'
+        assert reason in refused()
+        assert api.starts == ['shared']
+
+    api.state, api.endpoint = 'Active', profile.endpoint
+    recovered = profile.command(0, 'tiktok')
+    profile.entered('tiktok', recovered)
+    profile.finish('tiktok', recovered)
+    assert api.starts == api.stops == ['shared']
