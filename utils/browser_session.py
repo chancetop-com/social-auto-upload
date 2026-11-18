@@ -108,15 +108,16 @@ def _connection_hint(mode: str) -> str:
 def _startup_line(
     *,
     mode: str,
-    headless: bool,
+    headless: bool | None,
     identity: str,
     ignored: tuple[str, ...],
     extras: tuple[str, ...] = (),
 ) -> str:
     """Build the single "session is ready" line each managed run logs."""
+    setting = "unknown" if headless is None else ("headless" if headless else "headed")
     fields = (
         f"mode={mode}",
-        f"headless={'headless' if headless else 'headed'}",
+        f"headless={setting}",
         f"identity={identity}",
         f"ignored={', '.join(ignored) if ignored else '-'}",
         *extras,
@@ -221,7 +222,11 @@ async def browser_session(
 
     command = current_command()
     if command is not None:
-        async with command.session(playwright, managed, headless, _connect_over_cdp) as (browser, pages):
+        async with command.session(playwright, managed, headless, _connect_over_cdp) as (browser, pages, setting):
+            logger.info(_startup_line(
+                mode=managed.mode, headless=setting, identity=f"profile:{managed.profile_id}",
+                ignored=ignored, extras=(f"platform={command.platform}",),
+            ))
             yield BrowserSession(browser=browser, context=pages, mode=managed.mode)
         return
 

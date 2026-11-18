@@ -225,6 +225,12 @@ class AdspowerClient:
         if not self._is_success(response):
             raise self._http_error(PROBE_ACTION, response)
 
+    @staticmethod
+    def _verify_profile(data: dict, profile_id: str) -> None:
+        # The V2 request is scoped by profile_id. Some releases also echo it.
+        if any(key in data and data[key] != profile_id for key in ("profile_id", "user_id")):
+            raise RuntimeError("AdsPower 返回的 Profile 身份不符。")
+
     def start(self, profile_id: str, headless: bool) -> str:
         """Start a profile and return ``data.ws.puppeteer`` verbatim."""
         body = {
@@ -261,7 +267,10 @@ class AdspowerClient:
                 START_ACTION, payload, self._status_code(response)
             )
 
-        ws_url = _browser_endpoint(payload.get("data"))
+        data = payload.get("data")
+        if isinstance(data, dict):
+            self._verify_profile(data, profile_id)
+        ws_url = _browser_endpoint(data)
         if ws_url is None:
             raise StartIncompleteError(
                 f"{START_ACTION}失败：响应缺少可用的 data.ws.puppeteer"
@@ -338,10 +347,7 @@ class AdspowerClient:
 
     def observe(self, profile_id: str) -> ProfileObservation:
         data = self._active_data(profile_id)
-        # The V2 request is scoped by profile_id. Some releases also echo it.
-        for key in ("profile_id", "user_id"):
-            if key in data and data[key] != profile_id:
-                raise RuntimeError("AdsPower 返回的 Profile 身份不符。")
+        self._verify_profile(data, profile_id)
         state = data.get("status")
         if state == "Inactive":
             return ProfileObservation(False)

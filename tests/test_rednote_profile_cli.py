@@ -11,17 +11,16 @@ import conf
 import sau_cli
 from sau_commands import rednote as command
 from uploader.rednote_uploader import main as rednote
-from tests.fakes import FakeContext, FakePlaywright
+from tests.fakes import FakeContext, FakePage, FakePlaywright
 from tests.test_mlx_tiktok import _AsyncCM
 from tests.test_tiktok_profile_cli import ProbeLocator
 from utils.local_profile import acquire_local_profile
 
 
-class ProbePage:
+class ProbePage(FakePage):
     def __init__(self, context):
+        super().__init__()
         self.context = context
-        self.url = 'about:blank'
-        self.closed = False
     async def goto(self, url, **kwargs):
         state = self.context.state
         if state == 'network':
@@ -54,6 +53,7 @@ class RednoteProfileCliTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.stack.enter_context(patch.dict(os.environ, {'HOME': str(self.root), 'USERPROFILE': str(self.root)}))
         self.stack.enter_context(patch.object(conf, 'BASE_DIR', self.root))
         self.stack.enter_context(patch.object(conf, 'LOCAL_CHROME_PATH', ''))
         self.stack.enter_context(patch.object(conf, 'LOCAL_CHROME_HEADLESS', True))
@@ -344,11 +344,14 @@ class RednoteProfileCliTests(unittest.TestCase):
     def test_post_submit_outcomes_survive_cleanup_failure_without_resubmitting(self):
         from tests.test_xhs_submit import _note_page, _PublishButton
         media = self.root / 'image.png'; media.write_bytes(b'fixture')
-        for outcome, expected in [('success', 0), ('unknown', 9), ('login', 10), ('verification', 10)]:
+        for outcome, expected in [('success', 0), ('unknown', 9), ('login', 10), ('verification', 10), ('redirecting', 10)]:
             with self.subTest(outcome=outcome):
                 class Button(_PublishButton):
                     async def click(inner, **kwargs):
                         await super().click(**kwargs)
+                        if outcome == 'redirecting':
+                            page.redirect_on_dom_read = 'https://creator.rednote.com/login'
+                            return
                         suffix = {'success': '/publish/success', 'unknown': '/publish/publish', 'login': '/login', 'verification': '/website-login/captcha'}[outcome]
                         page.url = page.main_frame.url = 'https://creator.rednote.com' + suffix
                 page = _note_page(Button())
@@ -361,7 +364,7 @@ class RednoteProfileCliTests(unittest.TestCase):
                     self.assertEqual(out, 'Rednote note upload submitted: 1 images\n')
                 self.assertEqual(code, expected, err)
                 self.assertEqual(page._selectors['xhs-publish-btn'].click_count, 1)
-                self.assertEqual('publish_attempted=true' in err, outcome in ('login', 'verification'))
+                self.assertEqual('publish_attempted=true' in err, outcome in ('login', 'verification', 'redirecting'))
                 self.assertEqual(self.context.browser.close_calls, 0)
 
     def test_cancellation_and_page_failure_release_profile_without_relaunch(self):

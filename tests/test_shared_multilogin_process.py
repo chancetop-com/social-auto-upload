@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import threading
 from contextlib import ExitStack
 from urllib.parse import urlsplit
 
@@ -17,8 +18,8 @@ PROFILE = '5f25f9eb-2d65-4440-9d66-dcec611b4f29'
 
 
 class LauncherProfile(OfflineProfile):
-    def __init__(self, root, stack, entries, playwright):
-        super().__init__(root, stack, entries, playwright)
+    def __init__(self, root, stack, entries, playwright, *, sites=None):
+        super().__init__(root, stack, entries, playwright, sites=sites)
         self.folder = FOLDER
         self.start_fields = {}
         self.denied_tokens = set()
@@ -160,3 +161,98 @@ def test_cli_revalidates_membership_with_each_callers_credential(mlx):
                                    profile_id=PROFILE.upper())
     mlx.finish('instagram', first)
     assert mlx.starts == mlx.stops == [PROFILE]
+
+
+def test_launcher_cannot_attach_an_unverified_or_unsupported_resource(mlx):
+    mlx.active = True
+    for fields in (
+        {'profile_id': 'other'}, {'folder_id': 'other'}, {'is_quick': True},
+        {'browser_type': 'stealthfox'}, {'status': 'download_finished'},
+        {'message': ''}, {'message': '６５'}, {'message': '0'}, {'message': '65536'},
+        {'message': '1'}, {'message': 'token@localhost:9222'},
+    ):
+        mlx.observation_fields = fields
+        # A status-level message cannot furnish the automation port.
+        mlx.top_status['message'] = str(urlsplit(mlx.endpoint).port)
+        child = mlx.command(0, 'instagram')
+        output = child.communicate(timeout=6)[0]
+        assert child.returncode == 1, (fields, output)
+        assert not mlx.pages_requested and not mlx.starts and not mlx.stops
+        assert 'offline-key-' not in output and urlsplit(mlx.endpoint).netloc not in output
+    mlx.observation_fields.clear()
+    mlx.top_status['error_code'] = 'FAILED'
+    child = mlx.command(0, 'instagram')
+    output = child.communicate(timeout=6)[0]
+    assert child.returncode == 1, output
+    assert not mlx.pages_requested and not mlx.starts and not mlx.stops
+
+
+def test_simultaneous_cold_requests_start_once(mlx):
+    one = mlx.command(0, 'instagram')
+    two = mlx.command(1, 'tiktok')
+    mlx.entered('instagram', one)
+    mlx.entered('tiktok', two)
+    assert mlx.starts == [PROFILE]
+    mlx.finish('tiktok', two)
+    assert not mlx.stops
+    mlx.finish('instagram', one)
+    assert mlx.stops == [PROFILE]
+
+
+def test_distinct_profiles_can_use_the_same_platform(mlx):
+    other_root = mlx.root / 'second'
+    other_root.mkdir()
+    other = LauncherProfile(other_root, mlx.stack, mlx.entries, mlx.playwright)
+    other_id = '6e8e77e0-a211-4067-82c8-e57eff61a5fe'
+    other.home, other.launcher_port = mlx.home, mlx.launcher_port
+    mlx.profiles[other_id] = other
+    first = mlx.command(0, 'instagram')
+    second = other.command(1, 'instagram', profile_id=other_id)
+    mlx.entered('instagram', first)
+    other.entered('instagram', second)
+    mlx.finish('instagram', first)
+    assert mlx.stops == [PROFILE] and not other.stops
+    other.finish('instagram', second)
+    assert mlx.starts == [PROFILE] and other.starts == other.stops == [other_id]
+
+
+@pytest.mark.parametrize('action', ['check', 'upload-note'])
+def test_check_and_upload_hold_same_platform_until_login_failure(tmp_path, installations, action):
+    entered, release = threading.Event(), threading.Event()
+
+    class Login(Handler):
+        def do_GET(self):
+            entered.set()
+            release.wait(20)
+            self.respond(b'<form action="/login"><input name="username"></form>', 'text/html')
+
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = LauncherProfile(tmp_path, stack, installations, playwright,
+                                  sites={'www.tiktok.com': Login})
+        image = tmp_path / 'owned.png'
+        image.touch()
+        # Every upload observes a local login page before it can reach an editor.
+        def run(install, action):
+            flags = ['--images', str(image), '--no-publish'] if action == 'upload-note' else []
+            return profile.command(install, 'tiktok', *flags, action=action)
+
+        first = run(0, action)
+        assert entered.wait(12)
+        for contender in ('check', 'upload-note'):
+            second = run(1, contender)
+            output = second.communicate(timeout=5)[0]
+            assert second.returncode == 1 and 'tiktok' in output and '占用' in output, output
+        assert profile.starts == [PROFILE] and not profile.stops
+        release.set()
+        output = first.communicate(timeout=12)[0]
+        assert first.returncode == 10 and 'publish_attempted=true' not in output, output
+        assert profile.stops == [PROFILE]
+
+
+def test_launcher_status_rate_limit_keeps_cli_code(mlx):
+    mlx.status_code = 429
+    child = mlx.command(0, 'instagram')
+    output = child.communicate(timeout=5)[0]
+    assert child.returncode == 11 and '429' in output, output
+    assert not mlx.pages_requested and not mlx.starts and not mlx.stops

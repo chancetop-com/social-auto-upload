@@ -1,6 +1,7 @@
 """Exercise installed CLI entries against a loopback provider and isolated Chromium."""
 import json
 import os
+import re
 import shutil
 import site
 import ssl
@@ -122,12 +123,24 @@ class OfflineProfile:
             '--no-proxy-server', '--ignore-certificate-errors', f'--host-resolver-rules={rules}',
             'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         stack.callback(self.close_browser)
+        port_file = user_data / 'DevToolsActivePort'
         deadline = time.monotonic() + 15
-        while not (user_data / 'DevToolsActivePort').exists():
-            if self.chrome.poll() is not None or time.monotonic() >= deadline:
-                pytest.fail('Isolated Chromium did not start')
+        while True:
+            exit_code = self.chrome.poll()
+            if exit_code is not None:
+                pytest.fail(f'Isolated Chromium exited with code {exit_code} before CDP was ready')
+            try:
+                content = port_file.read_text(encoding='ascii')
+            except FileNotFoundError:
+                content = ''
+            # Chromium creates the file before the port and full browser UUID are visible.
+            ready = re.fullmatch(r'([1-9][0-9]{0,4})\n(/devtools/browser/[0-9a-fA-F-]{36})\n?', content)
+            if ready and int(ready[1]) <= 65535:
+                port, path = ready.groups()
+                break
+            if time.monotonic() >= deadline:
+                pytest.fail(f'Chromium CDP endpoint incomplete after 15s ({len(content)} characters read)')
             time.sleep(.02)
-        port, path = (user_data / 'DevToolsActivePort').read_text().splitlines()
         self.endpoint = f'ws://127.0.0.1:{port}{path}'
         self.reported_endpoint = self.endpoint
         self.browser = playwright.chromium.connect_over_cdp(self.endpoint, no_defaults=True)
@@ -317,3 +330,15 @@ def test_same_platform_can_check_two_distinct_profiles(profile):
     assert profile.stops == ['shared'] and other.stops == []
     other.finish('instagram', second)
     assert other.starts == other.stops == ['second']
+
+
+def test_simultaneous_cold_checks_start_once_for_different_platforms(profile):
+    instagram = profile.command(0, 'instagram')
+    tiktok = profile.command(1, 'tiktok')
+    profile.entered('instagram', instagram)
+    profile.entered('tiktok', tiktok)
+    assert profile.starts == ['shared']
+    profile.finish('tiktok', tiktok)
+    assert profile.stops == []
+    profile.finish('instagram', instagram)
+    assert profile.stops == ['shared']
