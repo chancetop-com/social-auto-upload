@@ -1,12 +1,13 @@
 """Crash and recovery through separate installed commands and a local provider."""
 import json
+import signal
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from tests.test_shared_adspower_process import Handler, installations, profile, serve
+from tests.test_shared_adspower_process import Handler, OfflineProfile, installations, profile, serve
 
 
 pytestmark = pytest.mark.skipif(sys.platform == 'win32', reason='POSIX console-script fixture')
@@ -94,6 +95,7 @@ def test_rejected_start_is_terminal_and_next_authorized_command_can_start(profil
     assert api.starts == ['shared', 'shared'] and api.stops == ['shared']
     assert api.observations == ['Inactive', 'Inactive']
 
+
 @pytest.mark.parametrize('finishes', [True, False], ids=['eventually-stopped', 'still-ambiguous'])
 def test_join_waits_for_last_stop_after_its_response_is_lost(profile, finishes):
     api = ControlledProvider(profile)
@@ -176,3 +178,97 @@ def test_uncertain_start_preserves_browser_until_current_connection_is_available
     profile.entered('tiktok', recovered)
     profile.finish('tiktok', recovered)
     assert api.starts == api.stops == ['shared']
+
+def platform_pages(profile, platform):
+    inspector = profile.browser.new_browser_cdp_session()
+    inspector.send('Target.getTargets')
+    inspector.detach()
+    return [page for page in profile.browser.contexts[0].pages
+            if urlsplit(page.url).hostname == f'www.{platform}.com']
+
+
+def kill_cli(child):
+    child.kill()
+    child.communicate(timeout=8)
+    assert child.returncode == -signal.SIGKILL
+
+
+def test_killing_one_cli_releases_only_its_platform_and_preserves_both_drafts(profile):
+    first = profile.command(0, 'instagram')
+    profile.entered('instagram', first)
+    peer = profile.command(1, 'tiktok')
+    profile.entered('tiktok', peer)
+    old, = platform_pages(profile, 'instagram')
+    peer_page, = platform_pages(profile, 'tiktok')
+    old.locator('textarea').fill('killed command draft')
+    peer_page.locator('textarea').fill('surviving command draft')
+    kill_cli(first)
+    # The interrupted navigation can now finish. Chromium coalesces identical
+    # pending script requests from different tabs on this origin.
+    profile.gates['instagram'].set()
+    old.wait_for_load_state('load', timeout=5000)
+    profile.gates['instagram'].clear()
+
+    blocked = profile.command(0, 'tiktok')
+    output = blocked.communicate(timeout=8)[0]
+    assert blocked.returncode == 1 and 'tiktok' in output and '占用' in output
+    assert profile.stops == []
+    assert peer_page.locator('textarea').input_value() == 'surviving command draft'
+    peer_page.locator('textarea').fill('edited after crash')
+    profile.arrived['instagram'].clear()
+    next_command = profile.command(1, 'instagram')
+    profile.entered('instagram', next_command)
+    new, = [p for p in platform_pages(profile, 'instagram') if p != old]
+    assert new.locator('textarea').input_value() == 'draft'
+    assert old.locator('textarea').input_value() == 'killed command draft'
+    profile.finish('instagram', next_command)
+    assert profile.starts == ['shared'] and profile.stops == []
+    assert peer_page.locator('textarea').input_value() == 'edited after crash'
+    assert old.locator('textarea').input_value() == 'killed command draft'
+    profile.finish('tiktok', peer)
+    assert profile.stops == ['shared'] and not profile.active
+
+
+@pytest.mark.parametrize('reopened', [False, True], ids=['original-browser', 'desktop-reopened'])
+def test_all_killed_commands_recover_from_the_current_profile(profile, reopened):
+    first = profile.command(0, 'instagram')
+    profile.entered('instagram', first)
+    peer = profile.command(1, 'tiktok')
+    profile.entered('tiktok', peer)
+    old, = platform_pages(profile, 'instagram')
+    old.locator('textarea').fill('original browser draft')
+    kill_cli(first)
+    kill_cli(peer)
+    for gate in profile.gates.values():
+        gate.set()
+    assert profile.active and profile.stops == []
+
+    if reopened:
+        profile.close_browser()
+        root = profile.root / 'manually-reopened'
+        root.mkdir()
+        current = OfflineProfile(root, profile.stack, profile.entries, profile.playwright)
+        current.home = profile.home
+        current.api_port = profile.api_port
+        current.active = True
+        assert current.endpoint != profile.endpoint
+        profile.profiles['shared'] = current
+        marked = current.browser.contexts[0].pages[0]
+        marked.set_content('<textarea>desktop draft</textarea>')
+    else:
+        current = profile
+        old.wait_for_load_state('load', timeout=5000)
+        current.arrived['instagram'].clear()
+        current.gates['instagram'].clear()
+        marked = old
+
+    recovered = current.command(1, 'instagram')
+    current.entered('instagram', recovered)
+    editor, = [p for p in platform_pages(current, 'instagram') if p != marked]
+    assert editor.locator('textarea').input_value() == 'draft'
+    assert marked.locator('textarea').input_value() == ('desktop draft' if reopened else 'original browser draft')
+    current.finish('instagram', recovered)
+    assert profile.starts == ['shared'] and current.stops == ['shared']
+    if reopened:
+        assert not current.starts and not profile.stops
+    assert not current.active and current.chrome.poll() is not None
