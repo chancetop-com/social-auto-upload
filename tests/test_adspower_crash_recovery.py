@@ -22,6 +22,7 @@ class ControlledProvider:
         self.starts = []
         self.stops = []
         self.observations = []
+        self.observed = threading.Event()
         self.start = self.start_ok
         self.stop = self.stop_ok
         api = self
@@ -36,6 +37,7 @@ class ControlledProvider:
                     assert parse_qs(url.query) == {'profile_id': ['shared']}
                     api.observations.append(api.state)
                     data = {'status': api.state, 'ws': {'puppeteer': api.endpoint}}
+                    api.observed.set()
                 self.reply({'code': 0, 'data': data})
 
             def do_POST(self):
@@ -91,3 +93,28 @@ def test_rejected_start_is_terminal_and_next_authorized_command_can_start(profil
     profile.finish('instagram', legitimate)
     assert api.starts == ['shared', 'shared'] and api.stops == ['shared']
     assert api.observations == ['Inactive', 'Inactive']
+
+@pytest.mark.parametrize('finishes', [True, False], ids=['eventually-stopped', 'still-ambiguous'])
+def test_join_waits_for_last_stop_after_its_response_is_lost(profile, finishes):
+    api = ControlledProvider(profile)
+    api.stop = lambda request: None  # Close the HTTP connection without a response.
+    first = profile.command(0, 'instagram')
+    profile.entered('instagram', first)
+    assert '停止或清理失败' in profile.finish('instagram', first)
+
+    api.stop = api.stop_ok
+    api.observed.clear()
+    successor = profile.command(1, 'tiktok')
+    assert api.observed.wait(8)
+    assert api.observations[-1] == 'Active'
+    if finishes:
+        api.state = 'Inactive'
+        profile.entered('tiktok', successor)
+        profile.finish('tiktok', successor)
+        assert api.starts == api.stops == ['shared', 'shared']
+        assert api.state == 'Inactive'
+    else:
+        output = successor.communicate(timeout=16)[0]
+        assert successor.returncode == 1 and '停止' in output and '超时' in output
+        assert api.starts == api.stops == ['shared']
+        assert profile.pages_requested == ['instagram'] and api.state == 'Active'

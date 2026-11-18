@@ -87,8 +87,15 @@ class ManagedCommand:
 
         await _provider_call(provider, "probe")
         state = await _provider_call(provider, "observe")
-        if record and record["phase"] == "stopping" and state.active:
-            raise RuntimeError(f"{self.mode} Profile 上次停止尚未确认。")
+        if record and record["phase"] == "stopping":
+            # The previous Stop response was lost. Never resend it: the open
+            # browser may have been reopened from the desktop in the meantime.
+            deadline = monotonic() + LIFECYCLE_TIMEOUT
+            while state.active:
+                if monotonic() >= deadline:
+                    raise RuntimeError(f"{self.mode} Profile 上次停止尚未确认，等待超时。")
+                await asyncio.sleep(0.5)
+                state = await _provider_call(provider, "observe")
         if state.active:
             if not state.endpoint:
                 raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
