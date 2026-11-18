@@ -18,37 +18,7 @@ import sau_cli
 from uploader.meta_uploader.facebook_uploader import main
 
 
-COMPOSER_HTML = '''<!doctype html><meta charset="utf-8">
-<style>
-body { margin: 0; font: 16px sans-serif; min-height: 180vh; }
-#shade { position: fixed; inset: 0; background: #3338; z-index: 10; }
-#composer { position: fixed; top: 12vh; left: 10vw; width: 70vw;
- max-height: 75vh; overflow: auto; background: white; padding: 20px; z-index: 11; }
-[contenteditable] { min-height: 90px; border: 1px solid #888; padding: 10px; }
-button { padding: 14px; margin: 12px; }
-[hidden] { display: none !important; }
-</style>
-<main><input type="file" accept="image/*,video/*" multiple hidden
- onchange="document.querySelector('#shade').hidden=false;document.querySelector('#composer').hidden=false"></main>
-<div id="shade" hidden></div>
-<div id="composer" role="dialog" aria-modal="true" hidden><form>
-<button type="button">Close</button>
-<div role="textbox" contenteditable="true">Existing draft</div>
-<button type="button" onclick="submitFixture()">Post</button></form></div>
-<p id="success"></p>
-<script>
-let submitted = 0;
-async function submitFixture() {
- await fetch('/fixture-published', {method:'POST', body:JSON.stringify({
-   caption:document.querySelector('[contenteditable]').innerText,
-   clicks:++submitted, files:[...document.querySelector('input').files].map(f=>f.name),
-   width:innerWidth, height:innerHeight
- })});
- document.querySelector('#composer').hidden=true;
- document.querySelector('#shade').hidden=true;
- document.querySelector('#success').innerText='Your post has been published.';
-}
-</script>'''
+COMPOSER_HTML = (Path(__file__).parent / 'fixtures' / 'facebook' / 'personal.html').read_text()
 
 
 class FacebookNaturalViewportTests(unittest.IsolatedAsyncioTestCase):
