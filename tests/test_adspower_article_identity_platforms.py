@@ -263,6 +263,26 @@ class IdentityFormatTests(unittest.TestCase):
 
 
 class InstagramManagedCheckTests(_SeamHarness, unittest.TestCase):
+    def test_shared_startup_log_records_profile_settings_and_ignored_option_names(self):
+        from loguru import logger
+
+        stack, *_ = self.start_seam(instagram_command)
+        lines = io.StringIO()
+        sink = logger.add(lines, format="{message}")
+        try:
+            with stack:
+                code, _, err = _run(["instagram", "check", "--profile-id", PROFILE, "--headed"])
+        finally:
+            logger.remove(sink)
+        self.assertEqual(code, 0, err)
+        ready, = [line for line in lines.getvalue().splitlines() if "browser session ready" in line]
+        self.assertIn("mode=adspower", ready)
+        self.assertIn(f"identity=profile:{PROFILE}", ready)
+        self.assertIn("headless=headed", ready)
+        self.assertIn("ignored=launch_kwargs, context_kwargs", ready)
+        self.assertNotIn("127.0.0.1", lines.getvalue())
+        self.assertNotIn(KEY, lines.getvalue())
+
     def test_check_reports_that_the_profile_owns_the_instagram_identity(self):
         stack, calls, client, playwright, browser, context, logger = self.start_seam(
             instagram_command, logger_attr="logger"
