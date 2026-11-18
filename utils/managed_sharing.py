@@ -16,6 +16,9 @@ from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
 
 LIFECYCLE_TIMEOUT = 10.0
+# An admitted member must outlast a contender's provider reads, CDP retries
+# and final status query before giving up the obligation to stop the browser.
+DEPARTURE_TIMEOUT = 180.0
 _current = ContextVar("managed_command", default=None)
 
 
@@ -53,8 +56,8 @@ class ManagedCommand:
         self.provider = None
 
     @asynccontextmanager
-    async def lifecycle(self):
-        deadline = monotonic() + LIFECYCLE_TIMEOUT
+    async def lifecycle(self, timeout=LIFECYCLE_TIMEOUT):
+        deadline = monotonic() + timeout
         lock = self.store.try_lock("lifecycle")
         while lock is None:
             if monotonic() >= deadline:
@@ -164,7 +167,7 @@ class ManagedCommand:
         try:
             if self.member is None:
                 return
-            async with self.lifecycle():
+            async with self.lifecycle(timeout=DEPARTURE_TIMEOUT):
                 self.member.close()
                 self.member = None
                 self.reservation.close()

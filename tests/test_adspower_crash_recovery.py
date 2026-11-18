@@ -1,6 +1,7 @@
 """Crash and recovery through separate installed commands and a local provider."""
 import json
 import signal
+import subprocess
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
@@ -24,6 +25,7 @@ class ControlledProvider:
         self.stops = []
         self.observations = []
         self.observed = threading.Event()
+        self.observe = self.current_state
         self.start = self.start_ok
         self.stop = self.stop_ok
         api = self
@@ -36,8 +38,8 @@ class ControlledProvider:
                 else:
                     assert url.path == '/api/v2/browser-profile/active'
                     assert parse_qs(url.query) == {'profile_id': ['shared']}
-                    api.observations.append(api.state)
-                    data = {'status': api.state, 'ws': {'puppeteer': api.endpoint}}
+                    data = api.observe()
+                    api.observations.append(data['status'])
                     api.observed.set()
                 self.reply({'code': 0, 'data': data})
 
@@ -53,6 +55,9 @@ class ControlledProvider:
                 self.respond(json.dumps(data).encode(), 'application/json')
 
         browser.api_port = browser.stack.enter_context(serve(Provider))
+
+    def current_state(self):
+        return {'status': self.state, 'ws': {'puppeteer': self.endpoint}}
 
     def start_ok(self, request):
         self.state = 'Active'
@@ -272,3 +277,33 @@ def test_all_killed_commands_recover_from_the_current_profile(profile, reopened)
     if reopened:
         assert not current.starts and not profile.stops
     assert not current.active and current.chrome.poll() is not None
+
+def test_slow_failing_join_cannot_strand_the_last_admitted_commands_profile(profile):
+    api = ControlledProvider(profile)
+    departing = profile.command(0, 'tiktok')
+    profile.entered('tiktok', departing)
+    editor, = platform_pages(profile, 'tiktok')
+    observing, release = threading.Event(), threading.Event()
+
+    def slow_unknown():
+        observing.set()
+        release.wait(25)
+        return {'status': 'Unknown'}
+
+    api.observe = slow_unknown
+    contender = profile.command(1, 'instagram')
+    assert observing.wait(8)
+    try:
+        profile.gates['tiktok'].set()
+        if not editor.is_closed():
+            editor.wait_for_event('close', timeout=8000)
+        # A provider call is allowed to outlast a new admission's 10s lock
+        # budget. The departing CLI still owns its last-member obligation.
+        with pytest.raises(subprocess.TimeoutExpired):
+            departing.wait(timeout=11)
+    finally:
+        release.set()
+    output = contender.communicate(timeout=8)[0]
+    assert contender.returncode == 1 and 'observe' in output
+    profile.finish('tiktok', departing)
+    assert api.starts == api.stops == ['shared'] and api.state == 'Inactive'
