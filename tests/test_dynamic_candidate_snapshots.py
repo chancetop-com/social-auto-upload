@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from patchright.async_api import Locator, async_playwright
 
-from uploader.baijiahao_uploader import main as baijiahao
 from uploader.rednote_uploader import main as rednote
 from uploader.tk_uploader import main_chrome as tiktok
 from uploader.xiaohongshu_uploader import main as xhs
@@ -177,7 +176,7 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
 
     async def menu(self, labels):
         items = "".join(
-            f'<div class="item cheetah-select-item" role="option"><span class="name">{label}</span></div>'
+            f'<div class="item" role="option"><span class="name">{label}</span></div>'
             for label in labels
         )
         await self.page.set_content(
@@ -191,19 +190,6 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
         started = time.monotonic()
         with self.refresh_after_capture(xhs.XHS_TOPIC_ITEM_SELECTOR) as refreshed:
             candidate, _ = await self.xhs._scan_topic_candidate(self.page, "travel")
-        self.assertTrue(refreshed)
-        self.assertIsNone(candidate)
-        self.assertLess(time.monotonic() - started, 1)
-
-    async def test_baijiahao_refresh_does_not_wait_for_removed_candidates(self):
-        await self.menu(["other-a", "other-b"])
-        started = time.monotonic()
-        with self.refresh_after_capture(
-            baijiahao.COLLECTION_OPTION_SELECTOR
-        ) as refreshed:
-            candidate = await baijiahao._find_exact_option(
-                self.page.locator(baijiahao.COLLECTION_OPTION_SELECTOR), "travel"
-            )
         self.assertTrue(refreshed)
         self.assertIsNone(candidate)
         self.assertLess(time.monotonic() - started, 1)
@@ -228,7 +214,7 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_selected_candidate_does_not_change_after_reorder(self):
         original_tiktok_click = tiktok._humanized_click
-        for platform in ("xhs", "baijiahao", "tiktok"):
+        for platform in ("xhs", "tiktok"):
             with self.subTest(platform=platform):
                 await self.menu(["#travel", "#other"])
                 await self.page.locator(".item").evaluate_all("""items => {
@@ -255,15 +241,9 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
                             )
                         )
                 else:
-                    if platform == "xhs":
-                        candidate, _ = await self.xhs._scan_topic_candidate(
-                            self.page, "travel"
-                        )
-                    else:
-                        candidate = await baijiahao._find_exact_option(
-                            self.page.locator(baijiahao.COLLECTION_OPTION_SELECTOR),
-                            "#travel",
-                        )
+                    candidate, _ = await self.xhs._scan_topic_candidate(
+                        self.page, "travel"
+                    )
                     self.assertIsNotNone(candidate)
                     try:
                         await reorder_then_click(self.humanizer, candidate)

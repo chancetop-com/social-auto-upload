@@ -1,0 +1,178 @@
+"""Crash and recovery through separate installed commands and a local provider."""
+import json
+import sys
+import threading
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
+
+from tests.test_shared_adspower_process import Handler, installations, profile, serve
+
+
+pytestmark = pytest.mark.skipif(sys.platform == 'win32', reason='POSIX console-script fixture')
+
+
+class ControlledProvider:
+    """Choose when each real HTTP request completes and what the client sees."""
+
+    def __init__(self, browser):
+        self.browser = browser
+        self.state = 'Inactive'
+        self.endpoint = browser.endpoint
+        self.starts = []
+        self.stops = []
+        self.observations = []
+        self.observed = threading.Event()
+        self.start = self.start_ok
+        self.stop = self.stop_ok
+        api = self
+
+        class Provider(Handler):
+            def do_GET(self):
+                url = urlsplit(self.path)
+                if url.path == '/status':
+                    data = {}
+                else:
+                    assert url.path == '/api/v2/browser-profile/active'
+                    assert parse_qs(url.query) == {'profile_id': ['shared']}
+                    api.observations.append(api.state)
+                    data = {'status': api.state, 'ws': {'puppeteer': api.endpoint}}
+                    api.observed.set()
+                self.reply({'code': 0, 'data': data})
+
+            def do_POST(self):
+                request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                assert request['profile_id'] == 'shared'
+                operation = self.path.rsplit('/', 1)[-1]
+                assert operation in ('start', 'stop')
+                getattr(api, operation + 's').append(request['profile_id'])
+                getattr(api, operation)(self)
+
+            def reply(self, data):
+                self.respond(json.dumps(data).encode(), 'application/json')
+
+        browser.api_port = browser.stack.enter_context(serve(Provider))
+
+    def start_ok(self, request):
+        self.state = 'Active'
+        request.reply({'code': 0, 'data': {'ws': {'puppeteer': self.endpoint}}})
+
+    def stop_ok(self, request):
+        self.state = 'Inactive'
+        request.reply({'code': 0})
+
+
+def test_definitively_rejected_stop_preserves_result_and_next_command_can_join(profile):
+    api = ControlledProvider(profile)
+    api.stop = lambda request: request.send_error(429)
+    first = profile.command(0, 'instagram')
+    profile.entered('instagram', first)
+    output = profile.finish('instagram', first)
+    assert '停止或清理失败' in output
+    assert api.starts == api.stops == ['shared'] and api.state == 'Active'
+
+    api.stop = api.stop_ok
+    second = profile.command(1, 'tiktok')
+    profile.entered('tiktok', second)
+    profile.finish('tiktok', second)
+    assert api.starts == ['shared'] and api.stops == ['shared', 'shared']
+    assert api.state == 'Inactive'
+
+
+def test_rejected_start_is_terminal_and_next_authorized_command_can_start(profile):
+    api = ControlledProvider(profile)
+    api.start = lambda request: request.send_error(403)
+    refused = profile.command(0, 'instagram')
+    output = refused.communicate(timeout=10)[0]
+    assert refused.returncode == 1 and 'start' in output
+    assert api.stops == [] and profile.pages_requested == []
+
+    api.start = api.start_ok
+    legitimate = profile.command(1, 'instagram')
+    profile.entered('instagram', legitimate)
+    profile.finish('instagram', legitimate)
+    assert api.starts == ['shared', 'shared'] and api.stops == ['shared']
+    assert api.observations == ['Inactive', 'Inactive']
+
+@pytest.mark.parametrize('finishes', [True, False], ids=['eventually-stopped', 'still-ambiguous'])
+def test_join_waits_for_last_stop_after_its_response_is_lost(profile, finishes):
+    api = ControlledProvider(profile)
+    api.stop = lambda request: None  # Close the HTTP connection without a response.
+    first = profile.command(0, 'instagram')
+    profile.entered('instagram', first)
+    assert '停止或清理失败' in profile.finish('instagram', first)
+
+    api.stop = api.stop_ok
+    api.observed.clear()
+    successor = profile.command(1, 'tiktok')
+    assert api.observed.wait(8)
+    assert api.observations[-1] == 'Active'
+    if finishes:
+        api.state = 'Inactive'
+        profile.entered('tiktok', successor)
+        profile.finish('tiktok', successor)
+        assert api.starts == api.stops == ['shared', 'shared']
+        assert api.state == 'Inactive'
+    else:
+        output = successor.communicate(timeout=16)[0]
+        assert successor.returncode == 1 and '停止' in output and '超时' in output
+        assert api.starts == api.stops == ['shared']
+        assert profile.pages_requested == ['instagram'] and api.state == 'Active'
+
+
+def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profile(profile):
+    api = ControlledProvider(profile)
+    attaching = threading.Event()
+
+    class DepartedBrowser(Handler):
+        def do_GET(self):
+            attaching.set()
+            self.send_error(410)
+
+    port = profile.stack.enter_context(serve(DepartedBrowser))
+    api.endpoint = f'ws://127.0.0.1:{port}/devtools/browser/previous'
+    interrupted = profile.command(0, 'instagram')
+    assert attaching.wait(10)
+    interrupted.kill()
+    interrupted.communicate(timeout=8)
+    assert api.starts == ['shared'] and api.stops == [] and not profile.pages_requested
+
+    # AdsPower acknowledged the last Start with its CDP endpoint. The desktop
+    # has since closed that browser, before the killed client could open a tab.
+    api.state = 'Inactive'
+    api.endpoint = profile.endpoint
+    next_command = profile.command(1, 'instagram')
+    profile.entered('instagram', next_command)
+    profile.finish('instagram', next_command)
+    assert api.starts == ['shared', 'shared'] and api.stops == ['shared']
+
+
+@pytest.mark.parametrize('reply', ['lost', 'missing-ws', 'malformed-ws'])
+def test_uncertain_start_preserves_browser_until_current_connection_is_available(profile, reply):
+    api = ControlledProvider(profile)
+    if reply == 'lost':
+        api.start = lambda request: None
+    else:
+        ws = {'puppeteer': 'invalid-cdp-endpoint'} if reply == 'malformed-ws' else {}
+        api.start = lambda request: request.reply({'code': 0, 'data': {'ws': ws}})
+
+    def refused():
+        child = profile.command(1, 'tiktok')
+        output = child.communicate(timeout=18)[0]
+        assert child.returncode == 1, output
+        assert 'offline-key-' not in output and profile.endpoint not in output
+        assert profile.pages_requested == [] and api.stops == []
+        return output
+
+    assert 'start' in refused()
+    for state, endpoint in [('Inactive', ''), ('Starting', ''), ('Unknown', ''), ('Active', '')]:
+        api.state, api.endpoint = state, endpoint
+        reason = '尚未确认' if state == 'Inactive' else 'observe'
+        assert reason in refused()
+        assert api.starts == ['shared']
+
+    api.state, api.endpoint = 'Active', profile.endpoint
+    recovered = profile.command(0, 'tiktok')
+    profile.entered('tiktok', recovered)
+    profile.finish('tiktok', recovered)
+    assert api.starts == api.stops == ['shared']
