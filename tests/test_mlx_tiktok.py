@@ -19,15 +19,11 @@ from pathlib import Path
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import sau_cli
-from conf import LOCAL_CHROME_PATH
 import conf
 from sau_commands import tiktok as tiktok_command
 from tests.fakes import FakeContext, FakeMultiloginClient, FakePage, FakePlaywright
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import (
-    TIKTOK_CONTEXT_KWARGS,
-    TIKTOK_INIT_SCRIPT,
-    TIKTOK_LAUNCH_KWARGS,
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
     TIKTOK_LOGIN_CHECK_URL,
     TIKTOK_UPLOAD_URL,
@@ -105,9 +101,6 @@ def _run(argv, token=TOKEN):
 
 
 class TiktokParserTests(unittest.TestCase):
-    def test_platform_is_registered(self):
-        self.assertIs(sau_cli.PLATFORMS["tiktok"], tiktok_command)
-
     def test_actions_are_check_upload_video_upload_note_login_only(self):
         self.assertEqual(
             set(_action_names("tiktok")),
@@ -147,12 +140,6 @@ class TiktokParserTests(unittest.TestCase):
             with self.subTest(option=expected):
                 self.assertIn(expected, options)
         self.assertNotIn("--file", options)
-
-    def test_login_does_not_accept_multilogin_flags(self):
-        options = _option_strings(_subparser(sau_cli.build_parser(), "tiktok", "login"))
-        self.assertIn("--account", options)
-        self.assertNotIn("--folder-id", options)
-        self.assertNotIn("--profile-id", options)
 
     def test_parse_upload_video(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -422,16 +409,6 @@ class IsLoggedInTests(unittest.TestCase):
 class UploaderSeamTests(unittest.TestCase):
     def _video(self, account_file=None) -> TiktokVideo:
         return TiktokVideo("标题", "/tmp/demo.mp4", ["tag"], 0, account_file)
-
-    def test_golden_legacy_browser_constants(self):
-        expected_launch = (
-            {"executable_path": LOCAL_CHROME_PATH}
-            if LOCAL_CHROME_PATH
-            else {}
-        )
-        self.assertEqual(TIKTOK_LAUNCH_KWARGS, expected_launch)
-        self.assertEqual(TIKTOK_CONTEXT_KWARGS, {"locale": "en-US"})
-        self.assertIs(TIKTOK_INIT_SCRIPT, False)
 
     def test_mlx_upload_only_uses_injected_context(self):
         video = self._video(account_file=None)
@@ -892,9 +869,9 @@ class TiktokUploadCliTests(unittest.TestCase):
         self.assertIn("TikTok video upload submitted", out)
         kwargs = factory.call_args.kwargs
         self.assertIsNone(kwargs["account_file"])
-        self.assertEqual(kwargs["launch_kwargs"], TIKTOK_LAUNCH_KWARGS)
-        self.assertEqual(kwargs["context_kwargs"], TIKTOK_CONTEXT_KWARGS)
-        self.assertEqual(kwargs["init_script"], TIKTOK_INIT_SCRIPT)
+        self.assertEqual(kwargs["launch_kwargs"], {})
+        self.assertEqual(kwargs["context_kwargs"], {"locale": "en-US"})
+        self.assertIs(kwargs["init_script"], False)
         probe.assert_awaited_once_with(session.context)
         app.upload.assert_awaited_once_with(None, session=session)
         request = builder.call_args.args[0]

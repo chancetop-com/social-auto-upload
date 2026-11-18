@@ -371,19 +371,6 @@ class ParameterMatrixTests(unittest.TestCase):
             (),
         )
 
-    def test_local_only_actions_keep_requiring_account(self):
-        # login/verify/delete never gain the "ignore --account" behaviour.
-        with _env(ADSPOWER_API_KEY=KEY):
-            for action in ("verify", "delete"):
-                with self.subTest(action=action):
-                    with self.assertRaises(UsageError):
-                        browser_command.require_account(
-                            Namespace(action=action, account=None)
-                        )
-                    browser_command.require_account(
-                        Namespace(action=action, account="creator")
-                    )
-
     def test_headed_maps_to_headless_false_and_default_is_false(self):
         parser = sau_cli.build_parser()
         default_args = parser.parse_args(

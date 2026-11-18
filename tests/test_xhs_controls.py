@@ -79,11 +79,13 @@ class ReadSwitchStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(await read_switch_state(loc), True)
 
     async def test_both_probes_failing_returns_none(self):
-        loc = SwitchLocator(
-            attribute_error=RuntimeError("detached"),
-            checked_error=RuntimeError("not a checkbox"),
-        )
-        self.assertIsNone(await read_switch_state(loc))
+        for attribute_error in (None, RuntimeError("detached")):
+            with self.subTest(attribute_error=attribute_error):
+                loc = SwitchLocator(
+                    attribute_error=attribute_error,
+                    checked_error=RuntimeError("not a checkbox"),
+                )
+                self.assertIsNone(await read_switch_state(loc))
 
     async def test_missing_is_checked_returns_none(self):
         class NoCheckedMethod:
@@ -91,10 +93,6 @@ class ReadSwitchStateTests(unittest.IsolatedAsyncioTestCase):
                 return None
 
         self.assertIsNone(await read_switch_state(NoCheckedMethod()))
-
-    async def test_none_is_not_false(self):
-        loc = SwitchLocator(checked_error=RuntimeError("unknown"))
-        self.assertIsNot(await read_switch_state(loc), False)
 
 
 if __name__ == "__main__":

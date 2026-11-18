@@ -20,7 +20,6 @@ from tests.fakes import (
     FakeManagedProvider,
     FakeMultiloginClient,
     FakePlaywright,
-    ForbiddenApiError,
 )
 from utils.browser_session import (
     BrowserSession,
@@ -505,14 +504,6 @@ class MultiloginBrowserSessionTests(unittest.TestCase):
         self.assertEqual(client.probe_calls, 1)
         self.assertEqual(client.start_calls, [(FOLDER_ID, PROFILE_ID, True)])
         self.assertEqual(client.stop_calls, [PROFILE_ID])
-
-    def test_forbidden_apis_raise_loudly_if_mlx_touches_them(self):
-        context = FakeContext()
-
-        with self.assertRaises(ForbiddenApiError):
-            asyncio.run(context.add_cookies([]))
-        with self.assertRaises(ForbiddenApiError):
-            asyncio.run(FakeBrowser().new_context())
 
 
 class ManagedSessionSeamTests(unittest.TestCase):

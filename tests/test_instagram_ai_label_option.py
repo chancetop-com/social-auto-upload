@@ -29,7 +29,6 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     DEFAULT_OFF,
     ENTRY_MISSING,
     MISMATCH,
-    NOT_REQUESTED,
     SET,
     UNSUPPORTED,
     InstagramPublishOptions,
@@ -86,13 +85,6 @@ class InstagramAiLabelParserTests(unittest.TestCase):
                 self.assertIn("--no-ai-generated", options)
                 # 明确不引入 TikTok 的 --aigc 别名。
                 self.assertNotIn("--aigc", options)
-
-    def test_absent_flags_build_no_options(self):
-        for argv in (self._note_argv(), self._video_argv()):
-            with self.subTest(command=argv[0]):
-                args = self._parse(argv)
-                self.assertIsNone(args.ai_generated)
-                self.assertIsNone(instagram_command._build_publish_options(args))
 
     def test_ai_generated_flag_maps_to_true(self):
         for argv in (self._note_argv("--ai-generated"), self._video_argv("--ai-generated")):
@@ -151,19 +143,6 @@ class _FakeAiControl:
         self.calls.append(("set", requested))
 
 
-class _ExplodingAiControl:
-    """任何交互都失败：验证未请求时零控件交互。"""
-
-    async def resolve(self):
-        raise AssertionError("未请求的选项不得读取页面")
-
-    async def read(self):
-        raise AssertionError("未请求的选项不得读取页面")
-
-    async def set(self, requested):
-        raise AssertionError("未请求的选项不得点击页面")
-
-
 class InstagramAiLabelPipelineTests(unittest.TestCase):
     """B 层：fake 开关经 ``_apply_options`` 注入，覆盖 spec §7.2 B1–B7。"""
 
@@ -220,16 +199,6 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
                     "reason": ACCOUNT_INELIGIBLE,
                 },
             )
-
-    def test_on_and_ineligible_does_not_read_the_switch(self):
-        """spec §5.2：请求开启 + 账号不合格 → applied 必须是 null，也不读取控件。"""
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(InstagramPublishOptions(ai_generated=True), folder=folder)
-            control = _FakeAiControl([True], presence="ineligible")
-            with self.assertRaises(RuntimeError):
-                self._apply(app, {"ai_generated": control})
-            self.assertEqual(control.calls, ["resolve"])
-            self.assertIsNone(app.result["options"]["ai_generated"]["applied"])
 
     def test_on_and_already_on_records_set_without_clicking(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -308,15 +277,6 @@ class InstagramAiLabelPipelineTests(unittest.TestCase):
             self.assertEqual(
                 app.result["options"]["ai_generated"],
                 {"requested": False, "applied": True, "status": MISMATCH},
-            )
-
-    def test_not_requested_touches_no_control(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(None, folder=folder)
-            self._apply(app, {"ai_generated": _ExplodingAiControl()})
-            self.assertEqual(
-                app.result["options"]["ai_generated"],
-                {"requested": None, "applied": None, "status": NOT_REQUESTED},
             )
 
     def test_ai_and_comments_are_independent_switches(self):

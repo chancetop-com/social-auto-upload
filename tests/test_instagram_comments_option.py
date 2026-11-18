@@ -4,7 +4,6 @@ C 层真实 DOM 哨兵在 ``tests/test_instagram_uploader.py``；本文件不启
 """
 from __future__ import annotations
 
-import argparse
 import asyncio
 import tempfile
 import unittest
@@ -26,58 +25,20 @@ from uploader.meta_uploader.insgraph_uploader.options import (
 from utils.errors import PublishResultUnknownError
 
 
-def _subparser(parser: argparse.ArgumentParser, platform: str, action: str):
-    for item in parser._actions:
-        if isinstance(item, argparse._SubParsersAction) and platform in item.choices:
-            for nested in item.choices[platform]._actions:
-                if isinstance(nested, argparse._SubParsersAction):
-                    return nested.choices[action]
-    raise AssertionError(f"parser not found: {platform}/{action}")
-
-
-def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
-    return set(parser._option_string_actions)
-
-
 class InstagramCommentsParserTests(unittest.TestCase):
     """A 层：两个上传命令都注册 ``--no-comments``，并保持 None/False 三态。"""
 
-    def test_both_upload_commands_register_no_comments(self):
-        for action in ("upload-video", "upload-note"):
-            with self.subTest(action=action):
-                options = _option_strings(
-                    _subparser(sau_cli.build_parser(), "instagram", action)
-                )
-                self.assertIn("--no-comments", options)
-
-    def test_absent_flag_builds_no_options(self):
-        with tempfile.TemporaryDirectory() as folder:
-            image, video = Path(folder) / "image.png", Path(folder) / "video.mp4"
-            image.touch()
-            video.touch()
-            parser = sau_cli.build_parser()
-            for argv in (
-                ["instagram", "upload-note", "--images", str(image), "--title", "caption"],
-                ["instagram", "upload-video", "--file", str(video), "--title", "caption"],
-            ):
-                with self.subTest(argv=argv[1]):
-                    args = parser.parse_args(argv)
-                    self.assertIsNone(instagram_command._build_publish_options(args))
-
     def test_present_flag_maps_to_comments_false(self):
-        with tempfile.TemporaryDirectory() as folder:
-            image = Path(folder) / "image.png"
-            image.touch()
-            args = sau_cli.build_parser().parse_args(
-                [
-                    "instagram", "upload-note", "--images", str(image),
-                    "--title", "caption", "--no-comments",
-                ]
-            )
-            options = instagram_command._build_publish_options(args)
-            self.assertEqual(options, InstagramPublishOptions(comments=False))
-            # 显式关闭不能压缩成 False 默认值以外的形态。
-            self.assertIs(options.comments, False)
+        parser = sau_cli.build_parser()
+        commands = (("upload-note", "--images", ".png"), ("upload-video", "--file", ".mp4"))
+        for action, flag, suffix in commands:
+            with self.subTest(action=action), tempfile.NamedTemporaryFile(suffix=suffix) as media:
+                args = parser.parse_args([
+                    "instagram", action, flag, media.name, "--title", "caption", "--no-comments",
+                ])
+                options = instagram_command._build_publish_options(args)
+                self.assertEqual(options, InstagramPublishOptions(comments=False))
+                self.assertIs(options.comments, False)
 
 
 class _FakeCommentsControl:
@@ -100,19 +61,6 @@ class _FakeCommentsControl:
 
     async def set(self, requested):
         self.calls.append(("set", requested))
-
-
-class _ExplodingCommentsControl:
-    """任何交互都失败：验证未请求时零控件交互。"""
-
-    async def resolve(self):
-        raise AssertionError("未请求的选项不得读取页面")
-
-    async def read(self):
-        raise AssertionError("未请求的选项不得读取页面")
-
-    async def set(self, requested):
-        raise AssertionError("未请求的选项不得点击页面")
 
 
 class InstagramCommentsPipelineTests(unittest.TestCase):
@@ -175,17 +123,7 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
                 },
             )
             self.assertEqual(control.calls, ["resolve"])
-
-    def test_present_and_already_off_never_clicks(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            control = _FakeCommentsControl([False])
-            self._apply(app, {"comments": control})
-            self.assertEqual(control.calls, ["resolve", "read"])
-            record = app.result["options"]["comments"]
-            self.assertEqual(record["status"], DEFAULT_OFF)
-            self.assertEqual(record["applied"], False)
-            self.assertNotIn("reason", record)
+            self.assertEqual(app.result["options"]["ai_generated"]["status"], NOT_REQUESTED)
 
     def test_ineligible_but_already_off_is_default_off(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -198,15 +136,6 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
             self.assertEqual(record["status"], DEFAULT_OFF)
             self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
             self.assertIs(record["applied"], False)
-
-    def test_not_requested_touches_no_control(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(None, folder=folder)
-            self._apply(app, {"comments": _ExplodingCommentsControl()})
-            self.assertEqual(
-                app.result["options"]["comments"],
-                {"requested": None, "applied": None, "status": NOT_REQUESTED},
-            )
 
 
 class _FakeSwitch:

@@ -237,11 +237,16 @@ class InstagramOptionValidationTests(unittest.TestCase):
 class InstagramCommandRequestTests(unittest.TestCase):
     """CLI 接线：三态透传、请求校验先于浏览器 / 托管 Profile。"""
 
-    def test_build_publish_options_returns_none_when_everything_is_none(self):
-        args = SimpleNamespace(
-            location=None, alt_text=None, no_comments=False, ai_generated=None
-        )
-        self.assertIsNone(instagram_command._build_publish_options(args))
+    def test_upload_commands_leave_optional_settings_unset(self):
+        parser = sau_cli.build_parser()
+        commands = (('upload-note', '--images', '.png'), ('upload-video', '--file', '.mp4'))
+        for action, flag, suffix in commands:
+            with self.subTest(action=action), tempfile.NamedTemporaryFile(suffix=suffix) as media:
+                args = parser.parse_args(['instagram', action, flag, media.name, '--title', 'caption'])
+                self.assertIsNone(args.location)
+                self.assertIsNone(args.ai_generated)
+                self.assertIsNone(getattr(args, 'alt_text', None))
+                self.assertIsNone(instagram_command._build_publish_options(args))
 
     def test_build_publish_options_preserves_tri_state(self):
         args = SimpleNamespace(
@@ -343,6 +348,7 @@ class InstagramOptionPipelineTests(unittest.TestCase):
             self.assertEqual(comments.interactions, ['resolve', 'read'])
             record = app.result['options']['comments']
             self.assertEqual(record['status'], DEFAULT_OFF)
+            self.assertIs(record['applied'], False)
             self.assertNotIn('reason', record)
 
     def test_apply_order_follows_spec(self):
@@ -368,71 +374,36 @@ class InstagramOptionPipelineTests(unittest.TestCase):
                     'location', 'alt_text'
                 } else DEFAULT_OFF)
 
-    def test_missing_entry_is_unsupported_and_blocks_publish(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(
-                InstagramPublishOptions(location='Shanghai'), folder=folder
-            )
-            controls = {'location': _FakeControl([], presence='missing')}
-            with self.assertRaisesRegex(
-                RuntimeError, r'location=unsupported\(entry_missing\)'
-            ):
-                self._apply(app, controls)
-            record = app.result['options']['location']
-            self.assertEqual(record['status'], UNSUPPORTED)
-            self.assertEqual(record['reason'], ENTRY_MISSING)
-            self.assertIsNone(record['applied'])
-            # 其余未请求项保持 not_requested，且结果文件同样保留四项。
-            self.assertEqual(
-                app.result['options']['comments']['status'], NOT_REQUESTED
-            )
-            saved = json.loads(Path(app.result_file).read_text(encoding='utf-8'))
-            self.assertEqual(set(saved['options']), set(OPTION_KEYS))
-
-    def test_toggle_missing_with_off_request_is_default_off(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            self._apply(app, {'comments': _FakeControl([], presence='missing')})
-            record = app.result['options']['comments']
-            self.assertEqual(record['status'], DEFAULT_OFF)
-            self.assertEqual(record['reason'], ENTRY_MISSING)
-            self.assertIsNone(record['applied'])
-            self.assertEqual(app.result['options']['ai_generated']['status'], NOT_REQUESTED)
-
-    def test_toggle_ineligible_but_satisfied_is_default_off(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            control = _FakeControl([False], presence='ineligible')
-            self._apply(app, {'comments': control})
-            record = app.result['options']['comments']
-            self.assertEqual(record['status'], DEFAULT_OFF)
-            self.assertEqual(record['reason'], ACCOUNT_INELIGIBLE)
-            # 不可用但可读时仍记录实际状态（spec §5.2 applied 列）。
-            self.assertIs(record['applied'], False)
-            self.assertEqual(control.interactions, ['resolve', 'read'])
-
-    def test_set_then_matching_readback_records_set(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(InstagramPublishOptions(ai_generated=True), folder=folder)
-            control = _FakeControl([False, True])
-            self._apply(app, {'ai_generated': control})
-            self.assertEqual(
-                control.interactions, ['resolve', 'read', ('set', True), 'read']
-            )
-            self.assertEqual(
-                app.result['options']['ai_generated'],
-                {'requested': True, 'applied': True, 'status': SET},
-            )
+    def test_unavailable_location_is_unsupported_and_blocks_publish(self):
+        cases = (('missing', ENTRY_MISSING), ('ineligible', ACCOUNT_INELIGIBLE))
+        for presence, reason in cases:
+            with self.subTest(presence=presence), tempfile.TemporaryDirectory() as folder:
+                app = self._app(InstagramPublishOptions(location='Shanghai'), folder=folder)
+                control = _FakeControl([], presence=presence)
+                with self.assertRaisesRegex(RuntimeError, rf'location=unsupported\({reason}\)'):
+                    self._apply(app, {'location': control})
+                self.assertEqual(control.interactions, ['resolve'])
+                record = app.result['options']['location']
+                self.assertEqual(record['status'], UNSUPPORTED)
+                self.assertEqual(record['reason'], reason)
+                self.assertIsNone(record['applied'])
+                self.assertEqual(app.result['options']['comments']['status'], NOT_REQUESTED)
+                saved = json.loads(Path(app.result_file).read_text(encoding='utf-8'))
+                self.assertEqual(set(saved['options']), set(OPTION_KEYS))
 
     def test_set_then_mismatched_readback_raises(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(InstagramPublishOptions(ai_generated=True), folder=folder)
-            with self.assertRaisesRegex(RuntimeError, 'ai_generated=mismatch'):
-                self._apply(app, {'ai_generated': _FakeControl([False, False])})
-            self.assertEqual(
-                app.result['options']['ai_generated'],
-                {'requested': True, 'applied': False, 'status': MISMATCH},
-            )
+        cases = (('ai_generated', True, False), ('location', 'Shanghai', 'Beijing'))
+        for key, requested, observed in cases:
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as folder:
+                app = self._app(InstagramPublishOptions(**{key: requested}), folder=folder)
+                control = _FakeControl([observed])
+                with self.assertRaisesRegex(RuntimeError, f'{key}=mismatch'):
+                    self._apply(app, {key: control})
+                self.assertEqual(control.interactions, ['resolve', 'read', ('set', requested), 'read'])
+                self.assertEqual(
+                    app.result['options'][key],
+                    {'requested': requested, 'applied': observed, 'status': MISMATCH},
+                )
 
     def test_control_declared_mismatch_keeps_applied_value_and_detail(self):
         """控件判定请求无法表达时，保留它读到的实际值并把文案并入聚合错误。"""

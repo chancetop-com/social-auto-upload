@@ -227,19 +227,15 @@ class UsageAndExitCodeTests(unittest.TestCase):
                 code = sau_cli.main(argv)
         return code, err.getvalue()
 
-    def test_local_missing_account_exits_2(self):
-        code, err = self._run(["youtube", "check"])
-        self.assertEqual(code, 2)
-        self.assertIn("--account", err)
-
     def test_local_missing_account_exits_2_for_every_login_and_check(self):
         for platform in sau_cli.PLATFORMS:
             for action in ("check", "login"):
                 if action not in _action_names(platform):
                     continue
                 with self.subTest(platform=platform, action=action):
-                    code, _ = self._run([platform, action])
+                    code, err = self._run([platform, action])
                     self.assertEqual(code, 2)
+                    self.assertIn("--account", err)
 
     def test_mlx_missing_folder_or_profile_exits_2(self):
         code, _ = self._run(["youtube", "check", "--account", "creator"], SENTINEL_TOKEN)

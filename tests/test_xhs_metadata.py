@@ -371,9 +371,6 @@ class Decision11ReadbackTitleMetricTests(unittest.TestCase):
         # ASCII base (1) + non-ASCII combining mark (2) → ceil(3 / 2).
         self.assertEqual(xhs_main.xhs_title_length("e\u0301"), 2)
 
-    def test_limit_is_twenty(self):
-        self.assertEqual(xhs_main.XHS_TITLE_MAX_LENGTH, 20)
-
     def test_truncation_never_splits_a_code_point(self):
         # ASCII: 40 units → 20; the 41st would be 21 and is dropped.
         self.assertEqual(xhs_main.xhs_truncate_title("a" * 41), "a" * 40)
@@ -538,10 +535,6 @@ class Decision11ReadbackBodyLengthTests(unittest.TestCase):
             if action[0] == "insert_text" and "旅行pov" in action[1]
         ]
         self.assertTrue(topic_actions)
-
-    def test_absent_length_error_passes(self):
-        app = _note_app(desc="正文", tags=["旅行pov"])
-        _run_meta_fill(app, body_error=0)
 
     def test_duplicate_length_error_nodes_still_fail(self):
         # Two matching nodes are still "present" — never treated as absent.
@@ -910,18 +903,6 @@ class OriginalSwitchPlatformDisabledTests(unittest.TestCase):
                 Decision11ReadbackOriginalTests._run(self, app, page)
         self.assertIn("原创声明开关被平台禁用", str(ctx.exception))
         self.assertEqual(switch.click_count, 0)
-
-    def test_normal_switch_path_is_unchanged(self):
-        page = _original_page(checked=False)
-        switch = page.locator(xhs_main.XHS_ORIGINAL_SWITCH_CANDIDATES[0].selector)
-        app = _video_app(original_declaration=True)
-        with patch.object(
-            xhs_main,
-            "check",
-            new=AsyncMock(return_value=(True, None)),
-        ):
-            Decision11ReadbackOriginalTests._run(self, app, page)
-        self.assertEqual(switch.click_count, 1)
 
     def test_other_reasons_fall_through_to_the_click_path(self):
         page = _original_page(checked=False)

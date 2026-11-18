@@ -863,7 +863,7 @@ _LOCATION_HTML = '''
 <!-- 真实结构：portal 滚动容器挂在页面根，候选行是它的直接子节点 -->
 <div id="suggestions" style="overflow-y:auto; max-height:240px; width:320px"></div>
 <script>
-  const locationCandidates = ['Shanghai, China', 'Hangzhou', 'Shanghai'];
+  const locationCandidates = ['Shanghai, China', 'Hangzhou', 'Shanghai', 'SHANGHAI'];
   const locationInput = document.querySelector('input[placeholder="Add location"]');
   locationInput.addEventListener('input', () => {
     const list = document.getElementById('suggestions');
@@ -930,10 +930,10 @@ class InstagramLocationOptionDomTests(unittest.TestCase):
                         # applied 是页面候选标签，不是原始请求值。
                         self.assertEqual(record['applied'], 'Shanghai')
                         self.assertEqual(record['requested'], '  shanghai ')
-                        # 模糊候选 "Shanghai, China" 确实出现过，但没有被点击。
-                        self.assertIn(
-                            'Shanghai, China',
+                        # 同名候选规范化后相同，必须点第一个精确匹配。
+                        self.assertEqual(
                             await page.locator('body').get_attribute('data-candidates'),
+                            'Shanghai, China|Shanghai|SHANGHAI',
                         )
                         self.assertEqual(
                             await page.locator('body').get_attribute('data-clicked'),

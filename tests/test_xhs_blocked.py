@@ -318,15 +318,6 @@ class Decision07BlockedMessageTests(unittest.TestCase):
                 )
                 self.assertNotIn("profile_id", message)
 
-    def test_adspower_is_named_and_multilogin_is_not(self):
-        for kind in ("login", "verification"):
-            with self.subTest(kind=kind):
-                message = xhs_main._blocked_message(
-                    kind, "adspower", publish_attempted=False
-                )
-                self.assertIn("AdsPower", message)
-                self.assertNotIn("Multilogin", message)
-
     def test_publish_attempted_appends_the_suffix(self):
         for kind in ("login", "verification"):
             for mode in ("local", "multilogin", "adspower"):

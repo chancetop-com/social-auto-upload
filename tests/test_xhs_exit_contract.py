@@ -5,16 +5,7 @@ One row = one failure type:
 
     scenario → exception / fields → expected exit code → stderr assertion
 
-The mirror only exercises scenarios that already work through
-``sau_cli.main()``.  As of ticket 41 every spec §4 failure type has a row and
-:data:`PENDING` is empty; the meta-tests below fail if a row is neither covered
-nor pending.
-
-This file deliberately does **not** parse ``docs/CLI.md``: that file is a
-derived projection and must not define the contract (spec §4).
-
-All tests are offline: ``sau_cli.dispatch`` is replaced with a scripted
-outcome, so no browser, network, or platform uploader runs.
+Each scenario runs through ``sau_cli.main()`` with a scripted dispatch outcome.
 """
 
 from __future__ import annotations
@@ -41,7 +32,6 @@ from utils.errors import (
 EXIT_CODES = frozenset({0, 1, 2, 9, 10, 11, 130})
 
 #: The complete scenario set, one entry per spec §4 failure type.
-#: ``covered | PENDING`` must equal this set (see meta-tests).
 FULL_SET = frozenset(
     {
         "publish-success",
@@ -265,11 +255,6 @@ ROWS: tuple[ExitRow, ...] = (
     ),
 )
 
-#: Scenarios whose mechanism is not implemented yet.  Empty as of ticket 41:
-#: every spec §4 failure type now has a runnable row in :data:`ROWS`.
-PENDING: dict[str, str] = {}
-
-
 
 @dataclass(frozen=True)
 class RunResult:
@@ -353,43 +338,12 @@ class Decision13ParityExitMirrorTests(unittest.TestCase):
 
 
 class Decision13ParityExitRegistryTests(unittest.TestCase):
-    """Meta-tests that keep the table honest as later tickets land."""
-
     def test_every_exit_code_in_the_contract_has_a_covered_row(self):
         covered = {row.expected_code for row in ROWS}
         self.assertEqual(covered, set(EXIT_CODES))
 
-    def test_covered_and_pending_cover_the_full_scenario_set(self):
-        covered = {row.scenario for row in ROWS}
-        self.assertEqual(
-            covered & set(PENDING),
-            set(),
-            "a scenario cannot be both covered and pending",
-        )
-        self.assertEqual(
-            covered | set(PENDING),
-            set(FULL_SET),
-            "add the missing scenario to ROWS or PENDING",
-        )
-
-    def test_every_pending_entry_names_its_follow_up_ticket(self):
-        for scenario, reason in PENDING.items():
-            with self.subTest(scenario=scenario):
-                self.assertTrue(reason.strip())
-                self.assertIn("ticket", reason.lower())
-
-    def test_pending_is_empty(self):
-        """Ticket 41 closure: no spec §4 row may remain unexecuted."""
-
-        self.assertEqual(PENDING, {}, "move the row into ROWS and delete its PENDING entry")
-
-
-    def test_scenario_names_are_unique(self):
-        names = [row.scenario for row in ROWS]
-        self.assertEqual(len(names), len(set(names)))
-
-    def test_no_row_is_outside_the_full_set(self):
-        self.assertLessEqual({row.scenario for row in ROWS}, set(FULL_SET))
+    def test_every_contract_scenario_has_one_row(self):
+        self.assertCountEqual([row.scenario for row in ROWS], FULL_SET)
 
 
 if __name__ == "__main__":

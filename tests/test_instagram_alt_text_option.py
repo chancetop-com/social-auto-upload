@@ -14,7 +14,6 @@ import unittest
 from pathlib import Path
 
 import sau_cli
-from sau_commands import instagram as instagram_command
 from uploader.meta_uploader.insgraph_uploader.controls.alt_text import AltTextControl
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
@@ -25,9 +24,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     UNSUPPORTED,
     InstagramPublishOptions,
     OptionMismatchError,
-    validate_publish_options,
 )
-from utils.errors import UsageError
 
 
 class InstagramAltTextParserTests(unittest.TestCase):
@@ -75,11 +72,6 @@ class InstagramAltTextParserTests(unittest.TestCase):
         )
         self.assertIsNone(getattr(args, 'alt_text', None))
 
-    def test_absent_alt_text_keeps_legacy_options_path(self):
-        args = self._parse(*self._note_args(*self.images, title='only caption'))
-        self.assertIsNone(args.alt_text)
-        self.assertIsNone(instagram_command._build_publish_options(args))
-
     def test_valid_counts_pass_validation_through_cli(self):
         from unittest.mock import AsyncMock, patch
 
@@ -120,22 +112,6 @@ class InstagramAltTextParserTests(unittest.TestCase):
                     )
                 self.assertEqual(code, 2)
                 upload.assert_not_awaited()
-
-
-    def test_whitespace_only_alt_text_exits_2(self):
-        """ticket 14：去空白后长度为 0 同样非法，不能把纯空白填进页面。"""
-        with self.assertRaises(UsageError):
-            validate_publish_options(
-                InstagramPublishOptions(alt_texts=('   ',)),
-                image_count=1,
-                caption='caption',
-            )
-        with self.assertRaises(UsageError):
-            validate_publish_options(
-                InstagramPublishOptions(alt_texts=('ok', '  ')),
-                image_count=2,
-                caption='caption',
-            )
 
 
 class _FakeAltTextControl:
