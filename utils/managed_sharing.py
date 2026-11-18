@@ -160,7 +160,12 @@ class ManagedCommand:
                     if not record or record.get("phase") != "active":
                         raise RuntimeError("托管 Profile 的共享记录无效。")
                     self.store.write_record({**record, "phase": "stopping"})
-                    await _provider_call(self.provider, "stop")
+                    try:
+                        await _provider_call(self.provider, "stop")
+                    except RateLimitedError:
+                        # The provider rejected this operation before dispatch.
+                        self.store.clear_record()
+                        raise
                     self.store.clear_record()
         except Exception:
             logger.warning("{} Profile 停止或清理失败，可能仍在运行。", self.mode)
