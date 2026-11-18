@@ -5,6 +5,8 @@ Type: grilling
 Status: resolved
 Assignee: LukeChen
 
+当前实施范围见[规格的验收矩阵](../spec.md#testing-decisions)。下方问答保留调整前的决策记录。先完成 [#20 平台移除](20-remove-platforms.md)，再验收保留平台的页面归属。原微博、知乎弹窗与文章剪贴板场景已撤销。
+
 ## Question
 
 为每个已有托管 check 和发布入口确定隔离边界与逐项验证方法。Instagram 编辑中遇到 TikTok 回退到第一个标签页、微博打开子窗口、不同平台的两个文章编辑器先后写入共享剪贴板时，怎样保证一条命令只导航及清理自己创建的页面，且实际提交给平台的内容属于本命令？包括探测登录态的临时页面。讨论并行情形时，以[谁负责加入、离开和停止共享托管会话](02-process-lifecycle.md)确定的加入条件为准。
