@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Blocked by: None
+Blocked by: 20
 
 批次：第一批 · [托管 Profile 默认共享规格](../spec.md)
 

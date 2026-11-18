@@ -6,6 +6,8 @@ Status: resolved
 Assignee: LukeChen
 Blocked by: 02, 03, 04
 
+当前验收采用[规格的 20 个托管入口](../spec.md#testing-decisions)。下方问答记录原清单及其来由。[工单 #20](20-remove-platforms.md) 移除相应平台后，旧清单中的 24 项及其专属场景退出验收。两家 provider 的生命周期、页面隔离和 macOS 实测要求继续适用。
+
 ## Question
 
 哪些场景用双进程测试、真实浏览器双连接、各平台动作测试及两家桌面应用的测试 Profile 分别覆盖？如何验证从空闲启动的共享会话只需一次 Start 和 Stop、先退出者不影响同伴、各平台页面和内容互不干扰，以及本地模式和发布结果契约兼容？真实验证应如何在最终发表前停止？
