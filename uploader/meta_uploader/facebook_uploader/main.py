@@ -439,8 +439,8 @@ class FacebookPost:
                     raise
                 except Exception:
                     pass  # A disconnected page cannot replace the primary outcome.
-                if self._publish_attempted:
-                    raise self._ensure_publish_budget().timeout_error(True)
+            if self._publish_attempted:
+                raise self._ensure_publish_budget().timeout_error(True)
             raise
         if session.managed:
             _raise_if_login_required(page, publish_attempted=True)

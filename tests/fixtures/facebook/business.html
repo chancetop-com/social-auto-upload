@@ -18,7 +18,28 @@
   <button role="button">Cancel</button><button role="button">Draft</button>
   <button role="button" onclick="publish()">Publish</button>
 </footer>
+<section id="reel" data-surface="lib:bizweb_create_reel" hidden>
+  <div data-surface="bizweb_create_reel:left_panel">
+    <span id="filename"></span><span>100%</span><img alt="Facebook">
+    <input type="checkbox" role="switch">
+  </div>
+  <div role="button" aria-labelledby="upload" aria-current="step">Upload</div>
+  <div role="button" aria-labelledby="edit">Edit</div>
+  <div role="button" aria-labelledby="share">Share</div>
+  <footer data-surface="bizweb_create_reel:footer">
+    <button role="button">Back</button>
+    <button role="button" onclick="advanceReel(this)">Next</button>
+  </footer>
+</section>
 <script>
+let step = 0;
+function advanceReel(button) {
+  if (step === 2) { publish(); return; }
+  const steps = reel.querySelectorAll('[aria-labelledby]');
+  steps[step].removeAttribute('aria-current');
+  steps[++step].setAttribute('aria-current', 'step');
+  if (step === 2) button.textContent = 'Publish';
+}
 function selectPage(name, id) {
   actor.textContent = name;
   history.replaceState({}, '', '?asset_id=' + id);
@@ -26,6 +47,12 @@ function selectPage(name, id) {
 }
 selectPage('Page AB', '222');
 file.onchange = () => {
+  if (file.files[0].name.endsWith('.mp4')) {
+    filename.textContent = file.files[0].name;
+    reel.hidden = false;
+    footer.hidden = true;
+    return;
+  }
   const preview = document.createElement('img');
   preview.alt = 'Image preview';
   media.append(preview, Object.assign(document.createElement('span'), {textContent:'1 x 1'}));
@@ -37,5 +64,15 @@ async function publish() {
     caption: document.querySelector('[contenteditable]').innerText, file: file.files[0].name
   });
   await fetch('/api/graphql', {method:'POST', body:post});
+  if (!reel.hidden) {
+    const completion = document.createElement('div');
+    completion.setAttribute('role', 'dialog');
+    completion.setAttribute('aria-labelledby', 'completion-title');
+    completion.tabIndex = -1;
+    completion.innerHTML = '<h2 id="completion-title"></h2><button>Close</button><button>Done</button>';
+    completion.querySelector('h2').textContent = post.get('caption');
+    completion.querySelectorAll('button').forEach(b => b.onclick = () => completion.remove());
+    document.body.append(completion);
+  }
 }
 </script>

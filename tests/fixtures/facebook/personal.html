@@ -26,7 +26,9 @@ async function submitFixture() {
    actor:document.querySelector('#actor').innerText, id:new URL(document.querySelector('#actor').href).searchParams.get('id'),
    width:innerWidth, height:innerHeight
  })});
- if (await response.text() === 'login') { location.href='/login/'; return; }
+ const outcome = await response.text();
+ if (outcome === 'login') { location.href='/login/'; return; }
+ if (outcome === 'unconfirmed') return;
  document.querySelector('#composer').hidden=true;
  document.querySelector('#shade').hidden=true;
  document.querySelector('#success').innerText='Your post has been published.';

@@ -571,6 +571,11 @@ class MetaBusinessUploader(BaseVideoUploader):
         budget.check_pre_click()
         if getattr(self, '_local_mode', False):
             await _check_local_expiry(page)
+        elif self.publish_not_before is not None:
+            _raise_if_login_required(page)
+            assets = parse_qs(urlparse(page.url).query).get('asset_id', [])
+            if assets != [self.result['page_id']]:
+                raise RuntimeError('等待后无法确认原定 Page 的 asset_id，未提交')
         self.result['status'] = 'submission_unknown'
         self.result_file.parent.mkdir(parents=True, exist_ok=True)
         self.result_file.write_text(json.dumps(self.result, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -594,6 +599,8 @@ class MetaBusinessUploader(BaseVideoUploader):
             response = await response_info.value
             if getattr(self, '_local_mode', False):
                 await _check_local_expiry(page, publish_attempted=True)
+            else:
+                _raise_if_login_required(page, publish_attempted=True)
         except BrowserTimeoutError:
             raise budget.timeout_error(publish_clicked) from None
         try:
