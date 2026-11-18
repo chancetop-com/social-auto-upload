@@ -456,7 +456,7 @@ class UploaderSeamTests(unittest.TestCase):
         self.assertFalse(context.closed)
 
         page_ops.assert_awaited_once()
-        self.assertTrue(page_ops.await_args.kwargs["multilogin"])
+        self.assertTrue(page_ops.await_args.kwargs["managed"])
         self.assertEqual(page_ops.await_args.kwargs["budget"].deadline, 1900.0)
 
     def test_mlx_upload_opens_a_fresh_page_beside_existing_tabs(self):

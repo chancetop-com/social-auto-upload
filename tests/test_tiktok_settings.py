@@ -1738,7 +1738,7 @@ class TiktokOptionFlowTests(unittest.TestCase):
         resolver = _install(video, _controls(privacy=privacy))
 
         asyncio.run(
-            video._upload_on_page(_OptionPage(), multilogin=False, budget=None)
+            video._upload_on_page(_OptionPage(), managed=False, budget=None)
         )
 
         resolver.assert_awaited_once()
@@ -1755,7 +1755,7 @@ class TiktokOptionFlowTests(unittest.TestCase):
         video.resolve_option_controls = resolver
 
         asyncio.run(
-            video._upload_on_page(_OptionPage(), multilogin=False, budget=None)
+            video._upload_on_page(_OptionPage(), managed=False, budget=None)
         )
 
         resolver.assert_not_awaited()

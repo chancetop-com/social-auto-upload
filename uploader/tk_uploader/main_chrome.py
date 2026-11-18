@@ -1246,15 +1246,14 @@ class TiktokBaseUploader(BaseVideoUploader):
 
     async def upload_in(self, session: BrowserSession) -> None:
         """Upload through an injected session without owning its lifecycle."""
-        multilogin = session.managed
-        if multilogin:
+        if session.managed:
             page = await session.context.new_page()
         else:
             page = await _local_upload_page(session.context)
         budget = self.start_publish_budget()
         self._publish_attempted = False
         try:
-            await self._upload_on_page(page, multilogin=multilogin, budget=budget)
+            await self._upload_on_page(page, managed=session.managed, budget=budget)
         except (LoginRequiredError, PublishResultUnknownError):
             raise
         except Exception:
@@ -1274,11 +1273,11 @@ class TiktokBaseUploader(BaseVideoUploader):
         self,
         page,
         *,
-        multilogin: bool,
+        managed: bool,
         budget: PublishTimeoutBudget | None,
     ) -> None:
         # 1. open the upload page and pick the locator base
-        await self.open_upload_page(page, multilogin=multilogin)
+        await self.open_upload_page(page, managed=managed)
         # Snapshot HUMANIZE at page creation; never read the env mid-run.
         self._humanizer(page)
         # 2. attach the media file(s)
@@ -1286,9 +1285,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         # 3. fill the caption/title fields
         await self.fill_metadata(page)
         # 4. wait until the editor finished processing the media
-        await self.wait_media_ready(
-            page, deadline=budget, multilogin=multilogin
-        )
+        await self.wait_media_ready(page, deadline=budget)
         # 5. publish options (privacy / comments / reuse)
         await self.apply_options(page)
         # 6. custom cover (video only; base is a no-op)
@@ -1297,14 +1294,10 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self.apply_schedule(page)
         # 8. publish (``--no-publish`` stops at the ready point instead)
         if getattr(self, "no_publish", False):
-            await self.wait_publish_ready(
-                page, deadline=budget, multilogin=multilogin
-            )
+            await self.wait_publish_ready(page, deadline=budget)
             tiktok_logger.success(TIKTOK_DRY_RUN_READY_MESSAGE)
             return
-        await self.click_publish(
-            page, deadline=budget, multilogin=multilogin
-        )
+        await self.click_publish(page, deadline=budget, managed=managed)
         # The click already happened; a late redirect must not claim the
         # post was untouched.
         await _guard_login(page, publish_attempted=True)
@@ -1320,7 +1313,9 @@ class TiktokBaseUploader(BaseVideoUploader):
             )
         tiktok_logger.success(self.result_label(self.last_item_id))
 
-    async def open_upload_page(self, page, *, multilogin: bool) -> None:
+    async def open_upload_page(self, page, *, managed: bool | None = None, multilogin: bool = False) -> None:
+        if managed is None:
+            managed = multilogin  # Legacy public keyword.
         try:
             await page.goto(
                 self.upload_url,
@@ -1353,7 +1348,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             # The current Studio shell can be the ``Select video`` entry itself,
             # without an iframe or ``div.upload-container``.
             entry_timeout = (
-                TIKTOK_LOCAL_ENTRY_WAIT_MS if not multilogin else 10_000
+                10_000 if managed else TIKTOK_LOCAL_ENTRY_WAIT_MS
             )
             await page.wait_for_selector(
                 self.upload_entry_selector,
@@ -2573,9 +2568,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             if budget.remaining_seconds() <= 0:
                 raise budget.pre_click_error()
             await _guard_login(page)
-            button = await self._publish_button_ready(
-                page, multilogin=multilogin
-            )
+            button = await self._publish_button_ready(page)
             if button is not None:
                 return button
             remaining = min(
@@ -2590,9 +2583,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 )
             await asyncio.sleep(min(poll, remaining))
 
-    async def _publish_button_ready(
-        self, page, *, multilogin: bool
-    ) -> "Locator | None":
+    async def _publish_button_ready(self, page) -> "Locator | None":
         """The unique visible + enabled publish locator; never clicks it.
 
         Returns ``None`` when no candidate is present or the match is
@@ -2633,12 +2624,15 @@ class TiktokBaseUploader(BaseVideoUploader):
         page,
         *,
         deadline: float | PublishTimeoutBudget | None = None,
+        managed: bool | None = None,
         multilogin: bool = False,
     ):
+        if managed is None:
+            managed = multilogin  # Legacy public keyword.
         budget = self._coerce_budget(deadline)
         target = getattr(self, "publish_not_before", None)
         gate = budget.wait_until_allowed(target, logger=tiktok_logger, label="TikTok 发布")
-        if multilogin and target is not None:
+        if managed and target is not None:
             await _wait_with_editor_open(page, gate)
         else:
             await gate
@@ -2655,9 +2649,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         # The gate returns the exact locator it verified: visible + enabled +
         # no aria-disabled. A missing/disabled button fails here (exit 1)
         # instead of being retried, and the click below never re-resolves.
-        publish_button = await self.wait_publish_ready(
-            page, deadline=budget, multilogin=multilogin
-        )
+        publish_button = await self.wait_publish_ready(page, deadline=budget)
         if publish_button is None:
             raise RuntimeError(
                 "TikTok 发布按钮在就绪检查后消失：未点击发布，未发布任何内容。"

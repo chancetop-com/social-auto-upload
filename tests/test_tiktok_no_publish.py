@@ -247,7 +247,7 @@ class TiktokDryRunFlowTests(unittest.TestCase):
         ):
             asyncio.run(
                 video._upload_on_page(
-                    object(), multilogin=False, budget=None
+                    object(), managed=False, budget=None
                 )
             )
 
@@ -288,7 +288,7 @@ class TiktokDryRunFlowTests(unittest.TestCase):
             patch.object(tk_main.asyncio, "sleep", AsyncMock()),
         ):
             asyncio.run(
-                app._upload_on_page(object(), multilogin=False, budget=None)
+                app._upload_on_page(object(), managed=False, budget=None)
             )
 
         success.assert_called_once_with(DRY_RUN_LOG)
@@ -313,7 +313,7 @@ class TiktokDryRunFlowTests(unittest.TestCase):
         with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
             asyncio.run(
                 video._upload_on_page(
-                    object(), multilogin=False, budget=None
+                    object(), managed=False, budget=None
                 )
             )
 
@@ -327,7 +327,7 @@ class TiktokDryRunFlowTests(unittest.TestCase):
         video.click_publish = AsyncMock()
         video.read_result = AsyncMock(return_value="123")
 
-        asyncio.run(video._upload_on_page(object(), multilogin=False, budget=None))
+        asyncio.run(video._upload_on_page(object(), managed=False, budget=None))
 
         video.click_publish.assert_awaited_once()
         video.read_result.assert_awaited_once()
@@ -344,7 +344,7 @@ class TiktokDryRunFlowTests(unittest.TestCase):
 
         with patch.object(tk_main.tiktok_logger, "warning") as warning:
             asyncio.run(
-                video._upload_on_page(object(), multilogin=False, budget=None)
+                video._upload_on_page(object(), managed=False, budget=None)
             )
 
         video.click_publish.assert_awaited_once()
