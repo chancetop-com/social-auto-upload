@@ -20,7 +20,8 @@ from urllib.parse import urlsplit
 from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
 from utils.errors import LoginRequiredError, UsageError
 from utils.managed_browser import ManagedBrowserProvider, ProviderMode
-from utils.multilogin import MultiloginClient, MultiloginProvider, MultiloginTarget
+from utils.managed_sharing import current_command
+from utils.multilogin import MultiloginClient, MultiloginProvider, MultiloginTarget, SharedMultiloginProvider
 
 MLX_TOKEN_ENV = "MLX_API_TOKEN"
 ADSPOWER_KEY_ENV = "ADSPOWER_API_KEY"
@@ -218,7 +219,8 @@ def resolve_managed_provider(
         if not token:
             raise RuntimeError(MISSING_MLX_TOKEN_MESSAGE)
         target = _resolve_mlx_target(args)
-        return MultiloginProvider(target, MultiloginClient(token))
+        provider_type = SharedMultiloginProvider if current_command() is not None else MultiloginProvider
+        return provider_type(target, MultiloginClient(token))
 
     if mode == "adspower":
         key = _adspower_key()

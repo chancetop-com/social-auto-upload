@@ -55,7 +55,7 @@ async def dispatch(args: argparse.Namespace) -> int:
     if args.platform not in PLATFORMS:
         raise RuntimeError(f"Unsupported platform: {args.platform}")
     mode = active_mode()
-    if mode == "adspower" and args.action in {"check", "upload-video", "upload-note"} and args.profile_id:
+    if mode is not None and args.action in {"check", "upload-video", "upload-note"} and args.profile_id:
         async with managed_command(args.platform, mode, args.profile_id.strip(), getattr(args, "headless", None)):
             return await PLATFORMS[args.platform].run(args)
     return await PLATFORMS[args.platform].run(args)

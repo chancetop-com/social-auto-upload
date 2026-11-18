@@ -168,13 +168,16 @@ class OfflineProfile:
             self.chrome.wait(timeout=10)
 
     def command(self, installation, platform, *flags, host='127.0.0.1', profile_id='shared'):
-        work = self.root / f'cwd-{installation}'
-        work.mkdir(exist_ok=True)
         env = {**os.environ, 'HOME': str(self.home), 'ADSPOWER_API_KEY': f'offline-key-{installation}',
                'ADSPOWER_API_BASE': f'http://{host}:{self.api_port}/', 'MLX_API_TOKEN': '',
                'PYTHONPATH': '', 'PYTHONNOUSERSITE': '1', 'NO_PROXY': 'localhost,127.0.0.1'}
-        child = subprocess.Popen([self.entries[installation], platform, 'check', '--profile-id', profile_id,
-                                  *flags], env=env, cwd=work, text=True, stdout=subprocess.PIPE,
+        return self.spawn(installation, env, platform, 'check', '--profile-id', profile_id, *flags)
+
+    def spawn(self, installation, env, *arguments):
+        work = self.root / f'cwd-{installation}'
+        work.mkdir(exist_ok=True)
+        child = subprocess.Popen([self.entries[installation], *arguments], env=env, cwd=work,
+                                 text=True, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT)
         self.stack.callback(self.reap, child)
         return child
