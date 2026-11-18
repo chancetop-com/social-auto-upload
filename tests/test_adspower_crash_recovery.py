@@ -307,3 +307,35 @@ def test_slow_failing_join_cannot_strand_the_last_admitted_commands_profile(prof
     assert contender.returncode == 1 and 'observe' in output
     profile.finish('tiktok', departing)
     assert api.starts == api.stops == ['shared'] and api.state == 'Inactive'
+
+
+def test_interrupt_during_stop_keeps_mutex_until_the_provider_request_finishes(profile):
+    api = ControlledProvider(profile)
+    stopping, release = threading.Event(), threading.Event()
+
+    def delayed_ack(request):
+        api.state = 'Inactive'
+        stopping.set()
+        release.wait(25)
+        request.reply({'code': 0})
+
+    api.stop = delayed_ack
+    original = profile.command(0, 'tiktok')
+    profile.entered('tiktok', original)
+    profile.gates['tiktok'].set()
+    assert stopping.wait(10)
+    original.send_signal(signal.SIGINT)
+
+    # Even after the browser disappears, the in-flight Stop can still act on
+    # the Profile. A second process must wait for the response or time out.
+    try:
+        api.stop = api.stop_ok
+        profile.gates['instagram'].set()
+        successor = profile.command(1, 'instagram')
+        output = successor.communicate(timeout=18)[0]
+        assert successor.returncode == 1 and '超时' in output
+        assert api.starts == api.stops == ['shared']
+        assert 'instagram' not in profile.pages_requested
+    finally:
+        release.set()
+        original.communicate(timeout=10)

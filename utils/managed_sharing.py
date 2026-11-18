@@ -201,4 +201,11 @@ async def managed_command(platform, mode, profile_id, explicit_headless):
         yield
     finally:
         _current.reset(token)
-        await command.leave()
+        # Cancellation cannot cancel a synchronous provider request. Keep its
+        # lifecycle lock and finish recording the response before propagating it.
+        departure = asyncio.create_task(command.leave())
+        try:
+            await asyncio.shield(departure)
+        except asyncio.CancelledError:
+            await departure
+            raise
