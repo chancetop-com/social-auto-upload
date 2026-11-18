@@ -118,3 +118,30 @@ def test_join_waits_for_last_stop_after_its_response_is_lost(profile, finishes):
         assert successor.returncode == 1 and '停止' in output and '超时' in output
         assert api.starts == api.stops == ['shared']
         assert profile.pages_requested == ['instagram'] and api.state == 'Active'
+
+
+def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profile(profile):
+    api = ControlledProvider(profile)
+    attaching = threading.Event()
+
+    class DepartedBrowser(Handler):
+        def do_GET(self):
+            attaching.set()
+            self.send_error(410)
+
+    port = profile.stack.enter_context(serve(DepartedBrowser))
+    api.endpoint = f'ws://127.0.0.1:{port}/devtools/browser/previous'
+    interrupted = profile.command(0, 'instagram')
+    assert attaching.wait(10)
+    interrupted.kill()
+    interrupted.communicate(timeout=8)
+    assert api.starts == ['shared'] and api.stops == [] and not profile.pages_requested
+
+    # AdsPower acknowledged the last Start with its CDP endpoint. The desktop
+    # has since closed that browser, before the killed client could open a tab.
+    api.state = 'Inactive'
+    api.endpoint = profile.endpoint
+    next_command = profile.command(1, 'instagram')
+    profile.entered('instagram', next_command)
+    profile.finish('instagram', next_command)
+    assert api.starts == ['shared', 'shared'] and api.stops == ['shared']

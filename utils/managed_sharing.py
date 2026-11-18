@@ -120,8 +120,13 @@ class ManagedCommand:
             setting = headless
         if not isinstance(endpoint, str) or not endpoint:
             raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
-        return endpoint, {"resource": resource, "phase": "active",
-                          "endpoint": _digest(endpoint), "headless": setting}
+        active_record = {"resource": resource, "phase": "active",
+                         "endpoint": _digest(endpoint), "headless": setting}
+        if not state.active:
+            # Start completed independently of this command's CDP handshake.
+            # Death during attachment must not leave a pending Start behind.
+            self.store.write_record(active_record)
+        return endpoint, active_record
 
     @asynccontextmanager
     async def session(self, playwright, provider, headless, connect):
