@@ -741,11 +741,6 @@ class InstagramUploaderIdentityTests(unittest.TestCase):
                 return_value={"user_id": "42", "username": "creator"}
             )
             app._upload_steps = AsyncMock(return_value=app.result)
-            expect = MagicMock(
-                return_value=SimpleNamespace(
-                    not_to_have_count=AsyncMock(return_value=None)
-                )
-            )
 
             with (
                 patch.object(
@@ -754,7 +749,7 @@ class InstagramUploaderIdentityTests(unittest.TestCase):
                 patch.object(
                     instagram_main, "_multilogin_identity", live_identity
                 ),
-                patch.object(instagram_main, "expect", expect),
+                patch.object(instagram_main, "_instagram_dom_login_outcome", AsyncMock(return_value=False)),
             ):
                 asyncio.run(app.upload(session=session))
 

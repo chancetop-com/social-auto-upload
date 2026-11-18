@@ -1,11 +1,11 @@
 """Click a captured topic node without retrying a possibly dispatched click."""
 
-from utils.dom import ElementUnusableError
+from utils.dom import ElementUnusableError, is_interactive_element_handle
 from utils.humanize import Humanizer, maybe_dispatched
 
 
-async def click_topic_candidate(candidate, humanizer: Humanizer) -> bool:
-    """False means the snapshot detached before dispatch; the caller may rescan.
+async def click_topic_candidate(candidate, humanizer: Humanizer, *, rescan_moved: bool = False) -> bool:
+    """Rescan a detached snapshot, or an explicitly allowed, still usable moved row.
 
     Keep the platform's deadline and fallback outside this helper. A failed
     connection probe, ambiguity, occlusion, or possible dispatch must propagate.
@@ -19,7 +19,10 @@ async def click_topic_candidate(candidate, humanizer: Humanizer) -> bool:
             "not-attached", "no-bounding-box", "zero-box", "point-drift",
         }:
             raise
-        if await candidate.evaluate("el => el.isConnected") is not False:
-            raise
-        return False
+        if await candidate.evaluate("el => el.isConnected") is False:
+            return False
+        if rescan_moved and error.reason == "point-drift":
+            if await is_interactive_element_handle(candidate):
+                return False
+        raise
     return True

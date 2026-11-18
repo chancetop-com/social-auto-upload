@@ -292,7 +292,11 @@ class Humanizer:
         await self._pause(self.profile.pointer_settle)
 
         still = await locator.bounding_box()
-        if not still or not _same_box(box, still, tolerance=1.0):
+        if not still:
+            raise _not_dispatched("no-bounding-box")
+        if still["width"] <= 0 or still["height"] <= 0:
+            raise _not_dispatched("zero-box")
+        if not _same_box(box, still, tolerance=1.0):
             raise _not_dispatched("point-drift")
         ok, reason = await check(locator, "interactive", point=ratio)
         if not ok:

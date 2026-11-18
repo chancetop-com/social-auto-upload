@@ -148,7 +148,8 @@ el => {
   let opacity = 1.0;
   let ancestorAriaHidden = false;
   let ancestorAriaDisabled = false;
-  let node = el.parentElement;
+  const parent = n => n.assignedSlot || n.parentElement || n.getRootNode().host;
+  let node = parent(el);
   while (node) {
     const style = getComputedStyle(node);
     if (style.display === 'none') { display = 'none'; }
@@ -163,7 +164,7 @@ el => {
     if (node.getAttribute && node.getAttribute('aria-disabled') === 'true') {
       ancestorAriaDisabled = true;
     }
-    node = node.parentElement;
+    node = parent(node);
   }
   const ownOpacity = parseFloat(own.opacity);
   if (!Number.isNaN(ownOpacity)) { opacity *= ownOpacity; }
@@ -461,6 +462,31 @@ def _describe(hit: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _style_visibility_issue(facts: dict[str, Any]) -> str | None:
+    if facts["display"] == "none" or facts["visibility"] in ("hidden", "collapse"):
+        return "zero-box"
+    if facts["opacity"] < 0.1:
+        return "opacity-zero"
+    if str(facts["ariaHidden"] or "").strip().lower() == "true":
+        return "aria-hidden"
+    return None
+
+
+async def visible_element_snapshot(locator: Any, describe_nodes_js: str) -> list:
+    """Read one metadata item per visible node, from a single layout/DOM snapshot."""
+    rows = await locator.evaluate_all(f"""nodes => {{
+        const describe = ({describe_nodes_js});
+        const factsFor = ({_FACTS_JS});
+        const visibleBoxes = nodes.filter(node => {{
+            const rect = node.getBoundingClientRect();
+            return node.isConnected && rect.width > 0 && rect.height > 0;
+        }});
+        const values = describe(visibleBoxes);
+        return visibleBoxes.map((node, i) => [factsFor(node), values[i]]);
+    }}""")
+    return [value for facts, value in rows if _style_visibility_issue(facts) is None]
+
+
 async def _visible(
     locator: Any, facts: dict[str, Any] | None
 ) -> tuple[bool, str | None, dict[str, Any] | None, str | None]:
@@ -476,18 +502,25 @@ async def _visible(
         facts, probe_warning = await _probe(locator)
         warning = warning or probe_warning
     if facts is not None:
-        if facts["display"] == "none":
-            return False, "zero-box", facts, warning
-        if facts["visibility"] in ("hidden", "collapse"):
-            return False, "zero-box", facts, warning
-        if facts["opacity"] < 0.1:
-            return False, "opacity-zero", facts, warning
-        if str(facts["ariaHidden"] or "").strip().lower() == "true":
-            return False, "aria-hidden", facts, warning
+        issue = _style_visibility_issue(facts)
+        if issue:
+            return False, issue, facts, warning
         if facts["ancestorAriaHidden"]:
             # 祖先 aria-hidden 只做警告：XHS 的浮层容器常常整棵子树标记隐藏。
             warning = warning or WARNING_ANCESTOR_ARIA_HIDDEN
     return True, None, facts, warning
+
+
+async def is_interactive_element_handle(element: Any) -> bool:
+    """Require positive visibility, enabled state and hit-test evidence on a captured node."""
+    facts, _ = await _probe(element)
+    if facts is None or not facts["isConnected"]:
+        return False
+    visible, _, _, warning = await _visible(element, facts)
+    if not visible or warning == WARNING_PROBE_FAILED:
+        return False
+    usable, warning = await _interactive(element, facts, None, warning, strict=True)
+    return usable and warning != WARNING_PROBE_FAILED
 
 
 async def _interactive(
@@ -495,10 +528,14 @@ async def _interactive(
     facts: dict[str, Any] | None,
     point: tuple[float, float] | None,
     warning: str | None,
+    *,
+    strict: bool = False,
 ) -> tuple[bool, str | None]:
     try:
         enabled = await locator.is_enabled()
     except Exception:
+        if strict:
+            return False, WARNING_PROBE_FAILED
         enabled = None
     if enabled is False:
         return False, "disabled"
@@ -1089,9 +1126,11 @@ __all__ = [
     "Role",
     "check",
     "clear_overlays",
+    "is_interactive_element_handle",
     "normalise_point",
     "reject_ambiguous",
     "resolve",
+    "visible_element_snapshot",
     "wait_dom_quiet",
     "wait_resolved",
 ]

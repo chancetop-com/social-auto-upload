@@ -281,6 +281,48 @@ _DELAYED_NOTIFICATION_SCRIPT = """
 
 
 class InstagramBrowserRegressionTests(unittest.TestCase):
+    def test_homepage_login_requires_email_and_password_in_one_visible_form(self):
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel='chrome', headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.route('https://www.instagram.com/', lambda r: r.fulfill(body='<body></body>', content_type='text/html'))
+                    await page.goto('https://www.instagram.com/')
+                    email = '<input name="email" autocomplete="username webauthn">'
+                    password = '<input type="password" name="pass">'
+                    await page.set_content(f'<form>{email}{password}</form>')
+                    self.assertTrue(await _is_instagram_logged_out(page, timeout_ms=500))
+                    await page.locator('[name="email"]').evaluate("el => el.removeAttribute('autocomplete')")
+                    self.assertTrue(await _is_instagram_logged_out(page, timeout_ms=500))
+
+                    for markup in (
+                        f'<form>{email}</form><form>{password}</form>',
+                        f'<form hidden>{email}{password}</form>',
+                        f'<form style="opacity:0">{email}{password}</form>',
+                        f'<form><span style="opacity:0">{email}</span>{password}</form>',
+                        f'<form><input type="checkbox" name="email">{password}</form>',
+                        f'<div style="opacity:0"><template shadowrootmode="open"><form>{email}{password}</form></template></div>',
+                    ):
+                        with self.subTest(markup=markup):
+                            await page.set_content(markup)
+                            with self.assertRaisesRegex(RuntimeError, '未出现可确认登录状态的元素'):
+                                await _is_instagram_logged_out(page, timeout_ms=100)
+                    await page.evaluate("history.replaceState({}, '', '/challengeracing/')")
+                    await page.set_content(f'<form style="opacity:0">{email}{password}'
+                                           '<a href="/accounts/login/">Login</a><input name="username"></form>')
+                    await page.evaluate("""() => { setTimeout(() => {
+                        const inbox = document.createElement('a');
+                        inbox.href = '/direct/inbox/';
+                        inbox.textContent = 'Inbox';
+                        document.body.append(inbox);
+                    }, 200); }""")
+                    self.assertFalse(await _is_instagram_logged_out(page, timeout_ms=1500))
+                finally:
+                    await browser.close()
+
+        asyncio.run(scenario())
+
     def test_optional_prompts_present_absent_and_failed_dismissal(self):
         """按实际图标与按钮层级构造 DOM；覆盖延迟提示、缺席及点击未关闭的异常。"""
         async def scenario():
@@ -547,6 +589,8 @@ class InstagramBrowserRegressionTests(unittest.TestCase):
                 browser = await p.chromium.launch(channel='chrome', headless=True)
                 page = await browser.new_page()
                 try:
+                    await page.route('https://www.instagram.com/', lambda r: r.fulfill(body='<body></body>', content_type='text/html'))
+                    await page.goto('https://www.instagram.com/')
                     await page.set_content('''<script>setTimeout(() => {
                         document.body.innerHTML = '<a href="/direct/inbox/?hl=ja">Inbox</a>';
                     }, 250)</script>''')

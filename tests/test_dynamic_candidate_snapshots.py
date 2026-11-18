@@ -13,6 +13,7 @@ from uploader.rednote_uploader import main as rednote
 from uploader.tk_uploader import main_chrome as tiktok
 from uploader.xiaohongshu_uploader import main as xhs
 from utils.humanize import Humanizer
+from utils.dom import ElementUnusableError
 
 
 class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
@@ -105,6 +106,49 @@ class DynamicCandidateTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(replaced)
                 self.assertEqual(int(await self.page.get_attribute("body", "data-clicks")), 1)
                 self.assertEqual(await self.page.locator('a[data-topic]').count(), 1)
+
+    async def test_rednote_topic_moved_before_pointer_down_is_clicked_once(self):
+        await self.topic_editor()
+        moved = False
+
+        async def move_candidate_once(_seconds):
+            nonlocal moved
+            if not moved:
+                moved = True
+                await self.page.locator('.item').evaluate(
+                    "el => el.style.transform = 'translateY(30px)'"
+                )
+
+        with patch.dict(os.environ, {"HUMANIZE": "1"}):
+            app = rednote.RednoteVideo("test", "unused.mp4", [], 0, "unused.json")
+            await app._insert_topic(self.page, "travel", Humanizer(self.page, sleep=move_candidate_once))
+        self.assertEqual(await self.page.get_attribute("body", "data-clicks"), "1")
+        self.assertEqual(await self.page.locator('a[data-topic]').inner_text(), "#travel")
+
+    async def test_hidden_rednote_candidate_and_moving_xhs_candidate_fail_before_click(self):
+        for cls, style in (
+            (rednote.RednoteVideo, "display:none"),
+            (xhs.XiaoHongShuVideo, "transform:translateY(30px)"),
+        ):
+            with self.subTest(platform=cls.__name__):
+                await self.topic_editor()
+                changed = False
+
+                async def change_candidate_once(_seconds):
+                    nonlocal changed
+                    if not changed:
+                        changed = True
+                        await self.page.locator('.item').evaluate(
+                            "(el, style) => el.style.cssText = style", style
+                        )
+
+                with patch.dict(os.environ, {"HUMANIZE": "1"}):
+                    app = cls("test", "unused.mp4", [], 0, "unused.json")
+                    humanizer = Humanizer(self.page, sleep=change_candidate_once)
+                    with self.assertRaises(ElementUnusableError):
+                        await app._insert_topic(self.page, "travel", humanizer)
+                self.assertTrue(changed)
+                self.assertEqual(await self.page.get_attribute("body", "data-clicks"), "0")
 
     @contextmanager
     def refresh_after_capture(

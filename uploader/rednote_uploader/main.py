@@ -2094,7 +2094,7 @@ class RednoteBaseUploader(BaseVideoUploader):
                 continue
 
             try:
-                clicked = await click_topic_candidate(candidate, humanizer)
+                clicked = await click_topic_candidate(candidate, humanizer, rescan_moved=True)
             finally:
                 await asyncio.gather(candidate.dispose(), return_exceptions=True)
             if clicked:

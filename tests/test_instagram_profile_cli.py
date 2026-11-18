@@ -84,6 +84,10 @@ class InstagramProfileCliTests(unittest.TestCase):
         for module in (main, posts, instagram):
             self.stack.enter_context(patch.object(module, 'async_playwright', lambda: _AsyncCM(self.pw)))
         self.stack.enter_context(patch.object(main, 'expect', Expect))
+        async def dom_login_outcome(page):
+            return {'valid': False, 'login': True}.get(page.context.state)
+        self.stack.enter_context(patch.object(main, '_instagram_dom_login_outcome', dom_login_outcome))
+        self.stack.enter_context(patch.object(main, 'INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS', 200))
         self.addCleanup(self.stack.close)
     def run_cli(self, *argv):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:

@@ -51,12 +51,13 @@ from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
-from utils.dom import ElementUnusableError, check, reject_ambiguous
+from utils.dom import ElementUnusableError, check, reject_ambiguous, visible_element_snapshot
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 
 INSTAGRAM_HOME_URL = "https://www.instagram.com/"
+_INSTAGRAM_HOSTS = {"www.instagram.com", "instagram.com"}
 # 未配置环境变量或 --proxy 时使用系统直连。
 INSTAGRAM_PROXY = os.environ.get("SAU_INSTAGRAM_PROXY")
 # 创建弹窗在选素材阶段只有一个 file input（编辑页的封面 input 此时尚未挂载）。
@@ -120,12 +121,8 @@ INSTAGRAM_CONTEXT_KWARGS: dict[str, object] = {
 }
 INSTAGRAM_INIT_SCRIPT = False
 
-_INSTAGRAM_LOGIN_URL_MARKERS = (
-    "/accounts/login",
-    "/emailsignup",
-    "/challenge",
-    "/checkpoint",
-    "/two_step",
+_INSTAGRAM_LOGIN_PATH = re.compile(
+    r'^/(?:accounts/login|(?:accounts/)?emailsignup|challenge|checkpoint|two_step)(?:/|$)'
 )
 
 
@@ -135,9 +132,10 @@ def _raise_if_login_required(page: Page, *, publish_attempted: bool = False, man
     ``publish_attempted`` must be true when the redirect is observed after the
     publish click was dispatched.
     """
-    current_url = str(getattr(page, "url", "") or "").lower()
-    if any(marker in current_url for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
-        verification = any(marker in current_url for marker in ('/challenge', '/checkpoint', '/two_step'))
+    url = urlparse(str(getattr(page, "url", "") or ""))
+    path = url.path.lower()
+    if url.hostname in _INSTAGRAM_HOSTS and _INSTAGRAM_LOGIN_PATH.match(path):
+        verification = path.startswith(('/challenge', '/checkpoint', '/two_step'))
         message = ('Instagram 上传过程中需要重新登录（登录页/验证码/二次验证）：'
                    '请在 Multilogin 应用中登录 Profile 后重试。' if managed else
                    'Instagram 需要重新登录或完成验证：请运行 sau instagram login --account <别名> 完成登录或验证，再重新执行命令。')
@@ -353,12 +351,58 @@ async def _own_profile_link(page: Page) -> Locator:
     )
 
 
+async def _instagram_dom_login_outcome(page: Page) -> bool | None:
+    """Return logged-out state, or None while the page has no conclusive visible evidence."""
+    controls = page.locator(
+        'a[href^="/direct/inbox/"], a[href^="/accounts/login/"], '
+        'input:is([name="username"],[name="email"]):is(:not([type]),[type="text" i],[type="email" i]), '
+        'input[type="password"][name="pass"]'
+    )
+    markers = await visible_element_snapshot(controls, """nodes => {
+        const forms = new Map();
+        return nodes.map(node => {
+            if (node.tagName === 'A') {
+                return [node.pathname.startsWith('/direct/inbox/') ? 'inbox' : 'login', null];
+            }
+            if (node.form && !forms.has(node.form)) forms.set(node.form, forms.size);
+            return [node.name, forms.get(node.form) ?? null];
+        });
+    }""")
+    if any(kind == 'inbox' for kind, _ in markers):
+        return False
+    if any(kind in ('username', 'login') for kind, _ in markers):
+        return True
+    email_forms = {form for kind, form in markers if kind == 'email' and form is not None}
+    if any(kind == 'pass' and form in email_forms for kind, form in markers):
+        return True
+    return None
+
+
 async def _is_instagram_logged_out(page: Page, *, timeout_ms: int = 60_000) -> bool:
-    """等待明确登录/未登录业务区域；网络或未知页面超时不能解释为 Cookie 失效。"""
-    # 消息入口是登录后的导航，href 前缀允许站点附加 hl 参数；登录表单字段不依赖翻译。
-    outcomes = page.locator('a[href^="/direct/inbox/"], input[name="username"], a[href^="/accounts/login/"]')
-    await expect(outcomes).not_to_have_count(0, timeout=timeout_ms)
-    return not await page.locator('a[href^="/direct/inbox/"]').count()
+    """等待明确登录/未登录业务区域；网络或未知页面超时不能解释为登录失效。"""
+    async def wait_for_outcome():
+        while True:
+            path = _instagram_path(page)
+            if _INSTAGRAM_LOGIN_PATH.match(path):
+                return True
+            outcome = await _instagram_dom_login_outcome(page)
+            if path != _instagram_path(page):
+                continue
+            if outcome is not None:
+                return outcome
+            await asyncio.sleep(0.1)
+
+    try:
+        return await asyncio.wait_for(wait_for_outcome(), timeout=timeout_ms / 1000)
+    except asyncio.TimeoutError as exc:
+        raise RuntimeError('Instagram 页面未出现可确认登录状态的元素') from exc
+
+
+def _instagram_path(page: Page) -> str:
+    url = urlparse(page.url)
+    if url.hostname not in _INSTAGRAM_HOSTS:
+        raise RuntimeError('Instagram 登录检查未停留在 instagram.com')
+    return url.path.lower()
 
 
 async def is_logged_in(context: BrowserContext) -> bool:
@@ -384,14 +428,6 @@ async def is_logged_in(context: BrowserContext) -> bool:
         if isinstance(status, int) and status >= 500:
             raise RuntimeError(f"Instagram 登录状态检查失败：HTTP {status}")
 
-        current_url = str(getattr(page, "url", "") or "")
-        if "instagram.com" not in current_url.lower():
-            raise RuntimeError(
-                "Instagram 登录状态检查失败：页面未停留在 instagram.com"
-                f"（url={current_url or '<empty>'}）"
-            )
-        if any(marker in current_url.lower() for marker in _INSTAGRAM_LOGIN_URL_MARKERS):
-            return False
         return not await _is_instagram_logged_out(
             page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS
         )
@@ -424,15 +460,12 @@ async def _navigate_local_page(page: Page, url: str = INSTAGRAM_HOME_URL, *, tim
     status = getattr(response, 'status', None)
     if isinstance(status, int) and status >= 500:
         raise RuntimeError(f'Instagram 页面请求失败：HTTP {status}')
-    if urlparse(page.url).hostname not in {'www.instagram.com', 'instagram.com'}:
-        raise RuntimeError('Instagram 页面未停留在 instagram.com')
+    _instagram_path(page)
 
 
 async def instagram_identity(page: Page, account_file=None) -> dict:
     """Read the current positive login identity; aliases never bind a user ID."""
     _raise_if_login_required(page, managed=False)
-    if urlparse(page.url).hostname not in {'www.instagram.com', 'instagram.com'}:
-        raise RuntimeError('Instagram 登录检查未停留在 instagram.com')
     if await _is_instagram_logged_out(page, timeout_ms=INSTAGRAM_LOGIN_OUTCOME_TIMEOUT_MS):
         raise LoginRequiredError("Instagram 未登录；请执行 sau instagram login --account <别名>。")
     identity = await _multilogin_identity(page, page.context)

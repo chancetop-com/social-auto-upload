@@ -163,6 +163,23 @@ class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
             await click_topic_candidate(candidate, humanizer)
         humanizer.click.assert_not_awaited()
 
+    async def test_connected_drift_requires_positive_style_and_enabled_probes(self):
+        for failed_probe in ("style", "enabled"):
+            with self.subTest(probe=failed_probe):
+                error = ElementUnusableError("candidate", reason="point-drift")
+                style = RuntimeError("style unavailable") if failed_probe == "style" else {"isConnected": True}
+                candidate = SimpleNamespace(
+                    evaluate=AsyncMock(side_effect=[True, True, style, {"self": True}]),
+                    is_visible=AsyncMock(return_value=True),
+                    is_enabled=AsyncMock(side_effect=RuntimeError("enabled unavailable")),
+                    bounding_box=AsyncMock(return_value={"width": 80, "height": 30}),
+                )
+                humanizer = SimpleNamespace(click=AsyncMock(side_effect=error))
+                with self.assertRaises(ElementUnusableError) as caught:
+                    await click_topic_candidate(candidate, humanizer, rescan_moved=True)
+                self.assertIs(caught.exception, error)
+                humanizer.click.assert_awaited_once()
+
     async def test_page_cleanup_preserves_primary_result_and_cancellation(self):
         for error in (RuntimeError("cleanup"), asyncio.CancelledError()):
             page = SimpleNamespace(close=AsyncMock(side_effect=error))

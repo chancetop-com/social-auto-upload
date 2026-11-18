@@ -415,8 +415,7 @@ class MultiloginUploaderTests(unittest.TestCase):
     def test_instagram_mlx_upload_skips_identity_file_and_cookie_io(self):
         with tempfile.TemporaryDirectory() as directory:
             media = _write_media(directory)
-            page = _PageStub()
-            page.locators['a[href^="/direct/inbox/"]'] = _LocatorStub(count=1)
+            page = _PageStub(final_url=INSTAGRAM_HOME_URL)
             context = _ContextStub(page)
             app = InstagramUploader(
                 None,
@@ -434,12 +433,7 @@ class MultiloginUploaderTests(unittest.TestCase):
                 instagram_main, "_multilogin_identity", mlx_identity
             ), patch.object(
                 instagram_main,
-                "expect",
-                MagicMock(
-                    return_value=SimpleNamespace(
-                        not_to_have_count=AsyncMock(return_value=None)
-                    )
-                ),
+                "_instagram_dom_login_outcome", AsyncMock(return_value=False),
             ):
                 asyncio.run(app.upload(session=_session(context)))
 
@@ -578,8 +572,7 @@ class MetaLoginRedirectPublishAttemptTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             media = _write_media(directory)
-            page = _PageStub()
-            page.locators['a[href^="/direct/inbox/"]'] = _LocatorStub(count=1)
+            page = _PageStub(final_url=INSTAGRAM_HOME_URL)
             app = InstagramUploader(
                 None,
                 title="caption",
@@ -591,12 +584,7 @@ class MetaLoginRedirectPublishAttemptTests(unittest.TestCase):
 
             with patch.object(
                 instagram_main,
-                "expect",
-                MagicMock(
-                    return_value=SimpleNamespace(
-                        not_to_have_count=AsyncMock(return_value=None)
-                    )
-                ),
+                "_instagram_dom_login_outcome", AsyncMock(return_value=False),
             ), patch.object(
                 instagram_main,
                 "_multilogin_identity",
@@ -702,45 +690,36 @@ class IsLoggedInTests(unittest.TestCase):
         page.locators['a[href^="/direct/inbox/"]'] = _LocatorStub(count=1)
         return page
 
-    def _instagram_expect(self):
-        return MagicMock(
-            return_value=SimpleNamespace(
-                not_to_have_count=AsyncMock(return_value=None)
-            )
-        )
-
     def test_instagram_true_false_and_raise(self):
         context = _ContextStub(self._instagram_page())
-        with patch.object(instagram_main, "expect", self._instagram_expect()):
+        with patch.object(instagram_main, "_instagram_dom_login_outcome", AsyncMock(return_value=False)):
             self.assertTrue(asyncio.run(instagram_is_logged_in(context)))
         self.assertEqual(context.new_page_calls, 1)
         self.assertTrue(context.page.closed)
 
         for name, url in {
             "login": "https://www.instagram.com/accounts/login/",
+            "signup": "https://www.instagram.com/accounts/emailsignup/",
             "challenge": "https://www.instagram.com/challenge/",
             "two_step": "https://www.instagram.com/two_step/",
         }.items():
             with self.subTest(name=name):
                 context = _ContextStub(_PageStub(final_url=url))
-                with patch.object(instagram_main, "expect", self._instagram_expect()):
-                    self.assertFalse(asyncio.run(instagram_is_logged_in(context)))
+                self.assertFalse(asyncio.run(instagram_is_logged_in(context)))
 
-        logged_out = self._instagram_page()
-        logged_out.locators['a[href^="/direct/inbox/"]'] = _LocatorStub(count=0)
-        with patch.object(instagram_main, "expect", self._instagram_expect()):
-            self.assertFalse(
-                asyncio.run(instagram_is_logged_in(_ContextStub(logged_out)))
-            )
+        with patch.object(instagram_main, "_instagram_dom_login_outcome", AsyncMock(return_value=True)):
+            self.assertFalse(asyncio.run(instagram_is_logged_in(_ContextStub(self._instagram_page()))))
 
         for name, page in (
             ("network", self._instagram_page(goto_error=TimeoutError("timeout"))),
             ("5xx", self._instagram_page(response_status=502)),
             ("unexpected", self._instagram_page(final_url="https://example.com/")),
+            ("foreign return URL", self._instagram_page(
+                final_url="https://auth.example.test/?next=https://www.instagram.com/accounts/login/"
+            )),
         ):
-            with self.subTest(name=name), self.assertRaises(Exception):
-                with patch.object(instagram_main, "expect", self._instagram_expect()):
-                    asyncio.run(instagram_is_logged_in(_ContextStub(page)))
+            with self.subTest(name=name), self.assertRaises((TimeoutError, RuntimeError)):
+                asyncio.run(instagram_is_logged_in(_ContextStub(page)))
 
 
 # ---------------------------------------------------------------------------
