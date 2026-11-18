@@ -7,7 +7,8 @@ from tests.test_shared_adspower_process import Handler
 
 
 class InstagramSite:
-    def __init__(self):
+    def __init__(self, *, now=time.time):
+        self.now = now
         self.submissions = []
         self.submitted_at = []
 
@@ -42,14 +43,15 @@ class InstagramSite:
                     return self.send_error(404)
                 submission = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 site.submissions.append(submission)
-                site.submitted_at.append(time.time())
+                site.submitted_at.append(site.now())
                 self.respond(json.dumps(site.configure(submission)).encode(), "application/json")
 
         return Instagram
 
 
 class TikTokSite:
-    def __init__(self, *, ready=True, outcome="content"):
+    def __init__(self, *, ready=True, outcome="content", now=time.time):
+        self.now = now
         self.ready = ready
         self.outcome = outcome
         self.submissions = []
@@ -76,7 +78,7 @@ class TikTokSite:
                 if self.path != "/offline-submit":
                     return self.send_error(404)
                 site.submissions.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-                site.submitted_at.append(time.time())
+                site.submitted_at.append(site.now())
                 self.respond(site.outcome.encode(), "text/plain")
 
         return TikTok

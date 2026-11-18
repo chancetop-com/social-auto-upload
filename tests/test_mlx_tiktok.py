@@ -460,7 +460,7 @@ class UploaderSeamTests(unittest.TestCase):
         self.assertTrue(page_ops.await_args.kwargs["multilogin"])
         self.assertEqual(page_ops.await_args.kwargs["budget"].deadline, 1900.0)
 
-    def test_mlx_upload_reuses_an_existing_page(self):
+    def test_mlx_upload_opens_a_fresh_page_beside_existing_tabs(self):
         video = self._video(account_file=None)
         page_ops = AsyncMock()
         video._upload_on_page = page_ops
@@ -473,9 +473,9 @@ class UploaderSeamTests(unittest.TestCase):
 
         asyncio.run(video.upload(None, session=session))
 
-        self.assertEqual(context.new_page_calls, 0)
         page_ops.assert_awaited_once()
-        self.assertIs(page_ops.await_args.args[0], page)
+        self.assertIsNot(page_ops.await_args.args[0], page)
+        self.assertIn(page, context.pages)
 
     def test_mlx_skips_change_language(self):
         video = self._video(account_file=None)
