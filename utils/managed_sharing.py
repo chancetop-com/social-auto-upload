@@ -205,14 +205,15 @@ class ManagedCommand:
                     record = self.store.read_record()
                     if not record or record.get("phase") != "active":
                         raise RuntimeError("托管 Profile 的共享记录无效。")
-                    self.store.write_record({**record, "phase": "stopping"})
+                    # Python 3.10 cancels every Task on Ctrl-C. An executor
+                    # Future survives shutdown cancellation and lets us retain
+                    # the mutex until both the HTTP request and record update finish.
+                    stop = asyncio.get_running_loop().run_in_executor(None, self.stop, record)
                     try:
-                        await _provider_call(self.provider, "stop")
-                    except (RateLimitedError, ProviderRequestRejected):
-                        # The provider rejected this operation before dispatch.
-                        self.store.clear_record()
+                        await asyncio.shield(stop)
+                    except asyncio.CancelledError:
+                        await stop
                         raise
-                    self.store.clear_record()
         except Exception:
             logger.warning("{} Profile 停止或清理失败，可能仍在运行。", self.mode)
         finally:
@@ -220,6 +221,15 @@ class ManagedCommand:
                 self.member.close()
             if self.reservation is not None:
                 self.reservation.close()
+
+    def stop(self, record):
+        self.store.write_record({**record, "phase": "stopping"})
+        try:
+            _provider_request(self.provider, "stop")
+        except (RateLimitedError, ProviderRequestRejected):
+            self.store.clear_record()
+            raise
+        self.store.clear_record()
 
 
 @asynccontextmanager

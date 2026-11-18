@@ -382,9 +382,13 @@ class RednoteProfileCliTests(unittest.TestCase):
             page.goto = navigate
             media = self.root / 'video.mp4'; media.write_bytes(b'fixture')
             args = sau_cli.build_parser().parse_args(['rednote', 'upload-video', '--account', 'creator', '--file', str(media), '--title', 'Title', '--no-publish'])
-            with self.assertRaises(type(error)) as caught:
-                asyncio.run(sau_cli.dispatch(args))
-            self.assertIs(caught.exception, error)
+            async def dispatch():
+                # Python 3.10 can recreate CancelledError at the asyncio.run boundary.
+                with self.assertRaises(type(error)) as caught:
+                    await sau_cli.dispatch(args)
+                self.assertIs(caught.exception, error)
+
+            asyncio.run(dispatch())
             self.assertTrue(self.context.closed)
             self.assertEqual(page._selectors['xhs-publish-btn'].click_count, 0)
             with acquire_local_profile('rednote', 'creator', 'chrome') as profile:
