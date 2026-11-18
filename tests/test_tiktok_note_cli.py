@@ -76,8 +76,7 @@ def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
 
 
 def _run(argv, token=TOKEN):
-    environ = {"MLX_API_TOKEN": token}
-    with patch.dict(os.environ, environ):
+    with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"MLX_API_TOKEN": token, "HOME": home}):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(
             io.StringIO()
         ) as err:

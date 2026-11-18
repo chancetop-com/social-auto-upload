@@ -66,8 +66,9 @@ class ProbeContext(FakeContext):
         super().__init__()
         self.state = state
         self.created_pages = []
+        self.queued_pages = []
     async def new_page(self):
-        page = ProbePage(self.state)
+        page = self.queued_pages.pop(0) if self.queued_pages else ProbePage(self.state)
         page.context = self
         self.pages.append(page)
         self.created_pages.append(page)
@@ -475,7 +476,7 @@ class TikTokProfileCliTests(unittest.TestCase):
                 provider = FakeManagedProvider(mode=mode)
                 context = ProbeContext()
                 page = _StudioPage() if action == 'upload-note' else self.video_page()
-                context.pages = [page]
+                context.queued_pages = [ProbePage(), page]
                 browser = FakeBrowser([context])
                 self.pw.chromium.queue_connect_browser(browser)
                 logs = io.StringIO()

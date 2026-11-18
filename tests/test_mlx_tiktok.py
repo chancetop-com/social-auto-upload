@@ -91,8 +91,7 @@ class _AsyncCM:
 
 
 def _run(argv, token=TOKEN):
-    environ = {"MLX_API_TOKEN": token}
-    with patch.dict(os.environ, environ), patch.object(conf, "LOCAL_CHROME_HEADLESS", True):
+    with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"MLX_API_TOKEN": token, "HOME": home}), patch.object(conf, "LOCAL_CHROME_HEADLESS", True):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(
             io.StringIO()
         ) as err:

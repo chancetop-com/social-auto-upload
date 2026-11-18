@@ -729,7 +729,7 @@ class IsLoggedInTests(unittest.TestCase):
 
 class _CliBase(unittest.TestCase):
     def _run(self, argv, *, token=TOKEN):
-        with patch.dict(os.environ, {"MLX_API_TOKEN": token}):
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"MLX_API_TOKEN": token, "HOME": home}):
             with redirect_stdout(io.StringIO()) as out, redirect_stderr(
                 io.StringIO()
             ) as err:
