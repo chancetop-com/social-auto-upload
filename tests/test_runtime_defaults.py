@@ -13,9 +13,9 @@ import sau_cli
 class CliRuntimeDefaultsTests(unittest.TestCase):
     def test_debug_defaults_off_and_flag_turns_it_on(self):
         parser = sau_cli.build_parser()
-        default_args = parser.parse_args(["douyin", "check", "--account", "creator"])
+        default_args = parser.parse_args(["xiaohongshu", "check", "--account", "creator"])
         debug_args = parser.parse_args(
-            ["douyin", "check", "--account", "creator", "--debug"]
+            ["xiaohongshu", "check", "--account", "creator", "--debug"]
         )
         self.assertFalse(default_args.debug)
         self.assertTrue(debug_args.debug)
@@ -28,7 +28,7 @@ class CliRuntimeDefaultsTests(unittest.TestCase):
                     conf, "LOCAL_CHROME_HEADLESS", configured, create=True
                 ):
                     args = parser.parse_args(
-                        ["douyin", "check", "--account", "creator"]
+                        ["xiaohongshu", "check", "--account", "creator"]
                     )
                 self.assertIsNone(args.headless)  # Resolve migrated platform config at execution time.
 

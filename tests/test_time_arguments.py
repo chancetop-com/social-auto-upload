@@ -77,7 +77,7 @@ class ScheduleArgumentTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".mp4") as video:
             args = parser.parse_args(
                 [
-                    "douyin",
+                    "xiaohongshu",
                     "upload-video",
                     "--file",
                     video.name,

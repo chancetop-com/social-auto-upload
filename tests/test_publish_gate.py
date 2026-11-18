@@ -6,7 +6,7 @@ from pathlib import Path
 
 import sau_cli
 from sau_commands import arguments
-from sau_commands.douyin import DouyinVideoUploadRequest, _build_video_uploader
+from sau_commands.xiaohongshu import XiaohongshuVideoUploadRequest, _build_video_uploader
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_gate import remaining_seconds, wait_until_publish_allowed
 
@@ -173,7 +173,7 @@ class NotBeforeArgumentTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".mp4") as video:
             args = parser.parse_args(
                 [
-                    "douyin",
+                    "xiaohongshu",
                     "upload-video",
                     "--file",
                     video.name,
@@ -190,7 +190,7 @@ class NotBeforeArgumentTests(unittest.TestCase):
 
     def test_request_value_reaches_uploader(self):
         target = datetime(2026, 12, 1, 8, 30, tzinfo=timezone.utc)
-        request = DouyinVideoUploadRequest(
+        request = XiaohongshuVideoUploadRequest(
             account_name="creator",
             video_file=Path("demo.mp4"),
             title="hello",

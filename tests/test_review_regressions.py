@@ -6,7 +6,6 @@ import inspect
 import io
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -22,10 +21,6 @@ class AccountCheckCleanupTests(unittest.TestCase):
         actions = {
             "rednote": ("upload-video", "upload-note"),
             "xiaohongshu": ("upload-video", "upload-note"),
-            "douyin": ("upload-video", "upload-note"),
-            "alipay": ("upload-video",), "baijiahao": ("upload-video",),
-            "weibo": ("upload-video",), "dayu": ("upload-video", "upload-article"),
-            "zhihu": ("upload-video", "upload-article"), "xueqiu": ("upload-article",),
             "tiktok": ("upload-note",),
         }
         for platform, commands in actions.items():
@@ -45,37 +40,13 @@ class AccountCheckCleanupTests(unittest.TestCase):
 
 
 class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
-    async def test_alipay_tags_and_douyin_product_title_cannot_send_navigation_keys(self):
-        from sau_commands.alipay import upload_alipay_video
-        from uploader.alipay_uploader.main import format_title_with_tags
-        from uploader.douyin_uploader.main import DouYinVideo
 
-        for control in ("\n", "\r", "\t"):
-            with self.subTest(control=repr(control)):
-                request = SimpleNamespace(title="Title", tags=[f"a{control}b"])
-                with self.assertRaisesRegex(ValueError, "单行"):
-                    await upload_alipay_video(request)
-                with self.assertRaisesRegex(ValueError, "单行"):
-                    format_title_with_tags(request.title, request.tags)
-                with self.assertRaisesRegex(ValueError, "单行"):
-                    DouYinVideo("Title", "unused.mp4", [], 0, "unused.json", productTitle=f"a{control}b")
-
-    async def test_tencent_title_parameter_remains_a_multiline_description(self):
-        from uploader.tencent_uploader.main import TencentVideo
-
-        caption = "first line\nsecond line"
-        app = TencentVideo(caption, "unused.mp4", [], 0, "unused.json")
-        with patch.object(app, "validate_video_file", return_value=Path("unused.mp4")):
-            await app.validate_upload_args(check_cookie=False)
-        self.assertEqual(app.title, caption)
     async def test_all_login_probes_keep_the_original_error_when_page_close_fails(self):
         modules = (
-            "alipay_uploader.main", "baijiahao_uploader.main", "dayu_uploader.session",
-            "douyin_uploader.main", "hupu_uploader.main", "ks_uploader.main",
             "meta_uploader.facebook_page_uploader.main", "meta_uploader.facebook_uploader.main",
-            "meta_uploader.insgraph_uploader.main", "tencent_uploader.main",
-            "tk_uploader.main_chrome", "weibo_uploader.main", "xueqiu_uploader.session",
-            "youtube_uploader.main", "zhihu_uploader.session",
+            "meta_uploader.insgraph_uploader.main",
+            "tk_uploader.main_chrome",
+            "youtube_uploader.main",
         )
         for name in modules:
             with self.subTest(platform=name):
@@ -95,15 +66,6 @@ class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
         paths = {
             "rednote_uploader.main": ("RednoteVideo", "RednoteNote"),
             "xiaohongshu_uploader.main": ("XiaoHongShuVideo", "XiaoHongShuNote"),
-            "alipay_uploader.main": ("AlipayVideo",),
-            "baijiahao_uploader.main": ("BaiJiaHaoVideo",),
-            "weibo_uploader.main": ("WeiBoVideo",),
-            "douyin_uploader.main": ("DouYinVideo", "DouYinNote"),
-            "dayu_uploader.main": ("DayuVideo",),
-            "dayu_uploader.article": ("DayuArticle",),
-            "zhihu_uploader.article": ("ZhihuArticle",),
-            "zhihu_uploader.video": ("ZhihuVideo",),
-            "xueqiu_uploader.article": ("XueqiuArticle",),
         }
         for path, names in paths.items():
             module = importlib.import_module(f"uploader.{path}")
@@ -123,8 +85,7 @@ class InputAndCandidateTests(unittest.IsolatedAsyncioTestCase):
                                 await result
 
     async def test_derived_titles_keep_multiline_body_and_normalize_only_title(self):
-        for platform, prefix in (("rednote", "Rednote"), ("xiaohongshu", "XiaoHongShu"),
-                                 ("douyin", "DouYin")):
+        for platform, prefix in (("rednote", "Rednote"), ("xiaohongshu", "XiaoHongShu")):
             module = importlib.import_module(f"uploader.{platform}_uploader.main")
             cls = getattr(module, prefix + "Note")
             body = "hello\r\nworld\t标题"
