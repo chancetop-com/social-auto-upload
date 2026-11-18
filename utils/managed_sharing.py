@@ -10,7 +10,7 @@ from time import monotonic
 from loguru import logger
 
 from utils.base_social_media import get_supported_social_media
-from utils.errors import RateLimitedError
+from utils.errors import ProviderRequestRejected, RateLimitedError
 from utils.managed_browser import SharedBrowserProvider
 from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
@@ -33,6 +33,8 @@ async def _provider_call(provider, operation, *args):
         return await asyncio.to_thread(getattr(provider, operation), *args)
     except RateLimitedError:
         raise RateLimitedError(f"{provider.mode} {operation} 请求过于频繁（HTTP 429）。") from None
+    except ProviderRequestRejected:
+        raise ProviderRequestRejected(f"{provider.mode} {operation} 请求被拒绝。") from None
     except Exception:
         raise RuntimeError(f"{provider.mode} {operation} 失败，无法确认 Profile 当前状态或连接。") from None
 
@@ -85,8 +87,15 @@ class ManagedCommand:
 
         await _provider_call(provider, "probe")
         state = await _provider_call(provider, "observe")
-        if record and record["phase"] == "stopping" and state.active:
-            raise RuntimeError(f"{self.mode} Profile 上次停止尚未确认。")
+        if record and record["phase"] == "stopping":
+            # The previous Stop response was lost. Never resend it: the open
+            # browser may have been reopened from the desktop in the meantime.
+            deadline = monotonic() + LIFECYCLE_TIMEOUT
+            while state.active:
+                if monotonic() >= deadline:
+                    raise RuntimeError(f"{self.mode} Profile 上次停止尚未确认，等待超时。")
+                await asyncio.sleep(0.5)
+                state = await _provider_call(provider, "observe")
         if state.active:
             if not state.endpoint:
                 raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
@@ -105,14 +114,19 @@ class ManagedCommand:
             self.store.write_record({"resource": resource, "phase": "starting"})
             try:
                 endpoint = await _provider_call(provider, "start", headless)
-            except RateLimitedError:
+            except (RateLimitedError, ProviderRequestRejected):
                 self.store.clear_record()
                 raise
             setting = headless
         if not isinstance(endpoint, str) or not endpoint:
             raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
-        return endpoint, {"resource": resource, "phase": "active",
-                          "endpoint": _digest(endpoint), "headless": setting}
+        active_record = {"resource": resource, "phase": "active",
+                         "endpoint": _digest(endpoint), "headless": setting}
+        if not state.active:
+            # Start completed independently of this command's CDP handshake.
+            # Death during attachment must not leave a pending Start behind.
+            self.store.write_record(active_record)
+        return endpoint, active_record
 
     @asynccontextmanager
     async def session(self, playwright, provider, headless, connect):
@@ -159,7 +173,12 @@ class ManagedCommand:
                     if not record or record.get("phase") != "active":
                         raise RuntimeError("托管 Profile 的共享记录无效。")
                     self.store.write_record({**record, "phase": "stopping"})
-                    await _provider_call(self.provider, "stop")
+                    try:
+                        await _provider_call(self.provider, "stop")
+                    except (RateLimitedError, ProviderRequestRejected):
+                        # The provider rejected this operation before dispatch.
+                        self.store.clear_record()
+                        raise
                     self.store.clear_record()
         except Exception:
             logger.warning("{} Profile 停止或清理失败，可能仍在运行。", self.mode)

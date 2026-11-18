@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>[contenteditable] { min-height:30px; border:1px solid }</style>
+<button data-e2e="select_video_button" onclick="video.click()">Select video</button>
+<input type="file" id="video" accept="video/mp4" hidden>
+<input type="file" id="images" accept="image/png" multiple>
+<input placeholder="Add a catchy title" id="title">
+<div class="public-DraftEditor-content" contenteditable="true"></div>
+<div data-id="photo">Cover</div>
+<button data-e2e="post_video_button" id="post" BUTTON_STATE>Post</button>
+<script>
+  post.onclick = async () => {
+    const text = document.querySelector('[contenteditable]').innerText.trim();
+    const caption = document.querySelector('#title').value || text;
+    const files = [...video.files, ...images.files].map(file => file.name);
+    sessionStorage.caption = caption;
+    const response = await fetch('/offline-submit', {method: 'POST', body: JSON.stringify({caption, files})});
+    const outcome = await response.text();
+    if (outcome === 'content') location.assign('/tiktokstudio/content');
+    if (outcome === 'login') location.assign('/login');
+  };
+</script>
