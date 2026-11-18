@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+
+from tests.fakes import FakePage
 from uploader.xiaohongshu_uploader import main as xhs_main
 
 LOGIN_URL = "https://creator.xiaohongshu.com/login?redirect=%2Fpublish"
@@ -66,7 +68,7 @@ class _Response:
         self.status = status
 
 
-class _ProbePage:
+class _ProbePage(FakePage):
     """Scripted publish page used by ``probe_session`` tests."""
 
     def __init__(
@@ -79,7 +81,7 @@ class _ProbePage:
         login_box_count: int = 0,
         anchor_ready_after_waits: int | None = None,
     ) -> None:
-        self.url = "about:blank"
+        super().__init__()
         self.main_frame = _ProbeFrame(self)
         self.final_url = final_url
         self.status = status

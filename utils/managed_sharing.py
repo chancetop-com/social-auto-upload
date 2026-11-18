@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from hashlib import sha256
-from time import monotonic
+from threading import Thread
+from time import monotonic, sleep
 
 from loguru import logger
 
@@ -16,6 +18,9 @@ from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
 
 LIFECYCLE_TIMEOUT = 10.0
+# An admitted member must outlast a contender's provider reads, CDP retries
+# and final status query before giving up the obligation to stop the browser.
+DEPARTURE_TIMEOUT = 180.0
 _current = ContextVar("managed_command", default=None)
 
 
@@ -27,16 +32,49 @@ def _digest(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
 
 
-async def _provider_call(provider, operation, *args):
+def _provider_request(provider, operation, *args):
     """Provider errors can carry authorization headers and complete CDP URLs."""
     try:
-        return await asyncio.to_thread(getattr(provider, operation), *args)
+        return getattr(provider, operation)(*args)
     except RateLimitedError:
         raise RateLimitedError(f"{provider.mode} {operation} 请求过于频繁（HTTP 429）。") from None
     except ProviderRequestRejected:
         raise ProviderRequestRejected(f"{provider.mode} {operation} 请求被拒绝。") from None
     except Exception:
         raise RuntimeError(f"{provider.mode} {operation} 失败，无法确认 Profile 当前状态或连接。") from None
+
+
+async def _provider_call(provider, operation, *args):
+    return await asyncio.to_thread(_provider_request, provider, operation, *args)
+
+
+async def _wait_for_stopped(provider, deadline):
+    # Only read operations may outlive the deadline. asyncio.run joins its
+    # default executor on exit, so a stalled HTTP read needs a daemon thread.
+    outcome = Future()
+    outcome.set_running_or_notify_cancel()
+
+    def observe():
+        try:
+            _provider_request(provider, "probe")
+            while monotonic() < deadline:
+                state = _provider_request(provider, "observe")
+                if not state.active:
+                    outcome.set_result(state)
+                    return
+                sleep(min(0.5, max(0, deadline - monotonic())))
+            raise asyncio.TimeoutError
+        except Exception as exc:
+            outcome.set_exception(exc)
+
+    remaining = deadline - monotonic()
+    if remaining > 0:
+        Thread(target=observe, daemon=True).start()
+        try:
+            return await asyncio.wait_for(asyncio.wrap_future(outcome), remaining)
+        except asyncio.TimeoutError:
+            pass
+    raise RuntimeError(f"{provider.mode} Profile 上次停止尚未确认，等待超时。")
 
 
 class ManagedCommand:
@@ -53,8 +91,8 @@ class ManagedCommand:
         self.provider = None
 
     @asynccontextmanager
-    async def lifecycle(self):
-        deadline = monotonic() + LIFECYCLE_TIMEOUT
+    async def lifecycle(self, timeout=LIFECYCLE_TIMEOUT):
+        deadline = monotonic() + timeout
         lock = self.store.try_lock("lifecycle")
         while lock is None:
             if monotonic() >= deadline:
@@ -62,7 +100,7 @@ class ManagedCommand:
             await asyncio.sleep(0.05)
             lock = self.store.try_lock("lifecycle")
         try:
-            yield
+            yield deadline
         finally:
             lock.close()
 
@@ -74,7 +112,7 @@ class ManagedCommand:
             lock.close()
         return False
 
-    async def connection(self, provider: SharedBrowserProvider, headless: bool):
+    async def connection(self, provider: SharedBrowserProvider, headless: bool, deadline: float):
         record = self.store.read_record()
         resource = _digest(provider.resource_identity)
         if record is not None and record.get("resource") != resource:
@@ -85,17 +123,12 @@ class ManagedCommand:
         if record and record.get("phase") not in {"active", "starting", "stopping"}:
             raise RuntimeError("托管 Profile 的共享记录无效。")
 
-        await _provider_call(provider, "probe")
-        state = await _provider_call(provider, "observe")
         if record and record["phase"] == "stopping":
-            # The previous Stop response was lost. Never resend it: the open
-            # browser may have been reopened from the desktop in the meantime.
-            deadline = monotonic() + LIFECYCLE_TIMEOUT
-            while state.active:
-                if monotonic() >= deadline:
-                    raise RuntimeError(f"{self.mode} Profile 上次停止尚未确认，等待超时。")
-                await asyncio.sleep(0.5)
-                state = await _provider_call(provider, "observe")
+            # A reopened browser can also be Active. Never resend a lost Stop.
+            state = await _wait_for_stopped(provider, deadline)
+        else:
+            await _provider_call(provider, "probe")
+            state = await _provider_call(provider, "observe")
         if state.active:
             if not state.endpoint:
                 raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
@@ -106,8 +139,6 @@ class ManagedCommand:
                     raise RuntimeError(f"{self.mode} Profile 的当前连接与同行不符。")
                 if setting is None:
                     setting = record.get("headless")
-            if self.explicit_headless is not None and setting is not self.explicit_headless:
-                raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         else:
             if peers or (record and record["phase"] == "starting"):
                 raise RuntimeError(f"{self.mode} Profile 上次启动或当前连接尚未确认。")
@@ -122,10 +153,12 @@ class ManagedCommand:
             raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
         active_record = {"resource": resource, "phase": "active",
                          "endpoint": _digest(endpoint), "headless": setting}
-        if not state.active:
-            # Start completed independently of this command's CDP handshake.
-            # Death during attachment must not leave a pending Start behind.
+        if not state.active or (record and record["phase"] == "starting"):
+            # A Start response or a later authenticated Active can establish
+            # completion before compatibility checks and the CDP connection.
             self.store.write_record(active_record)
+        if state.active and self.explicit_headless is not None and setting is not self.explicit_headless:
+            raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         return endpoint, active_record
 
     @asynccontextmanager
@@ -134,8 +167,8 @@ class ManagedCommand:
             raise RuntimeError("托管命令请求的 Profile 与平台资格不符。")
         browser = None
         try:
-            async with self.lifecycle():
-                endpoint, record = await self.connection(provider, headless)
+            async with self.lifecycle() as deadline:
+                endpoint, record = await self.connection(provider, headless, deadline)
                 try:
                     browser = await connect(playwright, provider, endpoint)
                     contexts = browser.contexts
@@ -150,9 +183,8 @@ class ManagedCommand:
                         raise RuntimeError("无法安全登记托管 Profile 成员。")
                 self.provider = provider
 
-            logger.info("托管 Profile 已连接：mode={}，platform={}", self.mode, self.platform)
             async with managed_pages(contexts[0]) as pages:
-                yield browser, pages
+                yield browser, pages, record["headless"]
         finally:
             if browser is not None:
                 try:
@@ -164,7 +196,7 @@ class ManagedCommand:
         try:
             if self.member is None:
                 return
-            async with self.lifecycle():
+            async with self.lifecycle(timeout=DEPARTURE_TIMEOUT):
                 self.member.close()
                 self.member = None
                 self.reservation.close()
@@ -198,4 +230,11 @@ async def managed_command(platform, mode, profile_id, explicit_headless):
         yield
     finally:
         _current.reset(token)
-        await command.leave()
+        # Cancellation cannot cancel a synchronous provider request. Keep its
+        # lifecycle lock and finish recording the response before propagating it.
+        departure = asyncio.create_task(command.leave())
+        try:
+            await asyncio.shield(departure)
+        except asyncio.CancelledError:
+            await departure
+            raise

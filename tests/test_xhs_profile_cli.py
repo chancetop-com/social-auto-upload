@@ -33,6 +33,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()
+        self.stack.enter_context(patch.dict(os.environ, {'HOME': str(self.root), 'USERPROFILE': str(self.root)}))
         for name, value in [('BASE_DIR', self.root), ('LOCAL_CHROME_PATH', ''), ('LOCAL_BROWSER', 'chrome'), ('LOCAL_CHROME_HEADLESS', True)]:
             self.stack.enter_context(patch.object(conf, name, value, create=True))
         self.stack.enter_context(patch.dict(os.environ, {'MLX_API_TOKEN': '', 'ADSPOWER_API_KEY': '', 'HUMANIZE': '0'}))
@@ -289,13 +290,15 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         image = self.root / 'image.png'
         image.write_bytes(b'image')
         self.context.close_error = OSError('close failed')
-        for outcome, expected in [('success', 0), ('unknown', 9), ('login', 10), ('verification', 10)]:
+        for outcome, expected in [('success', 0), ('unknown', 9), ('login', 10), ('verification', 10), ('redirecting', 10)]:
             page = _note_page()
             page._evaluate_handler = lambda expression, arg: {'since': 10_000} if 'performance.now' in str(expression) else True
             button = page.locator('xhs-publish-btn')
             async def publish(**kwargs):
                 button.click_count += 1
-                if outcome != 'unknown':
+                if outcome == 'redirecting':
+                    page.redirect_on_dom_read = 'https://creator.xiaohongshu.com/login'
+                elif outcome != 'unknown':
                     page.url = 'https://creator.xiaohongshu.com/' + {'success': 'publish/success', 'login': 'login', 'verification': 'website-login/captcha'}[outcome]
                     page.main_frame.url = page.url
             button.click = publish
@@ -311,7 +314,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
     def test_managed_boundaries_ignore_local_config_and_preserve_ownership(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser
         from loguru import logger
-        for mode, env in [('mlx', {'MLX_API_TOKEN': 'test'}), ('adspower', {'ADSPOWER_API_KEY': 'test'})]:
+        for mode, env in [('multilogin', {'MLX_API_TOKEN': 'test'}), ('adspower', {'ADSPOWER_API_KEY': 'test'})]:
             provider = FakeManagedProvider(mode=mode)
             context = ProfileContext()
             browser = FakeBrowser([context])
@@ -320,7 +323,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
             sink = logger.add(logs, format='{message}')
             try:
                 with patch.object(command, 'resolve_managed_provider', return_value=provider), patch.dict(os.environ, env), patch.object(conf, 'LOCAL_CHROME_PATH', []):
-                    code, out, err = self.cli('check', '--profile-id', 'profile', '--local-browser', 'invalid')
+                    code, out, err = self.cli('check', '--folder-id', 'folder', '--profile-id', 'profile', '--local-browser', 'invalid')
             finally:
                 logger.remove(sink)
             self.assertEqual(code, 0, err)
@@ -376,7 +379,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
         media.write_bytes(b'video')
         image = self.root / 'image.png'
         image.write_bytes(b'image')
-        for action, flags, mode in [('upload-video', ['--file', str(media)], 'mlx'), ('upload-note', ['--images', str(image)], 'adspower')]:
+        for action, flags, mode in [('upload-video', ['--file', str(media)], 'multilogin'), ('upload-note', ['--images', str(image)], 'adspower')]:
             provider = FakeManagedProvider(mode=mode)
             page = _note_page()
             page._evaluate_handler = lambda expression, arg: {'since': 10_000} if 'performance.now' in str(expression) else True
@@ -387,8 +390,8 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
             logs = io.StringIO()
             sink = logger.add(logs, format='{message}')
             try:
-                with patch.object(command, 'resolve_managed_provider', return_value=provider), patch.object(conf, 'LOCAL_CHROME_PATH', []), patch.dict(os.environ, {'MLX_API_TOKEN': 'token'} if mode == 'mlx' else {'ADSPOWER_API_KEY': 'key'}), FakeClock().patch(xhs, timeout, dom):
-                    code, out, err = self.cli(action, '--account', 'ignored', '--profile-id', 'profile', '--local-browser', 'ignored', '--headed', '--title', 'Title', '--no-publish', *flags)
+                with patch.object(command, 'resolve_managed_provider', return_value=provider), patch.object(conf, 'LOCAL_CHROME_PATH', []), patch.dict(os.environ, {'MLX_API_TOKEN': 'token'} if mode == 'multilogin' else {'ADSPOWER_API_KEY': 'key'}), FakeClock().patch(xhs, timeout, dom):
+                    code, out, err = self.cli(action, '--account', 'ignored', '--folder-id', 'folder', '--profile-id', 'profile', '--local-browser', 'ignored', '--headed', '--title', 'Title', '--no-publish', *flags)
             finally:
                 logger.remove(sink)
             self.assertEqual(code, 0, err)

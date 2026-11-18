@@ -631,7 +631,7 @@ class YouTubePublishDispatchGuardTests(unittest.TestCase):
                 youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
             ),
         ):
-            asyncio.run(app._upload_video_on_page(page, multilogin=False))
+            asyncio.run(app._upload_video_on_page(page))
         return dispatches
 
     def test_maybe_dispatched_done_click_maps_to_result_unknown(self):
@@ -699,7 +699,7 @@ class YouTubePostPublishCloseTests(unittest.TestCase):
                 youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
             ),
         ):
-            asyncio.run(app._upload_video_on_page(page, multilogin=False))
+            asyncio.run(app._upload_video_on_page(page))
 
         # 只尝试一次，绝不重试第二次关闭。
         self.assertEqual(len(close_selectors), 1)

@@ -161,6 +161,18 @@ class MultiloginClientStartTests(unittest.TestCase):
 
         self.assertIn("port", str(caught.exception).lower())
 
+    def test_start_rejects_wrong_or_unusable_browser_identity(self):
+        for field in (
+            {"id": "wrong-profile"}, {"folder_id": "wrong-folder"}, {"browser_type": "stealthfox"},
+            {"is_quick": True}, {"port": "65536"}, {"port": "http://unexpected.test"},
+        ):
+            with self.subTest(field=field):
+                payload = load_fixture("start_ok.json")
+                payload["data"].update({"id": PROFILE_ID, **field})
+                client, _ = self._client(FakeResponse(200, payload))
+                with self.assertRaises(RuntimeError):
+                    client.start(FOLDER_ID, PROFILE_ID, headless=False)
+
     def test_start_transport_failure_is_wrapped_without_token(self):
         client, _ = self._client(ConnectionError("connection refused"))
 
