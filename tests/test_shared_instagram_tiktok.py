@@ -210,3 +210,40 @@ def test_waiting_instagram_and_earlier_tiktok_publish_their_own_drafts(tmp_path,
         assert instagram.submissions == [{"caption": "IG on time", "files": ["IG.png"]}]
         assert instagram.submitted_at == [epoch + 20]
         assert profile.starts == profile.stops == ["shared"]
+
+
+@pytest.mark.parametrize(("outcome", "code"), [("lost", 9), ("login", 10)])
+def test_tiktok_outcome_after_one_dispatch_preserves_waiting_peer(tmp_path, installations, outcome, code):
+    instagram = InstagramSite()
+    tiktok = TikTokSite(outcome=outcome)
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = OfflineProfile(tmp_path, stack, installations, playwright,
+                                 sites={"www.instagram.com": instagram.handler(block_share=True),
+                                        "www.tiktok.com": tiktok.handler()})
+        photo = tmp_path / "draft.png"
+        photo.touch()
+        result = tmp_path / "peer.json"
+        ig = profile.command(0, "instagram", "--images", str(photo), "--title", "Editable peer",
+                             "--no-publish", "--result", str(result), action="upload-note", env={"HUMANIZE": "0"})
+        ig_page = matching_page(profile, lambda p: p.locator("[contenteditable]").count() and
+                               p.locator("[contenteditable]").inner_text() == "Editable peer", ig)
+        location = ig_page.url
+        tt = profile.command(1, "tiktok", "--images", str(photo), "--title", "TT submitted",
+                             action="upload-note", env={"HUMANIZE": "0"})
+        if outcome == "lost":
+            wait_for_event(lambda: bool(tiktok.submissions), tt)
+            page = matching_page(profile, lambda p: "tiktokstudio/upload?tab=photo" in p.url, tt)
+            page.close()
+        output = tt.communicate(timeout=10)[0]
+        assert tt.returncode == code, output
+        assert ("publish_attempted=true" in output.splitlines()) == (code == 10)
+        assert tiktok.submissions == [{"caption": "TT submitted", "files": ["draft.png"]}]
+        assert not profile.stops and not instagram.submissions
+        assert ig_page.url == location and ig_page.locator("[contenteditable]").inner_text() == "Editable peer"
+        ig_page.locator("[contenteditable]").fill("Still editing")
+        ig_page.locator("[data-share-blocker]").evaluate("el => el.remove()")
+        output = ig.communicate(timeout=8)[0]
+        assert ig.returncode == 0, output
+        assert json.loads(result.read_text())["status"] == "prepared"
+        assert profile.starts == profile.stops == ["shared"]
