@@ -60,7 +60,10 @@ class ProfileStore:
         home = Path.home()
         if not home.is_absolute():
             raise PermissionError("无法确认当前用户的主目录。")
-        if os.name != "nt":
+        if os.name == "nt":
+            from utils.windows_profile_security import check_private
+            check_private(home)
+        else:
             info = home.stat()
             if info.st_uid != os.geteuid() or info.st_mode & 0o022:
                 raise PermissionError("主目录无法保护托管会话文件。")
