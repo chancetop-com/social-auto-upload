@@ -12,6 +12,7 @@ dependencies = [
   "loguru==0.7.3",
   "opencv-python>=4.13.0.92",
   "patchright==1.64.4",
+  "pywin32==312; sys_platform == 'win32'",
   "requests==2.32.3",
   "segno>=1.6.6",
   "tinycss2>=1.4.0,<2",
