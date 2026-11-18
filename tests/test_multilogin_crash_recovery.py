@@ -1,13 +1,15 @@
 """Launcher failure and process-death scenarios through installed commands."""
 import json
+import subprocess
 import sys
 import threading
 import time
 from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, build_opener
 
 import pytest
 
-from tests.test_adspower_crash_recovery import platform_pages
+from tests.test_adspower_crash_recovery import kill_cli, platform_pages
 from tests.test_shared_multilogin_process import PROFILE, LauncherProfile, installations, mlx
 
 
@@ -179,3 +181,45 @@ def test_stop_success_response_precedes_browser_exit_and_desktop_reopen(mlx):
     current.entered('tiktok', successor)
     current.finish('tiktok', successor)
     assert not current.starts and current.stops == [PROFILE]
+
+
+def test_reused_launcher_port_requires_evidence_of_a_new_profile_launch(mlx):
+    launch = '2025-06-26T13:53:48.0788673Z'
+    mlx.observation_fields.update(last_launched_at=launch, timestamp=1750946030108)
+    owner = mlx.command(0, 'instagram')
+    mlx.entered('instagram', owner)
+    kill_cli(owner)
+    mlx.close_browser()
+
+    # Bind a new Chromium with a different browser UUID to the exact former port.
+    old_endpoint = urlsplit(mlx.endpoint)
+    args = [arg for arg in mlx.chrome.args
+            if not arg.startswith(('--user-data-dir=', '--remote-debugging-port='))]
+    args.extend([f'--user-data-dir={mlx.root / "replacement"}', f'--remote-debugging-port={old_endpoint.port}'])
+    mlx.chrome = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    local = build_opener(ProxyHandler({}))
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            with local.open(f'http://{old_endpoint.netloc}/json/version', timeout=1) as reply:
+                new_endpoint = json.load(reply)['webSocketDebuggerUrl']
+                break
+        except OSError:
+            assert time.monotonic() < deadline and mlx.chrome.poll() is None
+            time.sleep(.05)
+    assert new_endpoint != mlx.endpoint and urlsplit(new_endpoint).port == old_endpoint.port
+    mlx.browser = mlx.playwright.chromium.connect_over_cdp(new_endpoint, no_defaults=True)
+    mlx.observation_fields['timestamp'] += 10_000
+    mlx.gates['tiktok'].set()
+
+    denied = mlx.command(1, 'tiktok')
+    output = denied.communicate(timeout=12)[0]
+    assert denied.returncode == 1 and '启动' in output, output
+    assert mlx.pages_requested == ['instagram'] and not mlx.stops
+    assert len(mlx.browser.contexts[0].pages) == 1
+
+    mlx.observation_fields['last_launched_at'] = '2025-06-26T13:53:51.0000000Z'
+    successor = mlx.command(1, 'tiktok')
+    mlx.finish('tiktok', successor)
+    assert mlx.starts == mlx.stops == [PROFILE]
+    assert mlx.pages_requested == ['instagram', 'tiktok']

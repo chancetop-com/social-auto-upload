@@ -54,15 +54,22 @@ async def _provider_call(provider, operation, *args):
     return await asyncio.to_thread(_provider_request, provider, operation, *args)
 
 
-def _stop_finished(state, acknowledged_endpoint):
-    # A replacement instance establishes completion only after a successful
-    # Stop reply. A lost request can still execute against a reopened profile.
+def _newer_launch(state, record):
+    previous = record.get("launched_at_ns")
+    return previous is not None and state.launched_at_ns is not None and state.launched_at_ns > previous
+
+
+def _stop_finished(state, acknowledged_record):
+    # A changed port or browser UUID alone can point at an unrelated browser.
+    # A later MLX launch after an acknowledged Stop establishes a replacement.
     return not state.active or (
-        acknowledged_endpoint is not None and bool(state.endpoint) and _digest(state.endpoint) != acknowledged_endpoint
+        acknowledged_record is not None and bool(state.endpoint)
+        and _digest(state.endpoint) != acknowledged_record["endpoint"]
+        and _newer_launch(state, acknowledged_record)
     )
 
 
-async def _wait_for_stopped(provider, deadline, acknowledged_endpoint=None):
+async def _wait_for_stopped(provider, deadline, acknowledged_record=None):
     # Only read operations may outlive the deadline. asyncio.run joins its
     # default executor on exit, so a stalled HTTP read needs a daemon thread.
     outcome = Future()
@@ -77,7 +84,7 @@ async def _wait_for_stopped(provider, deadline, acknowledged_endpoint=None):
                 except ProfileConnectionUnavailableError:
                     pass  # CDP can disappear before Launcher changes its status.
                 else:
-                    if _stop_finished(state, acknowledged_endpoint):
+                    if _stop_finished(state, acknowledged_record):
                         outcome.set_result(state)
                         return
                 sleep(min(0.5, max(0, deadline - monotonic())))
@@ -140,11 +147,12 @@ class ManagedCommand:
             raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
 
         if record and record["phase"] in {"stopping", "stop_acknowledged"}:
-            old_endpoint = record.get("endpoint") if record["phase"] == "stop_acknowledged" else None
-            state = await _wait_for_stopped(provider, deadline, old_endpoint)
+            acknowledged = record if record["phase"] == "stop_acknowledged" else None
+            state = await _wait_for_stopped(provider, deadline, acknowledged)
         else:
             await _provider_call(provider, "probe")
             state = await _provider_call(provider, "observe")
+        launch_time = state.launched_at_ns
         if state.active:
             if not state.endpoint:
                 raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
@@ -154,6 +162,14 @@ class ManagedCommand:
                              and record.get("endpoint") == _digest(endpoint))
             if peers and not same_instance:
                 raise RuntimeError(f"{self.mode} Profile 的当前连接与同行不符。")
+            if record is not None and record["phase"] == "active" and self.mode == "multilogin":
+                previous_launch = record.get("launched_at_ns")
+                if same_instance:
+                    if previous_launch is not None and launch_time not in (None, previous_launch):
+                        raise RuntimeError("Multilogin Profile 的启动时间与浏览器实例不符。")
+                    launch_time = previous_launch if launch_time is None else launch_time
+                elif not _newer_launch(state, record):
+                    raise RuntimeError("无法确认 Multilogin Profile 已重新启动。")
             if same_instance and setting is None:
                 setting = record.get("headless")
         else:
@@ -170,10 +186,21 @@ class ManagedCommand:
             raise RuntimeError(f"{self.mode} Profile 当前连接不可用。")
         active_record = {"resource": resource, "phase": "active",
                          "endpoint": _digest(endpoint), "headless": setting}
+        if launch_time is not None:
+            active_record["launched_at_ns"] = launch_time
         if not state.active or (record and record["phase"] == "starting"):
             # A Start response or a later authenticated Active can establish
             # completion before compatibility checks and the CDP connection.
             self.store.write_record(active_record)
+        if not state.active and self.mode == "multilogin":
+            # Start supplies a port. Capture the scoped running observation for
+            # this exact browser before a later process has to recover it.
+            started = await _provider_call(provider, "observe")
+            if not started.active or started.endpoint != endpoint:
+                raise RuntimeError("无法确认 Multilogin Profile 已启动的浏览器实例。")
+            if started.launched_at_ns is not None:
+                active_record["launched_at_ns"] = started.launched_at_ns
+                self.store.write_record(active_record)
         if state.active and self.explicit_headless is not None and setting is not self.explicit_headless:
             raise RuntimeError(f"{self.mode} Profile 的 headless 设置冲突或无法确认。")
         return endpoint, active_record
@@ -249,7 +276,7 @@ class ManagedCommand:
         if self.provider.asynchronous_stop:
             self.store.write_record({**record, "phase": "stop_acknowledged"})
             state = _provider_request(self.provider, "observe")
-            if not _stop_finished(state, record["endpoint"]):
+            if not _stop_finished(state, record):
                 return
         self.store.clear_record()
 

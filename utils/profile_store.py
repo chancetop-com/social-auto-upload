@@ -69,6 +69,8 @@ def _valid_record(record: object) -> bool:
     phase = record.get("phase")
     if phase == "starting":
         return record.keys() == {"phase", "resource"}
+    if "launched_at_ns" in record and (type(record["launched_at_ns"]) is not int or record["launched_at_ns"] <= 0):
+        return False
     return (phase in ("active", "stopping", "stop_acknowledged")
             and digest("endpoint") and "headless" in record
             and (record["headless"] is None or type(record["headless"]) is bool))

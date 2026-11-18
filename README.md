@@ -209,7 +209,7 @@ sau xiaohongshu upload-video --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
 ```
 
-MLX 通过本机 Multilogin Launcher 启动 Profile；`--folder-id` / `--profile-id` 必填，Profile 使用 Mimic 内核。
+MLX 通过本机 Multilogin Launcher 启动 Profile，`--folder-id` / `--profile-id` 必填，Profile 使用 Mimic 内核。首次加入已打开的 Profile 时，CLI 依赖 Launcher 准确报告该 Profile 的运行状态和本机端口，并用当前凭据核对文件夹、Profile 和 CDP 连接。若已有记录中的浏览器实例发生变化，只有 Launcher 的 `last_launched_at` 能证明新一轮启动时才会重新加入。若缺少可比的启动时间，可先在桌面确认并关闭该 Profile，待 Launcher 报告已停止后再运行。
 
 ##### AdsPower
 

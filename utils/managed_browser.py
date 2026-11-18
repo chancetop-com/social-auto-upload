@@ -22,6 +22,7 @@ class ProfileObservation:
     active: bool
     endpoint: str | None = field(default=None, repr=False)
     headless: bool | None = None
+    launched_at_ns: int | None = None
 
 
 class ManagedBrowserProvider(Protocol):

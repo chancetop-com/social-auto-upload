@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import threading
+from datetime import datetime, timezone
 from contextlib import ExitStack
 from urllib.parse import urlsplit
 
@@ -22,6 +23,7 @@ class LauncherProfile(OfflineProfile):
 
     def __init__(self, root, stack, entries, playwright, *, sites=None):
         super().__init__(root, stack, entries, playwright, sites=sites)
+        self.launched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         self.folder = FOLDER
         self.start_fields = {}
         self.denied_tokens = set()
@@ -63,6 +65,7 @@ class LauncherProfile(OfflineProfile):
                     return self.respond_json({
                         'profile_id': profile_id, 'folder_id': target.folder, 'is_quick': False,
                         'browser_type': 'mimic', 'status': 'browser_running' if target.active else 'stopped',
+                        'last_launched_at': target.launched_at,
                         'message': str(urlsplit(target.endpoint).port) if target.active else '',
                         **target.observation_fields}, profile.status_code)
                 if operation == '/api/v1/profile/stop/p':

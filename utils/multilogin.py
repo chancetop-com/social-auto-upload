@@ -9,6 +9,7 @@ header; it is never included in reprs, exception messages, or dataclasses.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import re
 from typing import Any, Callable
@@ -80,6 +81,18 @@ def _automation_port(value) -> str:
     if not 1 <= port <= 65535:
         raise ProfileConnectionUnavailableError("Multilogin Profile 的 CDP 端口（port）超出范围。")
     return str(port)
+
+
+def _launch_time(value: str | None) -> int | None:
+    if value is None:
+        return None
+    # Launcher reports UTC and can supply seven fractional digits. Preserve
+    # the whole value across Python 3.10–3.12, including sub-microsecond ticks.
+    match = re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z", value)
+    if not match:
+        raise ValueError("无法确认 Multilogin Profile 的启动时间。")
+    second = datetime.strptime(match[1], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return int(second.timestamp()) * 10**9 + int((match[2] or "").ljust(9, "0"))
 
 
 class MultiloginClient:
@@ -273,7 +286,7 @@ class MultiloginClient:
             endpoint = self.browser_endpoint(port)
         except (requests.RequestException, RuntimeError, KeyError, ValueError, TypeError):
             raise ProfileConnectionUnavailableError("Multilogin Profile 的当前连接不可用。") from None
-        return ProfileObservation(True, endpoint)
+        return ProfileObservation(True, endpoint, launched_at_ns=_launch_time(data.get("last_launched_at")))
 
     def browser_endpoint(self, port: str) -> str:
         """Resolve a Launcher port to the immutable WebSocket for this browser run."""
