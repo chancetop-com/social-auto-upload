@@ -22,7 +22,7 @@ import sau_cli
 from conf import LOCAL_CHROME_PATH
 import conf
 from sau_commands import tiktok as tiktok_command
-from tests.fakes import FakeContext, FakePage, FakePlaywright
+from tests.fakes import FakeContext, FakeMultiloginClient, FakePage, FakePlaywright
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import (
     TIKTOK_CONTEXT_KWARGS,
@@ -1077,35 +1077,9 @@ class TiktokUploadCliTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class _FakeClient:
-    instances: list["_FakeClient"] = []
-
-    def __init__(self, token: str) -> None:
-        self.token = token
-        self.probe_calls = 0
-        self.start_calls: list[tuple[str, str, bool]] = []
-        self.stop_calls: list[str] = []
-        self.status_calls: list[str] = []
-        _FakeClient.instances.append(self)
-
-    def probe(self) -> None:
-        self.probe_calls += 1
-
-    def start(self, folder_id: str, profile_id: str, headless: bool) -> str:
-        self.start_calls.append((folder_id, profile_id, headless))
-        return "9222"
-
-    def status(self, profile_id: str) -> str:
-        self.status_calls.append(profile_id)
-        return "running"
-
-    def stop(self, profile_id: str) -> None:
-        self.stop_calls.append(profile_id)
-
-
 class StopOwnershipTests(unittest.TestCase):
     def test_stop_is_called_exactly_once_by_browser_session(self):
-        _FakeClient.instances.clear()
+        client = FakeMultiloginClient(port="9222")
         with tempfile.TemporaryDirectory() as tmp_dir:
             video = Path(tmp_dir) / "demo.mp4"
             video.write_bytes(b"video")
@@ -1115,7 +1089,8 @@ class StopOwnershipTests(unittest.TestCase):
             playwright.chromium.queue_connect_browser(browser)
 
             with (
-                patch("sau_commands.browser.MultiloginClient", _FakeClient),
+                patch.dict(os.environ, {"HOME": tmp_dir}),
+                patch("sau_commands.browser.MultiloginClient", return_value=client) as client_factory,
                 patch.object(tiktok_command, "async_playwright", lambda: _AsyncCM(playwright)),
                 patch.object(tiktok_command, "is_logged_in", new=AsyncMock(return_value=True)),
                 patch.object(TiktokVideo, "upload", new=AsyncMock()) as upload,
@@ -1136,12 +1111,14 @@ class StopOwnershipTests(unittest.TestCase):
                 )
 
         self.assertEqual(code, 0, err)
-        client = _FakeClient.instances[0]
-        self.assertEqual(client.token, TOKEN)
+        client_factory.assert_called_once_with(TOKEN)
         self.assertEqual(client.probe_calls, 1)
         self.assertEqual(client.start_calls, [("folder", "profile", True)])
         self.assertEqual(client.stop_calls, ["profile"])
-        self.assertEqual(playwright.chromium.connect_calls[0]["url"], "http://127.0.0.1:9222")
+        self.assertEqual(
+            playwright.chromium.connect_calls[0]["url"],
+            "ws://127.0.0.1:9222/devtools/browser/cccccccc-0000-4000-8000-000000000001",
+        )
         self.assertTrue(browser.closed)
         upload.assert_awaited_once()
         session = upload.await_args.kwargs["session"]

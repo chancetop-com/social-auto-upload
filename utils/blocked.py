@@ -59,9 +59,14 @@ async def classify(
     if kind is not None:
         return kind
 
-    if await _login_box_visible(page, rules, visibility_check):
-        return "login"
-    return None
+    visible = await _login_box_visible(page, rules, visibility_check)
+    # 等待 DOM 回应时可能已经跳到登录或验证页，当前路径优先于旧页面的登录框。
+    current = _page_path(page)
+    if current is not None and current != path:
+        kind = _match_path(current, rules)
+        if kind is not None:
+            return kind
+    return "login" if visible else None
 
 
 def _page_path(page: Any) -> str | None:

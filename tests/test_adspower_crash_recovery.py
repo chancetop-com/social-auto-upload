@@ -1,6 +1,7 @@
 """Crash and recovery through separate installed commands and a local provider."""
 import json
 import signal
+import subprocess
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
@@ -24,6 +25,7 @@ class ControlledProvider:
         self.stops = []
         self.observations = []
         self.observed = threading.Event()
+        self.observe = self.current_state
         self.start = self.start_ok
         self.stop = self.stop_ok
         api = self
@@ -36,8 +38,8 @@ class ControlledProvider:
                 else:
                     assert url.path == '/api/v2/browser-profile/active'
                     assert parse_qs(url.query) == {'profile_id': ['shared']}
-                    api.observations.append(api.state)
-                    data = {'status': api.state, 'ws': {'puppeteer': api.endpoint}}
+                    data = api.observe()
+                    api.observations.append(data['status'])
                     api.observed.set()
                 self.reply({'code': 0, 'data': data})
 
@@ -53,6 +55,9 @@ class ControlledProvider:
                 self.respond(json.dumps(data).encode(), 'application/json')
 
         browser.api_port = browser.stack.enter_context(serve(Provider))
+
+    def current_state(self):
+        return {'status': self.state, 'ws': {'puppeteer': self.endpoint}}
 
     def start_ok(self, request):
         self.state = 'Active'
@@ -122,7 +127,8 @@ def test_join_waits_for_last_stop_after_its_response_is_lost(profile, finishes):
         assert profile.pages_requested == ['instagram'] and api.state == 'Active'
 
 
-def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profile(profile):
+@pytest.mark.parametrize('previously_lost', [False, True], ids=['start-ack', 'active-observed'])
+def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profile(profile, previously_lost):
     api = ControlledProvider(profile)
     attaching = threading.Event()
 
@@ -133,14 +139,20 @@ def test_killed_after_complete_start_before_attach_can_restart_a_now_idle_profil
 
     port = profile.stack.enter_context(serve(DepartedBrowser))
     api.endpoint = f'ws://127.0.0.1:{port}/devtools/browser/previous'
+    if previously_lost:
+        api.start = lambda request: None
+        lost = profile.command(1, 'instagram')
+        assert 'start' in lost.communicate(timeout=8)[0] and lost.returncode == 1
+        api.start = api.start_ok
+        api.state = 'Active'
     interrupted = profile.command(0, 'instagram')
     assert attaching.wait(10)
     interrupted.kill()
     interrupted.communicate(timeout=8)
     assert api.starts == ['shared'] and api.stops == [] and not profile.pages_requested
 
-    # AdsPower acknowledged the last Start with its CDP endpoint. The desktop
-    # has since closed that browser, before the killed client could open a tab.
+    # Start or a fresh authenticated Active supplied the previous run's endpoint.
+    # The desktop has since closed it, before the killed client could open a tab.
     api.state = 'Inactive'
     api.endpoint = profile.endpoint
     next_command = profile.command(1, 'instagram')
@@ -272,3 +284,90 @@ def test_all_killed_commands_recover_from_the_current_profile(profile, reopened)
     if reopened:
         assert not current.starts and not profile.stops
     assert not current.active and current.chrome.poll() is not None
+
+def test_slow_failing_join_cannot_strand_the_last_admitted_commands_profile(profile):
+    api = ControlledProvider(profile)
+    departing = profile.command(0, 'tiktok')
+    profile.entered('tiktok', departing)
+    editor, = platform_pages(profile, 'tiktok')
+    observing, release = threading.Event(), threading.Event()
+
+    def slow_unknown():
+        observing.set()
+        release.wait(25)
+        return {'status': 'Unknown'}
+
+    api.observe = slow_unknown
+    contender = profile.command(1, 'instagram')
+    assert observing.wait(8)
+    try:
+        profile.gates['tiktok'].set()
+        if not editor.is_closed():
+            editor.wait_for_event('close', timeout=8000)
+        # A provider call is allowed to outlast a new admission's 10s lock
+        # budget. The departing CLI still owns its last-member obligation.
+        with pytest.raises(subprocess.TimeoutExpired):
+            departing.wait(timeout=11)
+    finally:
+        release.set()
+    output = contender.communicate(timeout=8)[0]
+    assert contender.returncode == 1 and 'observe' in output
+    profile.finish('tiktok', departing)
+    assert api.starts == api.stops == ['shared'] and api.state == 'Inactive'
+
+
+def test_interrupt_during_stop_keeps_mutex_until_the_provider_request_finishes(profile):
+    api = ControlledProvider(profile)
+    stopping, release = threading.Event(), threading.Event()
+
+    def delayed_ack(request):
+        api.state = 'Inactive'
+        stopping.set()
+        release.wait(25)
+        request.reply({'code': 0})
+
+    api.stop = delayed_ack
+    original = profile.command(0, 'tiktok')
+    profile.entered('tiktok', original)
+    profile.gates['tiktok'].set()
+    assert stopping.wait(10)
+    original.send_signal(signal.SIGINT)
+
+    # Even after the browser disappears, the in-flight Stop can still act on
+    # the Profile. A second process must wait for the response or time out.
+    try:
+        api.stop = api.stop_ok
+        profile.gates['instagram'].set()
+        successor = profile.command(1, 'instagram')
+        output = successor.communicate(timeout=18)[0]
+        assert successor.returncode == 1 and '超时' in output
+        assert api.starts == api.stops == ['shared']
+        assert 'instagram' not in profile.pages_requested
+    finally:
+        release.set()
+        original.communicate(timeout=10)
+
+
+def test_uncertain_stop_deadline_includes_a_stalled_provider_read(profile):
+    api = ControlledProvider(profile)
+    api.stop = lambda request: None
+    original = profile.command(0, 'instagram')
+    profile.entered('instagram', original)
+    assert '停止或清理失败' in profile.finish('instagram', original)
+    reading, release = threading.Event(), threading.Event()
+
+    def stalled():
+        reading.set()
+        release.wait(25)
+        return api.current_state()
+
+    api.observe = stalled
+    successor = profile.command(1, 'tiktok')
+    try:
+        assert reading.wait(8)
+        output = successor.communicate(timeout=12)[0]
+        assert successor.returncode == 1 and '停止' in output and '超时' in output
+        assert api.starts == api.stops == ['shared']
+        assert profile.pages_requested == ['instagram']
+    finally:
+        release.set()
