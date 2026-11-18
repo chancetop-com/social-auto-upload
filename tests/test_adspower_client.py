@@ -160,6 +160,14 @@ class AdspowerClientStartTests(unittest.TestCase):
             },
         )
 
+    def test_start_refuses_a_connection_reported_for_another_profile(self):
+        client, _ = self._client(FakeResponse(200, {"code": 0, "data": {
+            "profile_id": "other-profile", "ws": {"puppeteer": WS_URL},
+        }}))
+        with self.assertRaisesRegex(RuntimeError, "身份") as error:
+            client.start(PROFILE_ID, headless=False)
+        self.assertNotIn(WS_URL, str(error.exception))
+
     def test_start_headless_false_encodes_zero(self):
         client, http = self._client(
             FakeResponse(200, {"code": 0, "data": {"ws": {"puppeteer": WS_URL}}})

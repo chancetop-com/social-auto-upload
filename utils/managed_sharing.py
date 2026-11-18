@@ -136,9 +136,8 @@ class ManagedCommand:
                         raise RuntimeError("无法安全登记托管 Profile 成员。")
                 self.provider = provider
 
-            logger.info("托管 Profile 已连接：mode={}，platform={}", self.mode, self.platform)
             async with managed_pages(contexts[0]) as pages:
-                yield browser, pages
+                yield browser, pages, record["headless"]
         finally:
             if browser is not None:
                 try:
