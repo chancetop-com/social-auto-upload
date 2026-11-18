@@ -37,7 +37,7 @@ TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI�
 - AdsPower 付费版；桌面应用与 CLI 在同一台 macOS/Windows 机器，Local API 已开启，`50325` 未被占用。
 - Profile 为 Chromium 内核，已人工登录 TikTok，且没有待处理验证码或 2FA。
 - Profile 界面语言必须为 **English (US)**；`--folder-id` 忽略，`--profile-id` 映射 AdsPower `user_id`。
-- 同一 Profile 串行使用；客户端升级到最新 patch。
+- AdsPower 客户端需支持 V2 Local API。
 
 ## 命令
 
@@ -47,7 +47,7 @@ sau tiktok login --account creator --headed
 # 0=已登录，10=需登录/验证，1=运行故障
 sau tiktok check --account creator
 sau tiktok upload-video --account creator --file videos/demo.mp4 --title "标题"
-sau tiktok upload-note --account creator --images images/1.jpg images/2.png
+sau tiktok upload-note --account creator --images videos/demo1.png videos/demo2.png
 
 # 托管浏览器模式（MLX）
 export MLX_API_TOKEN="<token>"
@@ -60,16 +60,17 @@ sau tiktok upload-video \
   --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
-  --schedule "2026-10-21T02:30:00Z" --thumbnail covers/demo.png
+  --schedule "2026-10-21T02:30:00Z" --thumbnail videos/demo.png
 
 # 图文：1–35 张本地图片，按传入顺序展示，第 1 张即封面
 sau tiktok upload-note \
   --folder-id <folder_id> --profile-id <profile_id> \
-  --images images/1.jpg images/2.png \
+  --images videos/demo1.png videos/demo2.png \
   --title "图文标题" --note "图文正文" --tags 图文,测试 \
   --privacy friends --no-comments --aigc
 
 # AdsPower 模式（--folder-id 可省略）
+unset MLX_API_TOKEN
 export ADSPOWER_API_KEY="$KEY"
 
 sau tiktok check --profile-id <profile_id>
@@ -87,6 +88,8 @@ sau tiktok upload-video \
 - 安装、浏览器启动与当前 Profile 登录分开核验。验收视频/图文显式传 `--no-publish`：上传素材、编辑并等待发布就绪后停止，可能留下临时素材/草稿，不证明已经发布。
 
 ## 托管浏览器模式（可选）
+
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
 
 `check`、`upload-video` 和 `upload-note` 均可改用托管浏览器 Profile：MLX 需要 `--folder-id` + `--profile-id`，AdsPower 只需要 `--profile-id`（`--folder-id` 忽略）。两种模式都不读写 cookie 文件，`--account` 被忽略，日志标签取 profile_id，`login` 一律拒绝。使用托管模式前，读取运行 `sau` 的项目根目录 `docs/CLI.md` 的“托管浏览器模式（通用）”（[在线入口](https://github.com/dreammis/social-auto-upload/blob/main/docs/CLI.md#托管浏览器模式通用)），确认共同退出码、部署前提、调度责任与身份安全。
 

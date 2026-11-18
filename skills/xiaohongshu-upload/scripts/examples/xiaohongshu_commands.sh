@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# account_name is user-defined. One account_name maps to one account file.
+# account_name is user-defined. Each local account alias selects a persistent browser profile.
 # You can prepare multiple account names and run them in parallel.
 account="account_a"
 video="videos/demo.mp4"
@@ -22,7 +22,7 @@ sau xiaohongshu upload-video \
 
 sau xiaohongshu upload-note \
   --account "$account" \
-  --images "videos/1.png" "videos/2.png" \
+  --images "videos/demo1.png" "videos/demo2.png" \
   --title "Xiaohongshu note title from bash" \
   --note "Xiaohongshu note from bash" \
   --tags "cli,note" \

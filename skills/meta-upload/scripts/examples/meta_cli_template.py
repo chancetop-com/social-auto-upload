@@ -10,7 +10,7 @@ commands = [
     ],
     [
         'sau', 'facebook-page', 'upload-note', '--account', 'account_a',
-        '--page', '示例 Page', '--images', 'images/1.jpg',
+        '--page', '示例 Page', '--images', 'videos/demo1.png',
         '--title', 'Facebook Page 图文示例', '--note', '图文正文',
     ],
 ]

@@ -25,7 +25,7 @@ summary: 发布 Facebook Page 视频或图文，并管理排期。
 ```powershell
 sau facebook-page login --account creator --headed
 sau facebook-page check --account creator
-sau facebook-page upload-note --account creator --page "我的 Page" --images images/1.jpg --title "标题" --note "正文" --result .local/page-result.json
+sau facebook-page upload-note --account creator --page "我的 Page" --images videos/demo1.png --title "标题" --note "正文" --result .local/page-result.json
 sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
 
@@ -47,6 +47,8 @@ sau facebook-page delete --account creator --page "我的 Page" --page-id "Page�
 只覆盖已加载的近期列表，不保证自动查找全部历史作品。同文案不能唯一定位、Page 或编号不符时不删除。删除后超时或浏览器断开时先核对原记录，不自动重删；本地素材保留。完整参数以 `sau facebook-page upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。
 
 ## 托管浏览器模式（可选）
+
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。Facebook 个人与 Page 可并行，两条 Page 命令即使指定不同主页也互斥。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
 
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。`verify` / `delete` 仍为本地模式。
 

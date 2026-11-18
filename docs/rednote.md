@@ -17,7 +17,7 @@ sau rednote check --account creator
 
 普通命令不读取、导入、导出或删除旧 Cookie JSON。只有 `login` 引导登录；缺少 Profile、明确未登录或人机验证退出 `10`，网络、页面结构或浏览器故障退出 `1`。登录有效性由发布页上传入口确认；目录存在不代表已登录。账号别名可以重新登录其他真实账号，两种浏览器也可以使用不同账号。
 
-同 Profile 从启动、预检、业务到关闭全程独占；占用立即失败，不抢占手动浏览器。显式重建 `sau rednote reset-profile --account creator --browser-kind chrome` 只清空该种类资料，无需浏览器安装，保留另一种类和历史结果；之后需重新 login，不自动续跑发布。
+同一本地 Profile 从启动、预检、业务到关闭全程独占；占用立即失败，不抢占手动浏览器。显式重建 `sau rednote reset-profile --account creator --browser-kind chrome` 只清空该种类资料，无需浏览器安装，保留另一种类和历史结果；之后需重新 login，不自动续跑发布。
 
 ## 浏览器与页面语言
 
@@ -31,7 +31,7 @@ sau rednote upload-video --account creator \
   --desc "Video description" --tags travel,life --no-publish
 
 sau rednote upload-note --account creator \
-  --images videos/1.png videos/2.png --title "Hello rednote" \
+  --images videos/demo1.png videos/demo2.png --title "Hello rednote" \
   --note "Photo description" --tags travel,life --no-publish
 ```
 
@@ -42,6 +42,8 @@ sau rednote upload-note --account creator \
 ## 托管浏览器模式
 
 设置 `MLX_API_TOKEN` 后，`check` 和两种上传命令使用 `--folder-id <folder> --profile-id <profile>`。设置 `ADSPOWER_API_KEY` 后只需 `--profile-id <profile>`。两种凭据不能同时设置。
+
+同一托管 Profile 可同时运行 Rednote 与大陆版小红书。两条 Rednote 托管命令互斥。最后一条已加入的命令离开时关闭整个 Profile，包括从桌面打开的原标签页。详见[共享托管 Profile](./CLI.md#共享托管-profile)。
 
 托管模式沿用 Profile 自身语言和登录态，不覆盖指纹、不读写本地 cookie；请在 Profile 中使用英文环境登录 Rednote 后运行。`login` 命令仅用于本地模式。托管仅采用上述 headless 优先级，忽略本地浏览器选择和路径，不访问本地 Profile。
 

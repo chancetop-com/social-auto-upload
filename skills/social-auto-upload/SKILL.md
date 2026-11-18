@@ -1,6 +1,6 @@
 ---
 name: social-auto-upload
-description: 为 social-auto-upload 提供总入口，按平台和内容类型选择对应发布流程。Use when 用户要在本仓库支持的平台发布视频、文章或图文，或需要把内容分发到多个指定平台。
+description: 为 social-auto-upload 提供总入口，按平台和内容类型选择对应发布流程。Use when 用户要在本仓库支持的平台发布视频或图文，或需要把内容分发到多个指定平台。
 license: MIT-0
 slug: social-auto-upload
 displayName: social-auto-upload 多平台发布入口
@@ -16,43 +16,34 @@ summary: 按用户指定的平台和内容类型选择发布流程。
 
 | 平台 | 专用 Skill | CLI 平台名 |
 | --- | --- | --- |
-| 抖音 | `douyin-upload` | `douyin` |
-| Bilibili | `bilibili-upload` | `bilibili` |
 | 小红书 | `xiaohongshu-upload` | `xiaohongshu` |
 | Rednote（国际版，初始适配） | `rednote-upload` | `rednote` |
-| 快手 | `kuaishou-upload` | `kuaishou` |
-| 视频号 | `tencent-upload` | `tencent` |
-| 百家号 | `baijiahao-upload` | `baijiahao` |
-| 大鱼号 | `dayu-upload` | `dayu` |
-| 支付宝生活号 | `alipay-upload` | `alipay` |
-| 微博 | `weibo-upload` | `weibo` |
-| 虎扑 | `hupu-upload` | `hupu` |
 | TikTok | `tiktok-upload` | `tiktok`（本地或托管浏览器模式） |
-| 雪球 | `xueqiu-upload` | `xueqiu` |
 | YouTube | `youtube-upload` | `youtube` |
-| 知乎 | `zhihu-upload` | `zhihu` |
 | Facebook 个人主页 | `facebook-upload` | `facebook` |
 | Facebook Page | `meta-upload` | `facebook-page` |
 | Instagram | `instagram-upload` | `instagram` |
 
 ## 本地浏览器准备
 
-17 个浏览器平台均使用 `browser_profiles/<chrome|chromium>/<平台>/<原始别名>`，仅 login 引导登录；正常关闭后以同配置 check。默认系统 Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装；选择 Chromium 时用项目环境的 `uv run patchright install chromium`，可加 `--no-shell`，完整浏览器同时服务有头与无头。基础安装和 help 无浏览器要求。
+七个平台均使用 `browser_profiles/<chrome|chromium>/<平台>/<原始别名>`，仅 login 引导登录；正常关闭后以同配置 check。默认系统 Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装；选择 Chromium 时用项目环境的 `uv run patchright install chromium`，可加 `--no-shell`，完整浏览器同时服务有头与无头。基础安装和 help 无浏览器要求。
 
-保留已有 conf.py。非空 `LOCAL_CHROME_PATH` 优先，其次显式 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。旧 Cookie 不读写，别名可换号。仅显式 `reset-profile --account <别名> --browser-kind chrome|chromium` 清空指定 Profile，无需 binary，保留另一种类和历史结果；占用时拒绝。Bilibili 使用 biliup 的独立流程。
+保留已有 conf.py。非空 `LOCAL_CHROME_PATH` 优先，其次显式 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。旧 Cookie 不读写，别名可换号。仅显式 `reset-profile --account <别名> --browser-kind chrome|chromium` 清空指定 Profile，无需 binary，保留另一种类和历史结果；占用时拒绝。
 
 ## 托管浏览器模式
 
-除 Bilibili 外，多数浏览器平台支持两种可选的托管浏览器模式：
+七个平台均支持两种托管浏览器模式：
 
 - **Multilogin X（MLX）**：设置 `MLX_API_TOKEN`；`check` / `upload-*` 需要 `--folder-id` 与 `--profile-id`。
 - **AdsPower**：设置 `ADSPOWER_API_KEY`；只需要 `--profile-id`（映射 AdsPower `user_id`），`--folder-id` 忽略。
 
-两种模式都由 Profile 提供登录态与出口 IP，CLI 不读写 `cookies/*.json`；`--account` 仅作日志标签，`login` 一律拒绝。`verify` / `delete` / `article` 仍本地执行。**Bilibili 是明确特例：不支持托管浏览器模式**（`biliup` 没有浏览器上下文，托管模式下退出 `1`）。退出码（含 `11` 请求过于频繁）、部署前提、调度责任与身份风险见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
+两种模式都使用 Profile 的登录态与出口 IP。托管检查和发布忽略 `--account`，身份和日志标签均取自 `--profile-id`。请先在对应桌面应用中登录。`verify` / `delete` 仍使用本地 Profile，`sau article` 在本地渲染原稿。
+
+同机、同一操作系统用户的兼容 CLI 默认共享同一托管 Profile。不同平台可以同时执行，各自在新标签页工作。同一平台的检查和发布合计限一条命令，冲突者立即退出 `1`。**最后一条已加入的命令离开时会关闭整个 Profile，包括用户从桌面打开的标签页。**
 
 ## 指定发布时刻
 
-所有 `upload-video` / `upload-note` / `upload-article` 支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻）：先完成上传、填表、封面和声明，再等到绝对时刻不早于目标时间才点击发布。它和平台原生 `--schedule` 不同，可同时使用；同时使用时让 `--not-before` 早于 `--schedule`。`--no-publish` / `--prepare-only` / `--draft` 会跳过等待。Bilibili 因 `biliup` 一次性提交，等待发生在启动命令之前。
+所有 `upload-video` 和 `upload-note` 命令都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`。内容准备完成后，命令会等到该 UTC 时刻再提交。支持原生 `--schedule` 的平台可同时使用两者，此时 `--not-before` 应早于平台发布时间。支持 `--no-publish` 的入口在显式传入该参数后跳过等待，停在提交前。
 
 ## 人类化交互层
 

@@ -24,4 +24,6 @@ summary: 使用独立 Rednote Profile 完成登录、检查及发布流程。
 
 托管模式：设置 `MLX_API_TOKEN` 后使用 `--folder-id` 和 `--profile-id`；设置 `ADSPOWER_API_KEY` 后仅使用 `--profile-id`。使用其中一种凭据，并在对应 Profile 人工登录；CLI `login` 仅支持本地模式。托管模式只采用同一 headless 优先级；忽略本地浏览器选择/路径，不访问本地 Profile 或 cookie，保留托管 Profile 设置。
 
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。大陆版小红书与 Rednote 分别计数。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
+
 设置声明、封面、定时或处理非零退出码前，读取随 Skill 分发的 [CLI 契约](references/cli-contract.md)。定时发布只在用户提出时使用 `--schedule`；客户端等待使用 `--not-before`，两者均要求 UTC。

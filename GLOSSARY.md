@@ -16,11 +16,11 @@
 
 ## Profile
 
-浏览器身份容器：独立的 Cookie、localStorage、指纹，以及可选的代理配置。一个 Profile 通常对应一个平台账号的登录态。Profile 是托管模式下 Cookie 的唯一真相源。定位方式因 provider 而异：MLX 用 `folder_id + profile_id`，AdsPower 用 `user_id`（V2 请求体字段为 `profile_id`）。
+浏览器身份容器：独立的 Cookie、localStorage、指纹，以及可选的代理配置。一个 Profile 可同时保存多个平台的登录态。Profile 是托管模式下 Cookie 的唯一真相源。定位方式因 provider 而异：MLX 用 `folder_id + profile_id`，AdsPower 用 `user_id`（V2 请求体字段为 `profile_id`）。
 
 ## 本地模式（Local 模式）
 
-不设置任一托管模式环境变量时，由项目启动并关闭浏览器。正式 CLI 的 17 个浏览器平台均使用独立持久化本地浏览器 Profile 作为唯一登录态来源；Bilibili 使用独立的 biliup 账号文件流程，本地文章处理不需要浏览器。托管动作不使用本地资料；Instagram、Facebook 和 Facebook Page 的 verify/delete，以及大鱼号、知乎、雪球 verify，即使设置托管环境变量仍是本地动作。
+未设置托管凭据时，由项目启动并关闭浏览器。七个平台均使用独立的持久化本地 Profile 保存登录态。Instagram、Facebook 和 Facebook Page 的 `verify` / `delete` 始终使用本地 Profile。通用文章工具 `sau article` 只处理本地文件。
 
 ## 本地浏览器 Profile
 
@@ -32,7 +32,7 @@
 
 ## 共享托管会话
 
-同一操作系统用户的 CLI 共用托管 Profile 的同一次运行，包括用户从桌面打开的 Profile。同一 Profile 可供不同平台同时使用，每个平台同时限一条托管命令，包括 `check` 和发布。每条命令拥有独立的结果，以及它新开的标签页和可确认由这些页面打开的子窗口。最后一条托管命令离开时负责关闭整个 Profile。
+同一操作系统用户的 CLI 共用托管 Profile 的同一次运行，包括用户从桌面打开的 Profile。同一 Profile 可供不同平台同时使用，每个平台同时限一条托管命令，包括 `check` 和发布。每条命令拥有独立的结果，以及它新开的标签页和可确认由这些页面打开的子窗口。最后一条托管命令离开时负责关闭整个 Profile，包括桌面原有的标签页。
 
 ## Profile 重建
 
@@ -56,11 +56,11 @@
 
 ## Browser session
 
-一次“取得浏览器并交还”的生命周期单元。本地模式下它启动并关闭自己的浏览器；托管模式下它连接一个已存在的 Profile 上下文，只断开 CDP，不销毁浏览器。
+一次“取得浏览器并交还”的生命周期单元。本地模式下它启动并关闭自己的浏览器；托管模式下它连接 Profile 的现有上下文，清理本命令的页面并断开 CDP，由最后离开的托管命令归还整个 Profile。
 
 ## Owned session（所有权）
 
-现行独占流程中，由 CLI 启动且由该命令负责归还的一次托管浏览器运行。共享托管会话的归还责任由最后离开的托管命令承担。
+旧版独占流程中，由 CLI 启动且由该命令负责归还的一次托管浏览器运行。共享托管会话的归还责任由最后离开的托管命令承担。
 
 ## Login required（登录失效）
 
@@ -96,7 +96,7 @@ Multilogin X 中用于组织 Profile 的文件夹。启动 Profile 时必须同�
 
 ## Multilogin X 模式（MLX 模式；MLX 专属）
 
-由环境变量 `MLX_API_TOKEN` 激活的托管模式子模式：CLI 通过 Launcher 启动指定 Profile，经 CDP 接管其现有浏览器上下文，复用 Profile 登录态完成上传，结束后停止由本次调用启动的 Profile。
+由环境变量 `MLX_API_TOKEN` 激活的托管模式子模式：CLI 通过 Launcher 打开或加入指定 Profile，经 CDP 使用其现有浏览器上下文和登录态，最后一条托管命令离开时停止整个 Profile。
 
 ## AdsPower
 
@@ -112,7 +112,7 @@ AdsPower 桌面应用在本机暴露的 HTTP 接口，默认地址为 `http://12
 
 ## AdsPower 模式
 
-由环境变量 `ADSPOWER_API_KEY` 激活的托管模式子模式：CLI 通过 AdsPower Local API 启动 `user_id` 指定的 Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 接管上下文，复用 Profile 登录态完成上传，结束后停止由本次调用启动的 Profile。
+由环境变量 `ADSPOWER_API_KEY` 激活的托管模式子模式：CLI 通过 AdsPower Local API 打开或加入 `user_id` 指定的 Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 使用现有上下文和登录态，最后一条托管命令离开时停止整个 Profile。
 
 ## user_id（AdsPower Profile 标识）
 

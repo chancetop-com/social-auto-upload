@@ -44,11 +44,11 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-安装完成后，会注册 `sau` 命令。发行包已移除被替代的 TikTok Firefox 实现、未完成的视频号图文和 stealth 脚本，无需准备 Firefox 或额外注入资源；正式浏览器功能使用下述 Patchright 路线，Bilibili 继续使用独立的 biliup。文章渲染脚本、主题及许可证资源仍随包提供。
+安装完成后会注册 `sau` 命令。文章渲染脚本、主题及许可证资源随包提供。
 
 ### 4. 按所选浏览器准备运行环境
 
-项目保留固定版本的 Patchright。TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 的全部正式本地浏览器动作使用持久化 Profile，默认选择系统 Chrome。基础 Python 安装和 CLI help 不下载或检查浏览器；托管动作不要求本地 Chrome/Chromium，Bilibili 仍使用 biliup。
+七个平台的本地浏览器动作使用持久化 Profile，默认使用系统 Chrome。Python 包安装、CLI 帮助和托管动作均无需下载本地浏览器。
 
 - **Chrome 路线**：用户从 [Google Chrome 官方下载页](https://www.google.com/chrome/) 安装适合系统的 Chrome；项目使用 `channel="chrome"`，不会自动安装或更新它。macOS 选择相应 Apple 芯片或 Intel 版本。
 - **Chromium 路线**：在项目 Python 环境执行 `uv run patchright install --no-shell chromium`，并使用 `--local-browser chromium`。有头和无头均使用完整 `channel="chromium"`；`--only-shell` 不能满足这一模式。普通 `uv run patchright install chromium` 同样可用，会额外安装 shell；`--no-shell` 是节省下载的可选方式。
@@ -108,17 +108,15 @@ Windows 也可以直接手动复制并重命名。
 当前通常还会用到这些配置项：
 
 - `LOCAL_CHROME_PATH`：非空时优先作为实际可执行文件。
-- `LOCAL_BROWSER`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
-- `LOCAL_CHROME_HEADLESS`：TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 的 CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`。托管 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 同样解析 headless，但完全忽略本地来源配置。
+- `LOCAL_BROWSER`：无路径覆盖时，显式 `--local-browser` > 此配置 > `chrome`。
+- `LOCAL_CHROME_HEADLESS`：CLI 和直接调用采用显式 `--headed`/`--headless` 或布尔值 > 配置 > `False`。托管模式同样解析 headless，但完全忽略本地来源配置。
 
 ### 6. 验证 CLI 是否可用
 
 ```bash
 sau --help
-sau douyin --help
-sau kuaishou --help
 sau xiaohongshu --help
-sau bilibili --help
+sau article themes
 ```
 
 如果命令找不到，优先确认：
@@ -126,70 +124,23 @@ sau bilibili --help
 - 当前虚拟环境是否已激活
 - 是否执行过 `uv pip install -e .`
 
-### 7. 抖音主线示例
-
-```bash
-sau douyin login --account <account_name>
-sau douyin check --account <account_name>
-sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-图文正文1:
-$noteText = @"图文正文"@    
-sau douyin upload-note --account <account_name> --images videos/demo1.png videos/demo2.png --title "图文标题" --note $noteText --tags 'tag1,tag2'
-图文正文2:
-sau douyin upload-note --account <account_name> --images videos/demo1.png videos/demo2.png --title "图文标题" --notef '图文文件路径' --tags 'tag1,tag2'
-添加 BGM（可选）:
-sau douyin upload-note --account <account_name> --images videos/demo1.png videos/demo2.png --title "图文标题" --note $noteText --tags 'tag1,tag2' --bgm '音乐名称'
-``` 
-
-抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/<chrome|chromium>/douyin/<原始别名>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
-
-只有 login 引导扫码或验证；缺少 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。同别名可以重新登录另一真实账号，Chrome 与 Chromium 各自隔离。发布中遇到验证即结束本次任务；提交后退出 `10` 会附 `publish_attempted=true`，退出 `9` 表示结果未知，都先核对作品再决定重试。重建使用 `sau douyin reset-profile --account creator --browser-kind chrome`，无需 binary，拒绝占用，保留另一浏览器及历史结果；不会自动恢复发布任务。抖音没有 `--no-publish`，环境验证使用离线或受控页面，不能以真实提交验收。
-
-托管模式保留 `verify_code.txt`/交互终端短信验证码流程；本地发布遇到验证立即退出，先用同配置 login 完成验证。
-
-### 8. 快手主线示例
-
-```bash
-sau kuaishou login --account <account_name>
-sau kuaishou check --account <account_name>
-sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau kuaishou upload-note --account <account_name> --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文正文"
-```
-
-### 9. 小红书主线示例
+### 7. 小红书主线示例
 
 login/check/视频/图文复用专用持久化 Profile。登录扫码后正常关闭，再用同配置 check；只有 login 引导登录。`--local-browser chromium` 可选完整 Chromium，默认系统 Chrome；显式 headed/headless 覆盖配置。保留当前语言，不读写或迁移旧 Cookie JSON。安装可用、浏览器可启动和平台已登录是三项不同结果。
 
 
 ```bash
-sau xiaohongshu login --account <account_name>
-sau xiaohongshu check --account <account_name>
-sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau xiaohongshu upload-note --account <account_name> --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文正文"
-```
-
-### 10. Bilibili 主线示例
-
-```bash
-sau bilibili login --account <account_name>
-sau bilibili check --account <account_name>
-sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249
+sau xiaohongshu login --account creator
+sau xiaohongshu check --account creator
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
+sau xiaohongshu upload-note --account creator --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文正文"
 ```
 
 补充说明：
 
 - `creator` 之类的名字只是示例值，真正传的是用户自定义的 `account_name`
-- 一个 `account_name` 对应一个账号文件，可以准备多个账号并发使用
-- 浏览器平台统一元数据约定：
-- 视频使用 `title + desc + tags`
-- 图文使用 `title + note + tags`
-- 用户不需要手动安装 `biliup`
-- 首次运行 Bilibili 相关命令时，程序会自动下载 `biliup`
-- 后续运行会自动检查上游 release 并自动更新
-- Bilibili 登录建议由用户自己在本地真实终端里执行；如果终端里的二维码显示不完整，可直接打开当前目录下的 `qrcode.png` 扫码
-- 如果国内网络访问 GitHub Release 较慢，可先用 `https://gh-proxy.com/` 或 `https://gh-proxy.org/` 辅助访问对应 release 地址排障
-- 示例：
-  - `https://gh-proxy.org/https://github.com/biliup/biliup/releases/download/v1.1.29/biliupR-v1.1.29-aarch64-linux.tar.xz`
+- 本地每个浏览器种类、平台和 `account_name` 对应一个持久化 Profile。不同 Profile 可以并行使用
+- 视频和图文的元数据参数分别见所选平台的 `upload-video --help` 和 `upload-note --help`。
 
 ## For AI Agents
 
@@ -209,89 +160,21 @@ uv pip install -e .
 
 ```bash
 sau --help
-sau douyin --help
-sau kuaishou --help
 sau xiaohongshu --help
-sau bilibili --help
+sau article themes
 ```
 
-6. 如果用户的目标是抖音或快手的登录、登录态校验、视频上传、图文上传，优先走 CLI：
 
-```bash
-sau douyin login
-sau douyin check
-sau douyin upload-video
-sau douyin upload-note
-
-sau kuaishou login
-sau kuaishou check
-sau kuaishou upload-video
-sau kuaishou upload-note
-
-sau xiaohongshu login
-sau xiaohongshu check
-sau xiaohongshu upload-video
-sau xiaohongshu upload-note
-
-sau bilibili login
-sau bilibili check
-sau bilibili upload-video
-```
-
-7. 如果用户明确在使用 skill 系统，再引导其阅读：
-
-- `skills/douyin-upload/SKILL.md`
-- `skills/douyin-upload/references/cli-contract.md`
-- `skills/kuaishou-upload/SKILL.md`
-- `skills/kuaishou-upload/references/cli-contract.md`
-- `skills/xiaohongshu-upload/SKILL.md`
-- `skills/xiaohongshu-upload/references/cli-contract.md`
-- `skills/bilibili-upload/SKILL.md`
-- `skills/bilibili-upload/references/cli-contract.md`
+6. 针对目标平台，按 `sau <平台> <动作> --help` 核对参数，按[技能目录](./skill-distribution.md)选择对应的平台 Skill。
 
 ### 对 agent 的额外说明
 
 - 当登录流程生成本地二维码图片时，不要只把图片路径发给用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户扫码
 - 如果环境支持查看本地图片，优先用查看图片能力把二维码展示出来；路径只作为补充信息
-- Bilibili 登录当前不建议 agent 在非交互环境里直接代跑
-- 正确做法是让用户自己在本地终端执行 `sau bilibili login --account <name>`；如果二维码显示不完整，再提示用户打开 `qrcode.png`
 - `uploader/` 是核心实现目录
 - `sau_cli.py` 是当前 CLI 主入口
-- Bilibili 首次运行时可能自动下载 `biliup`
 
 ### Facebook Page 持久化登录
 
 准备所选 Chrome/完整 Chromium 或自定义可执行文件后，运行 `sau facebook-page login --account creator --headed`，在 Business Suite 完成人工登录；正常关闭后用同配置 `sau facebook-page check --account creator --headed`。一个登录 Profile 可访问多个 Page，显式 `--page` 继续核验目标；与 Facebook 账号资料隔离。只有 login 引导登录，旧 JSON 不参与。安装成功、浏览器启动、登录有效分别验证；本票离线结果不代表真实账号已登录。无头模式仍需实际选定的完整浏览器。
-
-### 快手登录验证
-
-准备所选 Chrome、完整 Chromium 或自定义 binary 后，运行 `sau kuaishou login --account creator --headed` 并扫码；正常关闭后以同配置 `sau kuaishou check --account creator --headed` 检查。已有 headless 配置保留，只有 login 引导登录。旧 JSON 不参与；安装成功和真实登录有效须分别验证。快手上传会实际提交，没有 --no-publish。
-
-### 视频号持久化登录
-
-准备所选系统 Chrome、完整 Chromium 或自定义 binary 后，运行 `sau tencent login --account creator --headed` 完成微信扫码；正常关闭后同配置 `sau tencent check --account creator --headed`。保持原 conf.py；headless 显式参数优先，旧 JSON 不参与。登录、检查和视频预检共用持久化 Profile；只有 login 引导扫码。视频号无 `--no-publish`，离线/受控 DOM 验证不代表真实账号发布验收。
-
-### 百家号持久化登录
-
-按上方说明只准备所选浏览器，保留已有 `conf.py`。执行 `sau baijiahao login --account creator --headed`，扫码或完成人工验证，正常关闭后执行同配置 `sau baijiahao check --account creator`。Profile 位于 `browser_profiles/<chrome|chromium>/baijiahao/creator`，旧 Cookie JSON 不再用于登录。两类浏览器各自登录，别名允许换号；显式 `reset-profile --account creator --browser-kind chrome` 只重建一个 Profile，无需启动浏览器。视频要求横版封面；百家号没有 no-publish 开关，安装/窗口验收使用隔离受控页面，避免提交真实作品。
-
-### 微博持久化登录
-
-保留已有 `conf.py`；按上文准备所选系统 Chrome、完整 Chromium（`uv run patchright install --no-shell chromium`）或自定义路径。先 `sau weibo login --account creator --headed`，按需扫码/完成人工验证，正常关闭后以同配置 `sau weibo check --account creator`。Profile 位于 `browser_profiles/<chrome|chromium>/weibo/creator`；默认有头，显式参数优先于配置，不导入旧 JSON。别名可换号，两类浏览器各自登录。重建使用 `sau weibo reset-profile --account creator --browser-kind chrome`，不需 binary，拒绝占用，仅清空明确目标。发布要求封面，没有 no-publish 开关；安装、浏览器启动和账号登录分别验证，窗口回归只用隔离受控页面。
-
-### 虎扑 Profile 登录
-
-只准备所选系统 Chrome、完整 Chromium 或自定义路径，保留已有 conf.py；默认 Chrome 有头，显式 headed/headless 优先于配置。执行 `sau hupu login --account creator --headed` 完成 QQ 扫码或人工验证，正常关闭后同配置 `sau hupu check --account creator`。资料位于 `browser_profiles/<chrome|chromium>/hupu/creator`，旧 JSON 不参与；两种浏览器各自登录，账号别名允许换号。`sau hupu reset-profile --account creator --browser-kind chrome` 只重建该 Profile，无需安装 binary。Hupu 无 no-publish，安装与窗口验收使用隔离合成页面，不提交真实视频。
-
-### 支付宝生活号持久化登录
-
-保留现有 conf.py，只准备所选 Chrome/完整 Chromium 或自定义浏览器。执行 `sau alipay login --account creator --headed` 扫码，正常关闭后同配置 `sau alipay check --account creator`；Profile 位于 `browser_profiles/<chrome|chromium>/alipay/creator`，旧 Cookie 不导入/导出。内容创作入口必须可见，登录 iframe 是未登录证据，网络/HTTP/权限/结构故障单独报错。两种浏览器独立登录，别名允许换号；重建时显式指定 browser-kind，无需浏览器安装。生活号无 no-publish 开关，使用受控页面验收安装和窗口交互。
-
-### 知乎持久化登录
-
-保留已有配置并只准备所选浏览器。执行 `sau zhihu login --account creator --headed`，关闭后同配置 `sau zhihu check --account creator`；可统一使用 `--local-browser chromium` 切换独立资料。文章、视频及 verify 复用这一 Profile；只有 login 引导登录，旧 JSON 和身份旁文件不参与。完整参数、原作品验证及重建说明见 [知乎 CLI](CLI.md#知乎-cli-子命令)。
-
-### 雪球持久化登录
-
-只准备所选系统 Chrome、完整 Chromium（`uv run patchright install --no-shell chromium`）或自定义路径，保留已有 conf.py。先 `sau xueqiu login --account creator --headed` 完成人工登录，关闭后同配置 check。默认 Chrome 有头，显式 browser/headless 覆盖配置（自定义路径优先）；旧 JSON/身份旁文件不导入、不读写。别名可换号，历史作品仍核对作者；文章验证显式 `--prepare-only`，可能保存草稿。完整参数见 [雪球说明](./xueqiu.md)。

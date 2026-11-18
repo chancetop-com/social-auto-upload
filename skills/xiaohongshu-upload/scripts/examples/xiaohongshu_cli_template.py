@@ -11,7 +11,7 @@ def run_command(command: list[str]) -> None:
 
 def main() -> None:
     account = "account_a"
-    # account_name is user-defined. One account_name maps to one account file.
+    # account_name is user-defined. Each local account alias selects a persistent browser profile.
     # You can prepare multiple account names and run them in parallel.
 
     commands = [
@@ -42,8 +42,8 @@ def main() -> None:
             "--account",
             account,
             "--images",
-            "videos/1.png",
-            "videos/2.png",
+            "videos/demo1.png",
+            "videos/demo2.png",
             "--title",
             "Xiaohongshu note title from Python",
             "--note",

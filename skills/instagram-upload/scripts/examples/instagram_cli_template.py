@@ -10,7 +10,7 @@ commands = [
     ],
     [
         'sau', 'instagram', 'upload-note', '--account', 'account_a',
-        '--images', 'images/1.jpg', 'images/2.jpg',
+        '--images', 'videos/demo1.png', 'videos/demo2.png',
         '--title', 'Instagram 轮播示例', '--note', '图文正文',
     ],
 ]

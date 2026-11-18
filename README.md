@@ -3,12 +3,11 @@
 ![Python](https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/github/license/dreammis/social-auto-upload)
 ![Release](https://img.shields.io/github/v/release/dreammis/social-auto-upload?display_name=tag)
-[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-19-0D9488?logo=github)](./docs/skill-distribution.md)
-[![skills.sh](https://img.shields.io/badge/skills.sh-Agent%20Skills-4B32C3?logo=github)](https://www.skills.sh/dreammis/social-auto-upload/douyin-upload)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-8-0D9488?logo=github)](./docs/skill-distribution.md)
 
 `social-auto-upload` 是一个面向内容创作者和运营者的多平台发布工具，提供统一 CLI 和供 Codex、OpenClaw、Claude Code 等 Agent 使用的 Skill。
 
-支持的视频、文章、图文发布平台及对应入口见下表。
+支持七个平台的视频发布，其中六个平台也提供图文发布。文章可用 `sau article` 在本地渲染。
 
 CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。日常变更记录见 [CHANGELOG.md](./CHANGELOG.md)，稳定版本通过 GitHub Release 发布。
 
@@ -76,48 +75,29 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 
 ## 💡功能特性
 
-| 平台 | 登录/账号准备 | 视频 | 文章 | 图文 | 定时发布 | CLI | Skill | 说明 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 抖音 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
-| Bilibili | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 视频发布；运行时自动准备 `biliup` |
-| 小红书（浏览器版） | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
-| Rednote（国际版） | ✅ | 实验性 | - | 实验性 | 实验性 | ✅ | ✅ | [本地登录及发布前准备已验收](./docs/rednote.md)，最终提交尚未实测 |
-| 快手 | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布 |
-| 视频号 | ✅ | ✅ | - | - | ✅ | ✅ | ✅ | 视频发布 |
-| 百家号 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频发布 |
-| 大鱼号 | ✅ | ✅ | ✅ | - | ✅ | ✅ | ✅ | [视频发布](./docs/dayu.md)；[文章发布](./docs/dayu-article.md)支持 HTML/Markdown/TXT、正文图片和封面 |
-| 支付宝生活号 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频发布 |
-| 微博 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题最多 30 字 |
-| 虎扑 | ✅ | ✅ | - | - | - | ✅ | ✅ | 视频标题 4–40 字 |
-| TikTok | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 视频与图文发布；支持本地模式与托管浏览器模式（MLX / AdsPower）；托管下 Profile 界面需 English (US) |
-| 雪球 | ✅ | - | ✅ | - | - | ✅ | ✅ | [长文与配图](./docs/xueqiu.md)：支持 HTML/Markdown/TXT、正文图片和封面 |
-| YouTube | ✅ | ✅ | - | - | 开发中 | ✅ | ✅ | 视频发布 |
-| 知乎 | ✅ | ✅ | ✅ | - | 实验性 | ✅ | ✅ | [文章与视频发布](./skills/zhihu-upload/SKILL.md)，文章支持正文位置配图 |
-| Facebook | ✅ | ✅ | - | ✅ | - | ✅ | ✅ | 支持作品查询、移至回收站及永久删除 |
-| Facebook Page | ✅ | ✅ | - | ✅ | ✅ | ✅ | ✅ | 支持视频与图文定时发布、查询和取消定时 |
-| Instagram | ✅ | ✅ | - | ✅ | - | ✅ | ✅ | 支持 Reels、单图与轮播 |
+| 平台 | 登录/账号准备 | 视频 | 图文 | 原生定时 | CLI 入口 | Skill | 说明 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 小红书（浏览器版） | ✅ | ✅ | ✅ | ✅ | `xiaohongshu` | ✅ | 视频与图文发布 |
+| Rednote（国际版） | ✅ | 实验性 | 实验性 | 实验性 | `rednote` | ✅ | [本地登录及发布前准备已验收](./docs/rednote.md)，最终提交尚未实测 |
+| TikTok | ✅ | ✅ | ✅ | ✅ | `tiktok` | ✅ | 视频与图文发布；支持本地模式与托管浏览器模式（MLX / AdsPower）；托管下 Profile 界面需 English (US) |
+| YouTube | ✅ | ✅ | - | - | `youtube` | ✅ | 视频发布 |
+| Facebook | ✅ | ✅ | ✅ | - | `facebook` | ✅ | 支持作品查询、移至回收站及永久删除 |
+| Facebook Page | ✅ | ✅ | ✅ | ✅ | `facebook-page` | ✅ | 支持视频与图文定时发布、查询和取消定时 |
+| Instagram | ✅ | ✅ | ✅ | - | `instagram` | ✅ | 支持 Reels、单图与轮播 |
 
-`✅` 表示支持，`-` 表示不适用或未提供；`开发中`、`实验性` 不计入稳定能力。文章正文可以包含图片，与独立图文发布分列。
+`实验性` 表示最终提交尚未通过真实账号验收。各平台的 `check`、`upload-video` 及表中支持的 `upload-note` 均可使用本地、AdsPower 或 Multilogin X 模式。
 
-### 按内容形态
-
-| 内容形态 | 平台与入口 |
-| --- | --- |
-| 视频 | 抖音、快手、小红书、Bilibili、视频号、百家号、大鱼号、知乎、YouTube 等；CLI 示例见下方和[CLI 使用说明](./docs/CLI.md) |
-| 文章 | 大鱼号[文章发布](./docs/dayu-article.md)、雪球[长文与配图](./docs/xueqiu.md)、知乎[文章发布](./skills/zhihu-upload/SKILL.md#文章) |
-| 图文 | 抖音、快手、小红书、TikTok（本地或托管浏览器模式）、Facebook、Facebook Page、Instagram；CLI 示例见[CLI 使用说明](./docs/CLI.md) |
-
-文章主题预览及 Markdown 转 HTML：见 [文章文件与主题渲染](./docs/article.md)。内置 `default/grace/simple/modern/plain` 主题；大鱼号可直接接收 Markdown，并将主题转换为保留文字颜色、背景和近似字号的兼容排版，圆角和精确间距等效果可能与本地预览不同。
 
 ## 💾安装指南
 
 ### 自己上手使用
+
 普通用户可按以下文档安装和更新：
 
 - [安装说明](./docs/install.md)
 - [更新说明](./docs/update.md)
 
-基础安装 `uv pip install -e .` 只安装项目依赖，不下载或检查浏览器。17 个正式浏览器平台默认使用系统 Chrome 和专用持久化 Profile；Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装，项目不自动安装/更新。可选完整 Chromium 或 `LOCAL_CHROME_PATH` 指定的兼容 binary，只需准备实际来源。托管动作无需本地 Chrome/Chromium。升级保留已有 `conf.py`，包括 `LOCAL_CHROME_HEADLESS=True`；显式 `--headed` / `--headless` 优先。
+基础安装 `uv pip install -e .` 只安装项目依赖，不下载或检查浏览器。七个平台默认使用系统 Chrome 和专用持久化 Profile；Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装，项目不自动安装/更新。可选完整 Chromium 或 `LOCAL_CHROME_PATH` 指定的兼容 binary，只需准备实际来源。托管动作无需本地 Chrome/Chromium。升级保留已有 `conf.py`，包括 `LOCAL_CHROME_HEADLESS=True`；显式 `--headed` / `--headless` 优先。
 
 #### 可选的两条 CI 安装路线
 
@@ -155,7 +135,7 @@ uv run patchright install --with-deps chromium
 
 - 优先按当前主线安装项目
 - 优先使用 `uv`、`sau` CLI 和 `skills/`
-- 先验证 `bilibili`、`douyin`、`kuaishou`、`xiaohongshu` 四个平台入口是否可用
+- 用 `sau --help` 和目标平台的 `--help` 核对已安装的入口
 
 
 相关入口：
@@ -163,47 +143,46 @@ uv run patchright install --with-deps chromium
 - [CLI 使用说明](./docs/CLI.md)
 - [Agent Bootstrap Prompt](./docs/agent-bootstrap.md)
 - 跨平台总入口：[social-auto-upload](./skills/social-auto-upload/SKILL.md)
-- 各平台 Skill：[抖音](./skills/douyin-upload/SKILL.md)、[Bilibili](./skills/bilibili-upload/SKILL.md)、[小红书](./skills/xiaohongshu-upload/SKILL.md)、[Rednote](./skills/rednote-upload/SKILL.md)、[快手](./skills/kuaishou-upload/SKILL.md)、[视频号](./skills/tencent-upload/SKILL.md)、[百家号](./skills/baijiahao-upload/SKILL.md)、[大鱼号](./skills/dayu-upload/SKILL.md)、[支付宝生活号](./skills/alipay-upload/SKILL.md)、[微博](./skills/weibo-upload/SKILL.md)、[虎扑](./skills/hupu-upload/SKILL.md)、[TikTok](./skills/tiktok-upload/SKILL.md)、[雪球](./skills/xueqiu-upload/SKILL.md)、[YouTube](./skills/youtube-upload/SKILL.md)、[知乎](./skills/zhihu-upload/SKILL.md)、[Facebook](./skills/facebook-upload/SKILL.md)、[Facebook Page](./skills/meta-upload/SKILL.md)、[Instagram](./skills/instagram-upload/SKILL.md)
+- 各平台 Skill 见 [小红书](./skills/xiaohongshu-upload/SKILL.md)、[Rednote](./skills/rednote-upload/SKILL.md)、[TikTok](./skills/tiktok-upload/SKILL.md)、[YouTube](./skills/youtube-upload/SKILL.md)、[Facebook](./skills/facebook-upload/SKILL.md)、[Facebook Page](./skills/meta-upload/SKILL.md)、[Instagram](./skills/instagram-upload/SKILL.md)。
 
 #### Skill 分发与市场
 
-仓库提供跨平台总入口和各平台独立 Skill。`skills.sh` 已收录[抖音 Skill](https://www.skills.sh/dreammis/social-auto-upload/douyin-upload)；各市场收录、上架方式和新增平台检查清单见[Skill 分发渠道与发布状态](./docs/skill-distribution.md)。
+仓库提供一个跨平台总入口和七个独立平台 Skill。各市场收录、上架方式和新增平台检查清单见[Skill 分发渠道与发布状态](./docs/skill-distribution.md)。
 
 Skill 目录可从 GitHub 安装到兼容 Agent。安装单个 Skill：
 
 ```bash
-npx skills add dreammis/social-auto-upload --skill douyin-upload
+npx skills add dreammis/social-auto-upload --skill xiaohongshu-upload
 ```
 
-将 `douyin-upload` 换成总入口或其他平台目录名。各目录对应关系、市场上架方式和状态见 [Skill 分发说明](./docs/skill-distribution.md)；`sau skill install` 不是本项目提供的命令。
+将 `xiaohongshu-upload` 换成总入口或其他平台目录名。各目录对应关系、市场上架方式和状态见 [Skill 分发说明](./docs/skill-distribution.md)。
 
 
 ## 🏁快速开始
 
 ### 使用 CLI
 
-先按上方平台能力表确认支持范围，再选择下面的内容类型。视频、文章和图文分别使用独立发布命令；文章中的配图仍属于文章正文。
+按上方平台能力表确认目标账号使用的 CLI 入口和可发布的内容类型。
 
 #### 账号准备
 
 每个平台先登录一次，再检查会话。`--account` 是你给本地会话取的名字，例如 `creator`，用于区分多个账号。
 
 ```bash
-sau douyin login --account creator
-sau douyin check --account creator
-# 换成 dayu、xueqiu、zhihu 等平台名称即可；具体登录要求见对应文档。
+sau xiaohongshu login --account creator
+sau xiaohongshu check --account creator
 ```
 
 Rednote 的 login/check/视频/图文已使用独立持久化 Profile，默认 Chrome 有头、可选 Chromium/自定义路径，并保留已有 headless 配置。登录态不再依赖旧 Cookie JSON；真实 Profile 验证范围见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。见 [Rednote 说明](./docs/rednote.md)。
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 还提供显式的本地 Profile 重建：`sau <平台> reset-profile --account <别名> --browser-kind chrome|chromium`。命令无需安装浏览器，只清空选定种类的专用资料；所有 17 个正式浏览器平台均已接入持久化会话。见 [重建说明](./docs/CLI.md#重建本地浏览器-profile-reset-profile)。
+七个平台均提供显式本地 Profile 重建命令。指定浏览器种类和别名后，只清空对应的专用资料。见[重建说明](./docs/CLI.md#重建本地浏览器-profilereset-profile)。
 
 #### 指定发布时刻（可选）
 
-所有发布命令都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，解析后换算到运行机器本地时区）：先完成素材上传、标题/正文、封面、声明等全部准备，再等待到绝对时刻不早于目标时间后才点击发布。它和平台原生 `--schedule` 是两套机制，可以同时使用。
+所有发布命令都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，解析后换算到运行机器本地时区）：先完成素材上传与内容编辑，到目标时刻后才点击发布。支持原生定时的平台可同时使用 `--schedule`。
 
 ```bash
-sau xiaohongshu upload-video --account creator --file demo.mp4 --title "新视频" \
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "新视频" \
   --not-before "2026-12-01T12:00:00Z"
 ```
 
@@ -211,7 +190,11 @@ sau xiaohongshu upload-video --account creator --file demo.mp4 --title "新视�
 
 #### 托管浏览器模式（可选）
 
-除 Bilibili 外，浏览器平台可以改由托管浏览器 Profile 提供浏览器与登录态。设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，CLI 不再读写 `cookies/*.json`，而是通过对应桌面应用启动指定 Profile，并在结束时停止由本次调用启动的 Profile。两个凭据同时设置会退出 `1`。
+七个平台的登录检查和发布都可以使用已登录的托管 Profile。设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower），两个凭据同时设置会退出 `1`。
+
+同机、同一操作系统用户的兼容 CLI 默认共享同一托管 Profile。不同平台可以同时执行，各自在新标签页工作。同一平台的检查和发布合计限一条命令，冲突者立即退出 `1`。**最后一条已加入的命令离开时会关闭整个 Profile，包括用户从桌面打开的标签页。**
+
+将下例中的 `PROFILE_ID`、`FOLDER_ID` 换成桌面应用中的标识。
 
 ##### Multilogin X（MLX）
 
@@ -219,10 +202,10 @@ sau xiaohongshu upload-video --account creator --file demo.mp4 --title "新视�
 export MLX_API_TOKEN="<token>"
 
 # check：0=已登录，10=需要人工登录
-sau douyin check --folder-id <folder_id> --profile-id <profile_id>
+sau xiaohongshu check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID"
 
-# 上传：--account 可省略，缺省用 profile_id 作日志标签
-sau douyin upload-video --folder-id <folder_id> --profile-id <profile_id> \
+# 上传使用 profile_id 选择身份和日志标签
+sau xiaohongshu upload-video --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
 ```
 
@@ -234,14 +217,14 @@ MLX 通过本机 Multilogin Launcher 启动 Profile；`--folder-id` / `--profile
 export ADSPOWER_API_KEY="$KEY"
 
 # check：0=已登录，10=需要人工登录
-sau douyin check --profile-id <profile_id>
+sau xiaohongshu check --profile-id "PROFILE_ID"
 
 # 上传：--folder-id 可省略；传了也会静默忽略
-sau douyin upload-video --profile-id <profile_id> \
+sau xiaohongshu upload-video --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
 
 # 需要人工处理验证码时使用有头模式
-sau douyin upload-video --headed --profile-id <profile_id> \
+sau xiaohongshu upload-video --headed --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题"
 ```
 
@@ -249,15 +232,15 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 
 共同说明：
 
-- 托管模式下 `--account` 仅是日志标签，默认取 `profile_id`，不代表账号身份校验；本地浏览器模式仍要求 `--account` 并定位专用 Profile，Bilibili 使用其账号文件。
+- 托管检查和发布忽略 `--account`，使用 `--profile-id` 选择 Profile。本地浏览器动作使用 `--account` 定位专用 Profile。
 - 托管模式下 `login` 一律拒绝；请先在对应桌面应用中登录 Profile，并处理验证码/2FA。托管模式不提供 CLI 登录链路。
 - 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录、`11` 请求过于频繁（429）、`130` 用户中断。**MLX 的 429 已由 `1` 改为 `11`**，调度层需改为退避重试。
 - 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到平台后台（如 TikTok Studio → Content/Posts）按标题、素材与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核。两者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
-- 不支持：Docker / 跨机 / Linux 无桌面、Bilibili、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
+- 不支持：Docker / 跨机 / Linux 无桌面、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
 - TikTok 本地模式已使用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器隔离与四平台真实 no-publish 的证据和边界见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 - 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/<chrome|chromium>/xiaohongshu/<原始别名>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止，可能留下草稿；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
-- 调度侧需串行使用同一 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
+- 与旧版 CLI 或其他工具混用时，调用方需串行使用同一托管 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
 - Instagram 全部本地动作已接入持久化 Profile：`browser_profiles/<chrome|chromium>/instagram/<原始别名>`，配置优先级与 TikTok 相同，保留本地代理及当前语言。仅 login 引导登录；check、视频/图文和 verify/delete 不读写旧 Cookie，也不绑定历史账号 ID。作品操作继续核对原作者，设置托管环境变量时仍使用本地账号和配置。视频/图文回归显式使用 `--no-publish`，结果 `prepared` 只证明到达 Share 前；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 
 - 托管模式只验证“已登录”，Profile 即身份；各平台本地作品所需的身份比对在托管发布模式下不执行，账号错配风险由调度侧承担。
@@ -271,66 +254,33 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 
 | 平台 | 平台参数 | 发布说明 |
 | --- | --- | --- |
-| 抖音、快手、小红书 | `douyin`、`kuaishou`、`xiaohongshu` | [CLI 参数](./docs/CLI.md) |
+| 小红书、TikTok | `xiaohongshu`、`tiktok` | [CLI 参数](./docs/CLI.md) |
 | Rednote（国际版，初始适配） | `rednote` | [登录与发布前验证](./docs/rednote.md) |
-| Bilibili、视频号 | `bilibili`、`tencent` | [CLI 参数](./docs/CLI.md) |
-| 百家号、大鱼号 | `baijiahao`、`dayu` | [大鱼号视频](./docs/dayu.md)、[CLI 参数](./docs/CLI.md) |
-| 支付宝生活号、微博、虎扑 | `alipay`、`weibo`、`hupu` | [CLI 参数](./docs/CLI.md) |
 | YouTube | `youtube` | [CLI 参数](./docs/CLI.md) |
-| 知乎 | `zhihu` | [文章与视频发布](./skills/zhihu-upload/SKILL.md) |
 | Facebook、Facebook Page、Instagram | `facebook`、`facebook-page`、`instagram` | [CLI 参数](./docs/CLI.md) |
 
 ```bash
-sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
-sau baijiahao upload-video --account <account_name> --file videos/demo.mp4 --thumbnail videos/demo.png --title "示例标题" --desc "示例简介" --tags tag1,tag2
-sau alipay upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
-sau weibo upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --thumbnail covers/demo.png
-sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
-sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau zhihu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --originality original --category "教育" --video-mark "内容无需标注"
-sau facebook upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags Facebook,测试
-sau facebook-page upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --page "我的 Page"
-```
-
-#### 文章
-
-文章使用 `upload-article`，正文来自文件，图片应写在原稿对应段落中。支持平台分别如下：
-
-| 平台 | 正文与说明 |
-| --- | --- |
-| 大鱼号 | HTML / Markdown / TXT、正文插图及封面，见[文章发布](./docs/dayu-article.md) |
-| 雪球 | HTML / Markdown / TXT、正文原位置配图及独立封面，见[长文发布](./docs/xueqiu.md) |
-| 知乎 | HTML / Markdown / TXT、正文原位置配图，见[文章发布](./skills/zhihu-upload/SKILL.md#文章) |
-
-```bash
-sau dayu upload-article --account creator --title "如何阅读作品数据面板" --content-file examples/dayu_article.html --source "无需标注" --cover-indices 1
-sau xueqiu upload-article --help
-sau zhihu upload-article --account creator --title "文章标题" --content-file examples/article.md
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
+sau facebook upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags Facebook,测试
+sau facebook-page upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --page "我的 Page"
 ```
 
 #### 图文
 
-图文指独立图片帖、轮播或图片笔记，使用 `upload-note`；支持抖音、快手、小红书、TikTok（本地或托管浏览器模式）、Facebook、Facebook Page 和 Instagram。
+小红书、Rednote、TikTok、Facebook、Facebook Page 和 Instagram 的独立图片帖、轮播或图片笔记使用 `upload-note`。
 
 ```bash
-sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
-sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
-sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文正文"
+sau xiaohongshu upload-note --account creator --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文正文"
 # TikTok 本地模式（不设置任一托管凭据）
 sau tiktok login --account creator
-sau tiktok upload-note --account creator --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
+sau tiktok upload-note --account creator --images videos/demo1.png videos/demo2.png --title "图文标题" --note "图文正文"
 # TikTok 托管浏览器模式（MLX；AdsPower 只传 --profile-id）
-sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文正文"
-sau facebook-page upload-note --account <account_name> --images images/1.jpg --title "Page 图文" --note "正文" --page "我的 Page" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
-sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图片帖" --note "正文"
-sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "图片轮播" --note "正文"
+sau tiktok upload-note --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" --images videos/demo1.png videos/demo2.png --title "图文标题" --note "图文正文"
+sau facebook-page upload-note --account creator --images videos/demo1.png --title "Page 图文" --note "正文" --page "我的 Page" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
+sau facebook upload-note --account creator --images videos/demo1.png videos/demo2.png --title "图片帖" --note "正文"
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "图片轮播" --note "正文"
 ```
-
-知乎的 `--account` 是本地 Profile 别名，可以重新登录其他真实账号；名称/头像只作为当次信息和作品结果证据，历史结果核验仍要求原作品账号。
 
 Facebook Page 的全部本地动作已接入持久化 Profile：`browser_profiles/<chrome|chromium>/facebook-page/<原始别名>`，与 Facebook 隔离，多个 Page 目标复用同一个登录 Profile。配置优先级与 TikTok 相同，保留代理、定时、作品证据及结果文件；旧 JSON 不再读写。显式目标/历史作品不匹配仍拒绝，verify/delete 在托管环境下仍走本地。本次只做离线与受控 DOM 验证，未登录真实账号、发布或删除作品。
 
@@ -343,29 +293,15 @@ Facebook、Facebook Page 和 Instagram 默认使用系统网络直连。网络�
 > 上传会**等进度到 100% 再点发布**（浏览器上传靠窗口开着传，传一半就发布会被掐断卡在中途）。
 > youtube.com 被墙的地区：在 `conf.py` 设 `YT_PROXY = "http://127.0.0.1:7890"`（chromium 不吃系统代理，需显式指定）。
 
-Markdown 主题文章首次使用需要 Node.js 22+，先准备渲染依赖，再发布：
+#### 本地文章预览
+
+安装 Node.js 22+ 后，可用内置主题将 Markdown 原稿渲染为 HTML。HTML 和 TXT 原稿无需 Node.js。渲染只生成本地文件。[文章格式与主题说明](./docs/article.md)
 
 ```bash
+sau article themes
 sau article setup
 sau article render --content-file examples/article.md --theme modern --output output/article.html
-sau dayu upload-article --account <account_name> --title "如何阅读作品数据面板" --content-file examples/article.md --theme modern --source "无需标注" --cover-indices 1
 ```
-
-`sau article render` 只生成本地 HTML；`sau dayu upload-article` 会实际发表，平台确认发表后即返回成功，不等待审核。HTML/TXT 输入不需要 Node.js，也不使用 `--theme`。大鱼号视频参数和文章格式限制分别见 [视频说明](./docs/dayu.md)、[文章说明](./docs/dayu-article.md)。
-
-补充说明：
-
-- `creator` 之类的名字只是示例值，真正含义是 `account_name`
-- 一个 `account_name` 对应一个账号文件，可以准备多个账号，也可以按账号名并发执行任务
-- 抖音本地发布触发短信/人机验证时退出 `10`，先用同配置 `login` 完成验证；托管视频流程保留 `verify_code.txt` 与终端输入。提交后异常先核对作品，禁止自动重发。
-- 浏览器平台统一约定：
-- 视频使用 `title + desc + tags`
-- 抖音、快手、小红书、TikTok 的图片笔记使用 `title + note + tags`（TikTok 的 `title` / `note` 均可选，本地与托管浏览器模式均支持）
-- 大鱼号文章使用 `title + content-file + source`，正文保存在 HTML、Markdown 或 TXT 文件中
-- Bilibili CLI 不要求用户手动安装 `biliup`
-- 首次运行相关命令时，程序会自动下载 `biliup`
-- 后续运行会自动检查上游 release 并更新
-- Bilibili 登录建议由用户自己在本地真实终端里执行；如果终端二维码显示不完整，可以直接打开当前目录下的 `qrcode.png` 扫码
 
 ## 📃详细文档
 
@@ -433,19 +369,11 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
   <img src="https://contrib.rocks/image?repo=dreammis/social-auto-upload" />
 </a>
 
-
-## 🙏致谢
-
-本项目的 Bilibili 上传能力基于开源项目 `biliup` 的能力进行接入与封装。
-感谢 `biliup` 项目及其贡献者提供的基础能力：
-
-- https://github.com/biliup/biliup
-
-本项目依赖的第三方组件和运行时工具仍受其各自许可证约束。下游发行或集成本项目时，请同时检查并保留相关第三方组件要求的版权、许可证和 NOTICE 声明。
-
 ## 📜许可证
 
-仓库主体采用 [MIT License](LICENSE)。纳入版本控制的 Agent Skills 按各自 `SKILL.md` frontmatter 中声明的许可证发布；当前 19 个产品 Skill 为 MIT-0，以便在要求该许可证的平台分发。该范围不改变仓库其余代码的 MIT License。
+仓库主体采用 [MIT License](LICENSE)。纳入版本控制的 Agent Skills 按各自 `SKILL.md` frontmatter 中声明的许可证发布；当前 8 个产品 Skill 为 MIT-0，以便在要求该许可证的平台分发。该范围不改变仓库其余代码的 MIT License。
+
+本项目依赖的第三方组件和运行时工具仍受其各自许可证约束。下游发行或集成本项目时，请同时检查并保留相关第三方组件要求的版权、许可证和 NOTICE 声明。
 
 ## ⭐Star-History
 
@@ -457,21 +385,3 @@ sau dayu upload-article --account <account_name> --title "如何阅读作品数�
 [![Star History Chart](https://star-history.dera.page/svg?repos=dreammis/social-auto-upload&type=Date)](https://star-history.dera.page/#dreammis/social-auto-upload&Date)
 
 Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Facebook Page 隔离；登录、检查、视频/图文和作品核验/删除共用来源/headless 配置，旧 JSON 不读写。账号别名允许换号，作品管理仍校验当前用户、原作者、编号和正文；托管环境下 verify/delete 继续走本地。详见 [Facebook CLI](./docs/CLI.md#facebook-cli-子命令)。
-
-快手 login/check/视频/图文与直接 uploader 已使用按账号别名、浏览器种类隔离的持久化 Profile，默认 Chrome 有头，旧 JSON 不读写。原生定时、合集、封面、not-before 和提交结果契约保持；详见 [快手 CLI](./docs/CLI.md#快手-cli-子命令)。
-
-视频号的 login/check/upload-video 与直接入口已使用专用持久化 Profile，预检与上传共用一次会话；默认 Chrome 有头，显式来源/headless 优先于配置，旧 JSON 不参与。保留扫码 iframe、二维码、合集、封面、草稿和定时；见 [视频号 CLI](./docs/CLI.md#视频号-cli-子命令)。本次验证仅离线和受控 DOM，没有真实账号或发布验收。
-
-抖音的本地 login/check/视频/图文现已使用独立持久化 Profile，默认 Chrome、有头，配置与显式参数优先级见 [CLI 说明](./docs/CLI.md#抖音-cli-子命令)。旧 Cookie JSON 不参与；本次验证仅为离线与受控 DOM，没有真实账号发布验收。
-
-百家号 login/check/视频及直接 uploader 已使用独立持久化 Profile。默认 Chrome 有头、可选完整 Chromium/自定义路径；只安装所选来源，旧 JSON 不读写。先 `sau baijiahao login --account creator --headed`，同配置 check；视频必须提供横版封面。验证与未登录退出 10，故障退出 1；提交后先核对作品，结果未知 9 禁止自动重发。无 no-publish 开关，本轮仅做离线和受控 DOM 验收，详见 [百家号 CLI](./docs/CLI.md#百家号-cli-子命令)。
-
-微博 login/check/视频及直接 uploader 已使用持久化 Profile，默认系统 Chrome 有头，可选完整 Chromium/自定义路径。先 login、正常关闭后同配置 check；旧 JSON 不参与。窗口保持自然尺寸，通过滚动和落点校验触达发布按钮；封面必填。未登录/验证退出 10，故障退出 1，提交后先核查作品、结果未知 9 禁止自动重发；无 no-publish，验证使用离线或受控页面。详见 [微博 CLI](./docs/CLI.md#微博-cli-子命令)。
-
-虎扑 login/check/视频与直接 uploader 已使用独立持久化 Profile；默认 Chrome 有头，支持完整 Chromium/自定义路径，只安装所选来源。旧 JSON 不读写；QQ 二维码、文件选择器和专区弹窗在同一自然窗口 context 中运行。先 login，再同配置 check；登录/验证退出 10，运行故障 1，提交结果未知 9 禁止自动重发。没有 no-publish，本轮只做离线与隔离 DOM 验证。见 [虎扑 CLI](./docs/CLI.md#虎扑-cli-子命令)。
-
-支付宝生活号 login/check/视频/reset-profile 与直接 uploader 已接入持久化 Profile，默认 Chrome 有头、可选完整 Chromium/自定义路径，旧 JSON 不读写。先 `sau alipay login --account creator --headed` 扫码，关闭后同配置 check；缺少 Profile/明确登录失效退出 10，页面与网络故障退出 1，发布结果未知退出 9 并禁止自动重发。生活号无 no-publish，使用离线/受控 DOM 验收。见 [支付宝 CLI](./docs/CLI.md#支付宝生活号-cli-子命令)。
-
-大鱼号 login/check/视频/文章/verify/reset-profile 与直接调用已使用持久化 Profile；默认 Chrome 有头，支持完整 Chromium 和自定义路径，旧 Cookie 与身份旁文件不参与。别名允许重新登录不同主体；显式名称和历史作品作者核验继续生效。`verify --public` 在同一已选浏览器内使用独立匿名 context，保持主 Profile 占用。见 [大鱼号说明](./docs/dayu.md)。
-
-雪球 login/check/文章/verify/reset-profile 和直接入口已使用独立持久化 Profile，默认 Chrome 有头，可选完整 Chromium/自定义路径；旧 Cookie JSON/身份旁文件不参与。别名允许换号，显式昵称及历史作品作者继续核验；verify 在托管环境下仍本地。文章验收显式 `--prepare-only`，结果保留 `cookies/xueqiu_results/`；本轮仅离线与受控浏览器验证，未操作真实账号。见 [雪球说明](./docs/xueqiu.md)。

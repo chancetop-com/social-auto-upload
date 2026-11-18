@@ -15,8 +15,8 @@ summary: 发布 Instagram Reels、单图或轮播，并核验作品。
 ```powershell
 sau instagram login --account creator
 sau instagram check --account creator
-sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail covers/demo.png --title "标题" --desc "正文" --tags 生活,分享 --result .local/instagram-video.json
-sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "轮播标题" --note "正文" --result .local/instagram-images.json
+sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail videos/demo.png --title "标题" --desc "正文" --tags 生活,分享 --result .local/instagram-video.json
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --result .local/instagram-images.json
 ```
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
@@ -37,7 +37,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于图片张数，每条 1–1000 字符，不截断。
 
 ```powershell
-sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-images.json
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-images.json
 ```
 
 协作者、Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。四项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 记录 `location`、`alt_text`、`comments`、`ai_generated` 的 `requested` / `applied` / `status`（必要时含 `reason`）。
@@ -61,11 +61,13 @@ sau instagram delete --account creator --post-url "原作品链接" --expected-t
 
 ## 托管浏览器模式（可选）
 
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
+
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。`verify` / `delete` 仍为本地模式，必须提供原始 `--account`，继续使用本地来源/headless/代理配置。
 
 - MLX：`--folder-id` 与 `--profile-id` 必填。
 - AdsPower：`--profile-id` 必填（映射 AdsPower `user_id`），`--folder-id` 忽略。
-- 对上述托管 check/上传动作，`--account` 仅作日志标签，缺省为 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
+- 对上述托管 check/上传动作，`--account` 被忽略，身份和日志标签均取自 `profile_id`；`login` 一律拒绝，请先在对应桌面应用中登录 Profile。
 - 托管 headless 同样采用显式参数 > `LOCAL_CHROME_HEADLESS` > `False`；忽略本地来源及路径，不触碰本地 Profile。
 - 退出码（含 `11` 请求过于频繁）、部署前提、调度责任、身份风险与安全说明见 `docs/CLI.md` 的“托管浏览器模式（通用）”。
 

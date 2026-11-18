@@ -2,23 +2,13 @@
 
 项目现在提供一个统一的 CLI 入口 `sau`，当前主线已经接入：
 
-- `douyin`
-- `kuaishou`
 - `xiaohongshu`
 - `rednote`：小红书国际版的独立适配，保留当前浏览器与站点语言；见 [Rednote 使用说明](./rednote.md)
-- `bilibili`
-- `tencent`
-- `baijiahao`
-- `alipay`
-- `weibo`
-- `hupu`
 - `tiktok`：本地持久化 Profile 或托管浏览器模式（MLX / AdsPower）
 - `youtube`
+- `instagram`：独立网页发布视频/Reels、单图与轮播
 - `facebook`：Facebook 个人主页视频/图文立即发布、查询和删除
 - `facebook-page`：Meta Business Suite 的 Facebook Page 视频/图文立即或定时发布
-- `dayu`
-- `xueqiu`：HTML/Markdown/TXT 长文、原位置配图及封面，默认实际发表，支持按原作品 ID 查询结果；见 [雪球使用说明](./xueqiu.md)，已实测正式 CLI 发表及后台核验
-- `zhihu`：文章、视频和定时发布；见仓库内 [知乎 Skill](../skills/zhihu-upload/SKILL.md)
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
@@ -41,23 +31,14 @@ uv pip install -e .
 安装后就可以直接使用：
 
 ```bash
-sau douyin --help
-sau kuaishou --help
 sau xiaohongshu --help
 sau rednote --help
-sau bilibili --help
-sau tencent --help
-sau baijiahao --help
-sau alipay --help
-sau weibo --help
-sau hupu --help
 sau tiktok --help
 sau youtube --help
+sau instagram --help
+sau article --help
 sau facebook --help
 sau facebook-page --help
-sau dayu --help
-sau xueqiu --help
-sau zhihu --help
 ```
 
 ## 按需准备浏览器
@@ -66,7 +47,7 @@ sau zhihu --help
 
 ## 重建本地浏览器 Profile（`reset-profile`）
 
-目前 TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 开放此命令；Bilibili 不提供。TikTok、小红书、抖音、快手的 login/check/视频/图文和直接 uploader 已接入持久化 Profile；Instagram、Facebook、Facebook Page 的 login/check/视频/图文/verify/delete 与直接调用也已接入；YouTube、视频号、百家号、微博、虎扑、支付宝生活号的 login/check/upload-video 与直接调用也已接入；大鱼号、知乎的 login/check/视频/文章/verify 与直接调用也已接入；雪球的 login/check/文章/verify 与直接调用也已接入。Rednote 的 login/check/视频/图文及直接调用同样接入。
+七个平台均提供本地 Profile 重建命令。登录、检查、发布及可用的作品核对和删除动作复用同一平台、浏览器种类、账号别名的持久化资料。
 
 ```bash
 sau tiktok reset-profile --account "creator" --browser-kind chrome
@@ -85,7 +66,7 @@ sau xiaohongshu reset-profile --account "creator" --browser-kind chrome
 
 ## 客户端发布闸门（`--not-before`）
 
-所有平台的 `upload-video` / `upload-note` / `upload-article` 都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，保留秒级精度，不接受小数秒；`--schedule` 则要求秒/微秒为 0）：
+所有平台的 `upload-video` / `upload-note` 都支持 `--not-before "YYYY-MM-DDTHH:MM:SSZ"`（UTC 绝对时刻，保留秒级精度，不接受小数秒；`--schedule` 则要求秒/微秒为 0）：
 
 - 上传素材、填写标题/正文、封面、声明、合集等准备工作照常执行；
 - 全部准备完成后，如果本地当前时间早于目标时间，保持浏览器打开并等待；
@@ -94,10 +75,10 @@ sau xiaohongshu reset-profile --account "creator" --browser-kind chrome
 
 ```bash
 # 先完成所有准备，东八区 20:00（12:00 UTC）之后才点发布
-sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --not-before "2026-12-01T12:00:00Z"
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "新视频" --not-before "2026-12-01T12:00:00Z"
 ```
 
-它与平台原生的 `--schedule` 是两套机制，可以同时使用：
+它与平台原生的 `--schedule` 是两套机制，支持原生定时的平台可同时使用：
 
 - `--schedule`：把发布时间交给平台，由平台在目标时间自动发布；
 - `--not-before`：在本地等待到目标绝对时刻才点击发布，发布动作仍由当前进程完成，适合需要人工保持登录态、平台不支持原生定时或希望统一控制提交时刻的场景。
@@ -109,10 +90,9 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 - 等待时间使用 **UTC 绝对时刻**（零偏移，`Z`/`+00:00` 等写法均可；必须用 `T` 分隔日期与时间，保留秒级精度），例如 `2026-12-01T12:00:00Z`；CLI 解析后换算到运行机器的本地时区再等待/打印，非零偏移、无时区或空格分隔会退出 `2`；
 - 长时间等待期间浏览器会保持打开；请确保网络、登录态和机器不会在目标时间前中断；
 - 主动等待不计入上传/发布超时预算；所有支持客户端发布闸门的平台都会把等待时长从 deadline 中顺延；
-- **禁止用 `--not-before` 做发布间隔或节流**：等待发生在填表之后、点击发布之前，浏览器与托管 Profile 全程被占用；节流、冷却与排程属于调用方 App（见[调度侧责任](#调度侧责任)）；
-- 使用 `--no-publish` / `--prepare-only` / `--draft` 时不会等待，也不会点击发布；小红书的 `--no-publish` 会跑到 ARM 就绪（见[小红书 CLI 子命令](#小红书-cli-子命令)）；
+- **禁止用 `--not-before` 做发布间隔或节流**：等待发生在填表之后、点击发布之前，本地 Profile 或托管 Profile 中的本平台全程被占用；节流、冷却与排程属于调用方 App（见[调度侧责任](#调度侧责任)）；
+- 支持 `--no-publish` 的入口显式使用该参数时不会等待，也不会点击发布；小红书的 `--no-publish` 会跑到 ARM 就绪（见[小红书 CLI 子命令](#小红书-cli-子命令)）；
 - Rednote、TikTok、小红书的视频和图文在 `--no-publish` 成功时，本地与托管模式均输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。它表示媒体上传、编辑及发布就绪检查已完成，可能留下临时素材或草稿；失败或登录失效不会输出此成功摘要。
-- Bilibili 由 `biliup` 一次性完成上传和提交，无法在「填好表」和「点发布」之间插入等待，因此 `--not-before` 在启动 `biliup` 前生效。
 
 ## 发布超时预算（全平台）
 
@@ -123,18 +103,13 @@ sau douyin upload-video --account creator --file demo.mp4 --title "新视频" --
 - 预算覆盖打开发布页、上传素材、填写标题/正文/标签、封面、声明、合集、定时设置、点击发布，以及等待平台确认；
 - **尚未点击发布**时超时：普通失败，CLI 退出 `1`，确定没有发布任何内容；
 - **已经点击发布**后超时：结果未知，CLI 退出 `9`，禁止自动重发；先到平台后台按标题与发布时间核对；
-- `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；**禁止用 `--not-before` 做发布间隔/节流**（等待期间浏览器与托管 Profile 被占用，节流属于调用方 App）；
+- `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；**禁止用 `--not-before` 做发布间隔/节流**（等待期间本地 Profile 或托管 Profile 中的本平台被占用，节流属于调用方 App）；
 - 平台原有的素材上传/转码等长等待会收紧到剩余预算；点击后的短轮询可能有秒级收尾开销；
 - 各平台若还保留自己的短等待（如上传完成 600s、封面 120s），取“平台短等待”和“剩余总预算”的较小值；
-- Bilibili 是 `biliup` 单命令上传并提交，没有可区分的“点击发布”时刻；`--not-before` 在启动 `biliup` 前等待。命令本身同样受 15 分钟预算约束：命令启动后超时按结果未知退出 `9`，不会自动重发。
-
-已接入的浏览器发布平台：抖音、快手、小红书、视频号、百家号、支付宝生活号、
-YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频/文章、Facebook
-个人主页、Facebook Page、Instagram、TikTok。
 
 ## 人类化交互层（全平台）
 
-浏览器发布平台（Bilibili 的 `biliup` 单命令路径除外）默认走人类化交互层：文本输入逐字符
+浏览器发布平台默认走人类化交互层：文本输入逐字符
 键入，可见点击走「移动 → 停顿 → 落点复核 → 按下 → 抬起」。默认开启，不需要任何参数。
 
 - **唯一回滚开关是全局 `HUMANIZE=0`**（按 `strip()` 后比较）。它是语义开关而非限速开关：
@@ -155,10 +130,6 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 - **与 15 分钟预算的关系**：人类化停顿不是额外预算，只消耗
   [发布超时预算](#发布超时预算全平台) 的剩余额度，并按 `min(采样值, 剩余)` 收紧；预算耗尽后
   停顿收缩到 `0`，暂停本身不抛超时。超时判据仍只在就绪锚点与发布点击。
-- **`force` 准入**：仅规格点名的 3 条残余允许 `force=True`（抖音 2FA 两处、快手引导层），
-  且必须在同一调用跨度内写
-  `# humanize-impossible: <失败模式>；<code|inferred|needs-live>；<已排除替代>`；`force`
-  不是回滚网。
 - **验收口径**：真机验收一律 `--no-publish`，停在发布按钮 / Share 就绪前，不点真实发布、
   不上真实帖子；发布点击与提交后行为不在本轮真机验收范围（规格 §9-28）。
 - **托管模式未验证**：Multilogin X / AdsPower 下的人类化交互只做过离线验证，真机行为
@@ -178,7 +149,7 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 
 ## 托管浏览器模式（通用）
 
-设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用启动指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。
+设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用打开或加入指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。
 
 未设置任一凭据时仍为本地模式；`verify` / `delete` / `article` 在托管模式下仍然本地执行，不受 Profile 影响。
 
@@ -205,19 +176,18 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 | `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
 | 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
 | 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 |
-| `--headless` | TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 读取 LOCAL_CHROME_HEADLESS，缺省 False；其他平台仍 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
+| `--headless` | 读取 LOCAL_CHROME_HEADLESS，缺省 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
 | `--headed` | False（等价默认） | False（等价默认） | False（等价默认），V2 编码 `"0"` |
 | `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower |
 | `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
 | `verify` / `delete` | 本地执行 | 本地执行 | 本地执行 |
-| `check` 未登录 | `invalid` + 退出 `1` | 退出 `10` | 退出 `10` |
-| Bilibili | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
+| `check` 未登录 | 退出 `10` | 退出 `10` | 退出 `10` |
 | `article` | 本地工具 | 本地工具 | 本地工具 |
 
-- `--profile-id` 只校验 strip 后非空，不猜格式；Profile 不存在、被占用或内核未就绪交给服务端，按运行失败退出 `1`。
+- `--profile-id` 会去除首尾空白并检查非空；同一 Profile 上本平台已被占用、Profile 不存在或内核未就绪时退出 `1`。
 - 托管模式下 `--account` **被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `profile_id` 决定。传了非空 `--account` 只会出现在启动日志的 `ignored=` 列表里。
 - 例外不变：`login`、`verify`、`delete` 仍必须 `--account`（`verify` / `delete` 始终本地执行）。
-- 注册范围：除 `bilibili` 外，所有平台的 `check` 与 `upload-*` 都接受 `--profile-id` / `--folder-id`；`login`、`verify`、`delete`、`article` 不注册这组参数。
+- 注册范围：七个平台的 `check` 与 `upload-*` 都接受 `--profile-id` / `--folder-id`；`login`、`verify`、`delete`、`article` 不注册这组参数。
 - 托管模式下 `sau <platform> login` 不带 flag 进入 `run()` 后拒绝并退出 `1`；显式带 `--profile-id` 时因 `login` 解析器未注册该 flag，argparse 退出 `2`。
 - 不打印模式 banner；`check` 成功只输出 `valid`，保持 stdout 可解析。
 
@@ -227,15 +197,15 @@ YouTube、微博、虎扑、知乎视频/文章、雪球文章、大鱼号视频
 
 | 码 | 含义 | 典型场景 | 调用方动作 |
 | --- | --- | --- | --- |
-| `0` | 成功 | 发布已提交；`--no-publish` / `--prepare-only` / `--draft` 已准备完成；`check` 已登录；Stop 失败但主操作成功（仅 warning） | 计数 +1、记录时刻 |
-| `1` | 运行失败（**确定未发布**） | Local API / Launcher 不可达、key/token 无效、Profile 不存在/被占用、CDP 连不上；双凭证冲突 / 不支持平台；登录探针结构异常或网络 5xx；ARM 就绪窗/预算耗尽；素材上传失败；话题插错/多插；元数据或定时回读失败；`login` 与平台拒绝 | 修正后可无条件重跑（冷却另议） |
-| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` 非法、本地缺 `--account`、静态参数冲突、未知子命令 | 修正参数 |
+| `0` | 成功 | 发布已提交；`--no-publish` 已准备完成；`check` 已登录；Stop 失败但主操作成功（仅 warning） | 计数 +1、记录时刻 |
+| `1` | 运行失败（**确定未发布**） | Local API / Launcher 不可达、key/token 无效、Profile 不存在/被占用、CDP 连不上；双凭证冲突；登录探针结构异常或网络 5xx；ARM 就绪窗/预算耗尽；素材上传失败；话题插错/多插；元数据或定时回读失败；`login` 与平台拒绝 | 修正后可无条件重跑（冷却另议） |
+| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` 非法、本地缺 `--account`、静态参数冲突、未知子命令（包括已移除的平台，本地及托管均在解析时退出） | 修正参数 |
 | `9` | 发布结果未知 | 发布点击已发出（FIRE 后）但未在观察窗内确认离开发布页，或派发后异常；**帖子可能已存在** | **禁止自动重发**；先到平台后台按标题/素材/时间核对 |
-| `10` | 需要登录 / 人机验证 | 登录页、登录表单、验证码、2FA；本地运行前预检失败（账号文件缺失/失效）；`check` 确定未登录 | 点击前：排人工登录，登录后可直接重跑。点击后（stderr 另有 `publish_attempted=true`）：**先核对笔记是否存在** |
+| `10` | 需要登录 / 人机验证 | 登录页、登录表单、验证码、2FA；本地运行前预检失败（本地 Profile 缺失或登录失效）；`check` 确定未登录 | 点击前：排人工登录，登录后可直接重跑。点击后（stderr 另有 `publish_attempted=true`）：**先核对笔记是否存在** |
 | `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
-| `130` | 用户中断 | `Ctrl-C`；Stop 仍会执行，不属于调度契约 | — |
+| `130` | 用户中断 | `Ctrl-C`，退出时按共享规则释放平台资格 | — |
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
+七个平台的本地持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
@@ -245,26 +215,29 @@ TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、
 
 ### 平台支持范围
 
-两种托管模式使用同一张平台表：
+两种托管模式使用同一张平台表。示例中的 `PROFILE_ID` 和 `FOLDER_ID` 须替换为桌面应用中的标识。
 
 | 平台 | 托管模式可用的 action | 说明 |
 | --- | --- | --- |
-| 抖音、快手、小红书 | `check`、`upload-video`、`upload-note` | |
-| 视频号、百家号、支付宝生活号、微博、虎扑、YouTube | `check`、`upload-video` | |
+| 小红书、Rednote | `check`、`upload-video`、`upload-note` | 两个独立平台 |
+| YouTube | `check`、`upload-video` | |
 | Facebook、Facebook Page、Instagram | `check`、`upload-video`、`upload-note` | `verify` / `delete` 仍为本地模式 |
-| 大鱼号 | `check`、`upload-video`、`upload-article` | `verify` 仍为本地模式 |
-| 知乎 | `check`、`upload-video`、`upload-article` | `verify` 仍为本地模式 |
-| 雪球 | `check`、`upload-article` | `verify` 仍为本地模式 |
 | TikTok | `check`、`upload-video`、`upload-note` | `login` 仅本地模式；图文依赖账号 Photos tab 灰度 |
-| Bilibili | 不支持 | `biliup` 没有浏览器上下文；托管模式下退出 `1` |
 
-共 16 个平台可走托管浏览器模式。`sau article` 是本地文件处理命令，不使用 Profile。`verify` / `delete` 始终本地执行，因此在托管模式下仍必须提供 `--account`（缺少时退出 `2`）。
+七个平台共提供 20 个托管入口（7 个登录检查、7 个视频发布和 6 个图文发布）。`sau article` 是本地文件处理命令，不使用 Profile。`verify` / `delete` 始终本地执行，因此在托管模式下仍必须提供 `--account`（缺少时退出 `2`）。
+
+### 共享托管 Profile
+
+同机、同一操作系统用户的兼容 CLI 默认共享同一托管 Profile。不同平台可以同时执行，各自在新标签页工作。同一平台的检查和发布合计限一条命令，冲突者立即退出 `1`。**最后一条已加入的命令离开时会关闭整个 Profile，包括用户从桌面打开的标签页。**
+
+- 从不同目录或虚拟环境运行时也按 provider、Profile 和 CLI 平台判定占用。不同 Profile 可并行运行同一平台。大陆版小红书与 Rednote 分开计数，Facebook 个人与 Page 也分开计数。两条 `facebook-page` 命令即使指定不同 `--page` 也互斥。
+- 一条命令在 `--not-before` 等待时，另一平台仍能检查或发布。先离开者清理自己的页面和连接，其他命令继续编辑原页。退出后分别读取各自的退出码和结果。Instagram 与 Facebook Page 默认按命令生成带 UUID 的结果文件。显式传 `--result` 时，为每条命令分配不同路径；使用相同路径时后写入的结果覆盖先前的结果。
+- 命令被强杀后，新命令在新页重新开始。若可能已经提交，先到平台核对作品。旧草稿和结果文件可用于核对。混用不支持共享的旧版 CLI 或独立工具时，由调用方串行访问同一 Profile。
 
 ### 调度侧责任
 
-- 保证同一 Profile **不并发**；CLI 不加锁，也不做 active 预检。同一 Profile 的串行由调度 App 负责。
 - Profile 即身份；传错 `profile_id` 会直接操作另一个账号。CLI 只校验“已登录”，不校验账号是否匹配，调度侧承担该风险。
-- 收到 `0`：已发布，或 `--no-publish` / `--prepare-only` / `--draft` 已准备完成；计数 +1 并记录时刻。
+- 收到 `0`：已发布，或 `--no-publish` 已准备完成；计数 +1 并记录时刻。
 - 收到 `1`：确定未发布，可无条件重跑（冷却另议）；不要与登录失效或 429 混淆。
 - 收到 `9`：已派发但未确认成功，**帖子可能已存在**；**禁止自动重发**，先到平台后台核对，已存在不要重发，不存在才可人工重试。
 - 收到 `10`：
@@ -294,7 +267,6 @@ TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、
 - AdsPower 无 key 安装（关闭 API 安全校验）、V1 Local API、旧客户端 fallback / 双栈 / 运行时版本探测。
 - AdsPower Firefox Profile；Playwright/CDP 只支持 Chromium。
 - Docker、跨机、无桌面 Linux 部署。
-- Bilibili（`biliup` 子进程，无浏览器上下文）。
 - 通过 CLI 在托管模式登录；登录必须在对应桌面应用中完成。
 - 在桌面应用中创建/修改 Profile、管理代理或导入/导出 Cookie。
 
@@ -302,35 +274,34 @@ TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、
 
 设计规格中的部分历史决策与最终实现不同，**实现以 uploader 的 golden 常量和对应测试为准**：
 
-- 视频号仅提供正式视频上传，`TENCENT_INIT_SCRIPT=False`；未完成且未注册的历史图文实现已移除。
 - TikTok：本地持久化 Profile 与托管分支均不注入 stealth。
 - 托管分支不应用 `launch_kwargs` / `context_kwargs` / `init_script` / `context_setup`，非空选项继续记录既有忽略警告及启动日志，并使用 `account_file=None`；Profile 的浏览器指纹、代理、时区、定位权限和 UA 由 Profile 自身决定。
 - Python 调用方使用 `local_browser_session(..., platform=..., account=...)` 取得本地持久化会话；通用 `browser_session` 必须传入 managed provider，缺少 provider 会在浏览器启动前明确报错。旧临时本地会话、TikTok Firefox 实现及 stealth 资源已移除。
 
 ## Multilogin X 模式
 
-设置非空环境变量 `MLX_API_TOKEN` 后，`sau` 进入 Multilogin X（MLX）模式。CLI 通过本机 Multilogin Launcher（`https://launcher.mlx.yt:45001`）启动指定 Profile，经 CDP 接管该 Profile 的浏览器，并复用其中的登录态；不再读写 `cookies/*.json`。
+设置非空环境变量 `MLX_API_TOKEN` 后，`sau` 进入 Multilogin X（MLX）模式。CLI 通过本机 Multilogin Launcher（`https://launcher.mlx.yt:45001`）打开或加入指定 Profile，经 CDP 接管该 Profile 的浏览器，并复用其中的登录态；不再读写 `cookies/*.json`。
 
 ```bash
 export MLX_API_TOKEN="<token>"
 
 # check：0=已登录，10=需要人工登录
-sau douyin check --folder-id <folder_id> --profile-id <profile_id>
+sau xiaohongshu check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID"
 
 # 上传：--account 被忽略；身份由 --profile-id 决定
-sau douyin upload-video \
-  --folder-id <folder_id> --profile-id <profile_id> \
+sau xiaohongshu upload-video \
+  --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 
 # 显式有头（等同默认；保留给调度侧既有传参）
-sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
+sau xiaohongshu check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" --headed
 ```
 
 ### MLX 专属参数与行为
 
 - MLX 模式必须同时提供 `--folder-id` 与 `--profile-id`，否则按用法错误退出 `2`。
 - `--account` 在 MLX 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 语义不变。
+- `--headless` / `--headed` 直接映射到 MLX Profile 的有头/无头模式；未传时读取 LOCAL_CHROME_HEADLESS（缺省 False）；`--debug` 语义不变。
 - `verify` / `delete` 仍是本地模式操作：即使设置了 `MLX_API_TOKEN` 也不会接管 Profile，因此始终必须提供 `--account`（缺少时退出 `2`）。
 - token 只从环境变量读取，不写入命令行、日志或异常文本。Launcher 地址固定，不支持覆盖。
 - **429 行为变更**：Launcher 返回 HTTP 429 时，退出码已由 `1` 改为 `11`；调度层应改为退避重试。
@@ -349,40 +320,36 @@ sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id> --headed
 - Docker launcher（CDP 端口默认未映射到宿主机）
 - 跨机 launcher（官方只支持 `127.0.0.1`，不引导 SSH 隧道）
 - Linux 无桌面部署
-- Bilibili
 - 通过 CLI 在 MLX 中登录（登录必须在 Multilogin 应用中完成；TikTok 本地模式支持 `login`）
 
-启动前 CLI 会探活 `GET /api/v1/version`；失败退出 `1`，并提示确认桌面应用、同机部署和 45001 端口。Start 成功但 CDP 连接连续 3 次失败时，错误信息会附带 Docker launcher 提示，并在退出前停止本次启动的 Profile。
+Launcher 不可达时请检查桌面应用、同机部署和 45001 端口。连接结果不明确时，先核实对应 Profile 的状态。
 
 ## AdsPower 模式
 
-设置非空环境变量 `ADSPOWER_API_KEY` 后，`sau` 进入 AdsPower 模式。CLI 通过 AdsPower Local API（默认 `http://127.0.0.1:50325`）启动 `user_id` 指定的 Chromium Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 接管现有浏览器上下文，并复用 Profile 登录态；不再读写 `cookies/*.json`。
+设置非空环境变量 `ADSPOWER_API_KEY` 后，`sau` 进入 AdsPower 模式。CLI 通过 AdsPower Local API（默认 `http://127.0.0.1:50325`）打开或加入 `user_id` 指定的 Chromium Profile，经 `data.ws.puppeteer` 的 CDP WebSocket 接管现有浏览器上下文，并复用 Profile 登录态；不再读写 `cookies/*.json`。
 
 ```bash
 export ADSPOWER_API_KEY="$KEY"
 
 # check：0=已登录，10=需要人工登录
-sau douyin check --profile-id <profile_id>
+sau xiaohongshu check --profile-id "PROFILE_ID"
 
 # 上传：--account 被忽略；身份由 --profile-id 决定
-sau douyin upload-video \
-  --profile-id <profile_id> \
+sau xiaohongshu upload-video \
+  --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
 
 # 有头运行，便于人工处理验证码
-sau douyin upload-video --headed \
-  --profile-id <profile_id> \
+sau xiaohongshu upload-video --headed \
+  --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题"
 
 # login 拒绝（退出 1）
-sau douyin login --account creator
-
-# Bilibili 拒绝（退出 1）
-sau bilibili check --account creator
+sau xiaohongshu login --account creator
 
 # 自定义 Local API 地址（仅改端口或使用官方地址时设置）
 ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
-  sau douyin check --profile-id <profile_id>
+  sau xiaohongshu check --profile-id "PROFILE_ID"
 ```
 
 ### AdsPower 激活与 `ADSPOWER_API_BASE`
@@ -397,7 +364,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `--profile-id` 必填；strip 后映射 AdsPower 的 `user_id`（V2 请求体字段为 `profile_id`）。
 - `--folder-id` 注册但静默忽略；传值不报错、不告警。
 - `--account` 在 AdsPower 下**被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `--profile-id` 决定。传了非空值只会出现在启动日志的 `ignored=` 列表里。
-- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 未传时读取 LOCAL_CHROME_HEADLESS（缺省 False），其他平台仍默认有头；`--debug` 不传给 AdsPower。
+- `--headless` 显式无头，V2 编码 `"1"`；`--headed` 为 False，V2 编码 `"0"`；未传时读取 LOCAL_CHROME_HEADLESS（缺省 False）；`--debug` 不传给 AdsPower。
 - `login` 拒绝：`AdsPower 模式不支持 CLI 登录；请在 AdsPower 中登录 Profile {profile} 后重试。`
 - 只支持 V2 Local API，不做 V1 fallback / 双栈 / 运行时版本探测；AdsPower 客户端请升级到最新 patch。旧客户端 404 会提示“AdsPower 版本过旧或 Local API 未开启”并退出 `1`。
 - 启动请求固定 `last_opened_tabs=0`、`proxy_detection=0`、`delete_cache=0`、`cdp_mask=1`，避免继承历史页、触发 IP 检测页或清掉登录态。
@@ -411,7 +378,6 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 5. Profile 已**人工登录**目标平台，且没有待处理验证码/2FA；TikTok Profile 界面须为 **English (US)**，小红书 Profile 界面须为**中文**。
 6. AdsPower 客户端升级到最新 patch（官方未给最低版本）。
 7. `ADSPOWER_API_BASE` 默认 `http://127.0.0.1:50325`；仅在改端口或使用官方地址时设置。
-8. 同一 Profile **串行使用**；CLI 不加锁、不做 active 预检。
 
 ### Bearer 与 key 重置
 
@@ -426,7 +392,7 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 
 ### AdsPower 未知项（真实冒烟未执行）
 
-本机未安装 AdsPower，**真实 AdsPower 冒烟未执行（ticket 09）**。以下行为只有离线测试和设计依据，仍需真实设备验证：
+以下是原 AdsPower 接入工单 09 的实测待核对项。共享托管会话的实机范围及记录见[共享 Profile 规格](../.scratch/managed-profile-sharing/spec.md)。
 
 - 已运行 Profile 的 start 返回形状（成功 + 既有 ws，还是错误）。
 - 重复 stop / 已停止 Profile 的真实 `code` / `msg`。
@@ -437,102 +403,20 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - `/status` 是否要求鉴权、是否返回版本字段。
 - V2 最低可用版本；`active` 在 Inactive / 多设备模式下的 `data` 形状。
 
-## 大鱼号 CLI 子命令
-
-login/check/upload-video/upload-article/verify 共用持久化本地 Profile，旧 JSON 与身份旁文件退出。先 `sau dayu login --account creator --headed`，正常关闭后同配置 check。默认 Chrome 有头；`--local-browser chromium` 使用完整配套 Chromium，自定义 `LOCAL_CHROME_PATH` 优先；显式运行模式 > `LOCAL_CHROME_HEADLESS` > `False`。别名可换号，`--expected-name` 仅校验当次显式请求；verify 继续校验原结果主体、标题和作品 ID，换号不会改写历史结果。只有 `--public` 才在后台核对后创建同一浏览器的独立匿名 context，不复制主 Profile 状态，保持外层占用。
-
-`reset-profile --account creator --browser-kind chrome|chromium` 只清空指定种类，无需 binary。缺少 Profile/未登录/验证退出 10，故障退出 1；提交后保留 publish_attempted，未知结果 9 禁止重发。视频与文章保留 `--prepare-only`（上传并填写，不点击发表）；它不是离线模拟。当前迁移验证为离线与受控浏览器，未执行真实大鱼号账号操作。
-
-登录、分类和来源选项见 [视频发布](./dayu.md)；正文文件、格式和图片路径见 [图文发布](./dayu-article.md)。Markdown 主题及独立本地渲染命令见 [文章文件与主题渲染](./article.md)。
-
-```powershell
-sau dayu upload-article --account creator --title "如何阅读作品数据面板" --content-file examples/dayu_article.html --source "无需标注" --cover-indices 1
-
-# Markdown 首次使用需要 Node.js 22+，先安装渲染依赖
-sau article setup
-sau dayu upload-article --account creator --title "如何阅读作品数据面板" --content-file examples/article.md --theme modern --source "无需标注" --cover-indices 1
-```
-
-Markdown 默认主题为 `default`，可选 `default/grace/simple/modern/plain`；HTML/TXT 不使用 `--theme`。主题会自动转换为大鱼号兼容排版，保留文字颜色、背景和近似字号，圆角、字体和间距等效果可能与本地预览不同。确认发表前会检查服务端预览；平台确认最终发表后即返回成功，不等待审核。
-
-视频和文章均支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，CLI 填写前按浏览器时区换算；当前时刻 2 小时后至 7 天内，分钟为 5 的倍数。平台确认原作品和定时安排后即成功，不等待到点。使用结果文件执行 `sau dayu verify --account creator --result "本次结果文件.json"` 可只读核对原作品与时间，勿重新上传。Agent 可使用仓库的 [大鱼号 Skill](../skills/dayu-upload/SKILL.md)。
-
-## 知乎 CLI 子命令
-
-知乎提供文章和视频发布。文章使用 HTML/Markdown/TXT 原稿，正文图片按原稿位置导入；视频文件须大于 100KB（102400 字节）、最大 20GB、最长 4 小时。
-
-```powershell
-sau zhihu login --account creator
-sau zhihu check --account creator
-sau zhihu upload-article --account creator --title "知乎文章标题" --content-file examples/article.md
-sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎视频标题" --desc "视频简介" --originality original --category "教育" --video-mark "含 AI 生成内容"
-# 上传素材后导出该表单的全部领域和视频标记；不发表，但可能留下草稿。
-sau zhihu upload-video --account creator --file videos/demo.mp4 --title "知乎视频标题" --originality original --show-options
-```
-
-知乎 login/check/upload-article/upload-video/verify/reset-profile 和直接调用使用 `browser_profiles/<chrome|chromium>/zhihu/<原始别名>/`。默认系统 Chrome 有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False。只准备所选浏览器，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 安装。
-
-`--account` 是资料别名，同别名允许重新登录其他账号，两种浏览器可登录不同账号。只有 login 引导登录；先 `sau zhihu login --account creator --headed`，正常关闭后同配置 check。旧 Cookie JSON 和身份旁文件不读写或清理；页头 name/avatar_path 仅用于当前操作，并非永久 ID。历史结果仍保存在 `cookies/zhihu_results`；verify 比对结果记录的原账号证据与标题，换号不会改写历史身份。
-
-缺少 Profile、明确登录/验证退出 10；页面、网络、权限与必需字段故障退出 1；提交后保留 publish_attempted，结果未知退出 9，先核对作品、禁止自动重发。文章保留 `https://zhuanlan.zhihu.com` 限定的剪贴板权限与原稿读回，不设置地理位置权限。重建显式执行 `sau zhihu reset-profile --account creator --browser-kind chrome`，只清空选中种类，无需 binary，不影响另一种类与历史结果。verify 即使设置托管环境变量也使用原始本地别名。
-
-`--category` 与 `--video-mark` 使用 CLI 可选值，完整领域清单见 `sau zhihu upload-video --help`。省略时在交互终端按编号选择；非交互调用必须指定。程序提交前仍核对实时菜单，`--show-options` 将候选写入结果 JSON 的 `options`。
-
-`--originality` 可选 `original`（原创）、`reprint`（转载）。`--video-mark` 可选 `内容无需标注`、`含 AI 生成内容`、`含虚构演绎内容`、`内容含营销信息`、`内容为转载`、`个人观点仅供参考`，须按实际内容选择。视频标题 5–50 字，简介最多 300 字；暂不支持自动选择话题、自定义封面、专栏和内容来源。
-
-文章标题最多 100 字。图片写在原稿里，例如 `![配图](images/1.png)`，相对路径从原稿目录解析。提交前核对文字、图片位置、基本格式和链接；恢复非空草稿时停止以保护原文。Markdown 首次使用先执行 `sau article setup`。暂不支持自定义主题 CSS、手动封面、专栏收录和文档导入。
-
-文章和视频加 `--prepare-only` 可只填写检查，平台仍可能自动保存草稿。`published` 表示平台确认发表；结果为 `submission_unknown` 时先检查创作中心原作品，勿重复上传。已有链接时用 `sau zhihu verify --account creator --result "本次结果.json"` 核对，视频详情地址可为 `/pin/<作品ID>`。
-
-`--schedule "YYYY-MM-DDTHH:MM:00Z"` 为实验性选项，UTC 绝对时刻，CLI 填写前按浏览器时区换算；限制在当前时刻 30 分钟后至 48 小时内，尚不保证完整排期流程可用。更多用法见 [知乎 Skill](../skills/zhihu-upload/SKILL.md)。
-
-## 抖音 CLI 子命令
-
-抖音 login/check/视频/图文及直接 uploader 使用 `browser_profiles/<chrome|chromium>/douyin/<原始别名>/`。默认系统 Chrome、有头；`LOCAL_CHROME_PATH` 非空优先，否则显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > Chrome。显式 `--headed`/`--headless` > `LOCAL_CHROME_HEADLESS` > False，保留用户已有配置。只要求所选浏览器，失败不回退；Chrome 由用户安装，Chromium 用 `uv run patchright install --no-shell chromium`。预检与发布共用一个会话，浏览器保存完整状态，旧 Cookie JSON 不导入、读写或删除。
-
-只有 login 引导扫码或验证；缺少 Profile、明确未登录/验证退出 `10`，网络、权限和页面故障退出 `1`。同别名可以重新登录另一真实账号，Chrome 与 Chromium 各自隔离。发布中遇到验证即结束本次任务；提交后退出 `10` 会附 `publish_attempted=true`，退出 `9` 表示结果未知，都先核对作品再决定重试。重建使用 `sau douyin reset-profile --account creator --browser-kind chrome`，无需 binary，拒绝占用，保留另一浏览器及历史结果；不会自动恢复发布任务。抖音没有 `--no-publish`，环境验证使用离线或受控页面，不能以真实提交验收。
-
-```bash
-sau douyin login --account <account_name>
-sau douyin login --account <account_name> --headless
-sau douyin check --account <account_name>
-sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 运动,训练
-sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --tags 图文,测试
-```
-
-托管模式保留现有短信处理方式：视频发布可读取 `verify_code.txt`，交互式终端可输入验证码；验证通过后清理该文件。本地发布遇到验证退出 `10`，改用同配置 login 完成人工验证。
-
-## 快手 CLI 子命令
-
-```bash
-sau kuaishou login --account <account_name>
-sau kuaishou check --account <account_name>
-sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 运动,训练
-sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
-```
-
-快手 login/check/upload-video/upload-note 及直接 uploader 已统一使用 `browser_profiles/<chrome|chromium>/kuaishou/<原始别名>/`；仅 login 创建资料并引导扫码，预检与发布共用同一会话和占用。旧 JSON 不再读取、导出或自动迁移；别名可重新登录不同账号，两种浏览器各自独立。
-
-默认系统 Chrome、有头。显式 `--headed` / `--headless` > `LOCAL_CHROME_HEADLESS` > False；`LOCAL_CHROME_PATH` 优先并按真实产品选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome。只需安装所选来源（Chromium 使用 `uv run patchright install --no-shell chromium`），失败不回退；不增加 stealth、UA、语言或固定 viewport。
-
-缺少 Profile、明确未登录或验证退出 `10`（验证保留 `reason=verification`），网络/权限/页面结构故障退出 `1`。提交后保留 `publish_attempted=true`；结果未知 `9` 禁止自动重发。视频封面、合集、原生定时与视频/图文的 `--not-before` 保留。快手没有 `--no-publish`；本次仅离线与受控 DOM 验证，不代表真实账号验收。
-
-重建用 `sau kuaishou reset-profile --account <account_name> --browser-kind chrome`（或 chromium），无需 browser binary，拒绝占用，只清空选定资料；重建后先 login，不重跑旧发布。MLX/AdsPower 保持原路由、参数日志和所有权，仅采用新 headless 来源，忽略本地 browser/path；托管拒绝 login/reset-profile。
-
 ## 小红书 CLI 子命令
 
 ```bash
-sau xiaohongshu login --account <account_name>
-sau xiaohongshu check --account <account_name>
-sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 小红书,视频
-sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --tags 图文,测试
+sau xiaohongshu login --account creator
+sau xiaohongshu check --account creator
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 小红书,视频
+sau xiaohongshu upload-note --account creator --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文示例" --tags 图文,测试
 ```
 
 Rednote 使用独立命令 `sau rednote`，持久化 Profile 与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
 
 小红书 login/check/视频/图文统一使用 `browser_profiles/<chrome|chromium>/xiaohongshu/<原始别名>/`。默认系统 Chrome、有头；已有 `LOCAL_CHROME_HEADLESS=True` 仍生效。显式 `--headed` / `--headless` 优先于配置；自定义 `LOCAL_CHROME_PATH` 优先于 `--local-browser` / `LOCAL_BROWSER`，无配置默认 Chrome。只要求选定来源，失败不切换。
 
-仅 login 创建资料并引导扫码；check 与发布缺少 Profile 或明确未登录退出 `10`，网络/页面结构故障退出 `1`，验证保留 `reason=verification`。可在同别名重新登录另一真实账号，两种浏览器各自独立。旧 Cookie JSON 不再读取、写回或自动清理。重建使用 `sau xiaohongshu reset-profile --account <account_name> --browser-kind chrome|chromium`。
+仅 login 创建资料并引导扫码；check 与发布缺少 Profile 或明确未登录退出 `10`，网络/页面结构故障退出 `1`，验证保留 `reason=verification`。可在同别名重新登录另一真实账号，两种浏览器各自独立。旧 Cookie JSON 不再读取、写回或自动清理。重建使用 `sau xiaohongshu reset-profile --account creator --browser-kind chrome|chromium`。
 
 本地保留当前语言和自然窗口，不设置 locale、Accept-Language、UA、stealth 或固定 viewport。托管保持原有 Profile 语言约定；仅 headless 默认来源采用新优先级，本地 browser/path 完全忽略。`--no-publish` 实际上传素材、编辑并等待 ARM 后停止，可能留下草稿；离线回归不代表真实平台验收。
 
@@ -556,22 +440,22 @@ Rednote 使用独立命令 `sau rednote`，持久化 Profile 与小红书隔离�
 
 ```bash
 # 开启原创声明
-sau xiaohongshu upload-video --account <account_name> \
+sau xiaohongshu upload-video --account creator \
   --file videos/demo.mp4 --title "原创视频" --original
 
 # 声明 AI 合成内容
-sau xiaohongshu upload-note --account <account_name> \
-  --images videos/1.png videos/2.png --title "图文标题" \
+sau xiaohongshu upload-note --account creator \
+  --images videos/demo1.png videos/demo2.png --title "图文标题" \
   --content-type ai
 
 # 声明自主拍摄（地点和日期必填）
-sau xiaohongshu upload-note --account <account_name> \
-  --images videos/1.png videos/2.png --title "图文标题" \
+sau xiaohongshu upload-note --account creator \
+  --images videos/demo1.png videos/demo2.png --title "图文标题" \
   --content-type self-shot \
   --shoot-location "北京" --shoot-date "2026-11-09"
 
 # 声明来源转载并填写媒体名称
-sau xiaohongshu upload-video --account <account_name> \
+sau xiaohongshu upload-video --account creator \
   --file videos/demo.mp4 --title "转载视频" \
   --content-type repost --repost-source "某某媒体"
 ```
@@ -608,91 +492,13 @@ sau xiaohongshu upload-video --account <account_name> \
 - 15 秒观察窗内仍未离开 `/publish/publish`（且未命中登录/验证页）：退出 `9`；登录/验证页命中则退出 `10`，派发后带 stderr 行 `publish_attempted=true`；
 - `--no-publish` 跑到 ARM 就绪即返回，不进入 FIRE / OBSERVE，不受发布观察窗影响（仍受总预算约束）。
 
-## Bilibili CLI 子命令
-
-```bash
-sau bilibili login --account <account_name>
-sau bilibili check --account <account_name>
-sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249 --tags 足球,测试 --thumbnail covers/demo.png
-```
-
-补充说明：
-
-- `creator` 之类的名字只是示例值，真正传的是用户自定义的 `account_name`
-- 一个 `account_name` 对应一个账号文件，可以准备多个账号并发使用
-- 浏览器平台统一元数据约定：
-- 视频使用 `title + desc + tags`
-- 抖音、快手、小红书的图片笔记使用 `title + note + tags`
-- 大鱼号文章使用 `title + content-file + source`，正文从 UTF-8 文件读取
-- `sau bilibili ...` 会自动准备 `biliup`
-- 如果本地没有 `biliup`，第一次运行会自动下载
-- 如果上游 GitHub Release 有更新，运行时会先自动更新
-- `sau bilibili login --account <name>` 建议由用户自己在本地真实终端里执行；如果终端里的二维码显示不完整，可直接打开当前目录下的 `qrcode.png` 扫码
-
-## 视频号 CLI 子命令
-
-```bash
-sau tencent login --account <account_name>
-sau tencent check --account <account_name>
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 视频号,测试
-```
-
-视频号支持定时发布、草稿、合集和双比例封面：
-
-`--draft` 成功后输出 `saved as draft`；正常发布成功后输出 `submitted`。本地和托管模式使用相同文案。
-
-```bash
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z" --thumbnail-landscape covers/landscape.png --thumbnail-portrait covers/portrait.png --collection "我的合集"
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --draft
-```
-
-视频号的 login/check/upload-video 与直接 uploader 已使用 `browser_profiles/<chrome|chromium>/tencent/<原始别名>/`。只有 login 创建 Profile 并等待扫码；内部预检和视频上传持有同一会话和占用权，不读写或删除旧 Cookie JSON。保留扫码 iframe/二维码回调、合集、双比例封面、短标题、草稿、原生定时和 `--not-before`。
-
-默认系统 Chrome、有头；显式 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`，`LOCAL_CHROME_PATH` 覆盖来源并按真实产品种类隔离资料。显式 `--headed` / `--headless` > `LOCAL_CHROME_HEADLESS` > `False`。只需准备选定浏览器，失败不回退；不注入 stealth、固定 viewport 或修改语言。
-
-首次使用运行 `sau tencent login --account <alias> --headed`，完成微信扫码后正常关闭，再运行同配置 `sau tencent check --account <alias> --headed`。别名可以换号，两种浏览器可登录不同账号。缺少 Profile、明确未登录或验证退出 `10`，页面/网络故障退出 `1`；只有 login 等待人工登录，上传中验证结束本次操作。提交后 `publish_attempted=true` 或退出 `9` 时先核查作品，禁止自动重发。
-
-重建使用 `sau tencent reset-profile --account <alias> --browser-kind chrome|chromium`，无需 binary，只清空指定资料并提示重新 login。托管模式拒绝 login/reset，仅 headless 采用新优先级；其他 provider 行为不变。视频号未注册图文和 `--no-publish`，验收使用离线替身/受控 DOM；草稿仍会写入平台，不能作为无副作用测试。
-
-## 百家号 CLI 子命令
-
-```bash
-sau baijiahao login --account <account_name> --headed
-sau baijiahao check --account <account_name>
-sau baijiahao upload-video --account <account_name> --file videos/demo.mp4 --thumbnail videos/demo.png --title "示例标题" --desc "示例简介" --tags 百家号,测试
-```
-
-百家号支持 login、check、upload-video 与 reset-profile。视频必须传横版封面 `--thumbnail`，可用 `--collection` 选择已有合集；保留 `--not-before` 客户端发布闸门与 15 分钟发布预算，当前不支持原生 `--schedule` 或 `--no-publish`。
-
-全部本地入口和直接 uploader 复用 `browser_profiles/<chrome|chromium>/baijiahao/<原始别名>`。默认系统 Chrome、有头；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。`LOCAL_CHROME_PATH` 非空时优先并按实际浏览器种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。只安装所选来源，失败不回退；保留当前语言与自然窗口，不授予无业务需要的地理位置权限。
-
-只有 login 引导扫码/人工验证；正常关闭后同配置 check，登录成功要求正向后台业务控件。旧 JSON 不读取、导入、导出或自动删除；别名不绑定真实账号，Chrome/Chromium 可登录不同账号。缺少 Profile、明确未登录或验证退出 `10`，验证保留 `reason=verification`；网络、页面结构、权限及必要字段故障退出 `1`。提交后登录/验证仍带 `publish_attempted=true`；结果未知退出 `9`，先核对作品，禁止自动重发。
-
-重建用 `sau baijiahao reset-profile --account <account_name> --browser-kind chrome`；无需 binary，只清空指定 Profile，其他浏览器资料、旧文件和历史结果保留。托管 check/upload-video 只采用新 headless 优先级，其余本地配置忽略；login/reset-profile 仍拒绝托管模式。百家号没有不发布开关，本票只使用离线替身和隔离受控页面验收，不以真实视频提交做回归。
-
-## 支付宝生活号 CLI 子命令
-
-```bash
-sau alipay login --account <account_name> --headed
-sau alipay check --account <account_name>
-sau alipay upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 生活号,测试
-```
-
-支付宝生活号支持 login/check/upload-video/reset-profile，视频可传 `--thumbnail` 与 `--collection`。保留 `--not-before` 和发布预算；无图文、`--schedule` 或 `--no-publish`。先完成生活号内容创作权限开通，只有 login 引导扫码并保留二维码回调；check 以内容创作入口作正向证据。
-
-本地正式入口、内部预检和直接 uploader 共用 `browser_profiles/<chrome|chromium>/alipay/<原始别名>`。默认 Chrome 有头；只安装所选来源，完整 Chromium 可用 `uv run patchright install --no-shell chromium`。`LOCAL_CHROME_PATH` 优先并按实际种类选资料，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False。保留现有 conf.py，失败不回退；无固定 viewport、地理位置权限或 stealth，保持 qiankun 微应用正常渲染。
-
-旧 JSON 不读写、不迁移；别名允许换号，两种浏览器独立登录。缺少 Profile、登录页/iframe 或验证退出 10；验证保留 reason=verification，网络、HTTP、超时、结构或权限故障退出 1。提交后登录错误保留 publish_attempted=true，先核查作品；观察失败退出 9，禁止自动重发，本地不会因 AIGC 信号再次点击发布。
-
-重建：`sau alipay reset-profile --account <account_name> --browser-kind chrome`。无需 binary、拒绝占用，只清空指定种类，保留其他资料和历史结果；清空后重新 login。托管 check/upload-video 仅采用新的 headless 来源，其他本地配置忽略；login/reset-profile 拒绝托管模式。验收使用离线替身或受控 DOM，不进行真实发布。
-
 ## YouTube CLI 子命令
 
 ```bash
-sau youtube login --account <account_name> --headed
-sau youtube check --account <account_name>
-sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau youtube upload-video --account <account_name> --file videos/demo.mp4 --title "示例视频"
+sau youtube login --account creator --headed
+sau youtube check --account creator
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频"
 ```
 
 YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维码。`--visibility` 可选 `public`、`unlisted` 或 `private`，`--playlist` 可选。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
@@ -716,9 +522,9 @@ sau youtube reset-profile --account creator --browser-kind chrome
 sau facebook login --account creator
 sau facebook check --account creator
 sau facebook upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文"
-sau facebook upload-note --account creator --images images/1.jpg --title "图文标题" --note "正文"
+sau facebook upload-note --account creator --images videos/demo1.png --title "图文标题" --note "正文"
 sau facebook-page login --account creator
-sau facebook-page upload-note --account creator --page "我的 Page" --images images/1.jpg --title "图文标题" --note "正文" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
+sau facebook-page upload-note --account creator --page "我的 Page" --images videos/demo1.png --title "图文标题" --note "正文" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
 sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
 
@@ -759,9 +565,9 @@ Instagram 使用 Patchright 与项目专用持久化 Profile，不依赖 Faceboo
 ```powershell
 sau instagram login --account creator
 sau instagram check --account creator
-sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail covers/demo.png --title "视频标题" --desc "正文" --tags 生活,分享 --result .local/instagram-video.json
-sau instagram upload-note --account creator --images images/1.jpg --title "单图标题" --note "正文"
-sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "轮播标题" --note "正文" --result .local/instagram-carousel.json
+sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail videos/demo.png --title "视频标题" --desc "正文" --tags 生活,分享 --result .local/instagram-video.json
+sau instagram upload-note --account creator --images videos/demo1.png --title "单图标题" --note "正文"
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --result .local/instagram-carousel.json
 ```
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
@@ -800,7 +606,7 @@ sau instagram upload-note --account creator --images images/1.jpg images/2.jpg -
 - 选项动作与回读（set-then-readback）在点击 Share **之前**完成。任何一项未生效都退出 `1`、不点击发布，也不会用到 `9`；结果文件仍会记录每项状态和失败证据。
 
 ```powershell
-sau instagram upload-note --account creator --images images/1.jpg images/2.jpg --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-carousel.json
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-carousel.json
 sau instagram upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文" --no-comments --result .local/instagram-video.json
 ```
 
@@ -840,38 +646,6 @@ sau instagram delete --account creator --post-url "https://www.instagram.com/ree
 
 结果未知且没有链接时，先在同一账号主页按配文、素材和发布时间查找原作品，复制原作品链接再运行 `verify`；找不到不能证明提交失败，也不要直接重发。删除出现 `deletion_unknown` 时同样先查原作品和“最近删除”，不要重复删除。失败结果会包含阶段/错误和本地证据目录；账号状态、截图及页面记录均放在 Git 忽略目录，不应提交到仓库。
 
-## 微博 CLI 子命令
-
-```bash
-sau weibo login --account <account_name> --headed
-sau weibo check --account <account_name>
-sau weibo upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 微博,测试 --thumbnail covers/demo.png
-```
-
-微博支持 login、check、upload-video 与 reset-profile；标题最多 30 个字，必须提供 `--thumbnail`（不超过 5 MB），可用 `--collection` 选择或新建合集。保留 `--not-before` 与 15 分钟发布预算；不支持图文、原生 `--schedule` 或 `--no-publish`。
-
-全部本地入口和直接 uploader 使用 `browser_profiles/<chrome|chromium>/weibo/<原始别名>`。默认系统 Chrome、有头、自然窗口；发布时滚动到按钮，关闭残留弹层并校验落点，不固定大 viewport 或最大化。`LOCAL_CHROME_PATH` 优先，否则 `--local-browser` > `LOCAL_BROWSER` > chrome；显式 headed/headless 或直接布尔值 > `LOCAL_CHROME_HEADLESS` > False。只准备所选来源，失败不回退，保留当前语言。
-
-只有 login 创建资料并引导扫码/验证；正常关闭后同配置 check。缺少 Profile、明确未登录或验证退出 `10`（验证保留 `reason=verification`），网络、页面、权限和运行故障退出 `1`。同别名可换真实账号，两类浏览器可各自登录；旧 Cookie JSON 不读取、写回、导入或自动清理。业务中失效即结束，提交后保留 `publish_attempted=true`；退出 `9` 先核对作品，禁止自动重发。
-
-重建：`sau weibo reset-profile --account <account_name> --browser-kind chrome`，只清空指定种类，无需 binary，拒绝占用并保留另一种类、旧文件和历史结果。托管 check/upload 仅采用相同 headless 来源，忽略本地浏览器/路径；login/reset-profile 拒绝托管模式。微博没有不发布开关，环境回归使用离线替身和隔离受控页面，不能以真实提交验收。
-
-## 虎扑 CLI 子命令
-
-```bash
-sau hupu login --account <account_name>
-sau hupu check --account <account_name>
-sau hupu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 虎扑,测试 --thumbnail covers/demo.png
-```
-
-虎扑支持 login、check、upload-video 和 reset-profile；标题为 4–40 字，封面可选。保留 `--not-before` 和 15 分钟发布预算；不支持图文、原生 `--schedule` 或 `--no-publish`。
-
-本地登录、检查、预检、发布与直接 uploader 共用 `browser_profiles/<chrome|chromium>/hupu/<原始别名>`。默认系统 Chrome、有头；显式 `--headed` / `--headless` 优先于 `LOCAL_CHROME_HEADLESS`，未配置默认 False。`LOCAL_CHROME_PATH` 优先于 `--local-browser chrome|chromium`、`LOCAL_BROWSER`（默认 chrome）；只准备所选来源，Chromium 使用 `uv run patchright install --no-shell chromium`。失败不回退。
-
-先 `sau hupu login --account <account_name> --headed`，在同一 Profile 内完成 QQ 扫码或人工登录，关闭后同配置 check。QQ iframe/popup 和临时二维码保留；不再覆盖 UA、webdriver、语言或 viewport，不为这些设置替换 context。账号别名不绑定真实账号，Chrome 与 Chromium 可登录不同账号；旧 JSON 不导入、读写或自动删除。只有 login 引导登录，check/发布不等待重新登录后继续任务。缺少 Profile/明确未登录或验证退出 10（验证保留 reason=verification）；网络、页面、权限和必需字段故障退出 1。
-
-显式重建：`sau hupu reset-profile --account <account_name> --browser-kind chrome`。无需安装 binary，只清空所选种类；占用时拒绝，其他浏览器、历史作品和旧文件保留。托管 check/upload-video 忽略本地配置，采用相同 headless 来源；login/reset-profile 拒绝托管模式。提交后出现登录/验证保留 publish_attempted=true；结果未知退出 9，先核对作品，禁止自动重发。Hupu 没有不发布开关，自动验收使用离线替身或隔离合成页面，不能以真实提交验收。
-
 ## TikTok CLI 子命令（本地模式或托管浏览器模式）
 
 TikTok 支持本地与两种托管子模式：
@@ -885,34 +659,35 @@ TikTok 支持本地与两种托管子模式：
 sau tiktok login --account creator --headed
 sau tiktok check --account creator
 sau tiktok upload-video --account creator --file videos/demo.mp4 --title "示例标题"
-sau tiktok upload-note --account creator --images images/1.jpg images/2.png
+sau tiktok upload-note --account creator --images videos/demo1.png videos/demo2.png
 
 # Multilogin 模式
 export MLX_API_TOKEN="<token>"
 
-sau tiktok check --folder-id <folder_id> --profile-id <profile_id>
+sau tiktok check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID"
 
 # 视频：发布选项均可选，不传时保持页面默认
 sau tiktok upload-video \
-  --folder-id <folder_id> --profile-id <profile_id> \
+  --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
-  --schedule "2026-10-21T02:30:00Z" --thumbnail covers/demo.png
+  --schedule "2026-10-21T02:30:00Z" --thumbnail videos/demo.png
 
 # 图文：1–35 张本地图片，按传入顺序展示，第 1 张即封面
 sau tiktok upload-note \
-  --folder-id <folder_id> --profile-id <profile_id> \
-  --images images/1.jpg images/2.png \
+  --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
+  --images videos/demo1.png videos/demo2.png \
   --title "图文标题" --note "图文正文" --tags 图文,测试 \
   --privacy friends --no-comments --aigc
 
 # AdsPower 模式（--folder-id 可省略）
+unset MLX_API_TOKEN
 export ADSPOWER_API_KEY="$KEY"
 
-sau tiktok check --profile-id <profile_id>
+sau tiktok check --profile-id "PROFILE_ID"
 
 sau tiktok upload-video \
-  --profile-id <profile_id> \
+  --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
   --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
 ```
@@ -923,7 +698,7 @@ sau tiktok upload-video \
 - 自定义路径必须先根据产品信息识别种类；无法识别/证据冲突退出 `1`。生效配置非法退出 `2`；托管完全忽略本地路径与种类配置，仅应用同一 headless 优先级。
 - Profile 是唯一登录态来源，旧 JSON 不参与读写或自动清理。只有 login 引导人工登录；缺少 Profile、明确未登录或验证挑战退出 `10`，网络、页面结构、权限或浏览器故障退出 `1`。check 成功返回 `0`，目录存在本身不证明登录。
 - 别名是管理名称，可登录不同真实账号；Chrome / Chromium 隔离，同种类改路径、版本或 headless 复用资料。跨种类不复制凭据；另一个种类未登录需单独 login。
-- 持有 Profile 独占权直到业务和关闭结束；占用时立即失败，不抢占外部浏览器。正常关闭只关闭 persistent context；关闭故障独立告警，保持成功/未知/主异常，取消继续传播。重建不恢复任务或自动重发。
+- 本地模式持有 Profile 独占权直到业务和关闭结束；占用时立即失败，不抢占外部浏览器。正常关闭只关闭 persistent context；关闭故障独立告警，保持成功/未知/主异常，取消继续传播。重建不恢复任务或自动重发。
 - TikTok 本地持久化路径不再注入 stealth、UA、请求头、语言参数或固定 viewport。现有选择器仍依赖支持的页面布局；自动化不会切换语言。
 - 本地与托管共用 15 分钟发布预算；提交后登录/验证错误保留 `publish_attempted=true`。离线、隔离浏览器矩阵与四平台真实 login/no-publish 的证据分列于[最终验收记录](../.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。此前 Cookie 路径验收不作为当前 Profile 的登录证据。
 - `--no-publish`：上传、标题/正文/话题、全部发布选项、封面与 `--schedule` 完成后，等待发布按钮可点击（`post_video_button` / `Post` / `Schedule`，窗口 `min(60s, 剩余预算)`）即停止，不点击发布，也不等待 `--not-before`；成功退出 `0`，就绪超时退出 `1`。
@@ -970,30 +745,24 @@ sau tiktok upload-video \
 
 ## 登录二维码说明
 
-- 抖音、快手、小红书、视频号、百家号、支付宝生活号、微博和虎扑登录过程中，CLI / uploader 可能会生成临时二维码图片
+- 小红书和 Rednote 登录过程中，CLI 可能会输出二维码图片。
 - 对普通用户来说，可以直接打开该图片扫码
 - 对可操作本地文件的 agent 来说，不要只把图片路径告诉用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户
-- Bilibili 和 YouTube 当前不走这套本地二维码图片托管链路，登录按上面的平台说明处理即可
+- YouTube 当前不走这套本地二维码图片托管链路，登录按上面的平台说明处理即可
 - 托管浏览器模式不提供 CLI 登录链路，也不会生成登录二维码；请在对应桌面应用（Multilogin / AdsPower）中登录 Profile，收到退出码 `10` 时转人工处理
 
 ## 定时发布
 
-抖音、快手、小红书、视频号、知乎、Facebook Page 的图文或视频上传，TikTok（本地或托管浏览器模式）的视频与图文上传，Bilibili 的视频上传，以及大鱼号的视频和文章上传支持 `--schedule`。时间统一传 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`，秒/微秒必须为 0，否则退出 `2`）。除 Bilibili 直接映射为 `--dtime` epoch 外，CLI 填写前从页面读取实际浏览器时区（`Intl.DateTimeFormat().resolvedOptions().timeZone`）再换算；读取失败直接退出 `1`，不回退到机器时区。不传则默认立即发布。大鱼号和 TikTok 的定时精确到 5 分钟，其它平台精确到分钟。百家号、支付宝生活号、微博、虎扑和 YouTube 当前不支持 `--schedule`。
+小红书、Rednote、TikTok 和 Facebook Page 的视频与图文支持原生 `--schedule`。使用 UTC 绝对时刻（`YYYY-MM-DDTHH:MM:00Z`），浏览器按其时区填写平台控件。TikTok 精确到 5 分钟。请将下方示例时间替换为目标平台允许的未来时刻。
 
 ```bash
-sau douyin upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
-sau douyin upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
-sau kuaishou upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
-sau kuaishou upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
-sau xiaohongshu upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
-sau xiaohongshu upload-note --account <account_name> --images videos/1.png videos/2.png videos/3.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
-sau bilibili upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tid 249 --schedule "2026-03-24T13:30:00Z"
-sau tencent upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
-sau tiktok upload-video --account <account_name> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24T13:30:00Z"
-sau tiktok upload-note --account <account_name> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
-sau tiktok upload-video --folder-id <folder_id> --profile-id <profile_id> --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24T13:30:00Z"
-sau tiktok upload-note --folder-id <folder_id> --profile-id <profile_id> --images videos/1.png videos/2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --schedule "2026-03-24T13:30:00Z"
+sau xiaohongshu upload-note --account creator --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-video --account creator --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-note --account creator --images videos/demo1.png videos/demo2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-video --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" --file videos/demo.mp4 --title "示例标题" --schedule "2026-03-24T13:30:00Z"
+sau tiktok upload-note --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" --images videos/demo1.png videos/demo2.png --title "图文标题" --note "图文示例" --schedule "2026-03-24T13:30:00Z"
 ```
 
 ## 运行时参数
@@ -1010,7 +779,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 - `--headless`: 无头模式运行
 - `--headed`: 有头模式运行（等价默认，保留给既有调度侧显式传参）
 
-TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、抖音、快手、视频号、百家号、微博、虎扑、支付宝生活号、大鱼号、知乎、雪球 已迁移：都不传时读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`。
+七个平台未显式指定有头或无头模式时，读取 `LOCAL_CHROME_HEADLESS`，未配置则为 `False`。
 
 补充：
 
@@ -1024,40 +793,14 @@ TikTok、Rednote、Instagram、小红书、YouTube、Facebook、Facebook Page、
 --title "示例标题"
 --desc "示例简介"
 --tags 运动,训练
---thumbnail videos/demo.png
---thumbnail-landscape videos/cover-4x3.png
---thumbnail-portrait videos/cover-3x4.png
 ```
 
-抖音和视频号支持同时设置两种比例的封面图：
-
-- `--thumbnail-landscape`: 4:3 横版封面
-- `--thumbnail-portrait`: 3:4 竖版封面
-- `--thumbnail`: 兼容旧参数，等同于 3:4 竖版封面
-
-视频号、百家号和支付宝生活号支持使用 `--collection` 指定已有合集；百家号和支付宝生活号还支持 `--thumbnail` 指定封面图。
-
-抖音额外支持：
-
-```bash
---product-link https://example.com/item
---product-title 示例商品
-```
-
-Bilibili 额外要求：
-
-```bash
---tid 249
-```
-
-- `--tid` 第一版是必填
-- `--tags` 会映射到 `biliup upload --tag`
-- `--schedule` 会映射到 Bilibili 所需的时间戳参数
+封面与其他可选参数见目标平台的 `upload-video --help`。
 
 ## 图片笔记上传参数
 
 ```bash
---images videos/1.png videos/2.png videos/3.png
+--images videos/demo1.png videos/demo2.png videos/demo.png
 --title "图文标题"
 --note "图文内容"
 --tags 图文,测试
@@ -1065,17 +808,5 @@ Bilibili 额外要求：
 
 图片笔记上传当前限制：
 
-- 抖音：最多 35 张图片，不支持 GIF
-- 快手：支持多张图片，建议传真实不同文件，不要把同一路径重复多次
 - 小红书：支持多张图片，正文 `--note` 可选，但 `--title` 建议始终显式传入
 - TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面；本地与托管浏览器模式均支持
-
-大鱼号文章使用 `--content-file` 提供 HTML、Markdown 或 TXT 正文文件，支持本地图片和图文混排，正文最多 2 万字；来源与封面等参数见 [大鱼号图文发布](./dayu-article.md)。
-
-## 雪球 CLI 本地 Profile
-
-`login`、`check`、`upload-article`、`verify` 和直接 uploader 使用 `browser_profiles/<chrome|chromium>/xueqiu/<原始别名>`。默认系统 Chrome 有头；`LOCAL_CHROME_PATH` 优先并识别实际种类，否则显式 `--local-browser` > `LOCAL_BROWSER` > chrome。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False；只准备所选来源，失败不回退。旧 JSON/身份旁文件不参与，别名允许换号；`--expected-name`、历史作品作者和本次受理作品主体仍核验。
-
-先 `sau xueqiu login --account creator --headed`，正常关闭后同配置 check。文章默认真实发表，验收用 `--prepare-only` 可停止在预览（可能留下远端草稿）。缺少 Profile/登录/验证退出 10，验证保留 reason，其他运行故障退出 1；提交后保留 publish_attempted，结果未知 9 先核查原作品。`verify` 在托管环境下仍走本地。结果路径继续为 `cookies/xueqiu_results/`。
-
-`sau xueqiu reset-profile --account creator --browser-kind chrome` 只重建该种类且无需 binary，不影响另一种类或历史结果。完整配置与原稿格式见 [雪球说明](./xueqiu.md)。

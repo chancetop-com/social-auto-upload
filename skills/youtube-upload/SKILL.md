@@ -34,9 +34,11 @@ sau youtube reset-profile --account creator --browser-kind chrome
 
 reset-profile 显式清除指定种类，不需安装浏览器；保留其他种类、账号及历史结果，不自动登录或恢复旧任务。占用或重建失败退出 `1`，部分失败需修复后重跑同一命令。缺 Profile、明确未登录/验证退出 `10`；`reason=verification` 时先完成人机验证。配置用法错误为 `2`；来源、启动、网络、权限或页面故障为 `1`。退出 `9` 或 `publish_attempted=true` 表示可能已提交，先核查作品、禁止自动重发；单纯重建不证明可重发。
 
-`--not-before "YYYY-MM-DDTHH:MM:SSZ"` 在内容准备完成后保持浏览器与 Profile 占用，等到指定 UTC 时刻才提交。YouTube 不提供 `--no-publish`；环境验证使用 login/check，不能把实际上传当不发布回归。安装成功、浏览器可启动和平台已登录分别验证。
+`--not-before "YYYY-MM-DDTHH:MM:SSZ"` 在内容准备完成后保持当前页面打开，等到指定 UTC 时刻才提交。YouTube 不提供 `--no-publish`；环境验证使用 login/check，不能把实际上传当不发布回归。安装成功、浏览器可启动和平台已登录分别验证。
 
 ## 托管浏览器模式（可选）
+
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
 
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check` 和 `upload-video` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。
 
@@ -53,6 +55,7 @@ sau youtube upload-video --folder-id <folder_id> --profile-id <profile_id> \
   --file videos/demo.mp4 --title "标题" --desc "简介" --tags tag1,tag2 --visibility public
 
 # AdsPower（--folder-id 可省略）
+unset MLX_API_TOKEN
 export ADSPOWER_API_KEY="$KEY"
 sau youtube check --profile-id <profile_id>
 sau youtube upload-video --profile-id <profile_id> \

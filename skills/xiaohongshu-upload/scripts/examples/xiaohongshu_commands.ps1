@@ -1,11 +1,11 @@
 # PowerShell examples for the installed sau CLI.
 
-# account_name is user-defined. One account_name maps to one account file.
+# account_name is user-defined. Each local account alias selects a persistent browser profile.
 # You can prepare multiple account names and run them in parallel.
 $account = "account_a"
 $video = "videos/demo.mp4"
 $thumbnail = "videos/demo.png"
-$noteImages = @("videos/1.png", "videos/2.png")
+$noteImages = @("videos/demo1.png", "videos/demo2.png")
 
 sau xiaohongshu login --account $account --headless
 sau xiaohongshu check --account $account

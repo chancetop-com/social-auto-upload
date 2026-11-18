@@ -10,7 +10,7 @@ sau rednote upload-video --account creator \
   --desc "Video description" --no-publish
 
 sau rednote upload-note --account creator \
-  --images videos/1.png videos/2.png --title "Hello rednote" \
+  --images videos/demo1.png videos/demo2.png --title "Hello rednote" \
   --note "Photo description" --no-publish
 ```
 

@@ -24,7 +24,7 @@ summary: 管理 Facebook 个人主页登录、视频图文发布和作品核验�
 sau facebook login --account creator --headed
 sau facebook check --account creator
 sau facebook upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "正文" --tags 生活,分享
-sau facebook upload-note --account creator --images images/1.jpg images/2.jpg --title "图文标题" --note "正文"
+sau facebook upload-note --account creator --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文"
 ```
 
 登录、检查、视频/图文及作品管理均使用 `browser_profiles/<chrome|chromium>/facebook/<原始别名>`；浏览器保存登录态，旧 Cookie JSON 不读取、不导入或导出。与 `facebook-page` 的 Profile 完全隔离。别名允许重新登录其他真实账号，两类浏览器也可使用不同账号；原作者/作品证据仍须核对。`check` 验证个人主页登录态，不代表 Page 权限或作品发布结果。标题、正文、标签合并为一段配文。当前支持立即发布，未接入个人主页定时；Page 使用独立 `facebook-page` 命令。
@@ -44,6 +44,8 @@ sau facebook delete --account creator --post-url "原作品链接" --owner-id "�
 只有平台出现本次提交的成功提示才认为发表已确认。点击后超时或浏览器断开应视为结果未知：先在同一账号个人主页或垃圾箱核对原作品，不重复上传或重复删除。本地素材不会被删除。Facebook 当前没有 no-publish 参数；不要用真实发表或删除来替代离线验收。退出 9 禁止自动重发，退出 10 若带 publish_attempted=true 也须先核对原作品。完整参数以 `sau facebook upload-video --help`、`upload-note --help`、`verify --help` 和 `delete --help` 为准。
 
 ## 托管浏览器模式（可选）
+
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。Facebook 个人与 Page 可并行，两条 Page 命令即使指定不同主页也互斥。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
 
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，`check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。`verify` / `delete` 仍为本地模式。
 

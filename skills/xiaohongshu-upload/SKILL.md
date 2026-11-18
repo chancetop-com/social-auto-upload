@@ -77,10 +77,12 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 ```bash
 sau xiaohongshu upload-note --account <name> \
-  --images videos/1.png videos/2.png --title "图文标题" --content-type ai
+  --images videos/demo1.png videos/demo2.png --title "图文标题" --content-type ai
 ```
 
 ## 托管浏览器模式（可选）
+
+兼容 CLI 在同一台机器、同一操作系统用户下默认共享托管 Profile。不同平台各用新页，同一平台上的检查和发布合计限一条，冲突退出 `1`。大陆版小红书与 Rednote 分别计数。最后一条命令离开时关闭整个 Profile，包括桌面原有的标签页。
 
 设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower）后，小红书的 `check`、`upload-video` 和 `upload-note` 可改用托管浏览器 Profile；登录态与出口 IP 由 Profile 决定，CLI 不读写 `cookies/*.json`。
 
@@ -94,13 +96,14 @@ sau xiaohongshu upload-note --account <name> \
 export MLX_API_TOKEN="<token>"
 sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id>
 sau xiaohongshu upload-note --folder-id <folder_id> --profile-id <profile_id> \
-  --images videos/1.png videos/2.png --title "图文标题" --note "正文" --tags 图文,测试
+  --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文" --tags 图文,测试
 
 # AdsPower（--folder-id 可省略）
+unset MLX_API_TOKEN
 export ADSPOWER_API_KEY="$KEY"
 sau xiaohongshu check --profile-id <profile_id>
 sau xiaohongshu upload-note --profile-id <profile_id> \
-  --images videos/1.png videos/2.png --title "图文标题" --note "正文" --tags 图文,测试
+  --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文" --tags 图文,测试
 ```
 
 Profile 必须已人工登录且无待处理验证码/2FA；托管模式不授予定位权限，发布若依赖定位请先确认 Profile 配置。
