@@ -1156,7 +1156,12 @@ class HumanizeDisabledTests(unittest.TestCase):
             app = _app(tmp, video_file=Path(tmp) / "clip.mp4", page_name="My Page")
             log: list = []
             combo = _Clickable("combo", log=log, text="Other Page")
-            option = _Clickable("option", log=log)
+            class PageOption(_Clickable):
+                async def click(self, **kwargs):
+                    await super().click(**kwargs)
+                    combo._text = "My Page"
+
+            option = PageOption("option", log=log)
             page = _page(
                 {
                     '[data-surface$="bizweb_create_post:left_panel"] '
