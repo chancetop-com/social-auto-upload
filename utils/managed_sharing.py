@@ -138,8 +138,6 @@ class ManagedCommand:
         peers = self.has_members()
         if peers and (not record or record.get("phase") != "active"):
             raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
-        if record and record.get("phase") not in {"active", "starting", "stopping", "stop_acknowledged"}:
-            raise RuntimeError("托管 Profile 的共享记录无效。")
 
         if record and record["phase"] in {"stopping", "stop_acknowledged"}:
             old_endpoint = record.get("endpoint") if record["phase"] == "stop_acknowledged" else None

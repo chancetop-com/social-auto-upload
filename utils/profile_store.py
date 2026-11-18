@@ -57,6 +57,23 @@ def _open_file(path: Path, flags: int) -> int:
     return fd
 
 
+def _valid_record(record: object) -> bool:
+    if not isinstance(record, dict):
+        return False
+    def digest(key):
+        value = record.get(key)
+        return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) is not None
+
+    if not digest("resource"):
+        return False
+    phase = record.get("phase")
+    if phase == "starting":
+        return record.keys() == {"phase", "resource"}
+    return (phase in ("active", "stopping", "stop_acknowledged")
+            and digest("endpoint") and "headless" in record
+            and (record["headless"] is None or type(record["headless"]) is bool))
+
+
 def _user_profile_directory() -> Path:
     if os.name == "nt":
         from utils.windows_profile_security import user_profile_directory
@@ -129,7 +146,7 @@ class ProfileStore:
             except (UnicodeError, ValueError):
                 pass
             else:
-                if isinstance(record, dict):
+                if _valid_record(record):
                     return record
         raise ValueError("无法读取托管会话记录。")
 

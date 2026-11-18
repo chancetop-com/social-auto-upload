@@ -63,8 +63,9 @@ class PrivateProfileStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home, patch("utils.profile_store._user_profile_directory", return_value=Path(home)):
             store = ProfileStore("adspower", "../untrusted/id")
             self.assertIsNone(store.read_record())
-            store.write_record({"phase":"active"})
-            self.assertEqual(store.read_record(), {"phase":"active"})
+            record_data = {"phase": "starting", "resource": "0" * 64}
+            store.write_record(record_data)
+            self.assertEqual(store.read_record(), record_data)
             record, = (path for path in Path(home).rglob("*") if path.is_file())
             self.assertEqual(stat.S_IMODE(record.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(record.parent.stat().st_mode), 0o700)

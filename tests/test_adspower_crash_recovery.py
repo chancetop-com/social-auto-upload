@@ -440,3 +440,20 @@ def test_free_platform_waits_during_stop_then_starts_again_after_confirmation(pr
     current.finish('instagram', waiting)
     assert api.stops == ['shared', 'shared'] and api.state == 'Inactive'
     assert current.chrome.poll() is not None
+
+
+def test_corrupt_recovery_state_refuses_before_contacting_provider(profile):
+    holder = profile.command(0, 'instagram')
+    profile.entered('instagram', holder)
+    kill_cli(holder)
+    record, = profile.home.rglob('*.json')
+    saved = json.loads(record.read_text())
+    requests = list(profile.keys)
+    for changes in ({'phase': 'stop_acknowledged', 'endpoint': 'invalid'}, {'endpoint': None},
+                    {'headless': 1}, {'resource': ['invalid']}, {'phase': 'unexpected'}):
+        record.write_text(json.dumps({**saved, **changes}))
+        child = profile.command(1, 'tiktok')
+        output = child.communicate(timeout=8)[0]
+        assert child.returncode == 1 and '记录' in output, output
+        assert profile.keys == requests
+        assert profile.pages_requested == ['instagram'] and not profile.stops
