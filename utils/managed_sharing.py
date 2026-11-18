@@ -10,7 +10,7 @@ from time import monotonic
 from loguru import logger
 
 from utils.base_social_media import get_supported_social_media
-from utils.errors import RateLimitedError
+from utils.errors import ProviderRequestRejected, RateLimitedError
 from utils.managed_browser import SharedBrowserProvider
 from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
@@ -33,6 +33,8 @@ async def _provider_call(provider, operation, *args):
         return await asyncio.to_thread(getattr(provider, operation), *args)
     except RateLimitedError:
         raise RateLimitedError(f"{provider.mode} {operation} 请求过于频繁（HTTP 429）。") from None
+    except ProviderRequestRejected:
+        raise ProviderRequestRejected(f"{provider.mode} {operation} 请求被拒绝。") from None
     except Exception:
         raise RuntimeError(f"{provider.mode} {operation} 失败，无法确认 Profile 当前状态或连接。") from None
 
@@ -105,7 +107,7 @@ class ManagedCommand:
             self.store.write_record({"resource": resource, "phase": "starting"})
             try:
                 endpoint = await _provider_call(provider, "start", headless)
-            except RateLimitedError:
+            except (RateLimitedError, ProviderRequestRejected):
                 self.store.clear_record()
                 raise
             setting = headless
@@ -162,7 +164,7 @@ class ManagedCommand:
                     self.store.write_record({**record, "phase": "stopping"})
                     try:
                         await _provider_call(self.provider, "stop")
-                    except RateLimitedError:
+                    except (RateLimitedError, ProviderRequestRejected):
                         # The provider rejected this operation before dispatch.
                         self.store.clear_record()
                         raise

@@ -75,3 +75,19 @@ def test_definitively_rejected_stop_preserves_result_and_next_command_can_join(p
     profile.finish('tiktok', second)
     assert api.starts == ['shared'] and api.stops == ['shared', 'shared']
     assert api.state == 'Inactive'
+
+
+def test_rejected_start_is_terminal_and_next_authorized_command_can_start(profile):
+    api = ControlledProvider(profile)
+    api.start = lambda request: request.send_error(403)
+    refused = profile.command(0, 'instagram')
+    output = refused.communicate(timeout=10)[0]
+    assert refused.returncode == 1 and 'start' in output
+    assert api.stops == [] and profile.pages_requested == []
+
+    api.start = api.start_ok
+    legitimate = profile.command(1, 'instagram')
+    profile.entered('instagram', legitimate)
+    profile.finish('instagram', legitimate)
+    assert api.starts == ['shared', 'shared'] and api.stops == ['shared']
+    assert api.observations == ['Inactive', 'Inactive']

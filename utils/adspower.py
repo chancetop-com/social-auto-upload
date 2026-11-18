@@ -19,7 +19,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
-from utils.errors import RateLimitedError, StartIncompleteError
+from utils.errors import ProviderRequestRejected, RateLimitedError, StartIncompleteError
 from utils.managed_browser import ProfileObservation, ProviderMode
 
 PROBE_TIMEOUT_SECONDS = 3
@@ -154,7 +154,8 @@ class AdspowerClient:
             parts.append(_UNAUTHORIZED_HINT)
         elif status == 404:
             parts.append(_OUTDATED_CLIENT_HINT)
-        return RuntimeError("；".join(parts))
+        error = ProviderRequestRejected if status in (401, 403, 404, 405) else RuntimeError
+        return error("；".join(parts))
 
     @staticmethod
     def _display_code(code: Any) -> Any:
