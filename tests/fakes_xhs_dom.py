@@ -48,6 +48,8 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from tests.fakes import FakePage
+
 _UNSET = object()
 
 
@@ -449,7 +451,7 @@ class _FileChooserInfo:
         return _resolve()
 
 
-class RecordingPage:
+class RecordingPage(FakePage):
     """Scripted Playwright ``Page`` double that records every interaction."""
 
     def __init__(
@@ -465,7 +467,9 @@ class RecordingPage:
         file_chooser: FakeFileChooser | None = None,
         timezone: str = "UTC",
     ) -> None:
+        super().__init__()
         self.url = url
+        self.redirect_on_dom_read = None
         self.main_frame = RecordingFrame(
             self, url if main_frame_url is None else main_frame_url
         )
@@ -493,6 +497,9 @@ class RecordingPage:
 
     # -- selectors ---------------------------------------------------------
     def locator(self, selector: str) -> FakeLocator:
+        if self.redirect_on_dom_read is not None:
+            self.url = self.main_frame.url = self.redirect_on_dom_read
+            self.redirect_on_dom_read = None
         try:
             return self._selectors[selector]
         except KeyError as exc:
