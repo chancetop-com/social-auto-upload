@@ -1,6 +1,7 @@
 # 09: Instagram 与 TikTok 并行准备视频和图文
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 08
 

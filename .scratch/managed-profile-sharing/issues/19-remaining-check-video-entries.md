@@ -1,6 +1,7 @@
 # 19: YouTube 登录检查与视频发布
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 08
 

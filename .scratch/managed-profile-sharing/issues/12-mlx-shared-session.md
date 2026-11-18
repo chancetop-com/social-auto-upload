@@ -1,6 +1,7 @@
 # 12: Multilogin X 支持正常加入与退出
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 08
 

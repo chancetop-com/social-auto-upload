@@ -1,6 +1,7 @@
 # 11: AdsPower 在进程中断后恢复
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 08
 

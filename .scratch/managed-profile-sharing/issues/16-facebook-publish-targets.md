@@ -1,6 +1,7 @@
 # 16: Facebook 个人与 Page 的发布目标隔离
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 08
 

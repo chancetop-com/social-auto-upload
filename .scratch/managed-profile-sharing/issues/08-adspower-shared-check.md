@@ -1,6 +1,7 @@
 # 08: AdsPower 共享 Profile 的启动与退出
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 20
 

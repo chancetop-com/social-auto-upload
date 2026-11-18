@@ -1,6 +1,7 @@
 # 10: 大陆版小红书与 Rednote 独立检查和发布
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 08
 

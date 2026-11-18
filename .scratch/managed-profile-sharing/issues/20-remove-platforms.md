@@ -1,6 +1,7 @@
 # 20: 先移除 11 个平台
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: None
 

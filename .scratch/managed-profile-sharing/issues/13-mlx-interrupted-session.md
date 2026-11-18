@@ -1,6 +1,7 @@
 # 13: Multilogin X 在启动、停止和进程故障后恢复
 
-Status: resolved
+Status: ready-for-agent
+Resolution: completed
 
 Blocked by: 11, 12
 
