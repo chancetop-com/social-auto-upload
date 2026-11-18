@@ -25,3 +25,5 @@ Blocked by: 09, 11
 手动重开场景已执行至强杀两个进程，两张原草稿页均在，Profile 为 `Active`。已请操作者从 AdsPower 桌面关闭并重开指定环境，以核验恢复命令。桌面预先打开且保留原标签的场景也待验。各轮均使用 `--no-publish`。[实机时间线](../research/14-macos.md)
 
 2026-11-18 结项。操作者确认桌面关闭并重开了该 Profile，两次操作之间的 `Inactive` 未采样。恢复命令连接到新的浏览器，使用新编辑页，原结果摘要不变，最后一次 Stop 后确认 `Inactive`。桌面原标签的验收综合两轮观察。手动重开轮确认两条 CLI 加入并保留三张独立标签，下一次启动后仍能读到该轮桌面原标记。CLI 外预开补验中，Instagram 先退后桌面原标记仍在，TikTok 仍能在原编辑页追加并回读文字，随后由 TikTok 归还整个 Profile。两轮 CLI 各有 0 次 Start、1 次 Stop。四项验收完成，全程使用 `--no-publish`。[逐轮依据及观察范围](../research/14-macos.md)
+
+补充实测。操作者再次从桌面打开 2 号后，在同一轮直接观察到 Instagram 先退出、桌面原标签保留、TikTok 原草稿可追加并回读。TikTok 最后退出，22:04:18 确认环境关闭。两条 CLI 合计 0 次 Start、1 次 Stop，均使用 `--no-publish`。[实机记录](../research/14-macos.md)
