@@ -160,3 +160,27 @@ def test_cli_revalidates_membership_with_each_callers_credential(mlx):
                                    profile_id=PROFILE.upper())
     mlx.finish('instagram', first)
     assert mlx.starts == mlx.stops == [PROFILE]
+
+
+def test_launcher_cannot_attach_an_unverified_or_unsupported_resource(mlx):
+    mlx.active = True
+    for fields in (
+        {'profile_id': 'other'}, {'folder_id': 'other'}, {'is_quick': True},
+        {'browser_type': 'stealthfox'}, {'status': 'download_finished'},
+        {'message': ''}, {'message': '６５'}, {'message': '0'}, {'message': '65536'},
+        {'message': '1'}, {'message': 'token@localhost:9222'},
+    ):
+        mlx.observation_fields = fields
+        # A status-level message cannot furnish the automation port.
+        mlx.top_status['message'] = str(urlsplit(mlx.endpoint).port)
+        child = mlx.command(0, 'instagram')
+        output = child.communicate(timeout=6)[0]
+        assert child.returncode == 1, (fields, output)
+        assert not mlx.pages_requested and not mlx.starts and not mlx.stops
+        assert 'offline-key-' not in output and urlsplit(mlx.endpoint).netloc not in output
+    mlx.observation_fields.clear()
+    mlx.top_status['error_code'] = 'FAILED'
+    child = mlx.command(0, 'instagram')
+    output = child.communicate(timeout=6)[0]
+    assert child.returncode == 1, output
+    assert not mlx.pages_requested and not mlx.starts and not mlx.stops
