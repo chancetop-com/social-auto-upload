@@ -1051,8 +1051,7 @@ class InstagramUploader:
             except Exception as exc:
                 if maybe_dispatched(exc):
                     # 发布点击可能已经发出：按结果未知上抛，禁止再次派发。
-                    if not getattr(self, '_managed', False):
-                        self.publish_clicked = True
+                    self.publish_clicked = True
                     raise budget.timeout_error(True) from exc
                 raise
             # 点击已经返回：从这里开始的任何失败都算「结果可能已提交」。
@@ -1196,8 +1195,7 @@ class InstagramUploader:
             raise
         except PublishResultUnknownError as error:
             await self._capture_failure_safely(page, error)
-            if not session.managed:
-                _raise_if_login_required(page, publish_attempted=self.publish_clicked, managed=False)
+            _raise_if_login_required(page, publish_attempted=self.publish_clicked, managed=session.managed)
             raise
         except Exception as error:
             if not session.managed:

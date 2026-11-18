@@ -1,6 +1,7 @@
 """Installed publishing commands with independent connections to a loopback Chromium."""
 import json
 import sys
+import threading
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -247,3 +248,42 @@ def test_tiktok_outcome_after_one_dispatch_preserves_waiting_peer(tmp_path, inst
         assert ig.returncode == 0, output
         assert json.loads(result.read_text())["status"] == "prepared"
         assert profile.starts == profile.stops == ["shared"]
+
+
+def test_instagram_login_after_dispatch_retains_result_and_attempt_signal(tmp_path, installations):
+    release = threading.Event()
+
+    class UnconfirmedInstagram(InstagramSite):
+        def configure(self, submission):
+            release.wait(15)
+            return {"status": "fail"}
+
+    instagram = UnconfirmedInstagram()
+    with ExitStack() as stack:
+        playwright = stack.enter_context(sync_playwright())
+        profile = OfflineProfile(tmp_path, stack, installations, playwright,
+                                 sites={"www.instagram.com": instagram.handler()})
+        peer = profile.command(1, "tiktok")
+        profile.entered("tiktok", peer)
+        peer_page = matching_page(profile, lambda p: "tiktok.com" in p.url, peer)
+        editor = peer_page.locator("textarea")
+        editor.fill("Peer draft")
+        location = peer_page.url
+        video = tmp_path / "ig.mp4"
+        result = tmp_path / "ig.json"
+        video.touch()
+        ig = profile.command(0, "instagram", "--file", str(video), "--title", "IG sent",
+                             "--result", str(result), action="upload-video", env={"HUMANIZE": "0"})
+        stack.callback(release.set)
+        wait_for_event(lambda: bool(instagram.submissions), ig)
+        ig_page = matching_page(profile, lambda p: "instagram.com" in p.url, ig)
+        ig_page.evaluate("history.replaceState(null, '', '/accounts/login/')")
+        release.set()
+        output = ig.communicate(timeout=10)[0]
+        assert ig.returncode == 10 and "publish_attempted=true" in output.splitlines(), output
+        assert instagram.submissions == [{"caption": "IG sent", "files": ["ig.mp4"]}]
+        assert json.loads(result.read_text())["status"] == "submission_unknown"
+        assert not profile.stops and peer_page.url == location and editor.input_value() == "Peer draft"
+        editor.fill("Still editable")
+        profile.finish("tiktok", peer)
+        assert profile.stops == ["shared"]
