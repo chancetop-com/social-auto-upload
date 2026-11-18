@@ -358,8 +358,7 @@ class RednoteProfileCliTests(unittest.TestCase):
                 self.prepare_editor(page)
                 self.context.created_pages = []
                 self.context.close_error = OSError('cleanup failed')
-                # A redirect during DOM sampling is classified on the next poll.
-                with patch.object(rednote, 'REDNOTE_OBSERVE_WINDOW_SECONDS', 1 if outcome == 'redirecting' else 0):
+                with patch.object(rednote, 'REDNOTE_OBSERVE_WINDOW_SECONDS', 0):
                     code, out, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Title')
                 if expected == 0:
                     self.assertEqual(out, 'Rednote note upload submitted: 1 images\n')
