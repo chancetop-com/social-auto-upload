@@ -1,7 +1,10 @@
 """Download media for a scheduled post."""
 import json
+import sqlite3
+import sys
 
-from utils.remote_media import download_item, task_directory, validate_task_id, validate_url
+from utils.media_queue import submit, wait_for_result
+from utils.remote_media import validate_task_id, validate_url
 
 
 def register(platform_parsers):
@@ -10,18 +13,20 @@ def register(platform_parsers):
     predownload = actions.add_parser("predownload", help="Fetch media from direct HTTP(S) URLs")
     predownload.add_argument("--task-id", type=validate_task_id, required=True)
     predownload.add_argument("--urls", nargs="+", type=validate_url, required=True)
-    predownload.add_argument("--wait", action="store_true", required=True)
+    predownload.add_argument("--wait", action="store_true")
 
 
 async def run(args):
-    directory = task_directory(args.task_id)
-    results = {}
-    for url in dict.fromkeys(args.urls):
-        try:
-            results[url] = {"path": str(download_item(directory, url))}
-        except (OSError, ValueError) as exc:
-            results[url] = {"reason": str(exc)}
-    items = [results[url] for url in args.urls]
+    try:
+        request_id = await submit(args.task_id, args.urls, background=not args.wait)
+        if not args.wait:
+            print(json.dumps({"task_id": args.task_id, "status": "accepted"}))
+            return 0
+        items = await wait_for_result(request_id, args.urls)
+    except (OSError, sqlite3.Error) as exc:
+        print(str(exc), file=sys.stderr)
+        print(json.dumps({"task_id": args.task_id, "status": "failed", "reason": "queue_unavailable", "items": []}))
+        return 1
     failed = any("reason" in item for item in items)
     print(json.dumps({"task_id": args.task_id, "status": "failed" if failed else "ready", "items": items}))
     return 1 if failed else 0

@@ -11,6 +11,10 @@ import requests
 import conf
 
 
+QUEUE_DIRECTORY = ".sau-queue"
+TASK_OWNER_FILE = ".sau-task-id"
+
+
 def download_root() -> Path:
     return Path(conf.BASE_DIR).resolve() / "downloads"
 
@@ -18,6 +22,7 @@ def download_root() -> Path:
 def validate_task_id(task_id: str) -> str:
     if (
         not task_id
+        or task_id.casefold() == QUEUE_DIRECTORY
         or task_id.endswith((" ", "."))
         or re.search(r'[<>:"/\\|?*\x00-\x1f\x7f]', task_id)
         or PureWindowsPath(task_id).is_reserved()
@@ -45,12 +50,37 @@ def validate_url(url: str) -> str:
     return url
 
 
+def validate_task_owner(directory: Path, task_id: str) -> bool:
+    """Reject alternate spellings. Return whether the CLI created this directory."""
+    marker = directory / TASK_OWNER_FILE
+    if marker.is_symlink() or (marker.exists() and not marker.is_file()):
+        raise OSError("Invalid media task owner file")
+    if marker.is_file():
+        with marker.open("rb") as stream:
+            if stream.read(256) != task_id.encode("utf-8"):
+                raise OSError("Task ID conflicts with an existing directory")
+        return True
+    # Older downloads had no owner marker. Preserve their contents without
+    # converting an arbitrary existing directory into a CLI-managed one.
+    if not any(child.name == task_id for child in directory.parent.iterdir()):
+        raise OSError("Task ID conflicts with an existing directory")
+    return False
+
+
 def task_directory(task_id: str) -> Path:
     root = download_root()
     directory = root / validate_task_id(task_id)
     if root.is_symlink() or directory.is_symlink():
         raise OSError("Media directory is a symbolic link")
-    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        directory.mkdir(parents=True)
+    except FileExistsError:
+        if not directory.is_dir():
+            raise
+        validate_task_owner(directory, task_id)
+    else:
+        with (directory / TASK_OWNER_FILE).open("xb") as marker:
+            marker.write(task_id.encode("utf-8"))
     return directory
 
 

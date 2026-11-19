@@ -1,69 +1,22 @@
 """Predownload contract as observed by a caller and its local media origin."""
 import json
-import os
 from pathlib import Path
-import shutil
-import subprocess
-import sysconfig
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Event, Thread
+from subprocess import CompletedProcess
+from threading import Event
 
 import pytest
 
-
-PROJECT = Path(__file__).resolve().parents[1]
+from tests.remote_media_cli import media_cli, origin
 
 
 @pytest.fixture
-def sau(tmp_path):
-    shutil.copyfile(PROJECT / "conf.example.py", tmp_path / "conf.py")
-    env = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(map(str, (tmp_path, PROJECT))),
-        "MLX_API_TOKEN": "",
-        "ADSPOWER_API_KEY": "",
-        "NO_PROXY": "127.0.0.1",
-    }
-    executable = shutil.which("sau", path=sysconfig.get_path("scripts"))
-    assert executable, "Install the project to run the sau CLI tests"
-
+def sau(media_cli):
     def run(*args):
-        return subprocess.run(
-            [executable, "media", "predownload", "--wait", *args],
-            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20,
-        )
+        process = media_cli("--wait", *args)
+        stdout, stderr = process.communicate(timeout=20)
+        return CompletedProcess(process.args, process.returncode, stdout, stderr)
 
     return run
-
-
-@pytest.fixture
-def origin():
-    assets = {}
-    requests = []
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            requests.append(self.path)
-            asset = assets.get(self.path, (404, b""))
-            if callable(asset):
-                return asset(self)
-            status, body = asset
-            self.send_response(status)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            yield f"http://127.0.0.1:{server.server_port}", assets, requests
-        finally:
-            server.shutdown()
-            thread.join()
 
 
 def test_wait_returns_complete_files_in_input_order(sau, origin, tmp_path):
