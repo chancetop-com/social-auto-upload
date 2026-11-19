@@ -1,6 +1,7 @@
 # 网络素材预下载与上传 CLI 规格
 
 Status: ready-for-agent
+Resolution: completed
 
 ## Problem Statement
 
@@ -127,3 +128,7 @@ sau tiktok upload-note --account demo --task-id post-42 --images 'https://cdn.ex
 调度 App 若要分别保留两条 post 的素材，应使用不同的资源目录 ID。一个 post 确认发布会清理该 ID 下的全部素材，即使发布命令只选了其中一部分。提前排期超过七天的 post 也要考虑本地副本已被回收，届时发布需要仍然有效的直链。
 
 决策原文、调用示例和下载库实测可用于追溯本规格。[网络素材预下载与上传决策地图](map.md) · [下载库比较与实测](research/01-download-library.md) · [项目术语表](../../GLOSSARY.md) · [现有 CLI 用法](../../docs/CLI.md)
+
+## Comments
+
+11–19 号实现工单已完成。最终实现提交为 `b6eb521`。在 macOS 上从实际 `sau` 命令使用本机 HTTP 源站与离线平台验收。全库通过 1,679 项测试和 823 个子用例，跳过 7 项。各工单记录对应场景与测试文件。
