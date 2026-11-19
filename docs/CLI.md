@@ -37,9 +37,44 @@ sau tiktok --help
 sau youtube --help
 sau instagram --help
 sau article --help
+sau media --help
 sau facebook --help
 sau facebook-page --help
 ```
+
+## 网络素材与预下载
+
+七个平台现有的 `upload-video --file`、`upload-note --images` 和自定义封面 `--thumbnail` 都可在支持该参数的入口使用 HTTP(S) 媒体直链。图文可以混排本地路径和 URL，首图、顺序和重复位置按输入保留。
+
+```bash
+# 提前入队。收到 accepted 后，调度 App 可以退出。
+sau media predownload --task-id post-42 --urls 'https://cdn.example.com/front.jpg'
+
+# 需要本地路径时，加 --wait 并读取 stdout 的 JSON。
+sau media predownload --wait --task-id post-42 --urls 'https://cdn.example.com/front.jpg'
+
+# 发布时沿用原 ID 和完整 URL，可复用上一步的下载。
+sau tiktok upload-note --account creator --task-id post-42 --images 'https://cdn.example.com/front.jpg' ./back.jpg
+```
+
+`--wait` 返回的 `items` 与输入一一对应。成功项含绝对路径 `path`，失败项含 `reason`。整组成功退出 `0`，有项目失败退出 `1`，参数或并发配置无效退出 `2`。同一下载根目录共用后台进程和下载名额，环境变量 `SAU_DOWNLOAD_CONCURRENCY` 接受正整数，默认为 `1`，下次后台进程启动时生效。
+
+发布等待全部素材就绪后才开始计算平台的 15 分钟预算。素材下载失败时，命令指出失败项并以 `1` 退出，此时尚未提交帖子。省略 ID 时，远程文件放在本次发布的临时目录中，命令结束后清理。
+
+指定 ID 时，确认帖子已发布会清理整个 `downloads/<任务ID>/`，包括同一 ID 下未用于这次发布的文件。平台仅确认已排期或正在处理时保留指定目录。失败、中断、结果未知或使用 `--no-publish` 时也保留，之前拿到的路径仍可用于核查。
+
+```bash
+# 清除一项，让相同 URL 在下一次请求时获取源站的新内容。
+sau media delete --task-id post-42 --url 'https://cdn.example.com/front.jpg'
+
+# 撤销整个任务的下载并删除其目录。
+sau media delete --task-id post-42
+
+# 由调度 App 每天运行，回收闲置满七天的任务目录。
+sau media cleanup
+```
+
+发布正在使用一个任务 ID 时，主动删除该 ID 下任意素材都会退出 `1`。按 URL 删除后，已在等待该项的调用会收到 `item_deleted`。整目录清理会让该 ID 上的等待调用收到 `task_cleared`。
 
 ## 按需准备浏览器
 
