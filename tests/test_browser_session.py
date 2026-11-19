@@ -548,14 +548,7 @@ class ManagedSessionSeamTests(unittest.TestCase):
 
 
 class ManagedIgnoredKeysTests(unittest.TestCase):
-    """Managed mode drops local browser options; the user must be told once."""
-
-    FULL_WARNING = (
-        "托管模式忽略本地浏览器参数：launch_kwargs, context_kwargs, init_script"
-        "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置"
-    )
-
-    def _run_managed(self, **kwargs):
+    def _managed_startup_message(self, **kwargs):
         events: list[str] = []
         provider = FakeManagedProvider(
             mode="adspower", profile_id="profile-1", events=events
@@ -575,71 +568,46 @@ class ManagedIgnoredKeysTests(unittest.TestCase):
             ):
                 pass
 
-        run(scenario())
-
-    def test_non_empty_managed_options_warn_once_with_key_names_only(self):
-        with patch("utils.browser_session.logger.warning") as warning:
-            self._run_managed(
-                launch_kwargs={"channel": "chromium"},
-                context_kwargs={"locale": "zh-CN"},
-                init_script=True,
-            )
-
-        warning.assert_called_once()
-        message = warning.call_args.args[0]
-        self.assertEqual(message, self.FULL_WARNING)
-        # Key names only: no option values ever reach the log.
-        self.assertNotIn("chromium", message)
-        self.assertNotIn("zh-CN", message)
-
-    def test_empty_values_do_not_count_as_ignored(self):
-        with patch("utils.browser_session.logger.warning") as warning:
-            self._run_managed(
-                launch_kwargs={},
-                context_kwargs=None,
-                init_script=False,
-                context_setup=None,
-            )
-
-        warning.assert_not_called()
-
-    def test_context_setup_counts_as_an_ignored_key(self):
-        async def context_setup(context):
-            return context
-
-        with patch("utils.browser_session.logger.warning") as warning:
-            self._run_managed(context_setup=context_setup)
-
-        warning.assert_called_once()
-        self.assertEqual(
-            warning.call_args.args[0],
-            "托管模式忽略本地浏览器参数：context_setup"
-            "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置",
-        )
-
-    def test_extra_ignored_keys_join_the_single_warning_and_startup_log(self):
         with (
             patch("utils.browser_session.logger.warning") as warning,
             patch("utils.browser_session.logger.info") as info,
         ):
-            self._run_managed(
-                launch_kwargs={"channel": "chromium"},
-                extra_ignored=("account",),
-            )
+            run(scenario())
 
-        warning.assert_called_once()
-        self.assertEqual(
-            warning.call_args.args[0],
-            "托管模式忽略本地浏览器参数：launch_kwargs, account"
-            "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置",
-        )
+        warning.assert_not_called()
         startup = [
-            call
-            for call in info.call_args_list
-            if str(call.args[0]).startswith("browser session ready: ")
+            call.args[0] for call in info.call_args_list
+            if call.args[0].startswith("browser session ready: ")
         ]
         self.assertEqual(len(startup), 1)
-        self.assertIn("ignored=launch_kwargs, account,", startup[0].args[0])
+        return startup[0]
+
+    def test_ignored_keys_are_listed_only_in_the_startup_log(self):
+        async def context_setup(context):
+            self.fail("Managed mode must skip local context setup")
+
+        message = self._managed_startup_message(
+            launch_kwargs={"channel": "chromium"},
+            context_kwargs={"locale": "zh-CN"},
+            init_script=True,
+            context_setup=context_setup,
+            extra_ignored=("account",),
+        )
+        self.assertIn(
+            "ignored=launch_kwargs, context_kwargs, init_script, context_setup, account,",
+            message,
+        )
+        self.assertNotIn("chromium", message)
+        self.assertNotIn("zh-CN", message)
+
+    def test_empty_values_do_not_count_as_ignored(self):
+        message = self._managed_startup_message(
+            launch_kwargs={},
+            context_kwargs=None,
+            init_script=False,
+            context_setup=None,
+        )
+        self.assertIn("ignored=-,", message)
 
 
 class StartupLogTests(unittest.TestCase):

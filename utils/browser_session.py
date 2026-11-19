@@ -55,13 +55,6 @@ _CONNECTION_HINTS = {
     ),
 }
 
-#: Managed mode cannot apply the local launch/context options: the Profile owns
-#: the fingerprint, UI language and timezone.  The message lists key names only.
-MANAGED_IGNORED_WARNING = (
-    "托管模式忽略本地浏览器参数：{keys}"
-    "；Profile 负责指纹与界面语言，语言/UA/时区请在 Profile 内设置"
-)
-
 #: Options accepted by ``browser_session`` that a managed run silently drops.
 _IGNORED_OPTION_NAMES = (
     "launch_kwargs",
@@ -87,7 +80,7 @@ def _ignored_option_names(
     """Return the non-empty local-only options a managed run would drop.
 
     Empty values (``False`` / ``{}`` / ``None``) are not dropped content, so
-    they never appear in the warning or the startup log.  ``extra`` carries
+    they never appear in the startup log.  ``extra`` carries
     caller-known drops such as the CLI ``--account`` flag.
     """
     values = {
@@ -199,8 +192,8 @@ async def browser_session(
     for managed caller compatibility and is never read or written.
 
     Managed mode cannot apply ``launch_kwargs`` / ``context_kwargs`` /
-    ``init_script`` / ``context_setup``; each non-empty one is reported once in
-    a warning and in the startup line.  ``extra_ignored`` lets a caller report
+    ``init_script`` / ``context_setup``. The startup line lists each non-empty
+    option by name.  ``extra_ignored`` lets a caller report
     further keys it dropped itself (the CLI passes ``"account"``).
     """
 
@@ -217,9 +210,6 @@ async def browser_session(
         context_setup=context_setup,
         extra=extra_ignored,
     )
-    if ignored:
-        logger.warning(MANAGED_IGNORED_WARNING.format(keys=", ".join(ignored)))
-
     command = current_command()
     if command is not None:
         async with command.session(playwright, managed, headless, _connect_over_cdp) as (browser, pages, setting):
