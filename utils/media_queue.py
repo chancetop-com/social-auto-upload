@@ -97,6 +97,12 @@ def _initialize(db):
         token TEXT PRIMARY KEY, directory_key TEXT NOT NULL, task_id TEXT NOT NULL,
         url TEXT NOT NULL, UNIQUE (directory_key, url)
     )""")
+    _upgrade_writer_state(db)
+
+
+def _upgrade_writer_state(db):
+    if "reported" not in {row[1] for row in db.execute("PRAGMA table_info(writers)")}:
+        db.execute("ALTER TABLE writers ADD COLUMN reported INTEGER NOT NULL DEFAULT 0")
 
 
 def _try_lease(root, filename):
@@ -260,7 +266,10 @@ def _transfer(root, token):
         except Exception as exc:
             path, reason = None, str(exc)
         with transaction(root) as db:
+            # Publish the result and record the end of file I/O atomically.
+            # The last waiter can withdraw before this child process exits.
             _report(db, key, url, path, reason)
+            db.execute("UPDATE writers SET reported=1 WHERE token=?", (token,))
 
 
 def _abandoned_waiters(db, root, task_id=None):
@@ -276,22 +285,24 @@ def _reap_writer(db, root, token, *, interrupted=True):
     # never-started child checks its token under this same transaction.
     if _release_abandoned(root, token):
         if interrupted:
-            task_id, key = db.execute("SELECT task_id, directory_key FROM writers WHERE token=?",
-                                      (token,)).fetchone()
-            _refresh_retained(root, task_id, key)
+            unfinished = db.execute("""SELECT task_id, directory_key FROM writers
+                                       WHERE token=? AND NOT reported""", (token,)).fetchone()
+            if unfinished:
+                _refresh_retained(root, *unfinished)
         db.execute("DELETE FROM writers WHERE token=?", (token,))
 
 
 def _collect_writers(db, root, children):
-    for token, key, url in db.execute("SELECT token, directory_key, url FROM writers").fetchall():
+    writers = db.execute("SELECT token, directory_key, url, reported FROM writers").fetchall()
+    for token, key, url, reported in writers:
         child = children.get(token)
         if child is not None:
             if child.poll() is None:
-                if not child.stdin.closed and not _interests(db, key, url):
+                if not reported and not child.stdin.closed and not _interests(db, key, url):
                     child.stdin.close()
                     child.kill()
                 continue
-            if child.returncode and not child.stdin.closed:
+            if not reported and child.returncode and not child.stdin.closed:
                 _report(db, key, url, None, "Media transfer process failed")
             child.stdin.close()
             del children[token]
@@ -360,7 +371,8 @@ def _drain(root, concurrency):
                                          (slots,)).fetchall()
                     for key, url, task_id in pending:
                         token = uuid4().hex
-                        db.execute("INSERT INTO writers VALUES (?, ?, ?, ?)", (token, key, task_id, url))
+                        db.execute("INSERT INTO writers(token, directory_key, task_id, url) VALUES (?, ?, ?, ?)",
+                                   (token, key, task_id, url))
                         children[token] = subprocess.Popen(
                             [sys.executable, "-m", "utils.media_queue", str(root), token],
                             stdin=subprocess.PIPE, close_fds=True,
@@ -530,6 +542,7 @@ def cleanup_idle_tasks():
                     if not available:
                         continue
                     with transaction(root) as db:
+                        _upgrade_writer_state(db)
                         # The worker can exit before a foreground waiter dies.
                         # Retire abandoned leases without extending retention.
                         for owner in _abandoned_waiters(db, root, directory.name):
@@ -542,7 +555,7 @@ def cleanup_idle_tasks():
                                 db.execute("""DELETE FROM requests WHERE task_id=? AND background
                                               AND (path IS NOT NULL OR reason IS NOT NULL)""", (directory.name,))
                         active = db.execute("""SELECT 1 FROM requests WHERE task_id=?
-                                               UNION ALL SELECT 1 FROM writers WHERE task_id=? LIMIT 1""",
+                                               UNION ALL SELECT 1 FROM writers WHERE task_id=? AND NOT reported LIMIT 1""",
                                             (directory.name, directory.name)).fetchone()
                     if not active and directory.lstat().st_mtime_ns <= cutoff:
                         remove_task_files(directory, original, None)

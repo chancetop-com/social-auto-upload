@@ -14,7 +14,17 @@ from tests.test_remote_media_recovery import worker_of
 
 
 WEEK = 7 * 24 * 60 * 60
-NOW = int(time.time())
+
+
+@pytest.fixture
+def now():
+    return int(time.time())
+
+
+def freeze_cleanup_clock(tmp_path, now):
+    (tmp_path / "sitecustomize.py").write_text(
+        f"import time\ntime.time_ns = lambda: {now * 10**9}\n"
+    )
 
 
 def run(child):
@@ -28,13 +38,54 @@ def download(cli, task_id, url):
     return Path(json.loads(response)["items"][0]["path"])
 
 
-def age(directory, seconds=WEEK):
-    timestamp = NOW - seconds
+def age(directory, now, seconds=WEEK):
+    timestamp = now - seconds
     os.utime(directory, (timestamp, timestamp))
 
 
+def test_reported_writer_exits_normally_without_extending_retention(tmp_path, sau_cli, origin, now):
+    base, assets, requests = origin
+    assets.update({"/clip": (200, b"clip"), "/next": (200, b"next")})
+    # Delay interpreter exit in the first process that actually opens the
+    # origin socket. The CLI can consume its committed result independently.
+    (tmp_path / "sitecustomize.py").write_text("""
+import atexit
+from pathlib import Path
+import sys
+import time
+root = Path(__file__).parent
+def on_connect(event, args):
+    if event != "socket.connect" or not isinstance(args[1], tuple) or args[1][0] != "127.0.0.1":
+        return
+    try:
+        (root / "first-connection").touch(exist_ok=False)
+    except FileExistsError:
+        return
+    @atexit.register
+    def finish():
+        deadline = time.monotonic() + 12
+        while not (root / "release-exit").exists() and time.monotonic() < deadline:
+            time.sleep(.02)
+        (root / "exited-normally").touch()
+sys.addaudithook(on_connect)
+""")
+    clip = download(sau_cli, "finished", base + "/clip")
+    try:
+        age(clip.parent, now, 2 * WEEK)
+        # Acknowledging another request gives the scheduler an opportunity to
+        # cancel the first process while it has no outstanding consumers.
+        run(sau_cli("media", "predownload", "--task-id", "next", "--urls", base + "/next"))
+    finally:
+        (tmp_path / "release-exit").touch()
+    assert download(sau_cli, "next", base + "/next").read_bytes() == b"next"
+    assert (tmp_path / "exited-normally").exists()
+    assert clip.parent.stat().st_mtime == now - 2 * WEEK
+    run(sau_cli("media", "cleanup"))
+    assert not clip.parent.exists() and requests == ["/clip", "/next"]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Observes POSIX process termination")
-def test_cleanup_releases_a_dead_waiter_after_its_worker_finished(tmp_path, sau_cli, origin):
+def test_cleanup_releases_a_dead_waiter_after_its_worker_finished(tmp_path, sau_cli, origin, now):
     base, assets, requests = origin
     started, release = Event(), Event()
 
@@ -62,22 +113,23 @@ def test_cleanup_releases_a_dead_waiter_after_its_worker_finished(tmp_path, sau_
             assert time.monotonic() < deadline
             time.sleep(.05)
         assert any(path.read_bytes() == b"clip" for path in directory.iterdir() if path.is_file())
-        age(directory, 2 * WEEK)
+        age(directory, now, 2 * WEEK)
         run(sau_cli("media", "cleanup"))
         assert directory.exists(), "a live waiter can still collect its completed file"
     finally:
         release.set()
         waiter.kill()
         waiter.wait()
-    age(directory, WEEK - 60)
+    freeze_cleanup_clock(tmp_path, now)
+    age(directory, now, WEEK - 60)
     run(sau_cli("media", "cleanup"))
-    assert directory.stat().st_mtime == NOW - WEEK + 60
-    age(directory, WEEK)
+    assert directory.stat().st_mtime == now - WEEK + 60
+    age(directory, now, WEEK)
     run(sau_cli("media", "cleanup"))
     assert not directory.exists() and requests == ["/clip"]
 
 
-def test_cleanup_uses_task_directory_age_and_protects_other_files(tmp_path, sau_cli, origin):
+def test_cleanup_uses_task_directory_age_and_protects_other_files(tmp_path, sau_cli, origin, now):
     base, assets, requests = origin
     assets["/clip.mp4"] = (200, b"clip")
     url = base + "/clip.mp4"
@@ -92,25 +144,23 @@ def test_cleanup_uses_task_directory_age_and_protects_other_files(tmp_path, sau_
     (outside / "keep").write_text("outside")
     linked.symlink_to(outside, target_is_directory=True)
     (expired.parent / "outside-link").symlink_to(outside, target_is_directory=True)
-    age(expired.parent)
-    age(recent.parent, WEEK - 1)
-    age(unrelated)
-    age(outside)
-    (tmp_path / "sitecustomize.py").write_text(
-        f"import time\ntime.time_ns = lambda: {NOW * 10**9}\n"
-    )
+    age(expired.parent, now)
+    age(recent.parent, now, WEEK - 1)
+    age(unrelated, now)
+    age(outside, now)
+    freeze_cleanup_clock(tmp_path, now)
     for _ in range(2):
         run(sau_cli("media", "cleanup"))
         assert not expired.parent.exists()
         assert recent.read_bytes() == b"clip"
-        assert recent.parent.stat().st_mtime == NOW - WEEK + 1
+        assert recent.parent.stat().st_mtime == now - WEEK + 1
         assert (root / "outside-link" / "keep").read_text() == "outside"
         assert (unrelated / "keep").read_text() == "mine"
     assert download(sau_cli, "expired", url).read_bytes() == b"clip"
     assert requests == ["/clip.mp4"] * 4
 
 
-def test_cleanup_keeps_transferring_queued_and_publishing_tasks(tmp_path, sau_cli, origin):
+def test_cleanup_keeps_transferring_queued_and_publishing_tasks(tmp_path, sau_cli, origin, now):
     base, assets, requests = origin
     started, release = Event(), Event()
 
@@ -121,7 +171,7 @@ def test_cleanup_keeps_transferring_queued_and_publishing_tasks(tmp_path, sau_cl
 
     assets.update({"/stalled": stalled, "/queued": (200, b"queued"), "/prepared": (200, b"old file")})
     posting = download(sau_cli, "posting", base + "/prepared").parent
-    age(posting, 2 * WEEK)
+    age(posting, now, 2 * WEEK)
     run(sau_cli("media", "predownload", "--task-id", "transfer", "--urls", base + "/stalled"))
     assert started.wait(5)
     run(sau_cli("media", "predownload", "--task-id", "queued", "--urls", base + "/queued"))
@@ -146,25 +196,25 @@ if os.environ.get("HOLD_UPLOAD"):
         while not (tmp_path / "entered").exists():
             assert time.monotonic() < deadline and publish.poll() is None
             time.sleep(.02)
-        assert posting.stat().st_mtime >= NOW
+        assert posting.stat().st_mtime >= now
         for name in ("transfer", "queued", "posting"):
-            age(tmp_path / "downloads" / name, 2 * WEEK)
+            age(tmp_path / "downloads" / name, now, 2 * WEEK)
         run(sau_cli("media", "cleanup"))
         assert requests == ["/prepared", "/stalled"]
         for name in ("transfer", "queued", "posting"):
             assert (tmp_path / "downloads" / name).is_dir(), name
         run(sau_cli("media", "delete", "--task-id", "queued", "--url", base + "/queued"))
-        assert (tmp_path / "downloads" / "queued").stat().st_mtime >= NOW
+        assert (tmp_path / "downloads" / "queued").stat().st_mtime >= now
     finally:
         (tmp_path / "release").touch()
         release.set()
         run(publish)
-    assert posting.stat().st_mtime >= NOW
+    assert posting.stat().st_mtime >= now
     assert download(sau_cli, "queued", base + "/queued").read_bytes() == b"queued"
 
 
 def test_background_predownload_refreshes_retained_directory_on_admission_and_failure(
-        tmp_path, sau_cli, origin):
+        tmp_path, sau_cli, origin, now):
     base, assets, _ = origin
     assets["/clip"] = (200, b"clip")
     directory = download(sau_cli, "scheduled", base + "/clip").parent
@@ -176,26 +226,26 @@ def test_background_predownload_refreshes_retained_directory_on_admission_and_fa
         handler.send_error(403)
 
     assets["/denied"] = fail
-    age(directory, 2 * WEEK)
+    age(directory, now, 2 * WEEK)
     try:
         run(sau_cli("media", "predownload", "--task-id", "scheduled", "--urls", base + "/denied"))
         assert started.wait(5)
-        assert directory.stat().st_mtime >= NOW
-        age(directory, 2 * WEEK)
+        assert directory.stat().st_mtime >= now
+        age(directory, now, 2 * WEEK)
     finally:
         release.set()
     deadline = time.monotonic() + 6
-    while directory.stat().st_mtime < NOW:
+    while directory.stat().st_mtime < now:
         assert time.monotonic() < deadline, "unattended failure left the directory aged"
         time.sleep(.02)
 
 
-def test_cached_reuse_after_scan_protects_idle_task(tmp_path, sau_cli, origin):
+def test_cached_reuse_after_scan_protects_idle_task(tmp_path, sau_cli, origin, now):
     base, assets, requests = origin
     assets["/clip"] = (200, b"cached clip")
     url = base + "/clip"
     clip = download(sau_cli, "reused", url)
-    age(clip.parent, 2 * WEEK)
+    age(clip.parent, now, 2 * WEEK)
     # Pause the CLI after the filesystem returns the pre-scan metadata.
     # The next CLI can now finish using the cache before cleanup proceeds.
     (tmp_path / "sitecustomize.py").write_text("""
@@ -231,11 +281,11 @@ if target := os.environ.get("PAUSE_STAT"):
 
 
 @pytest.mark.parametrize("fault", ["unreadable", "missing-schema"])
-def test_cleanup_skips_when_queue_state_is_unreadable(tmp_path, sau_cli, origin, fault):
+def test_cleanup_skips_when_queue_state_is_unreadable(tmp_path, sau_cli, origin, fault, now):
     base, assets, _ = origin
     assets["/clip"] = (200, b"clip")
     clip = download(sau_cli, "unknown", base + "/clip")
-    age(clip.parent, 2 * WEEK)
+    age(clip.parent, now, 2 * WEEK)
     (tmp_path / "sitecustomize.py").write_text("""
 import os
 if fault := os.environ.get("UNREADABLE_STORAGE"):
@@ -249,6 +299,6 @@ if fault := os.environ.get("UNREADABLE_STORAGE"):
 """)
     run(sau_cli("media", "cleanup", UNREADABLE_STORAGE=fault))
     assert clip.read_bytes() == b"clip"
-    assert clip.parent.stat().st_mtime == NOW - 2 * WEEK
+    assert clip.parent.stat().st_mtime == now - 2 * WEEK
     run(sau_cli("media", "cleanup"))
     assert not clip.parent.exists()
