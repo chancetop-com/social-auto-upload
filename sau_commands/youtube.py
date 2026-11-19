@@ -12,10 +12,10 @@ from uploader.youtube_uploader.main import (
     is_logged_in,
     youtube_setup,
 )
+from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    existing_file_path,
     parse_tags,
     schedule_value,
 )
@@ -48,11 +48,16 @@ def register(platform_parsers):
 
     youtube_upload_video_parser = youtube_actions.add_parser("upload-video", help="Upload one video to YouTube")
     youtube_upload_video_parser.add_argument("--account", required=False, help="YouTube user-defined account_name")
-    youtube_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
+    add_task_id(youtube_upload_video_parser)
+    youtube_upload_video_parser.add_argument(
+        "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
+    )
     youtube_upload_video_parser.add_argument("--title", required=True, help="Video title (<=100 chars)")
     youtube_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     youtube_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
-    youtube_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail image path")
+    youtube_upload_video_parser.add_argument(
+        "--thumbnail", type=media_source, help="Local thumbnail path or HTTP(S) URL"
+    )
     youtube_upload_video_parser.add_argument("--playlist", help="Optional playlist name to add the video to (for series)")
     youtube_upload_video_parser.add_argument(
         "--visibility", default="public", choices=["public", "unlisted", "private"], help="Video visibility")

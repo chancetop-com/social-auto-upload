@@ -16,11 +16,11 @@ from uploader.meta_uploader.facebook_page_uploader.main import (
     meta_setup,
 )
 from uploader.meta_uploader.facebook_page_uploader.posts import meta_post_action
+from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     SCHEDULE_HELP_ZH,
     add_not_before_flag,
     add_local_runtime_flags,
-    existing_file_path,
     parse_image_files,
     parse_tags,
     schedule_value,
@@ -72,7 +72,10 @@ def register(platform_parsers):
 
         upload_video_parser = meta_actions.add_parser("upload-video", help=f"Upload a video to {meta_platform}")
         upload_video_parser.add_argument("--account", required=False)
-        upload_video_parser.add_argument("--file", required=True, type=existing_file_path)
+        add_task_id(upload_video_parser)
+        upload_video_parser.add_argument(
+            "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
+        )
         upload_video_parser.add_argument("--title", required=True)
         upload_video_parser.add_argument("--desc", default="")
         upload_video_parser.add_argument("--tags", default="")
@@ -86,7 +89,10 @@ def register(platform_parsers):
 
         upload_note_parser = meta_actions.add_parser("upload-note", help=f"Upload images to {meta_platform}")
         upload_note_parser.add_argument("--account", required=False)
-        upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path)
+        add_task_id(upload_note_parser)
+        upload_note_parser.add_argument(
+            "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
+        )
         upload_note_parser.add_argument("--title", required=True)
         upload_note_parser.add_argument("--note", default="")
         upload_note_parser.add_argument("--tags", default="")

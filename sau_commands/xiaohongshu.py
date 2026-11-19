@@ -22,11 +22,11 @@ from uploader.xiaohongshu_uploader.main import (
 )
 from sau_commands.output import NO_PUBLISH_SUCCESS
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
+from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
     add_local_runtime_flags,
-    existing_file_path,
     parse_image_files,
     parse_tags,
     schedule_value,
@@ -171,20 +171,28 @@ def register(platform_parsers):
 
     xiaohongshu_upload_video_parser = xiaohongshu_actions.add_parser("upload-video", help="Upload one video to Xiaohongshu")
     xiaohongshu_upload_video_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
-    xiaohongshu_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
+    add_task_id(xiaohongshu_upload_video_parser)
+    xiaohongshu_upload_video_parser.add_argument(
+        "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
+    )
     xiaohongshu_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
     xiaohongshu_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     xiaohongshu_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(xiaohongshu_upload_video_parser)
-    xiaohongshu_upload_video_parser.add_argument("--thumbnail", type=existing_file_path, help="Optional thumbnail path")
+    xiaohongshu_upload_video_parser.add_argument(
+        "--thumbnail", type=media_source, help="Local thumbnail path or HTTP(S) URL"
+    )
     _add_declaration_flags(xiaohongshu_upload_video_parser)
     add_local_runtime_flags(xiaohongshu_upload_video_parser)
     add_browser_flags(xiaohongshu_upload_video_parser)
 
     xiaohongshu_upload_note_parser = xiaohongshu_actions.add_parser("upload-note", help="Upload one note to Xiaohongshu")
     xiaohongshu_upload_note_parser.add_argument("--account", required=False, help="Xiaohongshu user-defined account_name")
-    xiaohongshu_upload_note_parser.add_argument("--images", required=True, nargs="+", type=existing_file_path, help="Image file paths")
+    add_task_id(xiaohongshu_upload_note_parser)
+    xiaohongshu_upload_note_parser.add_argument(
+        "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
+    )
     xiaohongshu_upload_note_parser.add_argument("--title", type=single_line_value, required=True, help="Note title")
     xiaohongshu_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
