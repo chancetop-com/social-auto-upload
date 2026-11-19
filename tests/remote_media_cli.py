@@ -14,7 +14,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def media_cli(tmp_path):
+def sau_cli(tmp_path):
     shutil.copyfile(PROJECT / "conf.example.py", tmp_path / "conf.py")
     env = {
         **os.environ,
@@ -29,11 +29,16 @@ def media_cli(tmp_path):
 
     def launch(*args, **environment):
         return subprocess.Popen(
-            [executable, "media", "predownload", *args],
+            [executable, *args],
             cwd=tmp_path, env={**env, **environment}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
 
     return launch
+
+
+@pytest.fixture
+def media_cli(sau_cli):
+    return lambda *args, **env: sau_cli("media", "predownload", *args, **env)
 
 
 @pytest.fixture

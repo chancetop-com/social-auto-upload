@@ -1,7 +1,8 @@
 """Durable media requests shared by CLI processes using the same download root."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing, contextmanager
+from contextlib import asynccontextmanager, closing, contextmanager, ExitStack
+import hashlib
 import os
 from pathlib import Path
 import sqlite3
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import time
 from uuid import uuid4
+import unicodedata
 
 from utils.errors import UsageError
 from utils.remote_media import QUEUE_DIRECTORY, download_item, download_root, task_directory
@@ -63,6 +65,8 @@ def _initialize(db):
         url TEXT NOT NULL, background INTEGER NOT NULL, accepted INTEGER NOT NULL DEFAULT 0,
         path TEXT, reason TEXT, PRIMARY KEY (request_id, url)
     )""")
+    if "priority" not in {row[1] for row in db.execute("PRAGMA table_info(requests)")}:
+        db.execute("ALTER TABLE requests ADD COLUMN priority INTEGER NOT NULL DEFAULT 0")
     db.execute("""CREATE INDEX IF NOT EXISTS media_pending ON requests (directory_key, url)
                   WHERE path IS NULL AND reason IS NULL""")
 
@@ -82,19 +86,20 @@ def _start_worker():
     )
 
 
-async def submit(task_id, urls, *, background):
+async def submit(task_id, urls, *, background, priority=False):
     """Persist the complete request and wait until a detached worker acknowledges it."""
     download_concurrency()
     request_id = uuid4().hex
-    with transaction() as db:
-        _initialize(db)
-        directory = task_directory(task_id)
-        key = directory_key(directory)
-        db.executemany(
-            """INSERT INTO requests(request_id, task_id, directory_key, url, background)
-               VALUES (?, ?, ?, ?, ?)""",
-            ((request_id, task_id, key, url, background) for url in dict.fromkeys(urls)),
-        )
+    async with task_gate(task_id):
+        with transaction() as db:
+            _initialize(db)
+            directory = task_directory(task_id)
+            key = directory_key(directory)
+            db.executemany(
+                """INSERT INTO requests(request_id, task_id, directory_key, url, background, priority)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                ((request_id, task_id, key, url, background, priority) for url in dict.fromkeys(urls)),
+            )
 
     process = None
     deadline = time.monotonic() + 10
@@ -120,19 +125,25 @@ async def submit(task_id, urls, *, background):
         raise
 
 
-async def wait_for_result(request_id, urls):
-    """Read this caller's results in input order and release its completed request."""
-    while True:
-        with closing(_connect("requests.sqlite")) as db:
-            rows = db.execute(
-                "SELECT url, path, reason FROM requests WHERE request_id=?", (request_id,),
-            ).fetchall()
-        if all(path is not None or reason is not None for _, path, reason in rows):
-            results = {url: {"path": path} if path else {"reason": reason} for url, path, reason in rows}
-            with transaction() as db:
-                db.execute("DELETE FROM requests WHERE request_id=?", (request_id,))
-            return [results[url] for url in urls]
-        await asyncio.sleep(POLL_SECONDS)
+async def wait_for_result(request_id, urls, *, fail_fast=False):
+    """Deliver ordered results, optionally raising on the first required failure."""
+    try:
+        while True:
+            with closing(_connect("requests.sqlite")) as db:
+                rows = db.execute(
+                    "SELECT url, path, reason FROM requests WHERE request_id=?", (request_id,),
+                ).fetchall()
+            if fail_fast:
+                for url, _, reason in rows:
+                    if reason is not None:
+                        raise OSError(f"{url}: {reason}")
+            if all(path is not None or reason is not None for _, path, reason in rows):
+                results = {url: {"path": path} if path else {"reason": reason} for url, path, reason in rows}
+                return [results[url] for url in urls]
+            await asyncio.sleep(POLL_SECONDS)
+    finally:
+        with transaction() as db:
+            db.execute("DELETE FROM requests WHERE request_id=?", (request_id,))
 
 
 def _drain(root, concurrency):
@@ -157,7 +168,8 @@ def _drain(root, concurrency):
                 if slots:
                     pending = db.execute("""SELECT directory_key, url, task_id FROM requests
                                             WHERE path IS NULL AND reason IS NULL
-                                            GROUP BY directory_key, url ORDER BY MIN(rowid) LIMIT ?""",
+                                            GROUP BY directory_key, url
+                                            ORDER BY MAX(priority) DESC, MIN(rowid) LIMIT ?""",
                                          (min(concurrency, sys.maxsize),))
                     for key, url, task_id in pending:
                         if (key, url) in active:
@@ -172,10 +184,10 @@ def _drain(root, concurrency):
 
 
 @contextmanager
-def _worker_lease(root):
+def _try_lease(root, filename):
     # SQLite's exclusive OS lock is released on process death on POSIX and
     # Windows. Keep it on a separate file so submissions never wait on HTTP I/O.
-    with closing(_connect("worker.sqlite", root=root, timeout=0)) as lease:
+    with closing(_connect(filename, root=root, timeout=0)) as lease:
         try:
             lease.execute("BEGIN EXCLUSIVE")
         except sqlite3.OperationalError as exc:
@@ -186,13 +198,45 @@ def _worker_lease(root):
         yield True
 
 
+def task_lease(task_id, purpose):
+    # Keep leases outside replaceable task directories. Case/unicode aliases
+    # can refer to the same directory on supported filesystems.
+    identity = unicodedata.normalize("NFC", task_id.casefold())
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    return _try_lease(download_root(), f"{purpose}-{key}.sqlite")
+
+
+@asynccontextmanager
+async def task_gate(task_id):
+    """Serialize admissions and destructive operations on this ID only."""
+    while True:
+        with task_lease(task_id, "gate") as acquired:
+            if acquired:
+                yield
+                return
+        await asyncio.sleep(POLL_SECONDS)
+
+
+@asynccontextmanager
+async def publish_access(task_id):
+    """Hold occupancy from admission through upload/cleanup; death releases it."""
+    with ExitStack() as stack:
+        while True:
+            async with task_gate(task_id):
+                if stack.enter_context(task_lease(task_id, "publish")):
+                    break
+                stack.close()
+            await asyncio.sleep(POLL_SECONDS)
+        yield
+
+
 def worker_running():
-    with _worker_lease(download_root()) as available:
+    with _try_lease(download_root(), "worker.sqlite") as available:
         return not available
 
 
 def worker(root):
-    with _worker_lease(root) as acquired:
+    with _try_lease(root, "worker.sqlite") as acquired:
         if acquired:
             _drain(root, download_concurrency())
 

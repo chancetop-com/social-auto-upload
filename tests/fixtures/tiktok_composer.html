@@ -12,9 +12,12 @@
   post.onclick = async () => {
     const text = document.querySelector('[contenteditable]').innerText.trim();
     const caption = document.querySelector('#title').value || text;
-    const files = [...video.files, ...images.files].map(file => file.name);
+    const selected = [...video.files, ...images.files];
+    const files = selected.map(file => file.name);
+    const submission = {caption, files};
+    if (CAPTURE_FILES) submission.contents = await Promise.all(selected.map(file => file.text()));
     sessionStorage.caption = caption;
-    const response = await fetch('/offline-submit', {method: 'POST', body: JSON.stringify({caption, files})});
+    const response = await fetch('/offline-submit', {method: 'POST', body: JSON.stringify(submission)});
     const outcome = await response.text();
     if (outcome === 'content') location.assign('/tiktokstudio/content');
     if (outcome === 'login') location.assign('/login');

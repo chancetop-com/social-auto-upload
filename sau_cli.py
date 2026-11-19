@@ -8,6 +8,7 @@ import sys
 from typing import Sequence
 
 from sau_commands import article, media
+from sau_commands.publish_media import publish_media
 from utils.base_social_media import get_supported_social_media
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict, resolve_multilogin_target
 from utils.managed_sharing import managed_command
@@ -49,6 +50,15 @@ async def dispatch(args: argparse.Namespace) -> int:
 
     if args.platform not in PLATFORMS:
         raise RuntimeError(f"Unsupported platform: {args.platform}")
+    if args.platform == "media":
+        return await media.run(args)
+    if args.action in {"upload-video", "upload-note"}:
+        async with publish_media(args):
+            return await _run_platform(args)
+    return await _run_platform(args)
+
+
+async def _run_platform(args):
     mode = active_mode()
     if mode is not None and args.action in {"check", "upload-video", "upload-note"} and args.profile_id:
         profile_id = args.profile_id.strip()
@@ -66,7 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Conflict detection lives after argparse and before dispatch so that
         # ``--help`` / unknown subcommands keep their argparse semantics, while
         # a dual-credential setup wins over command-level rejections.
-        if credentials_conflict():
+        if args.platform != "media" and credentials_conflict():
             raise RuntimeError(DUAL_CREDENTIALS_MESSAGE)
         return asyncio.run(dispatch(args))
     except LoginRequiredError as exc:

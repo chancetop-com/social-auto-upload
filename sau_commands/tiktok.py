@@ -9,12 +9,12 @@ from pathlib import Path
 from patchright.async_api import async_playwright
 
 from sau_commands.output import NO_PUBLISH_SUCCESS
+from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
     add_local_runtime_flags,
-    existing_file_path,
     parse_tags,
     schedule_value,
 )
@@ -166,7 +166,7 @@ def register(platform_parsers):
         help=TIKTOK_ACCOUNT_HELP,
     )
     upload_video_parser.add_argument(
-        "--file", required=True, type=existing_file_path, help="Video file path"
+        "--file", required=True, type=media_source, help="Video file path or direct URL"
     )
     upload_video_parser.add_argument("--title", required=True, help="Video title")
     upload_video_parser.add_argument(
@@ -176,8 +176,9 @@ def register(platform_parsers):
         "--schedule", type=schedule_value, help=SCHEDULE_HELP
     )
     add_not_before_flag(upload_video_parser)
+    add_task_id(upload_video_parser)
     upload_video_parser.add_argument(
-        "--thumbnail", type=existing_file_path, help="Optional thumbnail path"
+        "--thumbnail", type=media_source, help="Optional thumbnail path or direct URL"
     )
     _add_publish_option_flags(upload_video_parser, include_reuse=True)
     add_local_runtime_flags(upload_video_parser)
@@ -195,8 +196,8 @@ def register(platform_parsers):
         "--images",
         required=True,
         nargs="+",
-        type=existing_file_path,
-        help="1-35 image file paths, in display order (first is the cover)",
+        type=media_source,
+        help="1-35 image paths or direct URLs, in display order (first is the cover)",
     )
     upload_note_parser.add_argument(
         "--title",
@@ -223,6 +224,7 @@ def register(platform_parsers):
         "--schedule", type=schedule_value, help=SCHEDULE_HELP
     )
     add_not_before_flag(upload_note_parser)
+    add_task_id(upload_note_parser)
     # Photo posts have no content-reuse control, so ``--disable-reuse`` is not
     # registered here.  The first image is the cover: no thumbnail/cover flag.
     _add_publish_option_flags(upload_note_parser, include_reuse=False)

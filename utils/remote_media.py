@@ -86,12 +86,46 @@ def task_directory(task_id: str) -> Path:
     return directory
 
 
+# Explicit suffixes stay usable by local-only platform validators. When a CDN
+# uses an opaque URL, recognize its declared media type or a bounded signature.
+MEDIA_SUFFIXES = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+    "image/bmp": ".bmp", "image/gif": ".gif", "video/mp4": ".mp4",
+    "video/quicktime": ".mov", "video/webm": ".webm", "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv", "video/x-flv": ".flv", "video/x-ms-wmv": ".wmv",
+    "video/x-m4v": ".m4v",
+}
+
+
+def media_suffix(partial, content_type):
+    declared = MEDIA_SUFFIXES.get(content_type.split(";", 1)[0].strip().lower())
+    if declared:
+        return declared
+    with partial.open("rb") as stream:
+        header = stream.read(16)
+    if header.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return ".webp"
+    if header[4:8] == b"ftyp" and header[8:12] in (b"isom", b"mp41", b"mp42", b"avc1"):
+        return ".mp4"
+    return ""
+
+
 def item_path(directory: Path, url: str) -> Path:
     key = hashlib.sha256(url.encode("utf-8")).hexdigest()
     suffix = Path(urlsplit(url).path).suffix
     if not re.fullmatch(r"\.[A-Za-z0-9]{1,16}", suffix):
         suffix = ""
-    return directory / (key + suffix)
+    target = directory / (key + suffix)
+    if not suffix and not target.exists():
+        for candidate_suffix in MEDIA_SUFFIXES.values():
+            candidate = target.with_suffix(candidate_suffix)
+            if candidate.exists() or candidate.is_symlink():
+                return candidate
+    return target
 
 
 @contextmanager
@@ -253,6 +287,10 @@ def download_item(directory: Path, url: str) -> Path:
             saved = read_range(response, partial, metadata, temporary, saved, source)
             if saved and saved.offset == saved.total:
                 break
+    if not target.suffix:
+        suffix = media_suffix(partial, response.headers.get("Content-Type", ""))
+        if suffix:
+            target = target.with_suffix(suffix)
     partial.replace(target)
     metadata.unlink(missing_ok=True)
     return target

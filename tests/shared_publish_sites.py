@@ -50,10 +50,11 @@ class InstagramSite:
 
 
 class TikTokSite:
-    def __init__(self, *, ready=True, outcome="content", now=time.time):
+    def __init__(self, *, ready=True, outcome="content", now=time.time, capture_files=False):
         self.now = now
         self.ready = ready
         self.outcome = outcome
+        self.capture_files = capture_files
         self.submissions = []
         self.submitted_at = []
 
@@ -64,6 +65,7 @@ class TikTokSite:
             def do_GET(self):
                 if self.path.startswith("/tiktokstudio/upload"):
                     document = (Path(__file__).parent / "fixtures/tiktok_composer.html").read_text()
+                    document = document.replace("CAPTURE_FILES", json.dumps(site.capture_files))
                     document = document.replace("BUTTON_STATE", "" if site.ready else "disabled")
                     self.respond(document.encode(), "text/html; charset=utf-8")
                 elif self.path.startswith("/tiktokstudio/content"):
