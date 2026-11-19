@@ -53,8 +53,8 @@ async def dispatch(args: argparse.Namespace) -> int:
     if args.platform == "media":
         return await media.run(args)
     if args.action in {"upload-video", "upload-note"}:
-        async with publish_media(args):
-            return await _run_platform(args)
+        async with publish_media(args) as resolved:
+            return await _run_platform(resolved)
     return await _run_platform(args)
 
 
@@ -80,7 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise RuntimeError(DUAL_CREDENTIALS_MESSAGE)
         return asyncio.run(dispatch(args))
     except KeyboardInterrupt:
-        if args.platform == "media" and args.action == "predownload":
+        if args.action in {"predownload", "upload-video", "upload-note"}:
             return 130
         raise
     except LoginRequiredError as exc:

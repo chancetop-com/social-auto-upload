@@ -13,8 +13,7 @@ import pytest
 PROJECT = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture
-def sau_cli(tmp_path):
+def _launcher(tmp_path):
     shutil.copyfile(PROJECT / "conf.example.py", tmp_path / "conf.py")
     env = {
         **os.environ,
@@ -37,8 +36,14 @@ def sau_cli(tmp_path):
 
 
 @pytest.fixture
-def media_cli(sau_cli):
-    return lambda *args, **env: sau_cli("media", "predownload", *args, **env)
+def sau_cli(tmp_path):
+    return _launcher(tmp_path)
+
+
+@pytest.fixture
+def media_cli(tmp_path):
+    launch = _launcher(tmp_path)
+    return lambda *args, **env: launch("media", "predownload", *args, **env)
 
 
 @pytest.fixture

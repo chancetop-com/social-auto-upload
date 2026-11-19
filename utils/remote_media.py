@@ -69,15 +69,15 @@ def validate_task_owner(directory: Path, task_id: str) -> bool:
     return False
 
 
-def task_directory(task_id: str) -> Path:
+def task_directory(task_id: str, *, new=False) -> Path:
     root = download_root()
     directory = root / validate_task_id(task_id)
-    if root.is_symlink() or directory.is_symlink():
+    if root.is_symlink() or (not new and directory.is_symlink()):
         raise OSError("Media directory is a symbolic link")
     try:
         directory.mkdir(parents=True)
     except FileExistsError:
-        if not directory.is_dir():
+        if new or not directory.is_dir():
             raise
         validate_task_owner(directory, task_id)
     else:
@@ -95,6 +95,7 @@ MEDIA_SUFFIXES = {
     "video/x-matroska": ".mkv", "video/x-flv": ".flv", "video/x-ms-wmv": ".wmv",
     "video/x-m4v": ".m4v",
 }
+MEDIA_PATH_SUFFIXES = frozenset(MEDIA_SUFFIXES.values()) | {".jpeg"}
 
 
 def media_suffix(partial, content_type):
@@ -114,13 +115,18 @@ def media_suffix(partial, content_type):
     return ""
 
 
-def item_path(directory: Path, url: str) -> Path:
+def item_storage_path(directory: Path, url: str) -> Path:
+    """URL-derived name used for checkpoints before the content type is known."""
     key = hashlib.sha256(url.encode("utf-8")).hexdigest()
     suffix = Path(urlsplit(url).path).suffix
     if not re.fullmatch(r"\.[A-Za-z0-9]{1,16}", suffix):
         suffix = ""
-    target = directory / (key + suffix)
-    if not suffix and not target.exists():
+    return directory / (key + suffix)
+
+
+def item_path(directory: Path, url: str) -> Path:
+    target = item_storage_path(directory, url)
+    if target.suffix.lower() not in MEDIA_PATH_SUFFIXES and not target.exists():
         for candidate_suffix in MEDIA_SUFFIXES.values():
             candidate = target.with_suffix(candidate_suffix)
             if candidate.exists() or candidate.is_symlink():
@@ -287,7 +293,7 @@ def download_item(directory: Path, url: str) -> Path:
             saved = read_range(response, partial, metadata, temporary, saved, source)
             if saved and saved.offset == saved.total:
                 break
-    if not target.suffix:
+    if target.suffix.lower() not in MEDIA_PATH_SUFFIXES:
         suffix = media_suffix(partial, response.headers.get("Content-Type", ""))
         if suffix:
             target = target.with_suffix(suffix)

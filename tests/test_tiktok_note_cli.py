@@ -21,7 +21,6 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import sau_cli
 from sau_commands import tiktok as tiktok_command
-from sau_commands.arguments import existing_file_path
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import (
     TIKTOK_LAUNCH_KWARGS,
@@ -343,12 +342,14 @@ class UploadNoteParserTests(unittest.TestCase):
     def test_upload_note_is_registered(self):
         self.assertIn("upload-note", _action_names("tiktok"))
 
-    def test_images_is_required_multi_value_existing_file(self):
+    def test_images_accepts_multiple_local_files_and_direct_urls(self):
         parser = _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
         action = parser._option_string_actions["--images"]
         self.assertTrue(action.required)
         self.assertEqual(action.nargs, "+")
-        self.assertIs(action.type, existing_file_path)
+        url = "https://cdn.example/photo?signature=1"
+        args = parser.parse_args(["--images", __file__, url, __file__])
+        self.assertEqual(args.images, [Path(__file__), url, Path(__file__)])
 
     def test_allowed_options_are_present(self):
         options = _option_strings(

@@ -1,12 +1,14 @@
 """Resolve upload arguments together, before entering any platform session."""
+import asyncio
 from contextlib import asynccontextmanager
+from copy import copy
 from pathlib import Path
 import shutil
 import sqlite3
 from uuid import uuid4
 
 from sau_commands.arguments import existing_file_path
-from utils.media_queue import publish_access, submit, task_gate, wait_for_result, wait_for_writers
+from utils.media_queue import publish_access, revoke_task, submit, task_gate, wait_for_result
 from utils.remote_media import validate_task_id, validate_url
 
 
@@ -29,7 +31,7 @@ async def publish_media(args):
     urls = list(dict.fromkeys(value for value in sources if is_remote(value)))
     task_id = getattr(args, "task_id", None)
     if not task_id and not urls:
-        yield
+        yield args
         return
     temporary = task_id is None
     while True:
@@ -38,28 +40,39 @@ async def publish_media(args):
             if directory is None:
                 continue
             try:
-                await _resolve(args, images, urls, candidate)
-                yield
+                yield await _resolve(args, images, urls, candidate)
             finally:
                 if temporary:
-                    async with task_gate(candidate):
-                        await wait_for_writers(candidate)
-                        shutil.rmtree(directory)
+                    try:
+                        await _clear_temporary(directory)
+                    except asyncio.CancelledError:
+                        # A first SIGINT can arrive during cleanup itself.
+                        await _clear_temporary(directory)
+                        raise
             return
+
+
+async def _clear_temporary(directory):
+    async with task_gate(directory.name):
+        await revoke_task(directory.name)
+        if directory.exists():
+            shutil.rmtree(directory)
 
 
 async def _resolve(args, images, urls, task_id):
     if not urls:
-        return
+        return args
     try:
         request = await submit(task_id, urls, background=False, priority=True)
         items = await wait_for_result(request, urls, fail_fast=True)
     except (OSError, sqlite3.Error) as exc:
         raise RuntimeError(f"Could not acquire media for {task_id}: {exc}\npublish_attempted=false") from exc
     paths = {url: Path(item["path"]) for url, item in zip(urls, items)}
+    resolved = copy(args)
     for field in ("file", "thumbnail"):
         source = getattr(args, field, None)
         if source in paths:
-            setattr(args, field, paths[source])
+            setattr(resolved, field, paths[source])
     if images:
-        args.images = [paths.get(source, source) for source in images]
+        resolved.images = [paths.get(source, source) for source in images]
+    return resolved

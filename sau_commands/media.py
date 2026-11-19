@@ -3,7 +3,7 @@ import json
 import sqlite3
 import sys
 
-from utils.media_queue import submit, wait_for_result
+from utils.media_queue import TaskCleared, submit, wait_for_result
 from utils.remote_media import validate_task_id, validate_url
 
 
@@ -23,6 +23,9 @@ async def run(args):
             print(json.dumps({"task_id": args.task_id, "status": "accepted"}))
             return 0
         items = await wait_for_result(request_id, args.urls)
+    except TaskCleared:
+        print(json.dumps({"task_id": args.task_id, "status": "task_cleared", "items": []}))
+        return 1
     except (OSError, sqlite3.Error) as exc:
         print(str(exc), file=sys.stderr)
         print(json.dumps({"task_id": args.task_id, "status": "failed", "reason": "queue_unavailable", "items": []}))

@@ -2,7 +2,6 @@
 import asyncio
 from contextlib import asynccontextmanager, closing, contextmanager, ExitStack
 from dataclasses import dataclass
-import hashlib
 import os
 from pathlib import Path
 import sqlite3
@@ -10,11 +9,10 @@ import subprocess
 import sys
 import time
 from threading import Thread
-import unicodedata
 from uuid import uuid4
 
 from utils.errors import UsageError
-from utils.remote_media import QUEUE_DIRECTORY, download_item, download_root, task_directory
+from utils.remote_media import QUEUE_DIRECTORY, download_item, download_root, item_path, task_directory, validate_task_id
 
 POLL_SECONDS = 0.05
 
@@ -149,12 +147,13 @@ async def submit(task_id, urls, *, background, priority=False):
             _initialize(db)
             directory = task_directory(task_id)
             key = directory_key(directory)
-            db.executemany(
-                """INSERT INTO requests(request_id, task_id, directory_key, url, background, priority)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                ((request_id, task_id, key, url, background, priority) for url in dict.fromkeys(urls)),
-            )
-
+            for url in dict.fromkeys(urls):
+                target = item_path(directory, url)
+                cached = str(target) if not target.is_symlink() and target.is_file() else None
+                db.execute("""INSERT INTO requests(request_id, task_id, directory_key, url,
+                                                   background, priority, path)
+                              VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                           (request_id, task_id, key, url, background, priority, cached))
             request = Request(request_id, None if background else _try_lease(download_root(), request_id + ".lease"))
 
     process = None
@@ -176,6 +175,10 @@ async def submit(task_id, urls, *, background, priority=False):
         raise
 
 
+class TaskCleared(Exception):
+    """The task was cleared before this request could collect its results."""
+
+
 async def wait_for_result(request, urls, *, fail_fast=False):
     """Read this caller's results in input order and release its request on exit."""
     process = None
@@ -185,6 +188,8 @@ async def wait_for_result(request, urls, *, fail_fast=False):
                 rows = db.execute(
                     "SELECT url, path, reason FROM requests WHERE request_id=?", (request.id,),
                 ).fetchall()
+            if any(reason == "task_cleared" for _, _, reason in rows):
+                raise TaskCleared
             if fail_fast:
                 for url, _, reason in rows:
                     if reason is not None:
@@ -263,6 +268,16 @@ def _collect_writers(db, root, children):
         _reap_writer(db, root, token)
 
 
+async def revoke_task(task_id):
+    """Under task_gate, invalidate existing interests and drain their writers."""
+    with transaction() as db:
+        _initialize(db)
+        db.execute("DELETE FROM requests WHERE task_id=? AND background", (task_id,))
+        db.execute("""UPDATE requests SET accepted=1, path=NULL, reason='task_cleared'
+                      WHERE task_id=? AND NOT background""", (task_id,))
+    await wait_for_writers(task_id)
+
+
 async def wait_for_writers(task_id, url=None):
     """After withdrawing interest under the task guard, wait until writing has stopped."""
     root = download_root()
@@ -333,12 +348,16 @@ def _worker_lease(root):
 def task_lease(task_id, purpose):
     """Try the ID's admission or publish lock; occupancy ends on process death."""
     root = download_root()
-    identity = unicodedata.normalize("NFC", task_id.casefold())
-    key = hashlib.sha256(identity.encode()).hexdigest()
-    filename = f"{purpose}-{key}.lease"
-    # Serialize opening and retiring these replaceable lock files. No task
-    # holds the shared queue transaction across an await or platform call.
+    # The filesystem resolves spelling aliases here exactly as it does in the
+    # download root. Names that are distinct on this volume use separate locks.
+    parent = Path("task-locks") / validate_task_id(task_id)
+    filename = parent / (purpose + ".lease")
     with transaction(root):
+        queue = _queue_directory(root)
+        for directory in (queue / parent.parent, queue / parent):
+            if directory.is_symlink():
+                raise OSError("Media lock directory is a symbolic link")
+            directory.mkdir(mode=0o700, exist_ok=True)
         lease = _try_lease(root, filename)
     try:
         yield lease is not None
@@ -346,7 +365,9 @@ def task_lease(task_id, purpose):
         if lease is not None:
             with transaction(root):
                 lease.close()
-                (_queue_directory(root) / filename).unlink()
+                (queue / filename).unlink()
+                if not any((queue / parent).iterdir()):
+                    (queue / parent).rmdir()
 
 
 @asynccontextmanager
@@ -367,10 +388,12 @@ async def publish_access(task_id, *, new=False):
         while True:
             async with task_gate(task_id):
                 if stack.enter_context(task_lease(task_id, "publish")):
-                    if new and os.path.lexists(download_root() / task_id):
+                    try:
+                        directory = task_directory(task_id, new=new)
+                    except FileExistsError:
+                        if not new:
+                            raise
                         directory = None
-                    else:
-                        directory = task_directory(task_id)
                     break
                 stack.close()
             await asyncio.sleep(POLL_SECONDS)

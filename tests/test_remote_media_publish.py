@@ -2,13 +2,13 @@
 from contextlib import ExitStack
 import json
 import os
+from pathlib import Path
+import signal
 import subprocess
 import sys
 from threading import Event
 
 import pytest
-from pathlib import Path
-
 from patchright.sync_api import sync_playwright
 
 from tests.remote_media_cli import PROJECT, origin, sau_cli
@@ -130,8 +130,9 @@ tiktok._upload_video = record
     assert video.read_text() == "local video" and cover.read_text() == "local cover"
 
 
-@pytest.mark.parametrize("managed", [False, True])
-def test_first_required_failure_exits_while_earlier_photo_is_held(tmp_path, origin, sau_cli, managed):
+@pytest.mark.parametrize(("managed", "explicit_id"), [(False, True), (True, True), (False, False)])
+def test_first_required_failure_exits_while_earlier_photo_is_held(
+        tmp_path, origin, sau_cli, managed, explicit_id):
     base, assets, requests = origin
     release = Event()
     started = Event()
@@ -141,7 +142,12 @@ def test_first_required_failure_exits_while_earlier_photo_is_held(tmp_path, orig
         release.wait(15)
         handler.send_error(503)
 
+    def missing_photo(handler):
+        started.wait(5)
+        handler.send_error(404)
+
     assets["/held.jpg"] = slow
+    assets["/missing.jpg"] = missing_photo
     assets["/keep.jpg"] = (200, b"earlier download")
     prepared = sau_cli("media", "predownload", "--wait", "--task-id", "failed",
                        "--urls", base + "/keep.jpg")
@@ -153,7 +159,9 @@ def test_first_required_failure_exits_while_earlier_photo_is_held(tmp_path, orig
         # An attempted connection would be visible at the same controlled origin.
         flags, env = ["--profile-id", "fixture"], dict(ADSPOWER_API_KEY="offline", ADSPOWER_API_BASE=base)
     missing = base + "/missing.jpg"
-    child = sau_cli("tiktok", "upload-note", *flags, "--task-id", "failed", "--images",
+    if explicit_id:
+        flags += ["--task-id", "failed"]
+    child = sau_cli("tiktok", "upload-note", *flags, "--images",
                     base + "/held.jpg", missing, SAU_DOWNLOAD_CONCURRENCY="2", **env)
     try:
         assert started.wait(5)
@@ -166,6 +174,7 @@ def test_first_required_failure_exits_while_earlier_photo_is_held(tmp_path, orig
     assert missing in stderr and "HTTP 404" in stderr
     assert "publish_attempted=false" in stderr.splitlines()
     assert cached.read_bytes() == b"earlier download"
+    assert [p for p in cached.parent.parent.iterdir() if not p.name.startswith(".")] == [cached.parent]
     assert sorted(requests) == ["/held.jpg", "/keep.jpg", "/missing.jpg"]
 
 
@@ -195,7 +204,7 @@ tiktok._upload_video = publish
     stdout, stderr = early.communicate(timeout=8)
     assert early.returncode == 0 and json.loads(stdout)["status"] == "accepted", stderr
     child = sau_cli("tiktok", "upload-video", "--task-id", "priority", "--account", "local",
-                    "--file", urls[2], "--thumbnail", urls[0], "--title", "Urgent")
+                    "--file", urls[2], "--thumbnail", urls[0], "--title", "Urgent", "--no-publish")
     try:
         assert started.wait(5)
         with pytest.raises(subprocess.TimeoutExpired):
@@ -210,7 +219,8 @@ tiktok._upload_video = publish
     assert requests == ["/active.jpg", "/needed.mp4", "/ordinary.jpg"]
 
 
-def test_extensionless_direct_image_is_a_reusable_local_upload(tmp_path, origin, sau_cli):
+@pytest.mark.parametrize("source", ["/asset?key=1", "/asset.php?key=1"])
+def test_opaque_direct_image_is_a_reusable_local_upload(tmp_path, origin, sau_cli, source):
     base, assets, requests = origin
     body = b"\x89PNG\r\n\x1a\nphoto"
 
@@ -221,8 +231,8 @@ def test_extensionless_direct_image_is_a_reusable_local_upload(tmp_path, origin,
         handler.end_headers()
         handler.wfile.write(body)
 
-    assets["/asset?key=1"] = image
-    url = base + "/asset?key=1"
+    assets[source] = image
+    url = base + source
     fetched = sau_cli("media", "predownload", "--wait", "--task-id", "extensionless", "--urls", url)
     stdout, stderr = fetched.communicate(timeout=10)
     assert fetched.returncode == 0, stderr
@@ -238,7 +248,7 @@ tiktok._upload_note = publish
                     "--images", path, url)
     stdout, stderr = child.communicate(timeout=10)
     assert child.returncode == 0, stderr
-    assert requests == ["/asset?key=1"]
+    assert requests == [source]
 
 
 def test_predownload_is_independent_of_browser_credentials(origin, sau_cli):
@@ -249,3 +259,81 @@ def test_predownload_is_independent_of_browser_credentials(origin, sau_cli):
     stdout, stderr = child.communicate(timeout=10)
     assert child.returncode == 0, stderr
     assert json.loads(stdout)["status"] == "ready" and requests == ["/offline-cover"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT delivery")
+def test_interrupt_clears_temporary_directory_and_ends_other_interest(tmp_path, origin, sau_cli):
+    base, assets, requests = origin
+    received, release, joined = Event(), Event(), Event()
+
+    def stalled(handler):
+        received.set()
+        release.wait(15)
+
+    def witness(handler):
+        joined.set()
+        handler.send_error(404)
+
+    assets.update({"/held.jpg": stalled, "/join": witness})
+    local = tmp_path / "mine.jpg"
+    local.write_text("owned by caller")
+    env = {"SAU_DOWNLOAD_CONCURRENCY": "2"}
+    url = base + "/held.jpg"
+    child = sau_cli("tiktok", "upload-note", "--account", "local", "--images", str(local), url, **env)
+    waiting = None
+    try:
+        assert received.wait(6)
+        directory, = [p for p in (tmp_path / "downloads").iterdir() if not p.name.startswith(".")]
+        waiting = sau_cli("media", "predownload", "--wait", "--task-id", directory.name,
+                          "--urls", url, base + "/join", **env)
+        assert joined.wait(6)
+        child.send_signal(signal.SIGINT)
+        stdout, stderr = child.communicate(timeout=5)
+        assert child.returncode == 130, stderr
+        assert not directory.exists() and local.read_text() == "owned by caller"
+        stdout, stderr = waiting.communicate(timeout=5)
+        assert waiting.returncode == 1, stderr
+        assert json.loads(stdout) == {"task_id": directory.name, "status": "task_cleared", "items": []}
+    finally:
+        release.set()
+        if child.poll() is None:
+            child.communicate(timeout=10)
+        if waiting and waiting.poll() is None:
+            waiting.communicate(timeout=10)
+
+
+def test_completed_media_can_publish_while_an_unrelated_request_holds_the_only_slot(
+        tmp_path, origin, sau_cli):
+    base, assets, requests = origin
+    held, release = Event(), Event()
+
+    def slow(handler):
+        held.set()
+        release.wait(15)
+        handler.send_error(404)
+
+    assets.update({"/held": slow, "/cached.mp4": (200, b"original")})
+    url = base + "/cached.mp4"
+    cached = sau_cli("media", "predownload", "--wait", "--task-id", "prepared", "--urls", url)
+    stdout, stderr = cached.communicate(timeout=10)
+    assert cached.returncode == 0 and json.loads(stdout)["status"] == "ready", stderr
+    busy = sau_cli("media", "predownload", "--task-id", "other", "--urls", base + "/held")
+    stdout, stderr = busy.communicate(timeout=10)
+    assert busy.returncode == 0 and held.wait(5), stderr
+    (tmp_path / "sitecustomize.py").write_text("""
+from sau_commands import tiktok
+async def publish(request, target):
+    assert request.video_file.read_bytes() == b"original"
+tiktok._upload_video = publish
+""")
+    assets["/cached.mp4"] = (200, b"updated")
+    child = sau_cli("tiktok", "upload-video", "--account", "local", "--no-publish",
+                    "--task-id", "prepared", "--file", url, "--title", "Ready")
+    try:
+        stdout, stderr = child.communicate(timeout=4)
+    finally:
+        release.set()
+        if child.poll() is None:
+            child.communicate(timeout=10)
+    assert child.returncode == 0, stderr
+    assert requests == ["/cached.mp4", "/held"]
