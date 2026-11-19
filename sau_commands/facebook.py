@@ -18,10 +18,10 @@ from uploader.meta_uploader.facebook_uploader.main import (
     is_logged_in,
 )
 from uploader.meta_uploader.facebook_uploader.posts import facebook_post_action
+from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    existing_file_path,
     parse_tags,
 )
 from sau_commands.browser import (
@@ -77,7 +77,10 @@ def register(platform_parsers):
         "upload-video", help="Upload one video to a Facebook personal post"
     )
     facebook_upload_video_parser.add_argument("--account", required=False, help="Facebook user-defined account_name")
-    facebook_upload_video_parser.add_argument("--file", required=True, type=existing_file_path, help="Video file path")
+    add_task_id(facebook_upload_video_parser)
+    facebook_upload_video_parser.add_argument(
+        "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
+    )
     facebook_upload_video_parser.add_argument("--title", required=True, help="Post title, merged into Facebook caption")
     facebook_upload_video_parser.add_argument("--desc", default="", help="Optional post description")
     facebook_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
@@ -92,7 +95,10 @@ def register(platform_parsers):
 
     facebook_note = facebook_actions.add_parser("upload-note", help="向个人主页发布图片及正文")
     facebook_note.add_argument("--account", required=False)
-    facebook_note.add_argument("--images", required=True, nargs="+", type=existing_file_path)
+    add_task_id(facebook_note)
+    facebook_note.add_argument(
+        "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
+    )
     facebook_note.add_argument("--title", required=True)
     facebook_note.add_argument("--note", default="")
     facebook_note.add_argument("--tags", default="")

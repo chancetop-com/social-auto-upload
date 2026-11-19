@@ -11,7 +11,7 @@ from threading import Event
 import pytest
 from patchright.sync_api import sync_playwright
 
-from tests.remote_media_cli import PROJECT, origin, sau_cli
+from tests.remote_media_cli import PROJECT, origin, sau_cli, set_publish_clock
 from tests.shared_publish_sites import TikTokSite
 from tests.test_shared_instagram_tiktok import matching_page
 from tests.test_shared_adspower_process import OfflineProfile, installations
@@ -20,13 +20,11 @@ from tests.test_shared_adspower_process import OfflineProfile, installations
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX isolated Chromium fixture")
 @pytest.mark.parametrize(("managed", "explicit_id"), [(True, True), (False, False)])
 def test_photo_order_and_full_budget_after_eighteen_minutes_of_acquisition(
-        tmp_path, installations, origin, sau_cli, managed, explicit_id):
+        tmp_path, installations, origin, sau_cli, set_publish_clock, managed, explicit_id):
     base, assets, requests = origin
-    clock = tmp_path / "monotonic"
-    clock.write_text("0")
 
     def cover_response(handler):
-        clock.write_text("1080")
+        set_publish_clock(1080)
         handler.send_response(200)
         handler.send_header("Content-Length", "12")
         handler.end_headers()
@@ -36,16 +34,10 @@ def test_photo_order_and_full_budget_after_eighteen_minutes_of_acquisition(
     cover = base + "/cover.jpg?key=signed"
     local = tmp_path / "local.png"
     local.write_text("local photo")
-    # Only the publish budget reads virtual monotonic time. The scheduler,
-    # browser deadlines, HTTP clients and event loop keep their real clocks.
-    (tmp_path / "sitecustomize.py").write_text("""
+    with (tmp_path / "sitecustomize.py").open("a") as config:
+        config.write("""
 from contextlib import asynccontextmanager
-from pathlib import Path
-from types import SimpleNamespace
 import os
-from uploader import publish_timeout
-clock = Path(os.environ["TEST_PUBLISH_CLOCK"])
-publish_timeout.time = SimpleNamespace(monotonic=lambda: float(clock.read_text()))
 if "TEST_LOCAL_CDP" in os.environ:
     from sau_commands import tiktok
     from utils.browser_session import BrowserSession
@@ -63,7 +55,7 @@ if "TEST_LOCAL_CDP" in os.environ:
         args = ["--images", cover, str(local), cover, "--title", "Photo order"]
         if explicit_id:
             args += ["--task-id", "post"]
-        env = {"HUMANIZE": "0", "TEST_PUBLISH_CLOCK": str(clock), "PYTHONPATH": str(tmp_path)}
+        env = {"HUMANIZE": "0", "PYTHONPATH": str(tmp_path)}
         if managed:
             child = profile.command(0, "tiktok", *args, action="upload-note", env=env)
         else:
@@ -73,7 +65,7 @@ if "TEST_LOCAL_CDP" in os.environ:
             stack.callback(profile.reap, child)
         page = matching_page(profile, lambda p: p.locator("#images").count() and
                              p.locator("#images").evaluate("input => input.files.length === 3"), child)
-        clock.write_text("1979")  # Use 899 of the platform's 900 seconds.
+        set_publish_clock(1979)  # Use 899 of the platform's 900 seconds.
         page.locator("#post").evaluate("button => button.disabled = false")
         stdout, stderr = child.communicate(timeout=25)
         assert child.returncode == 0, (stdout, stderr)
@@ -130,9 +122,13 @@ tiktok._upload_video = record
     assert video.read_text() == "local video" and cover.read_text() == "local cover"
 
 
-@pytest.mark.parametrize(("managed", "explicit_id"), [(False, True), (True, True), (False, False)])
+@pytest.mark.parametrize(("platform", "managed", "explicit_id"), [
+    ("tiktok", False, True), ("tiktok", True, True), ("tiktok", False, False),
+    ("xiaohongshu", True, True), ("rednote", True, True), ("youtube", True, True),
+    ("facebook", True, True), ("facebook-page", True, True), ("instagram", True, True),
+])
 def test_first_required_failure_exits_while_earlier_photo_is_held(
-        tmp_path, origin, sau_cli, managed, explicit_id):
+        tmp_path, origin, sau_cli, platform, managed, explicit_id):
     base, assets, requests = origin
     release = Event()
     started = Event()
@@ -146,7 +142,8 @@ def test_first_required_failure_exits_while_earlier_photo_is_held(
         started.wait(5)
         handler.send_error(404)
 
-    assets["/held.jpg"] = slow
+    held_path = "/held.mp4" if platform == "youtube" else "/held.jpg"
+    assets[held_path] = slow
     assets["/missing.jpg"] = missing_photo
     assets["/keep.jpg"] = (200, b"earlier download")
     prepared = sau_cli("media", "predownload", "--wait", "--task-id", "failed",
@@ -161,8 +158,14 @@ def test_first_required_failure_exits_while_earlier_photo_is_held(
     missing = base + "/missing.jpg"
     if explicit_id:
         flags += ["--task-id", "failed"]
-    child = sau_cli("tiktok", "upload-note", *flags, "--images",
-                    base + "/held.jpg", missing, SAU_DOWNLOAD_CONCURRENCY="2", **env)
+    if platform == "youtube":
+        action = "upload-video"
+        inputs = ["--file", base + held_path, "--thumbnail", missing]
+    else:
+        action = "upload-note"
+        inputs = ["--images", base + held_path, missing]
+    child = sau_cli(platform, action, *flags, "--title", "Offline", *inputs,
+                    SAU_DOWNLOAD_CONCURRENCY="2", **env)
     try:
         assert started.wait(5)
         stdout, stderr = child.communicate(timeout=4)
@@ -175,7 +178,7 @@ def test_first_required_failure_exits_while_earlier_photo_is_held(
     assert "publish_attempted=false" in stderr.splitlines()
     assert cached.read_bytes() == b"earlier download"
     assert [p for p in cached.parent.parent.iterdir() if not p.name.startswith(".")] == [cached.parent]
-    assert sorted(requests) == ["/held.jpg", "/keep.jpg", "/missing.jpg"]
+    assert sorted(requests) == [held_path, "/keep.jpg", "/missing.jpg"]
 
 
 def test_publish_promotes_waiting_urls_and_shares_the_active_transfer(tmp_path, origin, sau_cli):

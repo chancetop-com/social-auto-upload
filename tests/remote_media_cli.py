@@ -47,6 +47,27 @@ def media_cli(tmp_path):
 
 
 @pytest.fixture
+def set_publish_clock(tmp_path):
+    """Advance only the platform's monotonic budget across CLI processes."""
+    clock = tmp_path / "monotonic"
+
+    def set_time(seconds):
+        pending = clock.with_suffix(".tmp")
+        pending.write_text(str(seconds))
+        pending.replace(clock)
+
+    set_time(0)
+    (tmp_path / "sitecustomize.py").write_text("""
+from pathlib import Path
+from types import SimpleNamespace
+from uploader import publish_timeout
+clock = Path(__file__).with_name("monotonic")
+publish_timeout.time = SimpleNamespace(monotonic=lambda: float(clock.read_text()))
+""")
+    return set_time
+
+
+@pytest.fixture
 def origin():
     assets = {}
     requests = []

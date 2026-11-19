@@ -18,6 +18,7 @@ class Studio:
         self.outcome = outcome
         self.requests = []
         self.submissions = []
+        self.uploaded_files = []
         self.submitted = threading.Event()
 
     def site(self):
@@ -36,6 +37,7 @@ class Studio:
                 elif path == "/record":
                     fields = parse_qs(urlsplit(self.path).query)
                     studio.submissions.append((fields["title"][0], fields["file"][0]))
+                    studio.uploaded_files.append(json.loads(fields["contents"][0]))
                     self.respond(b"OK", "text/plain")
                     studio.submitted.set()
                 else:
@@ -46,6 +48,7 @@ class Studio:
     def editor(self):
         return """
             <input type=file>
+            <ytcp-thumbnail-uploader><input type=file></ytcp-thumbnail-uploader>
             <div id=title-textarea><div id=textbox contenteditable=true>old title</div></div>
             <tp-yt-paper-radio-button name=VIDEO_MADE_FOR_KIDS_NOT_MFK>Adults</tp-yt-paper-radio-button>
             <tp-yt-paper-radio-button name=PUBLIC>Public</tp-yt-paper-radio-button>
@@ -60,7 +63,9 @@ class Studio:
             document.querySelector('#done-button').onclick = async () => {
                 const title = document.querySelector('#textbox').innerText;
                 const file = document.querySelector('input').files[0].name;
-                await fetch('/record?' + new URLSearchParams({title, file}));
+                const files = [...document.querySelectorAll('input[type=file]')].flatMap(i => [...i.files]);
+                const contents = JSON.stringify(await Promise.all(files.map(f => f.text())));
+                await fetch('/record?' + new URLSearchParams({title, file, contents}));
                 if (outcome === 'unconfirmed' || outcome === 'page-lost') return;
                 if (outcome === 'post-login') history.pushState({}, '', '/signin');
                 document.body.innerHTML = '<div role=dialog><a href="https://youtu.be/offline">Video</a>' +
