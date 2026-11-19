@@ -23,10 +23,10 @@ from uploader.meta_uploader.insgraph_uploader.options import (
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
+from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    existing_file_path,
     parse_image_files,
     parse_tags,
 )
@@ -60,8 +60,13 @@ def register(platform_parsers):
             add_browser_flags(action_parser)
     instagram_video = instagram_actions.add_parser("upload-video", help="向 Instagram 发布视频/Reel")
     instagram_video.add_argument("--account", required=False)
-    instagram_video.add_argument("--file", required=True, type=existing_file_path)
-    instagram_video.add_argument("--thumbnail", type=existing_file_path, help="Reel 自定义封面（JPG/JPEG/PNG）")
+    add_task_id(instagram_video)
+    instagram_video.add_argument(
+        "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
+    )
+    instagram_video.add_argument(
+        "--thumbnail", type=media_source, help="Reel 自定义封面（JPG/JPEG/PNG），支持本地路径或 HTTP(S) URL"
+    )
     instagram_video.add_argument("--title", required=True)
     instagram_video.add_argument("--desc", default="")
     instagram_video.add_argument("--tags", default="")
@@ -74,7 +79,10 @@ def register(platform_parsers):
     add_browser_flags(instagram_video)
     instagram_note = instagram_actions.add_parser("upload-note", help="向 Instagram 发布图片或轮播")
     instagram_note.add_argument("--account", required=False)
-    instagram_note.add_argument("--images", required=True, nargs="+", type=existing_file_path)
+    add_task_id(instagram_note)
+    instagram_note.add_argument(
+        "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
+    )
     instagram_note.add_argument("--title", required=True)
     instagram_note.add_argument("--note", default="")
     instagram_note.add_argument("--tags", default="")
