@@ -79,10 +79,12 @@ def task_directory(task_id: str, *, new=False) -> Path:
     except FileExistsError:
         if new or not directory.is_dir():
             raise
-        validate_task_owner(directory, task_id)
+        if not validate_task_owner(directory, task_id):
+            return directory
     else:
         with (directory / TASK_OWNER_FILE).open("xb") as marker:
             marker.write(task_id.encode("utf-8"))
+    os.utime(directory, follow_symlinks=False)
     return directory
 
 

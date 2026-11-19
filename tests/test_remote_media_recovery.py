@@ -162,6 +162,44 @@ def test_accepted_interest_survives_waiter_and_worker_until_next_acquisition(med
             waiter.wait()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Uses the POSIX process tree and signals")
+def test_recovery_refreshes_a_retained_task_when_its_abandoned_writer_is_retired(
+        tmp_path, media_cli, origin):
+    base, assets, requests = origin
+    started, disconnected = Event(), Event()
+
+    def stalled(handler):
+        started.set()
+        handler.connection.settimeout(12)
+        if not handler.connection.recv(1):
+            disconnected.set()
+
+    assets.update({"/stalled": stalled, "/other": (200, b"other")})
+    waiter = media_cli("--wait", "--task-id", "retained", "--urls", base + "/stalled")
+    directory = tmp_path / "downloads" / "retained"
+    old = int(time.time()) - 14 * 24 * 60 * 60
+    try:
+        assert started.wait(8)
+        os.kill(waiter.pid, signal.SIGSTOP)
+        os.kill(worker_of(waiter), signal.SIGKILL)
+        assert disconnected.wait(5)
+        os.utime(directory, (old, old))
+        waiter.send_signal(signal.SIGINT)
+        os.kill(waiter.pid, signal.SIGCONT)
+        waiter.communicate(timeout=5)
+        assert waiter.returncode == 130 and directory.stat().st_mtime > old
+        # Withdrawal succeeded while the scheduler was down. Its next run
+        # retires the interrupted writer before the task can be idle again.
+        os.utime(directory, (old, old))
+        ready(media_cli("--wait", "--task-id", "other", "--urls", base + "/other"))
+        assert directory.stat().st_mtime > old
+        assert requests == ["/stalled", "/other"]
+    finally:
+        if waiter.poll() is None:
+            waiter.kill()
+            waiter.wait()
+
+
 def test_terminating_one_waiter_leaves_shared_transfer_running(media_cli, origin):
     base, assets, requests = origin
     started, joined, release = Event(), Event(), Event()

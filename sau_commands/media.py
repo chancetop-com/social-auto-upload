@@ -3,7 +3,7 @@ import json
 import sqlite3
 import sys
 
-from utils.media_queue import TaskCleared, submit, wait_for_result
+from utils.media_queue import TaskCleared, cleanup_idle_tasks, submit, wait_for_result
 from utils.remote_media import validate_task_id, validate_url
 
 
@@ -14,9 +14,13 @@ def register(platform_parsers):
     predownload.add_argument("--task-id", type=validate_task_id, required=True)
     predownload.add_argument("--urls", nargs="+", type=validate_url, required=True)
     predownload.add_argument("--wait", action="store_true")
+    actions.add_parser("cleanup", help="Remove managed media tasks idle for seven days")
 
 
 async def run(args):
+    if args.action == "cleanup":
+        cleanup_idle_tasks()
+        return 0
     try:
         request_id = await submit(args.task_id, args.urls, background=not args.wait)
         if not args.wait:

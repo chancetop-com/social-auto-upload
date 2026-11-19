@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager, closing, contextmanager, ExitStack
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -12,7 +14,10 @@ from threading import Thread
 from uuid import uuid4
 
 from utils.errors import UsageError
-from utils.remote_media import QUEUE_DIRECTORY, download_item, download_root, item_path, task_directory, validate_task_id
+from utils.remote_media import (
+    QUEUE_DIRECTORY, TASK_OWNER_FILE, download_item, download_root, item_path, task_directory,
+    validate_task_id, validate_task_owner,
+)
 
 POLL_SECONDS = 0.05
 
@@ -54,6 +59,25 @@ def directory_key(directory):
     """The same physical directory can have several spellings on some filesystems."""
     stat = directory.stat()
     return f"{stat.st_dev}:{stat.st_ino}"
+
+
+def _refresh_retained(root, task_id, key):
+    directory = root / validate_task_id(task_id)
+    try:
+        if (not root.is_symlink() and not directory.is_symlink()
+                and directory_key(directory) == key and validate_task_owner(directory, task_id)):
+            os.utime(directory, follow_symlinks=False)
+    except FileNotFoundError:
+        pass  # A clear can already have retired this request's directory.
+
+
+def _finish_requests(db, root, where, parameters=()):
+    # A withdrawn request must never refresh a new generation of the same ID.
+    tasks = db.execute(f"""SELECT DISTINCT task_id, directory_key FROM requests
+                           WHERE ({where}) AND reason IS NOT 'task_cleared'""", parameters).fetchall()
+    for task_id, key in tasks:
+        _refresh_retained(root, task_id, key)
+    db.execute(f"DELETE FROM requests WHERE {where}", parameters)
 
 
 def _initialize(db):
@@ -105,7 +129,7 @@ class Request:
 
     def withdraw(self):
         with transaction() as db:
-            db.execute("DELETE FROM requests WHERE request_id=?", (self.id,))
+            _finish_requests(db, download_root(), "request_id=?", (self.id,))
             if self.lease is not None:
                 self.lease.close()
                 (_queue_directory(download_root()) / (self.id + ".lease")).unlink()
@@ -242,13 +266,17 @@ def _withdraw_dead_waiters(db, root):
     waiters = db.execute("SELECT DISTINCT request_id FROM requests WHERE NOT background")
     for (owner,) in waiters.fetchall():
         if _release_abandoned(root, owner):
-            db.execute("DELETE FROM requests WHERE request_id=?", (owner,))
+            _finish_requests(db, root, "request_id=?", (owner,))
 
 
-def _reap_writer(db, root, token):
+def _reap_writer(db, root, token, *, interrupted=True):
     # The old process can still be exiting after a scheduler crash. A
     # never-started child checks its token under this same transaction.
     if _release_abandoned(root, token):
+        if interrupted:
+            task_id, key = db.execute("SELECT task_id, directory_key FROM writers WHERE token=?",
+                                      (token,)).fetchone()
+            _refresh_retained(root, task_id, key)
         db.execute("DELETE FROM writers WHERE token=?", (token,))
 
 
@@ -265,7 +293,7 @@ def _collect_writers(db, root, children):
                 _report(db, key, url, None, "Media transfer process failed")
             child.stdin.close()
             del children[token]
-        _reap_writer(db, root, token)
+        _reap_writer(db, root, token, interrupted=child is None or child.returncode != 0)
 
 
 async def revoke_task(task_id):
@@ -306,7 +334,7 @@ def _drain(root, concurrency):
                 _withdraw_dead_waiters(db, root)
                 db.execute("UPDATE requests SET accepted=1 WHERE accepted=0")
                 _collect_writers(db, root, children)
-                db.execute("DELETE FROM requests WHERE background AND (path IS NOT NULL OR reason IS NOT NULL)")
+                _finish_requests(db, root, "background AND (path IS NOT NULL OR reason IS NOT NULL)")
                 running, = db.execute("SELECT COUNT(*) FROM writers").fetchone()
                 slots = min(concurrency, sys.maxsize) - running
                 if slots > 0:
@@ -389,7 +417,9 @@ async def publish_access(task_id, *, new=False):
             async with task_gate(task_id):
                 if stack.enter_context(task_lease(task_id, "publish")):
                     try:
-                        directory = task_directory(task_id, new=new)
+                        with transaction() as db:
+                            _initialize(db)
+                            directory = task_directory(task_id, new=new)
                     except FileExistsError:
                         if not new:
                             raise
@@ -397,12 +427,48 @@ async def publish_access(task_id, *, new=False):
                     break
                 stack.close()
             await asyncio.sleep(POLL_SECONDS)
-        yield directory
+        key = directory_key(directory) if directory is not None else None
+        try:
+            yield directory
+        finally:
+            if directory is not None:
+                _refresh_retained(directory.parent, task_id, key)
 
 
 def worker_running():
     with _worker_lease(download_root()) as available:
         return not available
+
+
+def _expired(directory, cutoff):
+    info = directory.lstat()
+    return stat.S_ISDIR(info.st_mode) and info.st_mtime_ns <= cutoff
+
+
+def cleanup_idle_tasks():
+    root = download_root()
+    if root.is_symlink() or not (root / QUEUE_DIRECTORY / "requests.sqlite").is_file():
+        return
+    cutoff = time.time_ns() - 7 * 24 * 60 * 60 * 10**9
+    for directory in root.iterdir():
+        try:
+            validate_task_id(directory.name)
+            if not _expired(directory, cutoff) or not (directory / TASK_OWNER_FILE).is_file():
+                continue
+            with task_lease(directory.name, "gate") as admitted:
+                if not admitted:
+                    continue
+                with task_lease(directory.name, "publish") as available:
+                    if not available or not validate_task_owner(directory, directory.name):
+                        continue
+                    with transaction(root) as db:
+                        active = db.execute("""SELECT 1 FROM requests WHERE task_id=?
+                                               UNION ALL SELECT 1 FROM writers WHERE task_id=? LIMIT 1""",
+                                            (directory.name, directory.name)).fetchone()
+                    if not active and _expired(directory, cutoff):
+                        shutil.rmtree(directory)
+        except (ValueError, OSError, sqlite3.Error):
+            continue
 
 
 def worker(root):
