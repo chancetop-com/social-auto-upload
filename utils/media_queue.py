@@ -12,7 +12,10 @@ from threading import Thread
 from uuid import uuid4
 
 from utils.errors import UsageError
-from utils.remote_media import QUEUE_DIRECTORY, download_item, download_root, item_path, task_directory, validate_task_id
+from utils.remote_media import (
+    QUEUE_DIRECTORY, download_item, download_root, item_path, owned_task_stat, remove_task_files,
+    task_directory, validate_task_id,
+)
 
 POLL_SECONDS = 0.05
 
@@ -268,14 +271,25 @@ def _collect_writers(db, root, children):
         _reap_writer(db, root, token)
 
 
-async def revoke_task(task_id):
+async def revoke_task(task_id, url=None):
     """Under task_gate, invalidate existing interests and drain their writers."""
     with transaction() as db:
         _initialize(db)
-        db.execute("DELETE FROM requests WHERE task_id=? AND background", (task_id,))
-        db.execute("""UPDATE requests SET accepted=1, path=NULL, reason='task_cleared'
-                      WHERE task_id=? AND NOT background""", (task_id,))
-    await wait_for_writers(task_id)
+        scope = (task_id, url, url)
+        db.execute("""DELETE FROM requests WHERE task_id=? AND (? IS NULL OR url=?) AND background""", scope)
+        reason = "task_cleared" if url is None else "item_deleted"
+        db.execute("""UPDATE requests SET accepted=1, path=NULL, reason=?
+                      WHERE task_id=? AND (? IS NULL OR url=?) AND NOT background
+                        AND reason IS NOT 'task_cleared'""", (reason, *scope))
+    await wait_for_writers(task_id, url)
+
+
+async def clear_media(task_id, url=None):
+    """Under task_gate, revoke existing work and remove its owned files."""
+    directory = download_root() / validate_task_id(task_id)
+    original = owned_task_stat(directory)
+    await revoke_task(task_id, url)
+    remove_task_files(directory, original, url)
 
 
 async def wait_for_writers(task_id, url=None):
@@ -371,10 +385,21 @@ def task_lease(task_id, purpose):
 
 
 @asynccontextmanager
-async def task_gate(task_id):
+async def task_gate(task_id, *, refuse_publish=False):
     """Serialize admissions and destructive operations on this ID only."""
     while True:
         with task_lease(task_id, "gate") as acquired:
+            if refuse_publish:
+                # A publisher may itself hold the gate while draining writers.
+                # Check its lease on each attempt, even if the gate is busy.
+                root = download_root()
+                filename = Path("task-locks") / task_id / "publish.lease"
+                with transaction(root):
+                    if (_queue_directory(root) / filename).exists():
+                        probe = _try_lease(root, filename)
+                        if probe is None:
+                            raise OSError("Task is in use by a publish command")
+                        probe.close()
             if acquired:
                 yield
                 return

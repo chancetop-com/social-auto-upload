@@ -3,7 +3,7 @@ import json
 import sqlite3
 import sys
 
-from utils.media_queue import TaskCleared, submit, wait_for_result
+from utils.media_queue import TaskCleared, clear_media, submit, task_gate, wait_for_result
 from utils.remote_media import validate_task_id, validate_url
 
 
@@ -14,9 +14,24 @@ def register(platform_parsers):
     predownload.add_argument("--task-id", type=validate_task_id, required=True)
     predownload.add_argument("--urls", nargs="+", type=validate_url, required=True)
     predownload.add_argument("--wait", action="store_true")
+    delete = actions.add_parser("delete", help="Remove downloaded media and cancel queued transfers",
+                                usage="%(prog)s --task-id ID [--url URL]")
+    # Delete reports a missing ID as a one-line operational failure (exit 1).
+    delete.add_argument("--task-id", nargs="?", metavar="ID", help="Required task ID")
+    delete.add_argument("--url", help="Remove only this full HTTP(S) URL")
 
 
 async def run(args):
+    if args.action == "delete":
+        try:
+            task_id = validate_task_id(args.task_id)
+            url = validate_url(args.url) if args.url is not None else None
+            async with task_gate(task_id, refuse_publish=True):
+                await clear_media(task_id, url)
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            print(" ".join(str(exc).splitlines()), file=sys.stderr)
+            return 1
+        return 0
     try:
         request_id = await submit(args.task_id, args.urls, background=not args.wait)
         if not args.wait:
