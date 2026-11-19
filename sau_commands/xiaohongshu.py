@@ -490,6 +490,7 @@ async def run(args):
             print(NO_PUBLISH_SUCCESS)
         else:
             print(f"Xiaohongshu video upload submitted: {request.video_file}")
+            args.post_published = not request.publish_date
         return 0
 
     if args.action == "upload-note":
@@ -523,6 +524,7 @@ async def run(args):
             print(NO_PUBLISH_SUCCESS)
         else:
             print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")
+            args.post_published = not request.publish_date
         return 0
 
     raise RuntimeError(f"Unsupported Xiaohongshu action: {args.action}")

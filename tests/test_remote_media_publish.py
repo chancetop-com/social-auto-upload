@@ -73,6 +73,8 @@ if "TEST_LOCAL_CDP" in os.environ:
     assert submission["contents"] == ["remote cover", "local photo", "remote cover"]
     assert requests == ["/cover.jpg?key=signed"]
     assert local.read_text() == "local photo"
+    if explicit_id:
+        assert not (tmp_path / "downloads" / "post").exists()
 
 
 def test_video_and_cover_are_independent_sources_and_only_remote_invocations_use_storage(

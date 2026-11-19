@@ -1,5 +1,6 @@
 """Offline upload receivers installed as sitecustomize by CLI contract tests."""
 import json
+import os
 from pathlib import Path
 
 from sau_commands import facebook, facebook_page, instagram, rednote, xiaohongshu, youtube
@@ -10,7 +11,7 @@ def receive(paths):
     Path("received.json").write_text(json.dumps([
         {"path": str(path), "bytes": path.read_bytes().hex()} for path in files
     ]))
-    return {"status": "published"}
+    return {"status": os.environ.get("SAU_TEST_POST_STATUS", "published")}
 
 
 async def video(self):

@@ -67,6 +67,7 @@ def test_local_and_predownloaded_video_and_cover(tmp_path, origin, sau_cli, rece
     assert [item["path"] for item in handoff] == prepared_paths
     assert [bytes.fromhex(item["bytes"]) for item in handoff] == remote_bytes
     assert requests == files
+    assert not Path(prepared_paths[0]).parent.exists()
 
 
 @pytest.mark.parametrize("platform", [name for name in PLATFORMS if name != "youtube"])

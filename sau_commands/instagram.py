@@ -365,6 +365,7 @@ async def run(args):
         validate_instagram_publish_request(request)
         result = await upload_instagram_content(request, target=target)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        args.post_published = not request.no_publish and result.get("status") == "published"
         return 0
 
     raise RuntimeError(f"Unsupported Instagram action: {args.action}")

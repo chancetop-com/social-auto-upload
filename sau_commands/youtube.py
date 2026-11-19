@@ -203,6 +203,7 @@ async def run(args):
         )
         await upload_youtube_video(request, target=target)
         print(f"YouTube video upload submitted: {request.video_file}")
+        args.post_published = True
         return 0
 
     raise RuntimeError(f"Unsupported YouTube action: {args.action}")

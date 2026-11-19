@@ -3,12 +3,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from copy import copy
 from pathlib import Path
-import shutil
 import sqlite3
+import sys
 from uuid import uuid4
 
 from sau_commands.arguments import existing_file_path
-from utils.media_queue import publish_access, revoke_task, submit, task_gate, wait_for_result
+from utils.media_queue import clear_media, publish_access, submit, task_gate, wait_for_result
 from utils.remote_media import validate_task_id, validate_url
 
 
@@ -36,39 +36,59 @@ async def publish_media(args):
     temporary = task_id is None
     while True:
         candidate = uuid4().hex if temporary else task_id
-        async with publish_access(candidate, new=temporary) as directory:
-            if directory is None:
-                continue
-            try:
-                yield await _resolve(args, images, urls, candidate)
-            finally:
-                if temporary:
-                    try:
-                        await _clear_temporary(directory)
-                    except asyncio.CancelledError:
-                        # A first SIGINT can arrive during cleanup itself.
-                        await _clear_temporary(directory)
-                        raise
-            return
+        published = False
+        try:
+            async with publish_access(candidate, new=temporary) as directory:
+                if directory is None:
+                    continue
+                try:
+                    resolved = await _resolve(args, images, urls, candidate)
+                    # Only the platform knows which successful runs actually published.
+                    resolved.post_published = False
+                    yield resolved
+                    published = resolved.post_published
+                finally:
+                    if temporary or published:
+                        await _release(candidate, published)
+        except Exception as error:
+            if not published:
+                raise
+            # Neither filesystem removal nor release of the task lock changes the post.
+            print(f"Post published. Could not release media task {candidate}: {error}", file=sys.stderr)
+        return
 
 
-async def _clear_temporary(directory):
-    async with task_gate(directory.name):
-        await revoke_task(directory.name)
-        if directory.exists():
-            shutil.rmtree(directory)
+async def _release(task_id, published):
+    async def clear():
+        try:
+            async with task_gate(task_id):
+                await clear_media(task_id)
+        except Exception as error:
+            if published:
+                raise
+            # Preserve the original platform outcome on temporary task teardown as well.
+            print(f"Could not release media task {task_id}: {error}", file=sys.stderr)
+
+    # Finish draining this generation even when a first SIGINT arrives during cleanup.
+    cleanup = asyncio.create_task(clear())
+    try:
+        await asyncio.shield(cleanup)
+    except asyncio.CancelledError:
+        await cleanup
+        if not published:
+            raise
 
 
 async def _resolve(args, images, urls, task_id):
+    resolved = copy(args)
     if not urls:
-        return args
+        return resolved
     try:
         request = await submit(task_id, urls, background=False, priority=True)
         items = await wait_for_result(request, urls, fail_fast=True)
     except (OSError, sqlite3.Error) as exc:
         raise RuntimeError(f"Could not acquire media for {task_id}: {exc}\npublish_attempted=false") from exc
     paths = {url: Path(item["path"]) for url, item in zip(urls, items)}
-    resolved = copy(args)
     for field in ("file", "thumbnail"):
         source = getattr(args, field, None)
         if source in paths:

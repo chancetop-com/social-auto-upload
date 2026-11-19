@@ -572,6 +572,7 @@ async def run(args):
             print(NO_PUBLISH_SUCCESS)
         else:
             print(f"TikTok note upload submitted: {len(request.image_files)} images")
+            args.post_published = not request.publish_date
         return 0
 
     if args.action == "upload-video":
@@ -596,6 +597,7 @@ async def run(args):
             print(NO_PUBLISH_SUCCESS)
         else:
             print(f"TikTok video upload submitted: {request.video_file}")
+            args.post_published = not request.publish_date
         return 0
 
     raise RuntimeError(f"Unsupported TikTok action: {args.action}")

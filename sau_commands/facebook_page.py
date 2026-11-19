@@ -253,6 +253,7 @@ async def run(args):
         )
         result = await upload_meta_content(request, target=target)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        args.post_published = result.get("status") == "published"
         return 0
 
     raise RuntimeError(f"Unsupported {args.platform} action: {args.action}")

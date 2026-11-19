@@ -283,6 +283,7 @@ async def run(args):
                 publish_not_before=args.not_before,
             )
             print("Facebook image post submitted")
+            args.post_published = True
             return 0
 
         app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
@@ -290,6 +291,7 @@ async def run(args):
         app.publish_not_before = args.not_before
         await app.main()
         print("Facebook image post submitted")
+        args.post_published = True
         return 0
 
     if args.action == "upload-video":
@@ -307,6 +309,7 @@ async def run(args):
         )
         await upload_facebook_video(request, target=target)
         print(f"Facebook video upload submitted: {request.video_file}")
+        args.post_published = True
         return 0
 
     raise RuntimeError(f"Unsupported Facebook action: {args.action}")
