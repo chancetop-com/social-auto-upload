@@ -23,6 +23,7 @@ from patchright.async_api import (
 )
 
 from uploader.meta_uploader.insgraph_uploader.controls import (
+    AltTextControl,
     resolve_instagram_option_controls,
 )
 from uploader.meta_uploader.insgraph_uploader.controls._rows import (
@@ -875,20 +876,20 @@ class InstagramUploader:
 
     async def _apply_one_option(
         self, key: str, requested, control, *, budget: PublishTimeoutBudget
-    ) -> str | None:
-        """解析入口、回读、必要时设置并再次回读。
-
-        返回 ``None`` 表示已按页面状态记录结果；返回错误文案表示控件明确判定
-        请求无法表达（``OptionMismatchError``），结果已记为 ``mismatch``，文案
-        并入管线聚合错误。其他异常交由管线兜底。
-        """
+    ) -> None:
+        """解析入口、按需设置，并记录回读结果。"""
         kind = option_kind(key)
+        if isinstance(control, AltTextControl):
+            presence, applied = await control.apply(requested)
+            status, reason = option_status(requested, applied, kind=kind, presence=presence)
+            self._record_option(key, requested, applied, status, reason)
+            return
         if control is None:
             status, reason = option_status(
                 requested, None, kind=kind, presence=MISSING
             )
             self._record_option(key, requested, None, status, reason)
-            return None
+            return
         presence = await control.resolve()
         if presence != PRESENT:
             status, reason = option_status(
@@ -903,26 +904,20 @@ class InstagramUploader:
                 except Exception:
                     applied = None
             self._record_option(key, requested, applied, status, reason)
-            return None
+            return
         current = await control.read()
         status, reason = option_status(requested, current, kind=kind)
         if status in (SET, DEFAULT_OFF):
             # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
             self._record_option(key, requested, current, status, reason)
-            return None
+            return
         budget.check_pre_click()
-        try:
-            await control.set(requested)
-            applied = await control.read()
-        except OptionMismatchError as error:
-            # 控件已确认无法表达请求：记录它读到的实际值，不中断后续选项。
-            self._record_option(key, requested, error.applied, MISMATCH)
-            return str(error) or type(error).__name__
+        await control.set(requested)
+        applied = await control.read()
         status, reason = option_status(
             requested, applied, kind=kind, presence=PRESENT, acted=True
         )
         self._record_option(key, requested, applied, status, reason)
-        return None
 
     async def _apply_options(
         self, page: Page, *, budget: PublishTimeoutBudget, controls: dict | None = None
@@ -944,11 +939,14 @@ class InstagramUploader:
                 continue
             budget.check_pre_click()
             try:
-                detail = await self._apply_one_option(
-                    key, requested, controls.get(key), budget=budget
-                )
-                if detail:
-                    details.append(f'{key}: {detail}')
+                try:
+                    await self._apply_one_option(
+                        key, requested, controls.get(key), budget=budget
+                    )
+                except OptionMismatchError as error:
+                    budget.check_pre_click()
+                    self._record_option(key, requested, error.applied, MISMATCH)
+                    details.append(f'{key}: {str(error) or type(error).__name__}')
                 await self._log_option_outcome(key, page)
             except LoginRequiredError:
                 # 登录失效属于硬异常：立即中止，不再操作后续选项（退出 10）。

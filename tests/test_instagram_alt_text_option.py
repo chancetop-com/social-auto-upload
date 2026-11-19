@@ -14,6 +14,9 @@ import unittest
 from pathlib import Path
 
 import sau_cli
+from tests.fakes_clock import FakeClock
+from uploader import publish_timeout
+from uploader.meta_uploader.insgraph_uploader.controls import alt_text
 from uploader.meta_uploader.insgraph_uploader.controls.alt_text import AltTextControl
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
@@ -198,6 +201,25 @@ class InstagramAltTextPipelineTests(unittest.TestCase):
                 },
             )
 
+    def test_value_lost_on_collapse_fails_the_carousel_readback(self):
+        requested = ('第一张图', '第二张图')
+        fields = [_FakeInput(), _FakeInput()]
+
+        class _DropsSecondValue(_StubAltTextControl):
+            async def _collapse(self):
+                await super()._collapse()
+                fields[1].value = ''
+
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(alt_texts=requested), folder=folder, image_count=2
+            )
+            control = _DropsSecondValue(fields, image_count=2)
+            with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+                self._apply(app, {'alt_text': control})
+            self.assertEqual(app.result['options']['alt_text']['applied'], ['第一张图', ''])
+            self.assertEqual((control.opens, control.closes), (2, 2))
+
     def test_partial_input_count_records_observed_values(self):
         class _PartialControl(_FakeAltTextControl):
             async def set(self, requested):
@@ -300,6 +322,9 @@ class _FakeInputs:
     async def count(self):
         return len(self.inputs)
 
+    async def evaluate_all(self, script):
+        return [field.value for field in self.inputs]
+
     def nth(self, index):
         return self.inputs[index]
 
@@ -319,7 +344,7 @@ class _StubAltTextControl(AltTextControl):
     async def _entry(self):
         return object()
 
-    async def _ensure_open(self):
+    async def _ensure_open(self, entry=None, *, require_activation=False):
         self.opens += 1
         return True, True
 
@@ -332,6 +357,12 @@ class _StubAltTextControl(AltTextControl):
 
 class AltTextControlUnitTests(unittest.TestCase):
     """真实控件的分支：0 个、1..N-1 个、N 个与失焦写入。"""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        clock_patch = self.clock.patch(alt_text, publish_timeout)
+        clock_patch.__enter__()
+        self.addCleanup(clock_patch.__exit__, None, None, None)
 
     def test_fills_every_input_in_order_without_truncation(self):
         inputs = [_FakeInput(), _FakeInput()]
@@ -362,6 +393,26 @@ class AltTextControlUnitTests(unittest.TestCase):
         self.assertIn('2', str(ctx.exception))
         # 数量不符时绝不填写，避免张冠李戴。
         self.assertEqual(inputs[0].fills, [])
+
+    def test_cleanup_failure_preserves_partial_values(self):
+        class _DetachedRow(_StubAltTextControl):
+            async def _collapse(self):
+                raise TimeoutError('row detached')
+
+        control = _DetachedRow([_FakeInput('第一张')], image_count=2)
+        with self.assertRaises(OptionMismatchError) as ctx:
+            asyncio.run(control.set(['一', '二']))
+        self.assertEqual(ctx.exception.applied, ['第一张'])
+
+    def test_late_input_wait_respects_publish_deadline(self):
+        control = _StubAltTextControl([_FakeInput()], image_count=2)
+        control.budget = publish_timeout.PublishTimeoutBudget(
+            'Instagram', timeout_seconds=0.125, pre_click_message='发布预算耗尽'
+        )
+        with self.assertRaisesRegex(RuntimeError, '发布预算耗尽'):
+            asyncio.run(control.apply(['一', '二']))
+        self.assertAlmostEqual(self.clock.now, 0.125)
+        self.assertEqual(control.closes, 1)
 
     def test_collapsed_section_reports_zero_without_toggling_again(self):
         class _Closed(_StubAltTextControl):

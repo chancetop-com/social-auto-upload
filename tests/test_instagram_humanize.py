@@ -321,6 +321,11 @@ class Field:
     async def input_value(self) -> str:
         return self.value
 
+    async def evaluate_all(self, script) -> list[str]:
+        if script != 'fields => fields.map(field => field.value)' or self._items is None:
+            raise AssertionError(f'Unexpected evaluate_all on {self.name}: {script}')
+        return [field.value for field in self._items]
+
     async def bounding_box(self):
         return dict(self._box) if self._box else None
 

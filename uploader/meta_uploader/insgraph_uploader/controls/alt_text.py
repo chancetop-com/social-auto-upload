@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING
 from utils.dom import ElementUnusableError
 from utils.humanize import Humanizer
 
-from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError, clamp_wait
-from ._rows import activate, press_enter, row_for
+from ..options import INELIGIBLE, MISSING, PRESENT, OptionMismatchError, alt_texts_match, clamp_wait
+from ._rows import _wait_until, activate, press_enter, row_for
 
 if TYPE_CHECKING:  # 运行时只导入 options 与行助手，避免把 Page 绑定成硬依赖。
     from patchright.async_api import Locator, Page
@@ -41,16 +41,127 @@ _ALT_INPUT_FALLBACK = (
 )
 
 _CLOSE_TIMEOUT_MS = 5_000
+_INPUTS_TIMEOUT_MS = 2_000
 _POLL_SECONDS = 0.05
+
+_PANEL_STATE_JS = r"""() => {
+    let hiddenPanelId;
+    const linkedPanelState = (row, id) => {
+        if (!id || /\s/.test(id)) return null;
+        const dialog = row.closest('dialog, [role="dialog"]');
+        const panel = row.ownerDocument.getElementById(id);
+        if (panel && !dialog?.contains(panel)) return null;
+        if (!panel || panel.closest('[hidden], [aria-hidden="true"]') ||
+            !panel.checkVisibility({visibilityProperty: true})) {
+            hiddenPanelId = id;
+            return false;
+        }
+        // 常驻的空容器本身不能证明面板展开。
+        if (hiddenPanelId === id || panel.getAttribute('aria-hidden') === 'false') return true;
+        return null;
+    };
+    return row => {
+        const expanded = row.getAttribute('aria-expanded');
+        const aria = expanded === 'true' || expanded === 'false' ? expanded === 'true' : null;
+        const visibleIcon = selector => [...row.querySelectorAll(selector)].some(
+            icon => icon.checkVisibility({visibilityProperty: true})
+        );
+        const up = visibleIcon('[aria-label*="chevron" i][aria-label*="up" i], [aria-label*="向上"]');
+        const down = visibleIcon('[aria-label*="chevron" i][aria-label*="down" i], [aria-label*="向下"]');
+        const chevron = up === down ? null : up;
+        const id = (row.getAttribute('aria-controls') || '').trim();
+        const panel = linkedPanelState(row, id);
+        const open = aria ?? chevron ?? panel;
+        const coherent = [aria, chevron, panel].every(value => value === null || value === open);
+        let visualCue = null;
+        if (coherent && chevron !== null) visualCue = 'chevron';
+        else if (coherent && panel !== null) visualCue = 'panel:' + id;
+        return {open, visualCue};
+    };
+}"""
+
+# 校验原生激活引起的展开；页面延迟切换时核对同一箭头或关联面板。
+_WATCH_OPEN_JS = """(row, {selector, labels, verify}) => {
+    const dialogSelector = 'dialog, [role="dialog"]';
+    const dialog = row.closest(dialogSelector);
+    const doc = row.ownerDocument;
+    const state = (PANEL_STATE)();
+    const visible = node => node.checkVisibility({visibilityProperty: true});
+    const hasFields = current => [...current.closest(dialogSelector).querySelectorAll(selector)].some(visible);
+    const isOpen = current => state(current).open ?? hasFields(current);
+    if (!verify) return {isOpen, stop() {}};
+    const currentRow = () => {
+        if (row.isConnected && row.closest(dialogSelector)) return row;
+        const scope = dialog.isConnected ? dialog : doc.getElementById(dialog.id);
+        const dialogs = scope?.matches(dialogSelector) ? [scope] :
+            [...doc.querySelectorAll(dialogSelector)].filter(visible);
+        if (dialogs.length !== 1) return null;
+        const buttons = [...dialogs[0].querySelectorAll('button, [role="button"]')].filter(visible);
+        for (const attr of ['id', 'aria-controls']) {
+            const value = row.getAttribute(attr);
+            const matches = value ? buttons.filter(button => button.getAttribute(attr) === value) : [];
+            if (matches.length === 1) return matches[0];
+        }
+        const matches = buttons.filter(button => [button, ...button.querySelectorAll('*')].some(
+            node => visible(node) && labels.includes(node.innerText?.trim())
+        ));
+        return matches.length === 1 ? matches[0] : null;
+    };
+    let activation, frameRequest, frameTime, closedCue, reopened = false;
+    const check = () => {
+        const current = currentRow();
+        if (current && isOpen(current)) reopened = true;
+    };
+    // 在页面的 rAF 处理前确认仍收起，在同一帧布局后检查结果。
+    // 两次取样之间不运行 timer，帧前或帧后恢复的草稿不能确认保存。
+    const afterLayout = new ResizeObserver(() => {
+        afterLayout.disconnect();
+        if (doc.timeline.currentTime === frameTime) check();
+    });
+    const observer = new MutationObserver(() => {
+        if (activation.eventPhase !== Event.NONE && !reopened) check();
+    });
+    const before = event => {
+        if (!event.isTrusted || (event.type !== 'click' && event.key !== 'Enter')) return;
+        const current = currentRow();
+        if (!current?.contains(event.target) || reopened) return;
+        const {open, visualCue} = state(current);
+        if (open || hasFields(current)) return;
+        closedCue = visualCue;
+        activation = event;
+        // 弹窗自身也可能被替换，观察只在目标行收到原生激活后开始。
+        observer.observe(doc, {subtree: true, childList: true, attributes: true});
+        if (frameRequest == null) frameRequest = requestAnimationFrame(time => {
+            frameRequest = null;
+            const current = currentRow();
+            if (reopened || !current || isOpen(current)) return;
+            frameTime = time;
+            afterLayout.observe(doc.documentElement);
+        });
+    };
+    const events = ['keydown', 'keyup', 'click'];
+    for (const type of events) doc.addEventListener(type, before, true);
+    return {
+        isOpen,
+        verified() {
+            if (reopened) return true;
+            const current = currentRow();
+            if (!closedCue || !current) return false;
+            const {open, visualCue} = state(current);
+            return open === true && visualCue === closedCue;
+        },
+        stop() {
+            observer.disconnect();
+            afterLayout.disconnect();
+            if (frameRequest != null) cancelAnimationFrame(frameRequest);
+            for (const type of events) doc.removeEventListener(type, before, true);
+        }
+    };
+}""".replace("PANEL_STATE", _PANEL_STATE_JS)
 
 
 class AltTextControl:
-    """按图片张数填写替代文字的控件（``resolve/read/set`` 三方法）。
-
-    图片张数由调用方从 ``self.image_files`` 传入，不用 DOM 猜测。折叠区只在
-    需要时展开；``read()`` / ``set()`` 结束时一律收起，``resolve()`` 只是探针，
-    保持原状并容忍收起失败。
-    """
+    """按图片顺序读写替代文字。发布时用 apply() 在同一次展开中检查并编辑。"""
 
     def __init__(
         self,
@@ -100,43 +211,78 @@ class AltTextControl:
         选择器覆盖实测哨兵。
         """
         dialog = self._dialog()
-        exact = dialog.locator(_ALT_INPUT_EXACT)
+        exact = dialog.locator(_ALT_INPUT_EXACT).filter(visible=True)
         if await exact.count():
             return exact
-        return dialog.locator(_ALT_INPUT_FALLBACK)
-
-    async def _count(self) -> int:
-        try:
-            return await (await self._inputs()).count()
-        except Exception:
-            return 0
-
-    async def _values(self) -> list[str]:
-        inputs = await self._inputs()
-        return [
-            await inputs.nth(index).input_value()
-            for index in range(await inputs.count())
-        ]
+        return dialog.locator(_ALT_INPUT_FALLBACK).filter(visible=True)
 
     async def _has_inputs(self) -> bool:
-        return bool(await self._count())
+        return bool(await (await self._inputs()).count())
 
-    async def _ensure_open(self) -> 'tuple[bool, bool]':
+    async def _ready_inputs(
+        self, *, requested: object = None, readback: bool = False,
+    ) -> 'tuple[Locator, list[str]]':
+        """字段可能分批挂载，也可能先显示缓存值；最终比较取加载窗口末尾的快照。"""
+        deadline = time.monotonic() + self._timeout(_INPUTS_TIMEOUT_MS) / 1000
+        while True:
+            inputs = await self._inputs()
+            values = await inputs.evaluate_all('fields => fields.map(field => field.value)')
+            remaining = deadline - time.monotonic()
+            complete = len(values) >= self.image_count
+            if complete and remaining > 0 and (readback or (
+                requested is not None and alt_texts_match(requested, values)
+            )):
+                # 本次快照可能直接决定是否发布。保留当前展开状态，等保存值回填。
+                await asyncio.sleep(remaining)
+                continue
+            if complete or remaining <= 0:
+                if self.budget is not None:
+                    self.budget.check_pre_click()
+                return inputs, values
+            await asyncio.sleep(min(_POLL_SECONDS, remaining))
+
+    async def _expanded(self, entry: 'Locator') -> bool | None:
+        return await entry.evaluate(f'row => ({_PANEL_STATE_JS})()(row).open', timeout=self._timeout(_CLOSE_TIMEOUT_MS))
+
+    async def _ensure_open(
+        self, entry: 'Locator | None' = None, *, require_activation: bool = False,
+    ) -> tuple[bool, bool]:
         """确保折叠区展开；返回 ``(是否展开, 是否由本次调用展开)``。"""
-        if await self._has_inputs():
-            return True, False
-        entry = await self._entry()
+        if entry is None:
+            entry = await self._entry()
         if entry is None:
             return False, False
-        opened = await activate(
-            self.page,
-            entry,
-            is_open=self._has_inputs,
-            humanizer=self._behavior(),
-            budget=self.budget,
+
+        watch = await entry.evaluate_handle(
+            _WATCH_OPEN_JS,
+            {'selector': f'{_ALT_INPUT_EXACT}, {_ALT_INPUT_FALLBACK}', 'labels': _ENTRY_LABELS,
+             'verify': require_activation},
+            timeout=self._timeout(_CLOSE_TIMEOUT_MS),
         )
-        # activate 已用输入框出现作为展开成功的判据。
-        return (True, True) if opened else (False, False)
+
+        async def is_open():
+            return await entry.evaluate(
+                '(row, watch) => watch.isOpen(row)', watch, timeout=self._timeout(_CLOSE_TIMEOUT_MS)
+            )
+
+        try:
+            if await is_open():
+                return not require_activation, False
+            opened = await activate(
+                self.page, entry, is_open=is_open, humanizer=self._behavior(), budget=self.budget,
+            )
+            if opened and require_activation:
+                # 内容与箭头可能分次更新。只等待同一次激活的确认，别再次切换折叠行。
+                opened = await _wait_until(
+                    lambda: watch.evaluate('watch => watch.verified()'),
+                    self._timeout(_INPUTS_TIMEOUT_MS),
+                )
+            return opened, opened
+        finally:
+            try:
+                await watch.evaluate('watch => watch.stop()')
+            finally:
+                await watch.dispose()
 
     async def _collapse(self) -> None:
         """再次激活折叠行直到输入框消失；收不起来抛 ``OptionMismatchError``。
@@ -146,68 +292,102 @@ class AltTextControl:
         （退出 1），不再像旧实现那样静默放弃。
         """
         entry = await self._entry()
-        if entry is None or not await self._has_inputs():
-            return
-        await press_enter(self.page, entry)
+        if entry is None:
+            raise OptionMismatchError('Instagram 无障碍折叠入口缺失，无法收起并核对替代文字')
         deadline = time.monotonic() + self._timeout(_CLOSE_TIMEOUT_MS) / 1000
-        while await self._has_inputs():
-            if time.monotonic() >= deadline:
-                raise OptionMismatchError(
-                    'Instagram 无障碍折叠区未能收起：Alt text 输入框仍在 DOM 中，'
-                    '无法完成关闭 → 重开回读',
-                    applied=None,
-                )
-            await asyncio.sleep(_POLL_SECONDS)
+        expanded = await self._expanded(entry)
+        while expanded is None and not await self._has_inputs():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OptionMismatchError('Instagram 无法确认无障碍折叠区状态')
+            await asyncio.sleep(min(_POLL_SECONDS, remaining))
+            expanded = await self._expanded(entry)
+        if expanded is not False and not await press_enter(self.page, entry):
+            raise OptionMismatchError('Instagram 未能激活无障碍折叠行，无法核对替代文字')
+        while True:
+            state = await self._expanded(entry)
+            if (state is False or (expanded is None and state is None)) and not await self._has_inputs():
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise OptionMismatchError('Instagram 无障碍折叠区未能收起，无法核对替代文字')
+            await asyncio.sleep(min(_POLL_SECONDS, remaining))
 
     async def _collapse_ignoring_failure(self) -> None:
         """异常路径上的尽力收起：不覆盖已经在传递的原始错误。"""
-        with contextlib.suppress(OptionMismatchError):
+        with contextlib.suppress(Exception):
             await self._collapse()
 
-    async def resolve(self) -> str:
-        """入口缺失 / 不可用 / 展开后仍无输入框时按不可用归类。
-
-        本方法只是探针：只收起自己展开的折叠区，收起失败也不改变结论。
-        """
+    async def _open_available(self) -> tuple[str, bool]:
         entry = await self._entry()
         if entry is None:
-            return MISSING
+            return MISSING, False
         if await self._entry_is_disabled(entry):
-            return INELIGIBLE
-        opened, by_us = await self._ensure_open()
+            return INELIGIBLE, False
+        opened, by_us = await self._ensure_open(entry)
+        return (PRESENT if opened else MISSING), by_us
+
+    async def resolve(self) -> str:
+        """单独探测时恢复折叠区原状。"""
+        presence, by_us = await self._open_available()
         try:
-            # 入口存在但展开后仍没有 Alt text 输入框：spec §5.2 归为 entry_missing。
-            return PRESENT if await self._has_inputs() else MISSING
+            if presence == PRESENT:
+                _, values = await self._ready_inputs()
+                return PRESENT if values else MISSING
+            return presence
         finally:
             if by_us:
                 await self._collapse_ignoring_failure()
 
-    async def read(self) -> list[str]:
+    @contextlib.asynccontextmanager
+    async def _close_on_exit(self):
+        try:
+            yield
+        except BaseException:
+            await self._collapse_ignoring_failure()
+            raise
+        await self._collapse()
+
+    async def apply(self, requested: object) -> tuple[str, list[str] | None]:
+        """一次展开完成检查和填写，写入后重新展开核对保存的值。"""
+        presence, _ = await self._open_available()
+        if presence != PRESENT:
+            return presence, None
+        async with self._close_on_exit():
+            inputs, current = await self._ready_inputs(requested=requested)
+            if not current:
+                return MISSING, None
+            if alt_texts_match(requested, current):
+                return PRESENT, current
+            if self.budget is not None:
+                self.budget.check_pre_click()
+            await self._fill(requested, inputs, current)
+        return PRESENT, await self.read(require_reopen=True)
+
+    async def read(self, *, require_reopen: bool = False) -> list[str]:
         """打开折叠区回读逐张输入值，然后一律收起。
 
         无论进入时是否已展开，结束时都收起：回读必须是“关闭 → 重开”，否则读到
         的是同一会话里的就地状态。收不起来即按 mismatch 上报。
         """
-        opened, _ = await self._ensure_open()
+        if require_reopen:
+            opened, _ = await self._ensure_open(require_activation=True)
+            if not opened:
+                await self._collapse_ignoring_failure()
+                raise OptionMismatchError('Instagram 未能确认无障碍折叠区重新展开')
+        else:
+            opened, _ = await self._ensure_open()
         if not opened:
             return []
-        try:
-            values = await self._values()
-        except BaseException:
-            await self._collapse_ignoring_failure()
-            raise
-        await self._collapse()
-        return values
+        async with self._close_on_exit():
+            _, values = await self._ready_inputs(readback=require_reopen)
+            return values
 
     async def set(self, requested: object) -> None:
         """数量等于图片张数才逐张填写；数量不符不填写并报出已观察到的值。
 
         填写完成后一律收起折叠区，保证管线下一次 ``read()`` 是关闭 → 重开回读。
         """
-        if isinstance(requested, str):
-            texts = [requested]
-        else:
-            texts = [str(text) for text in requested]  # type: ignore[union-attr]
         opened, _ = await self._ensure_open()
         if not opened:
             raise OptionMismatchError(
@@ -215,45 +395,37 @@ class AltTextControl:
                 f'图片 {self.image_count} 张',
                 applied=[],
             )
-        try:
-            inputs = await self._inputs()
-            count = await inputs.count()
-            values = await self._values()
-            if count == 0:
-                raise OptionMismatchError(
-                    f'Instagram Alt text 输入框 0 个，图片 {self.image_count} 张，'
-                    '无法按图片顺序逐张填写替代文字',
-                    applied=[],
-                )
-            if count != self.image_count:
-                raise OptionMismatchError(
-                    f'Instagram Alt text 输入框 {count} 个，图片 {self.image_count} 张，'
-                    '无法按图片顺序逐张填写替代文字',
-                    applied=values,
-                )
-            if len(texts) != count:
-                raise OptionMismatchError(
-                    f'Instagram 替代文字 {len(texts)} 条，Alt text 输入框 {count} 个，'
-                    '数量不符',
-                    applied=values,
-                )
-            # 长度已由 §3.3 静态校验保证在 1..1000，运行时绝不截断。
-            behavior = self._behavior()
-            for index, text in enumerate(texts):
-                field = inputs.nth(index)
-                await self._require_unique(field, index=index)
-                # 清空必须显式：预填/回读值可能是上一轮的残留。
-                await field.focus()
-                await behavior.press('ControlOrMeta+A')
-                await behavior.press('Delete')
-                await behavior.type_text(text)
-                # 实测必须失焦才写入页面状态；否则折叠后值会丢。
-                await field.evaluate('el => el.blur()')
-        except BaseException:
-            await self._collapse_ignoring_failure()
-            raise
-        # 正常结束必须真的收起：否则管线的 read() 只是同一会话的就地读取。
-        await self._collapse()
+        async with self._close_on_exit():
+            inputs, current = await self._ready_inputs()
+            await self._fill(requested, inputs, current)
+
+    async def _fill(self, requested: object, inputs: 'Locator', current: list[str]) -> None:
+        if isinstance(requested, str):
+            texts = [requested]
+        else:
+            texts = [str(text) for text in requested]  # type: ignore[union-attr]
+        count = len(current)
+        if count != self.image_count or count == 0:
+            raise OptionMismatchError(
+                f'Instagram Alt text 输入框 {count} 个，图片 {self.image_count} 张，'
+                '无法按图片顺序逐张填写替代文字',
+                applied=current,
+            )
+        if len(texts) != count:
+            raise OptionMismatchError(
+                f'Instagram 替代文字 {len(texts)} 条，Alt text 输入框 {count} 个，数量不符',
+                applied=current,
+            )
+        behavior = self._behavior()
+        for index, text in enumerate(texts):
+            field = inputs.nth(index)
+            await self._require_unique(field, index=index)
+            await field.focus()
+            await behavior.press('ControlOrMeta+A')
+            await behavior.press('Delete')
+            await behavior.type_text(text)
+            # 输入框失焦才会把值写入页面状态。
+            await field.evaluate('el => el.blur()')
 
     async def _require_unique(self, field: 'Locator', *, index: int) -> None:
         """每个文本点先收窄到 ``count() == 1``；多义直接硬错，不自动取首个。"""

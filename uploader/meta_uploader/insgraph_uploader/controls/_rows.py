@@ -78,13 +78,15 @@ async def _wait_until(
         await asyncio.sleep(_POLL_SECONDS)
 
 
-async def press_enter(page: 'Page', row: 'Locator') -> None:
+async def press_enter(page: 'Page', row: 'Locator') -> bool:
     """聚焦折叠行并按 Enter；鼠标点击在面板边缘会被覆盖层拦截，键盘才稳定。"""
     with contextlib.suppress(Exception):
         await row.scroll_into_view_if_needed()
     with contextlib.suppress(Exception):
         await row.focus()
         await page.keyboard.press("Enter")
+        return True
+    return False
 
 
 async def activate(

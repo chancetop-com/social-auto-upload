@@ -812,37 +812,131 @@ _ALT_HTML = '''
   <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
 </div>
 <script>
-  const accessibilityRow = document.getElementById('accessibility');
+  let accessibilityRow = document.getElementById('accessibility');
   const altSection = document.getElementById('alt-section');
   const altValues = ['', ''];
+  const drafts = ['', ''];
   let altOpen = false;
+  const altVisits = [];
   function renderAlt() {
     altSection.innerHTML = '';
     if (!altOpen) return;
+    const visit = altVisits.length;
+    const sameVisit = () => altOpen && visit === altVisits.length;
     altValues.forEach((value, index) => {
       const input = document.createElement('input');
       input.type = 'text';
       input.setAttribute('aria-label', 'Alt text');
       if (!value) input.setAttribute('placeholder', 'Alt text');
       input.value = value;
+      if (altSection.dataset.hydrate && visit > 1) {
+        input.value = drafts[index];
+        setTimeout(() => { if (sameVisit()) input.value = value; }, 300);
+      }
       // 实测：input 事件不写入页面状态，只有失焦才提交。这里进一步要求“字段
       // 自己失焦”（relatedTarget 为空）：焦点移到折叠行并不算提交，因此产品
       // 代码必须显式 blur，否则重开折叠区只能读到空值。
       input.addEventListener('blur', (event) => {
         if (event.relatedTarget) return;
+        drafts[index] = input.value;
+        if (altSection.dataset.hydrate && index === 1) return;
+        if (index === 1 && altSection.dataset.ignoreClose) return;
+        if (index === 1 && altSection.dataset.remount) {
+          if (altSection.dataset.remount === 'save') altValues[index] = input.value;
+          const draft = [...altSection.children];
+          altSection.replaceChildren();
+          setTimeout(() => { if (sameVisit()) altSection.replaceChildren(...draft); }, 80);
+          return;
+        }
         altValues[index] = input.value;
       });
-      altSection.appendChild(input);
+      if (index === 1 && altSection.dataset.delaySecond) {
+        setTimeout(() => { if (sameVisit()) altSection.appendChild(input); }, 150);
+      } else {
+        altSection.appendChild(input);
+      }
     });
   }
   function toggleAlt() {
+    if (altOpen && altSection.dataset.ignoreClose === 'ignored' && !altSection.childElementCount) return;
+    if (altOpen && altSection.dataset.ignoreClose === 'once') {
+      altSection.dataset.ignoreClose = 'ignored';
+      const visit = altVisits.length;
+      const draft = [...altSection.children];
+      altSection.replaceChildren();
+      const restoreDraft = () => {
+        if (altOpen && visit === altVisits.length) {
+          altSection.replaceChildren(...draft.map(input => input.cloneNode(true)));
+        }
+      };
+      if (altSection.dataset.restoreOnProbe || altSection.dataset.ignoreReopen) {
+        accessibilityRow.setAttribute('aria-expanded', 'false');
+        accessibilityRow.addEventListener('restore-draft', () => {
+          accessibilityRow.setAttribute('aria-expanded', 'true');
+          restoreDraft();
+        }, {once: true});
+      } else {
+        setTimeout(restoreDraft, 600);
+      }
+      return;
+    }
     altOpen = !altOpen;
-    accessibilityRow.querySelector('svg').setAttribute(
-      'aria-label', altOpen ? 'Up chevron icon' : 'Down chevron icon');
-    renderAlt();
+    if (altOpen) {
+      altVisits.push([...altValues]);
+      document.querySelector('dialog, [role="dialog"]').dataset.visits = JSON.stringify(altVisits);
+    }
+    const chevron = accessibilityRow.querySelector('svg');
+    if (chevron) {
+      const direction = altOpen ? 'Up chevron icon' : 'Down chevron icon';
+      if (altOpen && altVisits.length === 2 && altSection.dataset.lateChevron) {
+        setTimeout(() => chevron.setAttribute('aria-label', direction), 750);
+      } else {
+        chevron.setAttribute('aria-label', direction);
+      }
+    }
+    if (accessibilityRow.hasAttribute('aria-expanded')) {
+      accessibilityRow.setAttribute('aria-expanded', String(altOpen));
+    }
+    if (accessibilityRow.hasAttribute('aria-controls')) {
+      altSection.hidden = !altOpen;
+      if (altSection.dataset.mountPanel) {
+        if (altOpen) accessibilityRow.parentElement.after(altSection);
+        else altSection.remove();
+      }
+    }
+    if (altOpen && altSection.dataset.delayAll) setTimeout(renderAlt, 150);
+    else renderAlt();
+    if (altOpen && altSection.dataset.replaceRow) {
+      const next = accessibilityRow.cloneNode(true);
+      accessibilityRow.replaceWith(next);
+      accessibilityRow = next;
+    }
+    if (altOpen && altSection.dataset.replaceDialog) {
+      const dialog = accessibilityRow.closest('[role="dialog"]');
+      const next = dialog.cloneNode(false);
+      next.append(...dialog.childNodes);
+      dialog.replaceWith(next);
+    }
   }
-  accessibilityRow.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') { event.preventDefault(); toggleAlt(); }
+  function onAltKey(event) {
+    if (event.key === 'Enter' && event.target === accessibilityRow) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (altSection.dataset.ignoreReopen && altSection.dataset.ignoreClose === 'ignored' &&
+          accessibilityRow.getAttribute('aria-expanded') === 'false') {
+        setTimeout(() => accessibilityRow.dispatchEvent(new Event('restore-draft')), 35);
+        return;
+      }
+      if (altSection.dataset.nextFrame) requestAnimationFrame(toggleAlt);
+      else if (altSection.dataset.deferToggle) setTimeout(toggleAlt, 35);
+      else toggleAlt();
+    }
+  }
+  accessibilityRow.addEventListener('keydown', event => {
+    if (!altSection.dataset.replaceRow) onAltKey(event);
+  });
+  accessibilityRow.parentElement.addEventListener('keydown', event => {
+    if (altSection.dataset.replaceRow) onAltKey(event);
   });
   accessibilityRow.addEventListener('click', toggleAlt);
 </script>
@@ -1088,66 +1182,207 @@ class InstagramCommentsOptionDomTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
-class InstagramAltTextDomTests(unittest.TestCase):
-    """C2：真实 Chrome 中 Accessibility 行内折叠区的填写、折叠与重开回读。"""
+class InstagramAltTextDomTests(unittest.IsolatedAsyncioTestCase):
+    """在 Chrome 里检查行内折叠区的真实开合、挂载顺序和回读结果。"""
 
-    def test_alt_text_accordion_roundtrip_sets_both_images(self):
-        from uploader.meta_uploader.insgraph_uploader.options import (
-            SET,
-            InstagramPublishOptions,
+    async def asyncSetUp(self):
+        playwright = await async_playwright().start()
+        self.addAsyncCleanup(playwright.stop)
+        browser = await playwright.chromium.launch(channel='chrome', headless=True)
+        self.addAsyncCleanup(browser.close)
+        self.page = await browser.new_page()
+        self.page.set_default_timeout(2_000)
+        await self.page.set_content(_ALT_HTML)
+        self.section = self.page.locator('#alt-section')
+        self.chevron = self.page.locator('#accessibility svg')
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.requested = ['第一张图的描述', '第二张图的描述']
+        self.app = InstagramUploader(
+            None, title='caption', image_files=['one.png', 'two.png'],
+            options=InstagramPublishOptions(alt_texts=tuple(self.requested)),
+            result_file=Path(folder.name) / 'result.json',
         )
 
-        async def scenario():
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(channel='chrome', headless=True)
-                page = await browser.new_page()
-                try:
-                    # 实测：没有嵌套 dialog / Done 按钮；输入框随折叠区挂载与移除。
-                    await page.set_content(_ALT_HTML)
-                    page.set_default_timeout(2_000)
-                    with tempfile.TemporaryDirectory() as folder:
-                        images = [Path(folder) / f'{index}.png' for index in range(2)]
-                        for image in images:
-                            image.touch()
-                        requested = ('第一张图的描述', '第二张图的描述')
-                        app = InstagramUploader(
-                            'unused.json', title='caption', image_files=images,
-                            options=InstagramPublishOptions(alt_texts=requested),
-                            result_file=Path(folder) / 'result.json',
-                        )
-                        # 不注入 controls：走真实注册表 + 真实 DOM。
-                        await app._apply_options(
-                            page, budget=app.start_publish_budget()
-                        )
-                        self.assertEqual(
-                            app.result['options']['alt_text'],
-                            {'requested': list(requested), 'applied': list(requested),
-                             'status': SET},
-                        )
-                        # 结束时恢复为原先的收起状态：输入框从 DOM 移除。
-                        self.assertEqual(
-                            await page.locator('#alt-section input').count(), 0
-                        )
-                        self.assertEqual(
-                            await page.locator('#accessibility')
-                            .locator('svg').get_attribute('aria-label'),
-                            'Down chevron icon',
-                        )
-                        # 值在折叠/重开后保留：重新展开即可读回。
-                        await page.locator('#accessibility').focus()
-                        await page.keyboard.press('Enter')
-                        self.assertEqual(
-                            await page.locator('input[aria-label="Alt text"]')
-                            .evaluate_all('(inputs) => inputs.map((input) => input.value)'),
-                            list(requested),
-                        )
-                        # 收回复起状态，避免影响后续断言。
-                        await page.locator('#accessibility').focus()
-                        await page.keyboard.press('Enter')
-                        self.assertEqual(await page.get_by_role('dialog').count(), 1)
-                finally:
-                    await browser.close()
-        asyncio.run(scenario())
+    async def apply(self):
+        await self.app._apply_options(self.page, budget=self.app.start_publish_budget())
+        return self.app.result['options']['alt_text']
+
+    async def visits(self):
+        return json.loads(await self.page.get_by_role('dialog').get_attribute('data-visits'))
+
+    async def assert_roundtrip(self):
+        self.assertEqual(await self.apply(), {
+            'requested': self.requested, 'applied': self.requested, 'status': SET,
+        })
+        self.assertEqual(await self.visits(), [['', ''], self.requested])
+        self.assertEqual(await self.section.locator('input').count(), 0)
+        await self.apply()
+        self.assertEqual(await self.visits(), [['', ''], self.requested, self.requested])
+        self.assertEqual(await self.section.locator('input').count(), 0)
+
+    async def assert_lost_value(self):
+        await self.section.evaluate("el => el.dataset.remount = 'drop'")
+        with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+            await self.apply()
+        saved = [self.requested[0], '']
+        self.assertEqual(self.app.result['options']['alt_text']['applied'], saved)
+        self.assertEqual(await self.visits(), [['', ''], saved])
+        self.assertEqual(await self.section.locator('input').count(), 0)
+
+    async def test_alt_text_accordion_roundtrip_sets_both_images(self):
+        await self.assert_roundtrip()
+        self.assertEqual(await self.chevron.get_attribute('aria-label'), 'Down chevron icon')
+
+    async def test_panel_toggles_on_the_next_animation_frame(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.section.evaluate("el => el.dataset.nextFrame = 'true'")
+        await self.assert_roundtrip()
+
+    async def test_delayed_toggle_with_confirmed_chevron(self):
+        await self.page.locator('#accessibility').evaluate("row => row.setAttribute('aria-expanded', 'false')")
+        await self.chevron.evaluate("""icon => {
+            const hidden = icon.cloneNode(true);
+            hidden.setAttribute('aria-label', 'Up chevron icon');
+            hidden.style.display = 'none';
+            icon.after(hidden);
+        }""")
+        await self.section.evaluate("""el => {
+            el.dataset.deferToggle = 'true';
+            el.dataset.lateChevron = 'true';
+        }""")
+        await self.assert_roundtrip()
+
+    async def test_readback_waits_for_saved_values_to_replace_cached_drafts(self):
+        await self.section.evaluate("el => el.dataset.hydrate = 'true'")
+        with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+            await self.apply()
+        saved = [self.requested[0], '']
+        self.assertEqual(self.app.result['options']['alt_text']['applied'], saved)
+        self.assertEqual(await self.visits(), [['', ''], saved])
+        # 再次运行时，第一次展开也会先显示相同的旧草稿。
+        with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+            await self.apply()
+        self.assertEqual(await self.visits(), [['', ''], saved, saved, saved])
+
+    async def test_composer_replaced_during_activation(self):
+        await self.section.evaluate("el => el.dataset.replaceDialog = 'true'")
+        await self.assert_roundtrip()
+
+    async def test_waits_for_second_field_on_edit_and_readback(self):
+        await self.section.evaluate("el => el.dataset.delaySecond = 'true'")
+        await self.assert_roundtrip()
+
+    async def test_linked_panel_opens_before_any_fields_mount(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.page.locator('#accessibility').evaluate("row => row.setAttribute('aria-controls', 'alt-section')")
+        await self.section.evaluate("""el => {
+            el.hidden = true;
+            el.dataset.deferToggle = 'true';
+            el.dataset.delayAll = 'true';
+        }""")
+        await self.assert_roundtrip()
+
+    async def test_linked_panel_created_on_open_then_fields_mount(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.page.locator('#accessibility').evaluate("row => row.setAttribute('aria-controls', 'alt-section')")
+        await self.section.evaluate("""el => {
+            el.dataset.mountPanel = 'true';
+            el.dataset.delayAll = 'true';
+            el.remove();
+        }""")
+        await self.assert_roundtrip()
+
+    async def test_replaced_accessibility_row_without_id(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.page.locator('#accessibility').evaluate("""row => {
+            row.removeAttribute('id');
+            row.setAttribute('aria-expanded', 'false');
+            row.querySelector('span').innerHTML = '<b>Access</b>ibility';
+        }""")
+        await self.section.evaluate("el => el.dataset.replaceRow = 'true'")
+        await self.assert_roundtrip()
+
+    async def test_replaced_row_keeps_link_to_delayed_fields(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.page.locator('#accessibility').evaluate("""row => {
+            row.removeAttribute('id');
+            row.setAttribute('aria-controls', 'alt-section');
+            row.querySelector('span').innerHTML = '<b>Access</b>ibility';
+        }""")
+        await self.section.evaluate("""el => {
+            el.hidden = true;
+            el.dataset.replaceRow = 'true';
+            el.dataset.delayAll = 'true';
+        }""")
+        await self.assert_roundtrip()
+
+    async def test_external_reopen_before_activation_cannot_confirm_draft(self):
+        from uploader.meta_uploader.insgraph_uploader.controls import alt_text
+
+        row = self.page.locator('#accessibility')
+        await row.evaluate("row => row.setAttribute('aria-expanded', 'false')")
+        await self.section.evaluate("el => { el.dataset.ignoreClose = 'once'; el.dataset.restoreOnProbe = 'true'; }")
+        activate = alt_text.activate
+
+        async def activate_after_redraw(*args, **kwargs):
+            # 让同一份未保存的草稿在第一次状态检查和实际激活之间恢复。
+            await row.dispatch_event('restore-draft')
+            return await activate(*args, **kwargs)
+
+        with patch.object(alt_text, 'activate', activate_after_redraw):
+            with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+                await self.apply()
+        self.assertEqual(await self.section.get_attribute('data-ignore-close'), 'ignored')
+        self.assertNotEqual(self.app.result['options']['alt_text']['applied'], self.requested)
+
+    async def assert_ignored_reopen_rejects_draft(self):
+        row = self.page.locator('#accessibility')
+        await row.evaluate("row => row.setAttribute('aria-expanded', 'false')")
+        await self.section.evaluate("el => { el.dataset.ignoreClose = 'once'; el.dataset.ignoreReopen = 'true'; }")
+        with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+            await self.apply()
+        self.assertEqual(await self.visits(), [['', '']])
+        self.assertNotEqual(self.app.result['options']['alt_text']['applied'], self.requested)
+
+    async def test_ignored_enter_then_marked_row_restores_draft(self):
+        await self.assert_ignored_reopen_rejects_draft()
+
+    async def test_aria_flag_alone_cannot_confirm_delayed_draft_restoration(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.assert_ignored_reopen_rejects_draft()
+
+    async def test_fields_temporarily_unmounted_after_blur_require_real_reopen(self):
+        await self.assert_lost_value()
+
+    async def test_aria_expanded_reports_lost_value_without_chevron(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.page.locator('#accessibility').evaluate("row => row.setAttribute('aria-expanded', 'false')")
+        await self.assert_lost_value()
+
+    async def test_unmarked_row_recovers_saved_fields_after_remount(self):
+        await self.page.locator('#compose').evaluate("""el => {
+            const dialog = document.createElement('dialog');
+            dialog.open = true;
+            dialog.append(...el.childNodes);
+            el.replaceWith(dialog);
+        }""")
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.section.evaluate("el => el.dataset.remount = 'save'")
+        await self.assert_roundtrip()
+
+    async def test_unmarked_row_reports_value_lost_after_remount(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.assert_lost_value()
+
+    async def test_unmarked_row_that_ignores_close_cannot_confirm_the_draft(self):
+        await self.chevron.evaluate('icon => icon.remove()')
+        await self.section.evaluate("el => el.dataset.ignoreClose = 'once'")
+        with self.assertRaisesRegex(RuntimeError, 'alt_text=mismatch'):
+            await self.apply()
+        self.assertEqual(await self.section.get_attribute('data-ignore-close'), 'ignored')
+        self.assertNotEqual(self.app.result['options']['alt_text']['applied'], self.requested)
+        self.assertEqual(await self.section.locator('input').count(), 0)
 
 
 class InstagramAiLabelDomTests(unittest.TestCase):
