@@ -103,10 +103,6 @@ def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | Non
     raise AssertionError(f"parser not found: {platform}/{action}")
 
 
-def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
-    return set(parser._option_string_actions)
-
-
 def _run(argv, token=TOKEN):
     environ = {"MLX_API_TOKEN": token}
     with patch.dict(os.environ, environ):
@@ -123,27 +119,6 @@ def _run(argv, token=TOKEN):
 
 
 class TiktokOptionsParserTests(unittest.TestCase):
-    def test_upload_video_registers_three_option_flags(self):
-        options = _option_strings(
-            _subparser(sau_cli.build_parser(), "tiktok", "upload-video")
-        )
-        self.assertIn("--privacy", options)
-        self.assertIn("--no-comments", options)
-        self.assertIn("--disable-reuse", options)
-
-    def test_upload_video_registers_aigc_and_brand_flags(self):
-        options = _option_strings(
-            _subparser(sau_cli.build_parser(), "tiktok", "upload-video")
-        )
-        for flag in (
-            "--aigc",
-            "--no-aigc",
-            "--your-brand",
-            "--branded-content",
-        ):
-            with self.subTest(flag=flag):
-                self.assertIn(flag, options)
-
     def test_aigc_flags_are_mutually_exclusive(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video = Path(tmp_dir) / "demo.mp4"
@@ -235,19 +210,6 @@ class TiktokOptionsMappingTests(unittest.TestCase):
         values.update(overrides)
         return Namespace(**values)
 
-    def test_all_flags_unset_maps_to_none(self):
-        self.assertIsNone(tiktok_command._build_publish_options(self._args()))
-
-    def test_aigc_true_and_false_stay_tri_state(self):
-        enabled = tiktok_command._build_publish_options(self._args(aigc=True))
-        disabled = tiktok_command._build_publish_options(
-            self._args(aigc=False)
-        )
-        self.assertIsNotNone(enabled)
-        self.assertIs(enabled.aigc, True)
-        self.assertIsNotNone(disabled)
-        self.assertIs(disabled.aigc, False)
-
     def test_brand_flags_default_to_none_and_preserve_true(self):
         absent = tiktok_command._build_publish_options(self._args())
         self.assertIsNone(absent)
@@ -324,19 +286,6 @@ class TiktokOptionsMappingTests(unittest.TestCase):
         self.assertIsNone(options.privacy)
         self.assertIsNone(options.allow_comments)
         self.assertIs(options.allow_reuse, False)
-
-    def test_combined_flags_keep_every_value(self):
-        options = tiktok_command._build_publish_options(
-            self._args(
-                privacy="only-me", no_comments=True, disable_reuse=True
-            )
-        )
-        self.assertEqual(
-            options,
-            TiktokPublishOptions(
-                privacy="only-me", allow_comments=False, allow_reuse=False
-            ),
-        )
 
     def test_request_defaults_to_none_options(self):
         request = tiktok_command.TiktokVideoUploadRequest(

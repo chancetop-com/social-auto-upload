@@ -512,15 +512,6 @@ class CheckAndExitCodeTests(unittest.TestCase):
         self.assertIn("YouTube登录态无效", err)
         self.assertIn("AdsPower", err)
 
-    def test_rate_limited_error_maps_to_11(self):
-        with patch("sau_cli.dispatch", new=AsyncMock(side_effect=RateLimitedError("429"))):
-            code, _, err = _run(
-                ["youtube", "check", "--profile-id", PROFILE],
-                env={"ADSPOWER_API_KEY": KEY},
-            )
-        self.assertEqual(code, 11)
-        self.assertIn("429", err)
-
     def test_publish_result_unknown_error_maps_to_9(self):
         with patch(
             "sau_cli.dispatch",

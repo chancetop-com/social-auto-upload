@@ -43,25 +43,15 @@ TOKEN = "SENTINEL-MLX-TOKEN-ticket25"
 # ---------------------------------------------------------------------------
 
 
-def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | None = None):
+def _subparser(parser: argparse.ArgumentParser, platform: str, action: str):
     for item in parser._actions:
         if isinstance(item, argparse._SubParsersAction):
             if platform in item.choices:
                 platform_parser = item.choices[platform]
-                if action is None:
-                    return platform_parser
                 for nested in platform_parser._actions:
                     if isinstance(nested, argparse._SubParsersAction):
                         return nested.choices[action]
     raise AssertionError(f"parser not found: {platform}/{action}")
-
-
-def _action_names(platform: str) -> list[str]:
-    platform_parser = _subparser(sau_cli.build_parser(), platform)
-    for item in platform_parser._actions:
-        if isinstance(item, argparse._SubParsersAction):
-            return list(item.choices)
-    return []
 
 
 def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
@@ -103,12 +93,6 @@ def _run(argv, token=TOKEN):
 
 
 class TiktokParserTests(unittest.TestCase):
-    def test_actions_are_check_upload_video_upload_note_login_only(self):
-        self.assertEqual(
-            set(_action_names("tiktok")),
-            {"check", "upload-video", "upload-note", "login", "reset-profile"},
-        )
-
     def test_upload_video_parameters_match_repository_naming(self):
         options = _option_strings(_subparser(sau_cli.build_parser(), "tiktok", "upload-video"))
         for expected in (

@@ -354,19 +354,6 @@ class TiktokDryRunFlowTests(unittest.TestCase):
 
 
 class PublishReadyWaitTests(unittest.TestCase):
-    def test_ready_button_returns_without_clicking(self):
-        video = _video(no_publish=True)
-        button = _Button()
-        video.locator_base = _ButtonBase(button)
-
-        with patch.object(tk_main.asyncio, "sleep", AsyncMock()) as sleep:
-            asyncio.run(
-                video.wait_publish_ready(object(), deadline=None, multilogin=False)
-            )
-
-        self.assertEqual(button.click_calls, 0)
-        sleep.assert_not_awaited()
-
     def test_disabled_button_is_never_ready(self):
         video = _video(no_publish=True)
         button = _Button(enabled=False)
@@ -431,7 +418,7 @@ class PublishReadyWaitTests(unittest.TestCase):
         button = _Button()
         video.locator_base = _ButtonBase(button)
 
-        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
+        with patch.object(tk_main.asyncio, "sleep", AsyncMock()) as sleep:
             ready = asyncio.run(
                 video.wait_publish_ready(
                     object(), deadline=None, multilogin=False
@@ -440,6 +427,7 @@ class PublishReadyWaitTests(unittest.TestCase):
 
         self.assertIs(ready, button)
         self.assertEqual(button.click_calls, 0)
+        sleep.assert_not_awaited()
 
     def test_window_is_clamped_by_the_remaining_budget(self):
         video = _video(no_publish=True)

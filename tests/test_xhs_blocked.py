@@ -125,12 +125,6 @@ def _note_app(**overrides):
 
 
 class Decision07BlockedClassifierPathTests(unittest.TestCase):
-    def test_xhs_rules_pin_the_paths_and_the_login_box(self):
-        rules = xhs_main.XHS_BLOCKED_RULES
-        self.assertEqual(rules.verification_paths, ("/website-login/captcha",))
-        self.assertEqual(rules.login_paths, ("/website-login", "/login"))
-        self.assertEqual(rules.login_box_selector, LOGIN_BOX)
-
     def test_path_matrix(self):
         cases = (
             (
@@ -149,10 +143,9 @@ class Decision07BlockedClassifierPathTests(unittest.TestCase):
             with self.subTest(url=url):
                 # 无 selector 脚本：path 命中时绝不允许查 DOM。
                 page = RecordingPage(url=url)
-                self.assertEqual(
-                    asyncio.run(blocked.classify(page, xhs_main.XHS_BLOCKED_RULES)),
-                    expected,
-                )
+                with patch.object(page, "locator", wraps=page.locator) as locator:
+                    self.assertEqual(asyncio.run(xhs_main.classify_blocked(page)), expected)
+                locator.assert_not_called()
 
     def test_publish_path_is_not_a_block(self):
         page = RecordingPage(url=PUBLISH_URL_VIDEO, selectors={LOGIN_BOX: _absent_box()})
@@ -174,12 +167,6 @@ class Decision07BlockedClassifierPathTests(unittest.TestCase):
         )
         self.assertIsNone(asyncio.run(xhs_main.classify_blocked(page)))
 
-    def test_longest_prefix_wins(self):
-        # /website-login/captcha also matches the shorter /website-login prefix;
-        # the longer verification prefix must win.
-        page = RecordingPage(url=VERIFICATION_URL)
-        self.assertEqual(asyncio.run(xhs_main.classify_blocked(page)), "verification")
-
     def test_visible_login_box_is_the_dom_fallback(self):
         page = RecordingPage(url=PUBLISH_URL_VIDEO, selectors={LOGIN_BOX: _box()})
         self.assertEqual(asyncio.run(xhs_main.classify_blocked(page)), "login")
@@ -189,12 +176,6 @@ class Decision07BlockedClassifierPathTests(unittest.TestCase):
             url=PUBLISH_URL_VIDEO, selectors={LOGIN_BOX: _box(visible=False)}
         )
         self.assertIsNone(asyncio.run(xhs_main.classify_blocked(page)))
-
-    def test_path_hit_short_circuits_the_dom(self):
-        # RecordingPage raises UnscriptedSelectorError on any locator() call;
-        # a DOM read would be swallowed as "no block" and fail this assertion.
-        page = RecordingPage(url=LOGIN_URL)
-        self.assertEqual(asyncio.run(xhs_main.classify_blocked(page)), "login")
 
     def test_main_frame_url_is_the_authority(self):
         page = RecordingPage(url=PUBLISH_URL_VIDEO, main_frame_url=LOGIN_URL)

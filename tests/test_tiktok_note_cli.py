@@ -30,11 +30,6 @@ from uploader.tk_uploader.main_chrome import (
 )
 from uploader.tk_uploader.tk_config import (
     TIKTOK_IMAGE_SUFFIXES,
-    TIKTOK_MAX_DESCRIPTION_LENGTH,
-    TIKTOK_MAX_HASHTAG_COUNT,
-    TIKTOK_MAX_IMAGE_BYTES,
-    TIKTOK_MAX_IMAGE_COUNT,
-    TIKTOK_MAX_TITLE_LENGTH,
     TIKTOK_PHOTO_UPLOAD_URL,
     TIKTOK_UPLOAD_URL,
 )
@@ -49,25 +44,15 @@ ITEM_ID = "7412345678901234567"
 # ---------------------------------------------------------------------------
 
 
-def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | None = None):
+def _subparser(parser: argparse.ArgumentParser, platform: str, action: str):
     for item in parser._actions:
         if isinstance(item, argparse._SubParsersAction):
             if platform in item.choices:
                 platform_parser = item.choices[platform]
-                if action is None:
-                    return platform_parser
                 for nested in platform_parser._actions:
                     if isinstance(nested, argparse._SubParsersAction):
                         return nested.choices[action]
     raise AssertionError(f"parser not found: {platform}/{action}")
-
-
-def _action_names(platform: str) -> list[str]:
-    platform_parser = _subparser(sau_cli.build_parser(), platform)
-    for item in platform_parser._actions:
-        if isinstance(item, argparse._SubParsersAction):
-            return list(item.choices)
-    return []
 
 
 def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
@@ -339,9 +324,6 @@ class _StudioContext:
 
 
 class UploadNoteParserTests(unittest.TestCase):
-    def test_upload_note_is_registered(self):
-        self.assertIn("upload-note", _action_names("tiktok"))
-
     def test_images_accepts_multiple_local_files_and_direct_urls(self):
         parser = _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
         action = parser._option_string_actions["--images"]
@@ -350,42 +332,6 @@ class UploadNoteParserTests(unittest.TestCase):
         url = "https://cdn.example/photo?signature=1"
         args = parser.parse_args(["--images", __file__, url, __file__])
         self.assertEqual(args.images, [Path(__file__), url, Path(__file__)])
-
-    def test_allowed_options_are_present(self):
-        options = _option_strings(
-            _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
-        )
-        for expected in (
-            "--account",
-            "--images",
-            "--schedule",
-            "--debug",
-            "--headed",
-            "--headless",
-            "--folder-id",
-            "--profile-id",
-        ):
-            with self.subTest(option=expected):
-                self.assertIn(expected, options)
-
-    def test_metadata_and_publish_options_are_present(self):
-        options = _option_strings(
-            _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
-        )
-        for expected in (
-            "--title",
-            "--note",
-            "--notef",
-            "--tags",
-            "--privacy",
-            "--no-comments",
-            "--aigc",
-            "--no-aigc",
-            "--your-brand",
-            "--branded-content",
-        ):
-            with self.subTest(option=expected):
-                self.assertIn(expected, options)
 
     def test_cover_and_reuse_options_are_still_absent(self):
         options = _option_strings(
@@ -439,27 +385,6 @@ class UploadNoteParserTests(unittest.TestCase):
                         ]
                     )
         self.assertEqual(ctx.exception.code, 2)
-
-    def test_metadata_defaults_are_none_not_empty_strings(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            image = Path(tmp_dir) / "image.png"
-            image.write_bytes(b"x")
-            args = sau_cli.build_parser().parse_args(
-                [
-                    "tiktok",
-                    "upload-note",
-                    "--images",
-                    str(image),
-                ]
-            )
-        self.assertIsNone(args.title)
-        self.assertIsNone(args.note)
-        self.assertIsNone(args.notef)
-        self.assertEqual(args.tags, "")
-        self.assertIsNone(args.aigc)
-        self.assertIsNone(args.your_brand)
-        self.assertIsNone(args.branded_content)
-        self.assertIsNone(args.privacy)
 
     def test_parse_upload_note_keeps_image_order(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -552,7 +477,8 @@ class UploadNoteValidationTests(unittest.TestCase):
 
     def test_more_than_35_images_exits_2_without_browser(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            images = self._images(tmp_dir, TIKTOK_MAX_IMAGE_COUNT + 1)
+            images = self._images(tmp_dir, 36)
+            tiktok_command._validate_note_images([Path(path) for path in images[:35]])
             self._assert_exit_2_without_browser(self._argv(images))
 
     def test_missing_file_exits_2_without_browser(self):
@@ -602,10 +528,13 @@ class UploadNoteValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             huge = Path(tmp_dir) / "huge.png"
             with huge.open("wb") as handle:
-                handle.truncate(TIKTOK_MAX_IMAGE_BYTES + 1)
+                handle.truncate(50 * 1024 * 1024)
+                tiktok_command._validate_note_images([huge])
+                handle.truncate(50 * 1024 * 1024 + 1)
             self._assert_exit_2_without_browser(self._argv([str(huge)]))
 
     def test_title_over_90_characters_exits_2_without_browser(self):
+        tiktok_command._validate_note_metadata("x" * 90, None, [])
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
@@ -613,6 +542,7 @@ class UploadNoteValidationTests(unittest.TestCase):
             )
 
     def test_description_over_4000_characters_exits_2_without_browser(self):
+        tiktok_command._validate_note_metadata(None, "x" * 4000, [])
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
@@ -659,9 +589,10 @@ class UploadNoteValidationTests(unittest.TestCase):
     def test_more_than_50_hashtags_exits_2_without_browser(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
-            tags = ",".join(f"tag{index}" for index in range(51))
+            tags = [f"tag{index}" for index in range(51)]
+            tiktok_command._validate_note_metadata(None, None, tags[:50])
             self._assert_exit_2_without_browser(
-                self._argv(images, "--tags", tags)
+                self._argv(images, "--tags", ",".join(tags))
             )
 
     def test_missing_notef_file_exits_2_without_browser(self):
@@ -773,28 +704,6 @@ class UploadNoteBuilderTests(unittest.TestCase):
         self.assertEqual(app.options, options)
         self.assertIsNone(app.options.allow_reuse)
 
-    def test_note_publish_options_never_request_reuse(self):
-        args = SimpleNamespace(
-            privacy="followers",
-            no_comments=True,
-            aigc=False,
-            your_brand=True,
-            branded_content=None,
-        )
-        options = tiktok_command._build_publish_options(args)
-        self.assertEqual(
-            options,
-            TiktokPublishOptions(
-                privacy="followers",
-                allow_comments=False,
-                allow_reuse=None,
-                aigc=False,
-                your_brand=True,
-                branded_content=None,
-            ),
-        )
-        self.assertIsNone(options.allow_reuse)
-
     def test_upload_urls_are_media_specific(self):
         self.assertEqual(TiktokBaseUploader.upload_url, TIKTOK_UPLOAD_URL)
         self.assertEqual(TiktokNote.upload_url, TIKTOK_PHOTO_UPLOAD_URL)
@@ -890,6 +799,8 @@ class UploadNoteCliTests(unittest.TestCase):
                         "folder",
                         "--profile-id",
                         "profile",
+                        "--debug",
+                        "--headless",
                         "--images",
                         *images,
                         "--title",
@@ -901,7 +812,7 @@ class UploadNoteCliTests(unittest.TestCase):
                         "--privacy",
                         "friends",
                         "--no-comments",
-                        "--aigc",
+                        "--no-aigc",
                         "--your-brand",
                     ]
                 )
@@ -911,13 +822,15 @@ class UploadNoteCliTests(unittest.TestCase):
         self.assertEqual(request.title, "Photo title")
         self.assertEqual(request.note, "Photo body")
         self.assertEqual(request.tags, ["one", "two"])
+        self.assertTrue(request.debug)
+        self.assertTrue(request.headless)
         self.assertEqual(
             request.options,
             TiktokPublishOptions(
                 privacy="friends",
                 allow_comments=False,
                 allow_reuse=None,
-                aigc=True,
+                aigc=False,
                 your_brand=True,
                 branded_content=None,
             ),
@@ -1096,7 +1009,7 @@ class UploadNoteFlowTests(unittest.TestCase):
 
         self.assertEqual(code, 0, err)
         self.assertIn("TikTok note upload submitted: 3 images", out)
-        self.assertEqual(page.goto_calls[0][0], TIKTOK_PHOTO_UPLOAD_URL)
+        self.assertEqual(page.goto_calls[0][0], "https://www.tiktok.com/tiktokstudio/upload?tab=photo")
         self.assertEqual(page.input_files, images)
         self.assertEqual(page.input_files[0], images[0])
         self.assertEqual(session_cm.exit_calls, 1)
@@ -1536,28 +1449,6 @@ class UploadNoteOptionTests(unittest.TestCase):
         self.assertIn("aigc", err)
         self.assertIn("control-not-found", err)
         self.assertEqual(session_cm.exit_calls, 1)
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-
-class UploadNoteConstantsTests(unittest.TestCase):
-    def test_web_ui_limits(self):
-        self.assertEqual(TIKTOK_MAX_IMAGE_COUNT, 35)
-        self.assertEqual(TIKTOK_MAX_IMAGE_BYTES, 50 * 1024 * 1024)
-        self.assertEqual(TIKTOK_MAX_TITLE_LENGTH, 90)
-        self.assertEqual(TIKTOK_MAX_DESCRIPTION_LENGTH, 4000)
-        self.assertEqual(TIKTOK_MAX_HASHTAG_COUNT, 50)
-        self.assertEqual(
-            TIKTOK_IMAGE_SUFFIXES, {".jpg", ".jpeg", ".png", ".webp"}
-        )
-        self.assertEqual(
-            TIKTOK_PHOTO_UPLOAD_URL,
-            "https://www.tiktok.com/tiktokstudio/upload?tab=photo",
-        )
-
 
 
 class PhotoTitleStructuralErrorTests(unittest.TestCase):

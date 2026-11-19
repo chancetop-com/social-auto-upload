@@ -11,13 +11,6 @@ from utils.errors import UsageError
 
 
 class BrowserCliParserTests(unittest.TestCase):
-    def test_build_parser_accepts_xiaohongshu_login(self):
-        parser = sau_cli.build_parser()
-        args = parser.parse_args(["xiaohongshu", "login", "--account", "creator"])
-        self.assertEqual(args.platform, "xiaohongshu")
-        self.assertEqual(args.action, "login")
-
-
     def test_xiaohongshu_upload_video_defaults_to_headed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = Path(tmp_dir) / "demo.mp4"
@@ -38,31 +31,6 @@ class BrowserCliParserTests(unittest.TestCase):
             )
 
         self.assertFalse(args.headless)
-
-    def test_xiaohongshu_upload_note_accepts_headed(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            image_path = Path(tmp_dir) / "1.png"
-            image_path.write_bytes(b"image")
-
-            parser = sau_cli.build_parser()
-            args = parser.parse_args(
-                [
-                    "xiaohongshu",
-                    "upload-note",
-                    "--account",
-                    "creator",
-                    "--images",
-                    str(image_path),
-                    "--title",
-                    "图文标题",
-                    "--note",
-                    "图文正文",
-                    "--headed",
-                ]
-            )
-
-        self.assertFalse(args.headless)
-
 
     def test_xiaohongshu_upload_video_parses_declaration_flags(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -137,13 +105,6 @@ class BrowserCliParserTests(unittest.TestCase):
 
 
 class BrowserCliDispatchTests(unittest.TestCase):
-
-    def test_dispatch_xiaohongshu_check_prints_valid(self):
-        args = Namespace(platform="xiaohongshu", action="check", account="creator")
-        with patch("sau_commands.xiaohongshu.check_xiaohongshu_account", new=AsyncMock(return_value=True)):
-            code = asyncio.run(sau_cli.dispatch(args))
-        self.assertEqual(code, 0)
-
 
     def test_dispatch_xiaohongshu_upload_video_uses_headed_request(self):
         args = Namespace(

@@ -135,23 +135,15 @@ class MultiloginClientStartTests(unittest.TestCase):
 
     def test_start_429_is_surfaced_without_retry_or_sleep(self):
         client, http_get = self._client(
-            FakeResponse(429, {"status": {"error_code": "TOO_MANY_REQUESTS", "message": "rate limited"}})
+            FakeResponse(429, {"status": {"message": "rate limited"}})
         )
 
         with patch("time.sleep", side_effect=AssertionError("client must not sleep")):
-            with self.assertRaises(RuntimeError) as caught:
+            with self.assertRaises(RateLimitedError) as caught:
                 client.start(FOLDER_ID, PROFILE_ID, headless=True)
 
         self.assertIn("429", str(caught.exception))
         self.assertEqual(len(http_get.calls), 1)
-
-    def test_start_429_raises_the_shared_rate_limited_error(self):
-        client, _ = self._client(
-            FakeResponse(429, {"status": {"message": "rate limited"}})
-        )
-
-        with self.assertRaises(RateLimitedError):
-            client.start(FOLDER_ID, PROFILE_ID, headless=True)
 
     def test_start_missing_port_is_contract_error(self):
         client, _ = self._client(FakeResponse(200, {"data": {}, "status": {"http_code": 200}}))

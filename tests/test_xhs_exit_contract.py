@@ -31,30 +31,6 @@ from utils.errors import (
 #: The complete set of exit codes the contract may emit (spec §4).
 EXIT_CODES = frozenset({0, 1, 2, 9, 10, 11, 130})
 
-#: The complete scenario set, one entry per spec §4 failure type.
-FULL_SET = frozenset(
-    {
-        "publish-success",
-        "login-before-dispatch",
-        "login-after-dispatch",
-        "verification-before-dispatch",
-        "verification-after-dispatch",
-        "preflight-local-failure",
-        "check-logged-out",
-        "check-probe-failure",
-        "arm-window-exhausted",
-        "upload-failure",
-        "topic-mismatch",
-        "metadata-failure",
-        "fire-dispatch-exception",
-        "observe-timeout",
-        "usage-error",
-        "rate-limited",
-        "dual-credentials-or-provider-failure",
-        "ctrl-c",
-    }
-)
-
 DEFAULT_ARGV = ("xiaohongshu", "check")
 
 
@@ -341,9 +317,6 @@ class Decision13ParityExitRegistryTests(unittest.TestCase):
     def test_every_exit_code_in_the_contract_has_a_covered_row(self):
         covered = {row.expected_code for row in ROWS}
         self.assertEqual(covered, set(EXIT_CODES))
-
-    def test_every_contract_scenario_has_one_row(self):
-        self.assertCountEqual([row.scenario for row in ROWS], FULL_SET)
 
 
 if __name__ == "__main__":

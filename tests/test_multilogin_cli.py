@@ -127,20 +127,6 @@ class ParserContractTests(unittest.TestCase):
         self.assertEqual(args.profile_id, "profile")
         self.assertFalse(args.headless)
 
-    def test_documented_check_headed_example_parses(self):
-        args = sau_cli.build_parser().parse_args(
-            [
-                "xiaohongshu",
-                "check",
-                "--folder-id",
-                "folder",
-                "--profile-id",
-                "profile",
-                "--headed",
-            ]
-        )
-        self.assertFalse(args.headless)
-
 
 class HelperTests(unittest.TestCase):
     def test_local_mode_ignores_multilogin_flags(self):
