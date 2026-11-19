@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 from threading import Event
+import time
 
 import pytest
 from patchright.sync_api import sync_playwright
@@ -266,8 +267,11 @@ def test_predownload_is_independent_of_browser_credentials(origin, sau_cli):
     assert json.loads(stdout)["status"] == "ready" and requests == ["/offline-cover"]
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT delivery")
-def test_interrupt_clears_temporary_directory_and_ends_other_interest(tmp_path, origin, sau_cli):
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+@pytest.mark.parametrize(("interruption", "code"), [
+    (signal.SIGINT, 130), (signal.SIGTERM, -signal.SIGTERM), (getattr(signal, "SIGKILL", None), -9),
+])
+def test_interrupt_clears_temporary_directory_and_ends_other_interest(tmp_path, origin, sau_cli, interruption, code):
     base, assets, requests = origin
     received, release, joined = Event(), Event(), Event()
 
@@ -292,9 +296,14 @@ def test_interrupt_clears_temporary_directory_and_ends_other_interest(tmp_path, 
         waiting = sau_cli("media", "predownload", "--wait", "--task-id", directory.name,
                           "--urls", url, base + "/join", **env)
         assert joined.wait(6)
-        child.send_signal(signal.SIGINT)
+        child.send_signal(interruption)
         stdout, stderr = child.communicate(timeout=5)
-        assert child.returncode == 130, stderr
+        assert child.returncode == code, stderr
+        if interruption == signal.SIGKILL:
+            deadline = time.monotonic() + 5
+            while directory.exists():
+                assert time.monotonic() < deadline, "orphaned temporary transfer still present"
+                time.sleep(.05)
         assert not directory.exists() and local.read_text() == "owned by caller"
         stdout, stderr = waiting.communicate(timeout=5)
         assert waiting.returncode == 1, stderr
@@ -342,3 +351,48 @@ tiktok._upload_video = publish
             child.communicate(timeout=10)
     assert child.returncode == 0, stderr
     assert requests == ["/cached.mp4", "/held"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
+@pytest.mark.parametrize(("interruption", "explicit"), [
+    (signal.SIGTERM, False), (signal.SIGTERM, True), (getattr(signal, "SIGKILL", None), False),
+])
+def test_terminated_upload_releases_only_its_temporary_media(tmp_path, sau_cli, origin, interruption, explicit):
+    base, assets, _ = origin
+    assets["/image.jpg"] = (200, b"remote image")
+    local = tmp_path / "mine.jpg"
+    local.write_bytes(b"caller image")
+    entered = tmp_path / "entered"
+    (tmp_path / "sitecustomize.py").write_text("""
+import asyncio
+from pathlib import Path
+from sau_commands import tiktok
+async def platform(request, target):
+    Path("entered.tmp").write_text(str(request.image_files[0]))
+    Path("entered.tmp").replace("entered")
+    await asyncio.Event().wait()
+tiktok._upload_note = platform
+""")
+    flags = ["--task-id", "scheduled"] if explicit else []
+    child = sau_cli("tiktok", "upload-note", "--account", "local", "--images", base + "/image.jpg", str(local), *flags)
+    try:
+        deadline = time.monotonic() + 8
+        while not entered.exists():
+            assert time.monotonic() < deadline and child.poll() is None
+            time.sleep(.05)
+        remote = Path(entered.read_text())
+        child.send_signal(interruption)
+        child.communicate(timeout=5)
+        assert child.returncode == -interruption
+        if explicit:
+            assert remote.read_bytes() == b"remote image"
+        else:
+            deadline = time.monotonic() + 4
+            while remote.parent.exists():
+                assert time.monotonic() < deadline, "terminated publisher still owns its temporary directory"
+                time.sleep(.05)
+        assert local.read_bytes() == b"caller image"
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()

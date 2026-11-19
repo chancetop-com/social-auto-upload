@@ -8,6 +8,7 @@ from pathlib import Path, PureWindowsPath
 import re
 import shutil
 import stat
+from typing import NamedTuple
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -54,21 +55,14 @@ def validate_url(url: str) -> str:
     return url
 
 
-def validate_task_owner(directory: Path, task_id: str) -> bool:
-    """Reject alternate spellings. Return whether the CLI created this directory."""
+def validate_task_owner(directory: Path):
+    """Require a marker for this exact spelling of a CLI-created task."""
     marker = directory / TASK_OWNER_FILE
-    if marker.is_symlink() or (marker.exists() and not marker.is_file()):
+    if marker.is_symlink() or not marker.is_file():
         raise OSError("Invalid media task owner file")
-    if marker.is_file():
-        with marker.open("rb") as stream:
-            if stream.read(256) != task_id.encode("utf-8"):
-                raise OSError("Task ID conflicts with an existing directory")
-        return True
-    # Older downloads had no owner marker. Preserve their contents without
-    # converting an arbitrary existing directory into a CLI-managed one.
-    if not any(child.name == task_id for child in directory.parent.iterdir()):
-        raise OSError("Task ID conflicts with an existing directory")
-    return False
+    with marker.open("rb") as stream:
+        if stream.read(256) != directory.name.encode("utf-8"):
+            raise OSError("Task ID conflicts with an existing directory")
 
 
 def task_directory(task_id: str, *, new=False) -> Path:
@@ -81,8 +75,7 @@ def task_directory(task_id: str, *, new=False) -> Path:
     except FileExistsError:
         if new or not directory.is_dir():
             raise
-        if not validate_task_owner(directory, task_id):
-            return directory
+        owned_task_stat(directory)
     else:
         with (directory / TASK_OWNER_FILE).open("xb") as marker:
             marker.write(task_id.encode("utf-8"))
@@ -94,9 +87,12 @@ def task_directory(task_id: str, *, new=False) -> Path:
 # uses an opaque URL, recognize its declared media type or a bounded signature.
 MEDIA_SUFFIXES = {
     "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+    "image/avif": ".avif", "image/heic": ".heic", "image/heif": ".heif",
+    "image/heic-sequence": ".heic", "image/heif-sequence": ".heif",
     "image/bmp": ".bmp", "image/gif": ".gif", "video/mp4": ".mp4",
     "video/quicktime": ".mov", "video/webm": ".webm", "video/x-msvideo": ".avi",
-    "video/x-matroska": ".mkv", "video/x-flv": ".flv", "video/x-ms-wmv": ".wmv",
+    "video/matroska": ".mkv", "video/matroska-3d": ".mkv", "video/x-matroska": ".mkv",
+    "video/x-flv": ".flv", "video/x-ms-wmv": ".wmv",
     "video/x-m4v": ".m4v",
 }
 MEDIA_PATH_SUFFIXES = frozenset(MEDIA_SUFFIXES.values()) | {".jpeg"}
@@ -107,15 +103,37 @@ def media_suffix(partial, content_type):
     if declared:
         return declared
     with partial.open("rb") as stream:
-        header = stream.read(16)
+        header = stream.read(512)
     if header.startswith(b"\xff\xd8\xff"):
         return ".jpg"
     if header.startswith(b"\x89PNG\r\n\x1a\n"):
         return ".png"
-    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
-        return ".webp"
-    if header[4:8] == b"ftyp" and header[8:12] in (b"isom", b"mp41", b"mp42", b"avc1"):
-        return ".mp4"
+    if header.startswith(b"RIFF"):
+        return {b"WEBP": ".webp", b"AVI ": ".avi"}.get(header[8:12], "")
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if header.startswith(b"BM"):
+        return ".bmp"
+    if header.startswith(b"FLV\x01"):
+        return ".flv"
+    if header.startswith(bytes.fromhex("3026b2758e66cf11a6d900aa0062ce6c")):
+        return ".wmv"
+    if header.startswith(b"\x1a\x45\xdf\xa3"):
+        if b"\x42\x82\x84webm" in header:
+            return ".webm"
+        if b"\x42\x82\x88matroska" in header:
+            return ".mkv"
+    if header[4:8] == b"ftyp":
+        # Inspect whole four-byte brands, bounded by the first box and our sample.
+        end = min(int.from_bytes(header[:4], "big"), len(header))
+        brands = {header[8:12], *(header[i:i+4] for i in range(16, end - 3, 4))}
+        for suffix, known in (
+            (".avif", {b"avif", b"avis"}), (".heic", {b"heic", b"heix", b"hevc", b"hevx"}),
+            (".heif", {b"mif1", b"mif2", b"msf1"}), (".mov", {b"qt  "}),
+            (".m4v", {b"M4V "}), (".mp4", {b"isom", b"mp41", b"mp42", b"avc1"}),
+        ):
+            if brands & known:
+                return suffix
     return ""
 
 
@@ -155,9 +173,16 @@ def open_response(url: str, headers: dict):
     raise OSError("Too many HTTP redirects")
 
 
-def checkpoint_paths(target: Path) -> tuple[Path, Path, Path]:
-    return tuple(target.with_name(f".{target.name}.{suffix}")
-                 for suffix in ("part", "resume", "resume.tmp"))
+class CheckpointPaths(NamedTuple):
+    partial: Path
+    metadata: Path
+    temporary: Path
+
+    @classmethod
+    def for_target(cls, target):
+        return cls(partial=target.with_name(f".{target.name}.part"),
+                   metadata=target.with_name(f".{target.name}.resume"),
+                   temporary=target.with_name(f".{target.name}.resume.tmp"))
 
 
 def owned_task_stat(directory: Path):
@@ -169,8 +194,7 @@ def owned_task_stat(directory: Path):
             return None
         if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
             raise OSError("Expected a direct media directory")
-    if not validate_task_owner(directory, directory.name):
-        raise OSError("Directory is not owned by this media task")
+    validate_task_owner(directory)
     return info
 
 
@@ -197,7 +221,7 @@ def remove_task_files(directory: Path, original, url: str | None):
                 os.utime(directory, ns=(original.st_atime_ns, original.st_mtime_ns))
             raise
         return
-    paths = (item_path(directory, url), *checkpoint_paths(item_storage_path(directory, url)))
+    paths = (item_path(directory, url), *CheckpointPaths.for_target(item_storage_path(directory, url)))
     if os.unlink in os.supports_dir_fd:
         fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -227,9 +251,9 @@ class Checkpoint:
     offset: int
 
     @classmethod
-    def load(cls, metadata, partial):
+    def load(cls, paths: CheckpointPaths):
         try:
-            with metadata.open(encoding="utf-8") as stream:
+            with paths.metadata.open(encoding="utf-8") as stream:
                 # A valid journal contains only a hash, two integers and one HTTP header.
                 if os.fstat(stream.fileno()).st_size > 512 * 1024:
                     return None
@@ -238,28 +262,28 @@ class Checkpoint:
                 return None
             if saved.total is not None and (type(saved.total) is not int or saved.total < saved.offset):
                 return None
-            if 0 < saved.offset <= partial.stat().st_size:
+            if 0 < saved.offset <= paths.partial.stat().st_size:
                 return saved
         except (FileNotFoundError, ValueError, TypeError):
             pass
         return None
 
-    def save(self, output, metadata, temporary):
+    def save(self, output, paths: CheckpointPaths):
         output.flush()
         os.fsync(output.fileno())
-        temporary.unlink(missing_ok=True)
-        with temporary.open("x", encoding="utf-8") as stream:
+        paths.temporary.unlink(missing_ok=True)
+        with paths.temporary.open("x", encoding="utf-8") as stream:
             json.dump(asdict(self), stream)
             stream.flush()
             os.fsync(stream.fileno())
-        temporary.replace(metadata)
+        paths.temporary.replace(paths.metadata)
 
 
 CHUNK_SIZE = 64 * 1024
 CHECKPOINT_INTERVAL = 4 * 1024 * 1024
 
 
-def read_full(response, partial, metadata, temporary, source):
+def read_full(response, paths: CheckpointPaths, source):
     if "Content-Range" in response.headers:
         raise OSError("Unexpected Content-Range on full HTTP response")
     length = response.headers.get("Content-Length")
@@ -269,19 +293,19 @@ def read_full(response, partial, metadata, temporary, source):
     etag = response.headers.get("ETag")
     resumable = strong_etag(etag)
     # Invalidate the old version before replacing any of its bytes.
-    metadata.unlink(missing_ok=True)
-    partial.unlink(missing_ok=True)
-    with partial.open("xb") as output:
+    paths.metadata.unlink(missing_ok=True)
+    paths.partial.unlink(missing_ok=True)
+    with paths.partial.open("xb") as output:
         next_checkpoint = 1
         try:
             for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
                 output.write(chunk)
                 if resumable and output.tell() >= next_checkpoint:
-                    Checkpoint(source, etag, total, output.tell()).save(output, metadata, temporary)
+                    Checkpoint(source, etag, total, output.tell()).save(output, paths)
                     next_checkpoint = output.tell() + CHECKPOINT_INTERVAL
         except requests.RequestException:
             if resumable and output.tell():
-                Checkpoint(source, etag, total, output.tell()).save(output, metadata, temporary)
+                Checkpoint(source, etag, total, output.tell()).save(output, paths)
             raise
         if total is not None and output.tell() != total:
             raise OSError("Incomplete HTTP response")
@@ -289,7 +313,7 @@ def read_full(response, partial, metadata, temporary, source):
         os.fsync(output.fileno())
 
 
-def read_range(response, partial, metadata, temporary, saved, source):
+def read_range(response, paths: CheckpointPaths, saved, source):
     if response.headers.get("ETag") != saved.etag or source != saved.source:
         return None
     match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", response.headers.get("Content-Range", ""))
@@ -298,7 +322,7 @@ def read_range(response, partial, metadata, temporary, saved, source):
     start, end, total = map(int, match.groups())
     if start != saved.offset or not start <= end < total or saved.total not in (None, total):
         return None
-    with partial.open("r+b") as output:
+    with paths.partial.open("r+b") as output:
         # Ignore any uncommitted tail from an earlier interrupted range request.
         output.seek(start)
         output.truncate()
@@ -309,7 +333,7 @@ def read_range(response, partial, metadata, temporary, saved, source):
         if output.tell() != end + 1:
             raise OSError("Incomplete HTTP range")
         following = Checkpoint(source, saved.etag, total, end + 1)
-        following.save(output, metadata, temporary)
+        following.save(output, paths)
         return following
 
 
@@ -319,10 +343,10 @@ def download_item(directory: Path, url: str) -> Path:
         raise OSError("Media file is a symbolic link")
     if target.is_file():
         return target
-    partial, metadata, temporary = checkpoint_paths(target)
-    if partial.is_symlink() or metadata.is_symlink():
+    paths = CheckpointPaths.for_target(target)
+    if paths.partial.is_symlink() or paths.metadata.is_symlink():
         raise OSError("Media checkpoint is a symbolic link")
-    saved = Checkpoint.load(metadata, partial)
+    saved = Checkpoint.load(paths)
     while True:
         headers = {"Accept-Encoding": "identity"}
         if saved:
@@ -334,7 +358,7 @@ def download_item(directory: Path, url: str) -> Path:
                         and response.headers.get("Content-Range") == f"bytes */{saved.offset}"
                         and saved.total in (None, saved.offset)):
                     # A previous unvalidated 206 may have left a speculative tail.
-                    with partial.open("r+b") as output:
+                    with paths.partial.open("r+b") as output:
                         output.truncate(saved.offset)
                     break
                 saved = None
@@ -347,15 +371,15 @@ def download_item(directory: Path, url: str) -> Path:
             if transfer and (transfer != "chunked" or "Content-Length" in response.headers):
                 raise OSError("Unsupported HTTP transfer encoding or ambiguous length")
             if response.status_code == 200:
-                read_full(response, partial, metadata, temporary, source)
+                read_full(response, paths, source)
                 break
-            saved = read_range(response, partial, metadata, temporary, saved, source)
+            saved = read_range(response, paths, saved, source)
             if saved and saved.offset == saved.total:
                 break
     if target.suffix.lower() not in MEDIA_PATH_SUFFIXES:
-        suffix = media_suffix(partial, response.headers.get("Content-Type", ""))
+        suffix = media_suffix(paths.partial, response.headers.get("Content-Type", ""))
         if suffix:
             target = target.with_suffix(suffix)
-    partial.replace(target)
-    metadata.unlink(missing_ok=True)
+    paths.partial.replace(target)
+    paths.metadata.unlink(missing_ok=True)
     return target

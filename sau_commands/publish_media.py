@@ -1,10 +1,13 @@
 """Resolve upload arguments together, before entering any platform session."""
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from copy import copy
+import os
 from pathlib import Path
+import signal
 import sqlite3
 import sys
+import threading
 from uuid import uuid4
 
 from sau_commands.arguments import existing_file_path
@@ -24,6 +27,33 @@ def add_task_id(parser):
     parser.add_argument("--task-id", type=validate_task_id, help="Reuse downloads for this task ID")
 
 
+@contextmanager
+def _finish_temporary_task_on_termination():
+    # Give this CLI's temporary directory its normal asynchronous teardown
+    # before delivering the original POSIX termination status to its caller.
+    if (os.name == "nt" or threading.current_thread() is not threading.main_thread()
+            or signal.getsignal(signal.SIGTERM) != signal.SIG_DFL):
+        yield
+        return
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    terminating = False
+
+    def terminate(signum, frame):
+        nonlocal terminating
+        if not terminating:
+            terminating = True
+            loop.call_soon_threadsafe(task.cancel)
+
+    previous = signal.signal(signal.SIGTERM, terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        if terminating:
+            signal.raise_signal(signal.SIGTERM)
+
+
 @asynccontextmanager
 async def publish_media(args):
     images = getattr(args, "images", None) or []
@@ -33,6 +63,14 @@ async def publish_media(args):
     if not task_id and not urls:
         yield args
         return
+    temporary = task_id is None
+    with _finish_temporary_task_on_termination() if temporary else nullcontext():
+        async with _acquire(args, images, urls, task_id) as resolved:
+            yield resolved
+
+
+@asynccontextmanager
+async def _acquire(args, images, urls, task_id):
     temporary = task_id is None
     while True:
         candidate = uuid4().hex if temporary else task_id

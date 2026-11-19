@@ -2,12 +2,15 @@
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
 from threading import Event
 import time
 
 import pytest
 
 from tests.remote_media_cli import origin, sau_cli
+from tests.test_remote_media_recovery import worker_of
 
 
 WEEK = 7 * 24 * 60 * 60
@@ -28,6 +31,50 @@ def download(cli, task_id, url):
 def age(directory, seconds=WEEK):
     timestamp = NOW - seconds
     os.utime(directory, (timestamp, timestamp))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Observes POSIX process termination")
+def test_cleanup_releases_a_dead_waiter_after_its_worker_finished(tmp_path, sau_cli, origin):
+    base, assets, requests = origin
+    started, release = Event(), Event()
+
+    def deliver(handler):
+        started.set()
+        release.wait(10)
+        handler.send_response(200)
+        handler.send_header("Content-Length", "4")
+        handler.end_headers()
+        handler.wfile.write(b"clip")
+
+    assets["/clip"] = deliver
+    waiter = sau_cli("media", "predownload", "--wait", "--task-id", "finished", "--urls", base + "/clip")
+    directory = tmp_path / "downloads" / "finished"
+    try:
+        assert started.wait(6)
+        waiter.send_signal(signal.SIGSTOP)
+        worker = worker_of(waiter)
+        release.set()
+        deadline = time.monotonic() + 8
+        while True:
+            status = subprocess.run(["ps", "-o", "stat=", "-p", str(worker)], capture_output=True, text=True)
+            if status.returncode or status.stdout.strip().startswith("Z"):
+                break
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+        assert any(path.read_bytes() == b"clip" for path in directory.iterdir() if path.is_file())
+        age(directory, 2 * WEEK)
+        run(sau_cli("media", "cleanup"))
+        assert directory.exists(), "a live waiter can still collect its completed file"
+    finally:
+        release.set()
+        waiter.kill()
+        waiter.wait()
+    age(directory, WEEK - 60)
+    run(sau_cli("media", "cleanup"))
+    assert directory.stat().st_mtime == NOW - WEEK + 60
+    age(directory, WEEK)
+    run(sau_cli("media", "cleanup"))
+    assert not directory.exists() and requests == ["/clip"]
 
 
 def test_cleanup_uses_task_directory_age_and_protects_other_files(tmp_path, sau_cli, origin):

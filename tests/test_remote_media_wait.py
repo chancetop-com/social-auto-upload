@@ -31,6 +31,28 @@ def test_wait_returns_complete_files_in_input_order(sau, origin, tmp_path):
     assert all(p.parent == tmp_path / "downloads" / "post-42" for p in paths)
 
 
+def test_opaque_assets_receive_local_media_suffixes(sau, origin):
+    base, assets, _ = origin
+    samples = [
+        (".bmp", b"BM" + b"\x00" * 24), (".gif", b"GIF89a"),
+        (".avi", b"RIFF\x00\x00\x00\x04AVI "), (".flv", b"FLV\x01"),
+        (".wmv", bytes.fromhex("3026b2758e66cf11a6d900aa0062ce6c")),
+        (".webm", b"\x1a\x45\xdf\xa3\x87\x42\x82\x84webm"),
+        (".mkv", b"\x1a\x45\xdf\xa3\x8b\x42\x82\x88matroska"),
+        (".mov", b"\x00\x00\x00\x10ftypqt  " + b"\x00" * 4),
+        (".m4v", b"\x00\x00\x00\x10ftypM4V " + b"\x00" * 4),
+    ]
+    urls = []
+    for i, (_, body) in enumerate(samples):
+        path = f"/asset?file={i}"
+        urls.append(base + path)
+        assets[path] = (200, body)
+    result = sau("--task-id", "formats", "--urls", *urls)
+    assert result.returncode == 0, result.stderr
+    paths = [Path(item["path"]) for item in json.loads(result.stdout)["items"]]
+    assert [(path.suffix, path.read_bytes()) for path in paths] == samples
+
+
 def test_full_url_and_task_id_identify_reusable_copies(sau, origin):
     base, assets, requests = origin
     first, second = "/pic.jpg?sig=one", "/pic.jpg?sig=two"

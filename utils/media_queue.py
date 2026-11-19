@@ -18,6 +18,7 @@ from utils.remote_media import (
 )
 
 POLL_SECONDS = 0.05
+TEMPORARY_OWNER_FILE = ".sau-temporary-owner"
 
 
 def download_concurrency():
@@ -135,7 +136,7 @@ class Request:
                 (_queue_directory(download_root()) / (self.id + ".lease")).unlink()
 
 
-def _start_worker():
+def _start_queue_process(*arguments, stdin=subprocess.DEVNULL):
     options = (
         {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
         if os.name == "nt" else {"start_new_session": True}
@@ -144,8 +145,8 @@ def _start_worker():
     # Preserve the caller's resolved paths, including its configuration.
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(os.path.abspath, sys.path))}
     return subprocess.Popen(
-        [sys.executable, "-m", "utils.media_queue", str(download_root())],
-        cwd=Path(sys.executable).parent, env=env, stdin=subprocess.DEVNULL,
+        [sys.executable, "-m", "utils.media_queue", str(download_root()), *arguments],
+        cwd=Path(sys.executable).parent, env=env, stdin=stdin,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, **options,
     )
 
@@ -159,7 +160,7 @@ def _ensure_worker(launching):
             return launching
         if status > 0:
             raise OSError("Could not start media worker")
-    return _start_worker()
+    return _start_queue_process()
 
 
 async def submit(task_id, urls, *, background, priority=False):
@@ -262,11 +263,12 @@ def _transfer(root, token):
             _report(db, key, url, path, reason)
 
 
-def _withdraw_dead_waiters(db, root):
-    waiters = db.execute("SELECT DISTINCT request_id FROM requests WHERE NOT background")
+def _abandoned_waiters(db, root, task_id=None):
+    waiters = db.execute("""SELECT DISTINCT request_id FROM requests
+                            WHERE NOT background AND (? IS NULL OR task_id=?)""", (task_id, task_id))
     for (owner,) in waiters.fetchall():
         if _release_abandoned(root, owner):
-            _finish_requests(db, root, "request_id=?", (owner,))
+            yield owner
 
 
 def _reap_writer(db, root, token, *, interrupted=True):
@@ -342,7 +344,8 @@ def _drain(root, concurrency):
     try:
         while True:
             with transaction(root) as db:
-                _withdraw_dead_waiters(db, root)
+                for owner in _abandoned_waiters(db, root):
+                    _finish_requests(db, root, "request_id=?", (owner,))
                 db.execute("UPDATE requests SET accepted=1 WHERE accepted=0")
                 _collect_writers(db, root, children)
                 _finish_requests(db, root, "background AND (path IS NOT NULL OR reason IS NOT NULL)")
@@ -402,11 +405,14 @@ def task_lease(task_id, purpose):
         yield lease is not None
     finally:
         if lease is not None:
-            with transaction(root):
-                lease.close()
-                (queue / filename).unlink()
-                if not any((queue / parent).iterdir()):
-                    (queue / parent).rmdir()
+            try:
+                with transaction(root):
+                    lease.close()
+                    (queue / filename).unlink()
+                    if not any((queue / parent).iterdir()):
+                        (queue / parent).rmdir()
+            finally:
+                lease.close()  # Also release the OS lock if the queue became inaccessible.
 
 
 @asynccontextmanager
@@ -442,6 +448,8 @@ async def publish_access(task_id, *, new=False):
                         with transaction() as db:
                             _initialize(db)
                             directory = task_directory(task_id, new=new)
+                            if new:
+                                stack.callback(_watch_temporary_owner(directory).stdin.close)
                     except FileExistsError:
                         if not new:
                             raise
@@ -450,11 +458,51 @@ async def publish_access(task_id, *, new=False):
                 stack.close()
             await asyncio.sleep(POLL_SECONDS)
         key = _directory_key(directory.stat()) if directory is not None else None
+        # After admission the platform owns the outcome. Keep release errors
+        # outside its exception path, including on cancellation or interruption.
+        release = stack.pop_all()
         try:
             yield directory
         finally:
-            if directory is not None:
-                _refresh_retained(directory.parent, task_id, key)
+            try:
+                with release:
+                    if directory is not None:
+                        _refresh_retained(directory.parent, task_id, key)
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Could not release media task {task_id}: {exc}", file=sys.stderr)
+
+
+def _watch_temporary_owner(directory):
+    # A pipe detects even a hard kill after the download queue has drained.
+    # The separate process holds no download slot or scheduler lease.
+    token = uuid4().hex
+    original = owned_task_stat(directory)
+    try:
+        with (directory / TEMPORARY_OWNER_FILE).open("x") as marker:
+            marker.write(token)
+        return _start_queue_process("--watch-owner", directory.name, token, stdin=subprocess.PIPE)
+    except OSError:
+        remove_task_files(directory, original, None)
+        raise
+
+
+async def _clear_orphaned_publish(root, task_id, token):
+    directory = root / validate_task_id(task_id)
+    marker = directory / TEMPORARY_OWNER_FILE
+    if not marker.is_file():
+        return  # Normal teardown already removed this generation.
+    while True:
+        async with task_gate(task_id):
+            if owned_task_stat(directory) is None or marker.is_symlink() or not marker.is_file():
+                return
+            with marker.open("rb") as stream:
+                if stream.read(33) != token.encode("ascii"):
+                    return  # Another temporary generation owns this ID now.
+            with task_lease(task_id, "publish") as available:
+                if available:
+                    await clear_media(task_id)
+                    return
+        await asyncio.sleep(POLL_SECONDS)
 
 
 def worker_running():
@@ -482,6 +530,17 @@ def cleanup_idle_tasks():
                     if not available:
                         continue
                     with transaction(root) as db:
+                        # The worker can exit before a foreground waiter dies.
+                        # Retire abandoned leases without extending retention.
+                        for owner in _abandoned_waiters(db, root, directory.name):
+                            db.execute("DELETE FROM requests WHERE request_id=?", (owner,))
+                        with _worker_lease(root) as stopped:
+                            if stopped:
+                                writers = db.execute("SELECT token FROM writers WHERE task_id=?", (directory.name,))
+                                for (token,) in writers.fetchall():
+                                    _reap_writer(db, root, token, interrupted=False)
+                                db.execute("""DELETE FROM requests WHERE task_id=? AND background
+                                              AND (path IS NOT NULL OR reason IS NOT NULL)""", (directory.name,))
                         active = db.execute("""SELECT 1 FROM requests WHERE task_id=?
                                                UNION ALL SELECT 1 FROM writers WHERE task_id=? LIMIT 1""",
                                             (directory.name, directory.name)).fetchone()
@@ -498,7 +557,10 @@ def worker(root):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3:
+    if sys.argv[2:3] == ["--watch-owner"]:
+        sys.stdin.buffer.read(1)
+        asyncio.run(_clear_orphaned_publish(Path(sys.argv[1]), sys.argv[3], sys.argv[4]))
+    elif len(sys.argv) == 3:
         _transfer(Path(sys.argv[1]), sys.argv[2])
     else:
         worker(Path(sys.argv[1]))

@@ -14,6 +14,33 @@ from tests.test_shared_youtube_cli import Studio
 
 
 PLATFORMS = ("xiaohongshu", "rednote", "youtube", "facebook", "facebook-page", "instagram")
+
+
+@pytest.mark.parametrize("declare_type", [True, False])
+def test_instagram_receives_its_supported_image_formats_from_opaque_urls(origin, sau_cli, receiver, declare_type):
+    base, assets, _ = origin
+    expected = [(".avif", b"avif"), (".heic", b"heic"), (".heif", b"mif1")]
+    urls = []
+    for i, (suffix, brand) in enumerate(expected):
+        path = f"/asset?image={i}"
+        urls.append(base + path)
+        content_type = "image/" + suffix[1:] if declare_type else "application/octet-stream"
+        body = b"declared image" if declare_type else b"\x00\x00\x00\x14ftyp" + brand + b"\x00" * 4 + brand
+
+        def serve(handler, content_type=content_type, body=body):
+            handler.send_response(200)
+            handler.send_header("Content-Type", content_type)
+            handler.send_header("Content-Length", str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+
+        assets[path] = serve
+    finish(sau_cli("instagram", "upload-note", "--title", "Images", "--account", "local", "--images", *urls))
+    assert [Path(item["path"]).suffix for item in json.loads(receiver.read_text())] == [
+        suffix for suffix, _ in expected
+    ]
+
+
 WITH_COVER = {"xiaohongshu", "rednote", "youtube", "instagram"}
 
 

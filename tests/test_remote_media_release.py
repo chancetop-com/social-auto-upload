@@ -73,6 +73,41 @@ def test_cleanup_error_preserves_confirmed_platform_result(sau_cli, origin, rece
     finish(sau_cli("media", "delete", "--task-id", "post"))
 
 
+@pytest.mark.parametrize(("outcome", "code"), [
+    ("unknown", 9), ("login", 10), ("interrupt", 130), ("published", 0),
+])
+def test_inaccessible_download_root_preserves_platform_outcome(tmp_path, sau_cli, outcome, code):
+    (tmp_path / "sitecustomize.py").write_text("""
+import os
+from pathlib import Path
+from sau_commands import tiktok
+from utils.errors import LoginRequiredError, PublishResultUnknownError
+async def upload(request, target):
+    root = Path("downloads")
+    original = root.rename("original")
+    root.symlink_to(original, target_is_directory=True)
+    outcome = os.environ["OUTCOME"]
+    if outcome == "unknown":
+        raise PublishResultUnknownError("Confirmation unavailable")
+    if outcome == "login":
+        raise LoginRequiredError("Please log in", publish_attempted=True)
+    if outcome == "interrupt":
+        raise KeyboardInterrupt
+tiktok._upload_video = upload
+""")
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"movie")
+    stdout, stderr = finish(sau_cli("tiktok", "upload-video", "--task-id", "post", "--account", "demo",
+                                    "--title", "Post", "--file", str(video), OUTCOME=outcome), code)
+    assert "release media task post" in stderr
+    if outcome == "unknown":
+        assert "Confirmation unavailable" in stderr
+    if outcome == "login":
+        assert "publish_attempted=true" in stderr.splitlines()
+    if outcome == "published":
+        assert "TikTok video upload submitted" in stdout
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX isolated Chromium fixture")
 @pytest.mark.parametrize(("outcome", "code", "submissions"), [
     ("no-publish", 0, 0), ("failed", 1, 0), ("interrupt", 130, 0),

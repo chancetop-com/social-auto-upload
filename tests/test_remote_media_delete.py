@@ -36,6 +36,28 @@ def test_delete_task_removes_its_directory_and_is_repeatable(sau_cli, origin):
     assert independent.read_bytes() == b"video"
 
 
+def test_only_cli_owned_directories_can_admit_downloads(tmp_path, sau_cli, origin):
+    base, assets, requests = origin
+    assets["/video.mp4"] = (200, b"video")
+    url = base + "/video.mp4"
+    directory = tmp_path / "downloads" / "post"
+    directory.mkdir(parents=True)
+    personal = directory / "keep"
+    personal.write_text("mine")
+    timestamp = directory.stat().st_mtime_ns
+    args = ("media", "predownload", "--task-id", "post", "--urls", url)
+    for flags in ((), ("--wait",)):
+        stdout, stderr = finish(sau_cli(*args, *flags), 1)
+        assert json.loads(stdout)["reason"] == "queue_unavailable" and stderr
+    assert requests == [] and list(directory.iterdir()) == [personal]
+    assert personal.read_text() == "mine" and directory.stat().st_mtime_ns == timestamp
+    directory.rename(tmp_path / "personal")
+    downloaded, = fetch(sau_cli, "post", url)
+    assert downloaded.read_bytes() == b"video"
+    assert finish(sau_cli("media", "delete", "--task-id", "post")) == ("", "")
+    assert not directory.exists()
+
+
 def test_delete_signed_url_allows_refresh_and_retains_the_other_signature(sau_cli, origin):
     base, assets, requests = origin
     old, other = "/cover?signature=one", "/cover?signature=two"

@@ -190,6 +190,8 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 
 ### 激活与优先级
 
+独立的 `sau media predownload`、`sau media delete` 和 `sau media cleanup` 直接管理素材，忽略两种浏览器凭据。其余命令按下表处理，包括接收网络素材的 `upload-video` 和 `upload-note`。
+
 | `MLX_API_TOKEN`（strip 后） | `ADSPOWER_API_KEY`（strip 后） | 模式 |
 | --- | --- | --- |
 | 空 / 未设置 | 空 / 未设置 | 本地模式 |

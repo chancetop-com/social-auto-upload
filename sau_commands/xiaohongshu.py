@@ -20,7 +20,7 @@ from uploader.xiaohongshu_uploader.main import (
     probe_session,
     xiaohongshu_setup,
 )
-from sau_commands.output import NO_PUBLISH_SUCCESS
+from sau_commands.output import report_upload_success
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
@@ -485,12 +485,7 @@ async def run(args):
         await upload_xiaohongshu_video(
             request, target=target, ignored_keys=ignored_keys
         )
-        if request.no_publish:
-            print(f"Xiaohongshu video upload: {request.video_file}")
-            print(NO_PUBLISH_SUCCESS)
-        else:
-            print(f"Xiaohongshu video upload submitted: {request.video_file}")
-            args.post_published = not request.publish_date
+        args.post_published = report_upload_success(request, "Xiaohongshu video", request.video_file)
         return 0
 
     if args.action == "upload-note":
@@ -519,12 +514,7 @@ async def run(args):
         await upload_xiaohongshu_note(
             request, target=target, ignored_keys=ignored_keys
         )
-        if request.no_publish:
-            print(f"Xiaohongshu note upload: {len(request.image_files)} images")
-            print(NO_PUBLISH_SUCCESS)
-        else:
-            print(f"Xiaohongshu note upload submitted: {len(request.image_files)} images")
-            args.post_published = not request.publish_date
+        args.post_published = report_upload_success(request, "Xiaohongshu note", f"{len(request.image_files)} images")
         return 0
 
     raise RuntimeError(f"Unsupported Xiaohongshu action: {args.action}")
