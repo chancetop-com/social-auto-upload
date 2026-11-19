@@ -7,7 +7,7 @@ from importlib import import_module
 import sys
 from typing import Sequence
 
-from sau_commands import article
+from sau_commands import article, media
 from utils.base_social_media import get_supported_social_media
 from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict, resolve_multilogin_target
 from utils.managed_sharing import managed_command
@@ -19,7 +19,7 @@ from utils.errors import (
 )
 
 
-PLATFORMS = {"article": article}
+PLATFORMS = {"article": article, "media": media}
 for name in get_supported_social_media():
     PLATFORMS[name] = import_module("sau_commands." + name.replace("-", "_"))
 

@@ -30,7 +30,7 @@ raise SystemExit(main(['--help']))
         choices = re.search(r'\{([^}]+)\}', result.stdout)
         self.assertIsNotNone(choices, result.stdout)
         self.assertEqual(set(choices.group(1).split(',')), {
-            'article', 'facebook', 'facebook-page', 'instagram', 'rednote',
+            'article', 'facebook', 'facebook-page', 'instagram', 'media', 'rednote',
             'tiktok', 'xiaohongshu', 'youtube',
         })
 
