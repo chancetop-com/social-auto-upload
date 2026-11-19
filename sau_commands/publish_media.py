@@ -6,8 +6,8 @@ import sqlite3
 from uuid import uuid4
 
 from sau_commands.arguments import existing_file_path
-from utils.media_queue import publish_access, submit, wait_for_result
-from utils.remote_media import download_root, task_directory, validate_task_id, validate_url
+from utils.media_queue import publish_access, submit, task_gate, wait_for_result, wait_for_writers
+from utils.remote_media import validate_task_id, validate_url
 
 
 def is_remote(value):
@@ -34,16 +34,17 @@ async def publish_media(args):
     temporary = task_id is None
     while True:
         candidate = uuid4().hex if temporary else task_id
-        async with publish_access(candidate):
-            if temporary and (download_root() / candidate).exists():
+        async with publish_access(candidate, new=temporary) as directory:
+            if directory is None:
                 continue
-            directory = task_directory(candidate)
             try:
                 await _resolve(args, images, urls, candidate)
                 yield
             finally:
                 if temporary:
-                    shutil.rmtree(directory)
+                    async with task_gate(candidate):
+                        await wait_for_writers(candidate)
+                        shutil.rmtree(directory)
             return
 
 

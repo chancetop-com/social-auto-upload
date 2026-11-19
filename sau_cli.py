@@ -79,6 +79,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.platform != "media" and credentials_conflict():
             raise RuntimeError(DUAL_CREDENTIALS_MESSAGE)
         return asyncio.run(dispatch(args))
+    except KeyboardInterrupt:
+        if args.platform == "media" and args.action == "predownload":
+            return 130
+        raise
     except LoginRequiredError as exc:
         print(str(exc), file=sys.stderr)
         # Machine signal: only exit 10 *after* dispatch prints the standalone

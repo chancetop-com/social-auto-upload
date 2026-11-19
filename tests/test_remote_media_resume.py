@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_remote_media_wait import origin, sau
+from tests.remote_media_cli import media_cli, origin
+from tests.test_remote_media_wait import sau
 
 
 PREFIX = bytes(range(256)) * 1024
