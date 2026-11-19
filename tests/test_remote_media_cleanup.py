@@ -106,6 +106,8 @@ if os.environ.get("HOLD_UPLOAD"):
         assert requests == ["/prepared", "/stalled"]
         for name in ("transfer", "queued", "posting"):
             assert (tmp_path / "downloads" / name).is_dir(), name
+        run(sau_cli("media", "delete", "--task-id", "queued", "--url", base + "/queued"))
+        assert (tmp_path / "downloads" / "queued").stat().st_mtime >= NOW
     finally:
         (tmp_path / "release").touch()
         release.set()

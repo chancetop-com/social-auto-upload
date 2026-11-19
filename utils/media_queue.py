@@ -4,9 +4,7 @@ from contextlib import asynccontextmanager, closing, contextmanager, ExitStack
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import shutil
 import sqlite3
-import stat
 import subprocess
 import sys
 import time
@@ -15,8 +13,8 @@ from uuid import uuid4
 
 from utils.errors import UsageError
 from utils.remote_media import (
-    QUEUE_DIRECTORY, TASK_OWNER_FILE, download_item, download_root, item_path, task_directory,
-    validate_task_id, validate_task_owner,
+    QUEUE_DIRECTORY, TASK_OWNER_FILE, download_item, download_root, item_path, owned_task_stat, remove_task_files,
+    task_directory, validate_task_id,
 )
 
 POLL_SECONDS = 0.05
@@ -55,17 +53,19 @@ def transaction(root=None):
         yield db
 
 
-def directory_key(directory):
+def _directory_key(info):
     """The same physical directory can have several spellings on some filesystems."""
-    stat = directory.stat()
-    return f"{stat.st_dev}:{stat.st_ino}"
+    return f"{info.st_dev}:{info.st_ino}"
 
 
 def _refresh_retained(root, task_id, key):
     directory = root / validate_task_id(task_id)
     try:
-        if (not root.is_symlink() and not directory.is_symlink()
-                and directory_key(directory) == key and validate_task_owner(directory, task_id)):
+        info = owned_task_stat(directory)
+    except OSError:
+        return  # The path no longer identifies an owned task.
+    try:
+        if info is not None and _directory_key(info) == key:
             os.utime(directory, follow_symlinks=False)
     except FileNotFoundError:
         pass  # A clear can already have retired this request's directory.
@@ -170,7 +170,7 @@ async def submit(task_id, urls, *, background, priority=False):
         with transaction() as db:
             _initialize(db)
             directory = task_directory(task_id)
-            key = directory_key(directory)
+            key = _directory_key(directory.stat())
             for url in dict.fromkeys(urls):
                 target = item_path(directory, url)
                 cached = str(target) if not target.is_symlink() and target.is_file() else None
@@ -296,14 +296,25 @@ def _collect_writers(db, root, children):
         _reap_writer(db, root, token, interrupted=child is None or child.returncode != 0)
 
 
-async def revoke_task(task_id):
+async def revoke_task(task_id, url=None):
     """Under task_gate, invalidate existing interests and drain their writers."""
     with transaction() as db:
         _initialize(db)
-        db.execute("DELETE FROM requests WHERE task_id=? AND background", (task_id,))
-        db.execute("""UPDATE requests SET accepted=1, path=NULL, reason='task_cleared'
-                      WHERE task_id=? AND NOT background""", (task_id,))
-    await wait_for_writers(task_id)
+        scope = (task_id, url, url)
+        _finish_requests(db, download_root(), "task_id=? AND (? IS NULL OR url=?) AND background", scope)
+        reason = "task_cleared" if url is None else "item_deleted"
+        db.execute("""UPDATE requests SET accepted=1, path=NULL, reason=?
+                      WHERE task_id=? AND (? IS NULL OR url=?) AND NOT background
+                        AND reason IS NOT 'task_cleared'""", (reason, *scope))
+    await wait_for_writers(task_id, url)
+
+
+async def clear_media(task_id, url=None):
+    """Under task_gate, revoke existing work and remove its owned files."""
+    directory = download_root() / validate_task_id(task_id)
+    original = owned_task_stat(directory)
+    await revoke_task(task_id, url)
+    remove_task_files(directory, original, url)
 
 
 async def wait_for_writers(task_id, url=None):
@@ -399,10 +410,21 @@ def task_lease(task_id, purpose):
 
 
 @asynccontextmanager
-async def task_gate(task_id):
+async def task_gate(task_id, *, refuse_publish=False):
     """Serialize admissions and destructive operations on this ID only."""
     while True:
         with task_lease(task_id, "gate") as acquired:
+            if refuse_publish:
+                # A publisher may itself hold the gate while draining writers.
+                # Check its lease on each attempt, even if the gate is busy.
+                root = download_root()
+                filename = Path("task-locks") / task_id / "publish.lease"
+                with transaction(root):
+                    if (_queue_directory(root) / filename).exists():
+                        probe = _try_lease(root, filename)
+                        if probe is None:
+                            raise OSError("Task is in use by a publish command")
+                        probe.close()
             if acquired:
                 yield
                 return
@@ -427,7 +449,7 @@ async def publish_access(task_id, *, new=False):
                     break
                 stack.close()
             await asyncio.sleep(POLL_SECONDS)
-        key = directory_key(directory) if directory is not None else None
+        key = _directory_key(directory.stat()) if directory is not None else None
         try:
             yield directory
         finally:
@@ -440,11 +462,6 @@ def worker_running():
         return not available
 
 
-def _expired(directory, cutoff):
-    info = directory.lstat()
-    return stat.S_ISDIR(info.st_mode) and info.st_mtime_ns <= cutoff
-
-
 def cleanup_idle_tasks():
     root = download_root()
     if root.is_symlink() or not (root / QUEUE_DIRECTORY / "requests.sqlite").is_file():
@@ -453,20 +470,23 @@ def cleanup_idle_tasks():
     for directory in root.iterdir():
         try:
             validate_task_id(directory.name)
-            if not _expired(directory, cutoff) or not (directory / TASK_OWNER_FILE).is_file():
+            if not (directory / TASK_OWNER_FILE).is_file():
+                continue
+            original = owned_task_stat(directory)
+            if original is None or original.st_mtime_ns > cutoff:
                 continue
             with task_lease(directory.name, "gate") as admitted:
                 if not admitted:
                     continue
                 with task_lease(directory.name, "publish") as available:
-                    if not available or not validate_task_owner(directory, directory.name):
+                    if not available:
                         continue
                     with transaction(root) as db:
                         active = db.execute("""SELECT 1 FROM requests WHERE task_id=?
                                                UNION ALL SELECT 1 FROM writers WHERE task_id=? LIMIT 1""",
                                             (directory.name, directory.name)).fetchone()
-                    if not active and _expired(directory, cutoff):
-                        shutil.rmtree(directory)
+                    if not active and directory.lstat().st_mtime_ns <= cutoff:
+                        remove_task_files(directory, original, None)
         except (ValueError, OSError, sqlite3.Error):
             continue
 

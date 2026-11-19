@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import shutil
+import stat
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -156,6 +158,61 @@ def open_response(url: str, headers: dict):
 def checkpoint_paths(target: Path) -> tuple[Path, Path, Path]:
     return tuple(target.with_name(f".{target.name}.{suffix}")
                  for suffix in ("part", "resume", "resume.tmp"))
+
+
+def owned_task_stat(directory: Path):
+    """Identify a managed directory without accepting links or Windows junctions."""
+    for path in (directory.parent, directory):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise OSError("Expected a direct media directory")
+    if not validate_task_owner(directory, directory.name):
+        raise OSError("Directory is not owned by this media task")
+    return info
+
+
+def remove_task_files(directory: Path, original, url: str | None):
+    """Remove files only from the same task that initiated writer shutdown."""
+    current = owned_task_stat(directory)
+    if current is None:
+        return
+    if original is None or not os.path.samestat(original, current):
+        raise OSError("Media task directory changed during deletion")
+    if url is None:
+        try:
+            shutil.rmtree(directory)
+        except OSError:
+            # A failed recursive deletion may already have unlinked the
+            # marker. Keep this same directory eligible for a later retry.
+            if os.path.samestat(directory.lstat(), original):
+                marker = directory / TASK_OWNER_FILE
+                try:
+                    with marker.open("xb") as stream:
+                        stream.write(directory.name.encode("utf-8"))
+                except FileExistsError:
+                    pass
+                os.utime(directory, ns=(original.st_atime_ns, original.st_mtime_ns))
+            raise
+        return
+    paths = (item_path(directory, url), *checkpoint_paths(item_storage_path(directory, url)))
+    if os.unlink in os.supports_dir_fd:
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            if not os.path.samestat(original, os.fstat(fd)):
+                raise OSError("Media task directory changed during deletion")
+            for path in paths:
+                try:
+                    os.unlink(path.name, dir_fd=fd)
+                except FileNotFoundError:
+                    pass
+        finally:
+            os.close(fd)
+    else:
+        for path in paths:
+            path.unlink(missing_ok=True)
 
 
 def strong_etag(value):
