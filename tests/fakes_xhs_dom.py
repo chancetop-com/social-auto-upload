@@ -204,17 +204,20 @@ class FakeLocator:
     async def dispose(self) -> None:
         pass
 
-    async def get_attribute(self, name: str) -> Any:
+    async def get_attribute(self, name: str, *, timeout=None) -> Any:
         return self._attributes.get(name)
 
     async def is_visible(self) -> bool:
         return self._visible
 
-    async def is_enabled(self) -> bool:
+    async def is_enabled(self, *, timeout=None) -> bool:
         return self._enabled
 
-    async def inner_text(self) -> str:
+    async def inner_text(self, *, timeout=None) -> str:
         return self._text
+
+    async def all_inner_texts(self) -> list[str]:
+        return [await item.inner_text() for item in await self.element_handles()]
 
     async def text_content(self) -> str:
         return self._text
@@ -256,7 +259,7 @@ class FakeLocator:
     async def hover(self, **kwargs: Any) -> None:
         self.actions.append(("hover",))
 
-    async def set_input_files(self, files: Any) -> None:
+    async def set_input_files(self, files: Any, *, timeout=None) -> None:
         self.files = files if isinstance(files, list) else [files]
         self.actions.append(("set_input_files", self.files))
 

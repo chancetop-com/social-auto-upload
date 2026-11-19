@@ -1379,7 +1379,18 @@ class TiktokBaseUploader(BaseVideoUploader):
         deadline: float | PublishTimeoutBudget | None = None,
         multilogin: bool = False,
     ) -> None:
+        budget = self._coerce_budget(deadline)
+        await budget.wait_for_upload(self._wait_for_media(page, budget))
+
+    async def _wait_for_media(self, page, budget: PublishTimeoutBudget) -> None:
         raise NotImplementedError
+
+    async def _upload_button_enabled(self, post, budget: PublishTimeoutBudget) -> bool:
+        if not await post.is_enabled(timeout=budget.clamp_ms(2000)):
+            return False
+        aria_disabled = await post.get_attribute("aria-disabled", timeout=budget.clamp_ms(2000))
+        budget.check_pre_click()
+        return str(aria_disabled).lower() != "true"
 
     async def apply_options(self, page) -> None:
         """Apply the explicitly requested publish options, then read back.
@@ -2883,7 +2894,9 @@ class TiktokVideo(TiktokBaseUploader):
         self.headless = resolve_headless(headless)
         self.locator_base = None
 
-    async def handle_upload_error(self, page):
+    async def handle_upload_error(self, page, *, budget: PublishTimeoutBudget | None = None):
+        if budget is None:
+            budget = self.publish_budget
         tiktok_logger.info("video upload error retrying.")
         found = await _find_candidate(
             self.locator_base, _VIDEO_FILE_CANDIDATES, visible=True
@@ -2894,10 +2907,10 @@ class TiktokVideo(TiktokBaseUploader):
                 f"{tuple(label for label, _ in _VIDEO_FILE_CANDIDATES)!r}"
             )
         select_file_button, _, _ = found
-        async with page.expect_file_chooser() as fc_info:
-            await select_file_button.click()  # native-click: file；文件选择器只能由原生点击唤起
+        async with page.expect_file_chooser(timeout=budget.remaining_ms()) as fc_info:
+            await select_file_button.click(timeout=budget.remaining_ms())  # native-click: file；文件选择器只能由原生点击唤起
         file_chooser = await fc_info.value
-        await file_chooser.set_files(self.file_path)
+        await file_chooser.set_files(self.file_path, timeout=budget.remaining_ms())
 
     async def upload(self, playwright: Playwright | None, *, session: BrowserSession | None = None) -> None:
         if session is not None:
@@ -2926,7 +2939,7 @@ class TiktokVideo(TiktokBaseUploader):
                 async with page.expect_file_chooser() as fc_info:
                     await upload_button.click()  # native-click: file；文件选择器只能由原生点击唤起
                 file_chooser = await fc_info.value
-                await file_chooser.set_files(self.file_path)
+                await file_chooser.set_files(self.file_path, timeout=self.publish_budget.remaining_ms())
             except Exception as exc:
                 raise RuntimeError(
                     "TikTok 视频文件选择失败 | control=Select video | "
@@ -3222,17 +3235,9 @@ class TiktokVideo(TiktokBaseUploader):
             " video 链接；先核查 Content 列表，避免重复发布。"
         )
 
-    async def wait_media_ready(
-        self,
-        page,
-        *,
-        deadline: float | PublishTimeoutBudget | None = None,
-        multilogin: bool = False,
-    ):
-        budget = self._coerce_budget(deadline)
+    async def _wait_for_media(self, page, budget: PublishTimeoutBudget) -> None:
         while True:
-            if budget is not None:
-                budget.check_pre_click()
+            budget.check_pre_click()
             await _guard_login(page)
             try:
                 # Current Studio exposes the publish button via data-e2e; the
@@ -3242,31 +3247,25 @@ class TiktokVideo(TiktokBaseUploader):
                 )
                 enabled = False
                 if await reject_ambiguous(post, "TikTok 发布按钮") > 0:
-                    try:
-                        enabled = await post.is_enabled()
-                    except Exception:
-                        enabled = False
-                    if (
-                        str(await post.get_attribute("aria-disabled")).lower()
-                        == "true"
-                    ):
-                        enabled = False
+                    enabled = await self._upload_button_enabled(post, budget)
                 if enabled:
                     tiktok_logger.info("  [-]video uploaded.")
                     break
                 else:
                     tiktok_logger.info("  [-] video uploading...")
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(budget.clamp_seconds(2))
+                    budget.check_pre_click()
                     if await self.locator_base.locator(
                             '[data-e2e="select_video_button"]').count():
                         tiktok_logger.info("  [-] found some error while uploading now retry...")
-                        await self.handle_upload_error(page)
+                        await self.handle_upload_error(page, budget=budget)
             except ElementUnusableError:
                 raise
             except Exception:
+                budget.check_pre_click()
                 await _guard_login(page)
                 tiktok_logger.info("  [-] video uploading...")
-                await asyncio.sleep(2)
+                await asyncio.sleep(budget.clamp_seconds(2))
 
     async def main(self):
         async with async_playwright() as playwright:
@@ -3417,7 +3416,7 @@ class TiktokNote(TiktokBaseUploader):
             selector = self._MULTI_INPUT_SELECTOR
         # ``image_paths`` order is the display order; the first one is the cover.
         await scope.locator(selector).first.set_input_files(
-            list(self.image_paths)
+            list(self.image_paths), timeout=self.publish_budget.remaining_ms()
         )
 
     async def _resolve_photo_scope(self, page):
@@ -3513,17 +3512,9 @@ class TiktokNote(TiktokBaseUploader):
         finally:
             self.options = original
 
-    async def wait_media_ready(
-        self,
-        page,
-        *,
-        deadline: float | PublishTimeoutBudget | None = None,
-        multilogin: bool = False,
-    ) -> None:
-        budget = self._coerce_budget(deadline)
+    async def _wait_for_media(self, page, budget: PublishTimeoutBudget) -> None:
         while True:
-            if budget is not None:
-                budget.check_pre_click()
+            budget.check_pre_click()
             await _guard_login(page)
             try:
                 processed = await page.locator("div[data-id]").count() > 0
@@ -3552,27 +3543,17 @@ class TiktokNote(TiktokBaseUploader):
                     visible=True, unique=True,
                 )
                 post = found[0] if found is not None else None
-                post_enabled = False
-                if post is not None:
-                    try:
-                        post_enabled = await post.is_enabled()
-                    except Exception:
-                        post_enabled = False
-                    if (
-                        str(await post.get_attribute("aria-disabled")).lower()
-                        == "true"
-                    ):
-                        post_enabled = False
-                if processed and post_enabled:
+                if processed and post is not None and await self._upload_button_enabled(post, budget):
                     tiktok_logger.info("  [-] photos uploaded.")
                     return
             except ElementUnusableError:
                 raise
             except Exception:
+                budget.check_pre_click()
                 await _guard_login(page)
 
             tiktok_logger.info("  [-] photos uploading...")
-            await asyncio.sleep(2)
+            await asyncio.sleep(budget.clamp_seconds(2))
 
     async def read_result(self, page):
         if self.publish_date != 0:

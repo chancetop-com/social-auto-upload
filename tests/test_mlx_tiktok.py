@@ -22,6 +22,8 @@ import sau_cli
 import conf
 from sau_commands import tiktok as tiktok_command
 from tests.fakes import FakeContext, FakeMultiloginClient, FakePage, FakePlaywright
+from tests.fakes_clock import FakeClock
+from uploader import publish_timeout
 from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import (
     TIKTOK_LOGIN_CHECK_TIMEOUT_MS,
@@ -528,7 +530,7 @@ class _FileChooser:
         # Production awaits ``fc_info.value`` (matching the other uploaders).
         return self._self().__await__()
 
-    async def set_files(self, files) -> None:
+    async def set_files(self, files, *, timeout=None) -> None:
         self.files = files
 
 
@@ -556,6 +558,26 @@ class _ChooserPage:
 class VideoAttachMediaTests(unittest.TestCase):
     def _video(self) -> TiktokVideo:
         return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
+
+    def test_retry_uses_the_same_deadline_for_chooser_click_and_file(self):
+        clock = FakeClock()
+        button = _MediaButton()
+        button.click = AsyncMock(side_effect=lambda **kwargs: clock.advance(0.25))
+        page = _ChooserPage()
+        def open_chooser(*, timeout):
+            clock.advance(0.25)
+            return _ChooserContext(page.chooser)
+        page.expect_file_chooser = MagicMock(side_effect=open_chooser)
+        page.chooser.set_files = AsyncMock()
+        video = self._video()
+        video.locator_base = _MediaBase({'[data-e2e="select_video_button"]': button})
+        with clock.patch(publish_timeout):
+            budget = video.start_publish_budget()
+            clock.advance(899)
+            asyncio.run(video.handle_upload_error(page, budget=budget))
+        page.expect_file_chooser.assert_called_once_with(timeout=1000)
+        button.click.assert_awaited_once_with(timeout=750)
+        page.chooser.set_files.assert_awaited_once_with(video.file_path, timeout=500)
 
     def test_prefers_stable_data_e2e_before_english_text(self):
         primary = _MediaButton()
@@ -621,6 +643,36 @@ class VideoAttachMediaTests(unittest.TestCase):
 class PublishLoopTests(unittest.TestCase):
     def _video(self) -> TiktokVideo:
         return TiktokVideo("标题", "/tmp/demo.mp4", [], 0, None)
+
+    def test_late_button_state_cannot_confirm_video_or_photos(self):
+        for cls in (TiktokVideo, tk_main.TiktokNote):
+            with self.subTest(uploader=cls.__name__):
+                clock = FakeClock()
+                page = MagicMock()
+                post = page.locator.return_value
+                post.count = AsyncMock(return_value=1)
+                post.is_enabled = AsyncMock(return_value=True)
+
+                async def late_attribute(name, *, timeout):
+                    self.assertEqual((name, timeout), ("aria-disabled", 500))
+                    clock.advance(0.75)
+                    return "false"
+
+                post.get_attribute = AsyncMock(side_effect=late_attribute)
+                app = object.__new__(cls)
+                app.locator_base = page
+                with (
+                    clock.patch(tk_main, publish_timeout),
+                    patch.object(tk_main, "_guard_login", AsyncMock()),
+                    patch.object(tk_main, "_find_candidate", AsyncMock(return_value=(post, 0, "Post"))),
+                ):
+                    budget = app.start_publish_budget()
+                    clock.advance(899.5)
+                    with self.assertRaises(RuntimeError) as error:
+                        asyncio.run(app.wait_media_ready(page, deadline=budget))
+                    self.assertEqual(str(error.exception), str(budget.pre_click_error()))
+                post.get_attribute.assert_awaited_once_with("aria-disabled", timeout=500)
+                self.assertEqual(clock.sleep_calls, [])
 
     def test_detect_upload_status_stops_at_deadline(self):
         video = self._video()

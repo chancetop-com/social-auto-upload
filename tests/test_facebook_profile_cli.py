@@ -7,13 +7,15 @@ import unittest
 from contextlib import ExitStack, chdir, redirect_stdout, redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import conf
 import sau_cli
 from sau_commands import facebook
 from tests.fakes import FakeContext, FakePlaywright
+from tests.fakes_clock import FakeClock
 from tests.test_mlx_tiktok import _AsyncCM
+from uploader import publish_timeout
 from uploader.meta_uploader.facebook_uploader import main, posts
 from utils.local_profile import acquire_local_profile
 
@@ -83,7 +85,7 @@ class ComposerLocator(Locator):
     def last(self): return self
     def nth(self, index): return self
     def get_by_role(self, role, **kwargs): return ComposerLocator(self.page, 'publish')
-    async def is_enabled(self): return True
+    async def is_enabled(self, *, timeout=None): return True
     async def hover(self): pass
     async def click(self):
         if self.kind == 'publish':
@@ -92,8 +94,8 @@ class ComposerLocator(Locator):
             if outcome in ('login', 'verification', 'click-login'):
                 self.page.url = 'https://www.facebook.com/' + ('checkpoint/' if outcome == 'verification' else 'login/')
                 if outcome == 'click-login': raise OSError('response lost after dispatch')
-    async def set_input_files(self, files): self.page.files = files
-    async def inner_text(self): return self.page.caption
+    async def set_input_files(self, files, *, timeout=None): self.page.files = files
+    async def inner_text(self, *, timeout=None): return self.page.caption
 
 
 class ComposerPage(Page):
@@ -167,6 +169,40 @@ class PostPage(Page):
 
 
 class FacebookProfileCliTests(unittest.TestCase):
+    def test_managed_upload_classifies_verification_and_login(self):
+        app = main.FacebookPost('title', 'video.mp4', '', [])
+        for path, reason in (('/captcha/', 'verification'), ('/two_step_verification/', 'verification'),
+                             ('/checkpoint/', 'verification'), ('/login/', 'login')):
+            with self.subTest(path=path):
+                page = ComposerPage(Context())
+                page.url = 'https://www.facebook.com' + path
+                with self.assertRaises(main.LoginRequiredError) as caught:
+                    asyncio.run(app._wait_until_publishable(page, app._ensure_publish_budget()))
+                self.assertEqual(caught.exception.reason, reason)
+                self.assertFalse(caught.exception.publish_attempted)
+
+    def test_remounted_publish_button_is_retried_within_the_same_budget(self):
+        page = ComposerPage(Context())
+        app = main.FacebookPost('title', 'video.mp4', '', [])
+        clock = FakeClock()
+        probes = []
+
+        async def enabled(button, *, timeout):
+            probes.append(timeout)
+            if len(probes) == 1:
+                clock.advance(timeout / 1000)
+                raise main.BrowserTimeoutError('button detached')
+            return True
+
+        page.wait_for_timeout = AsyncMock(side_effect=lambda ms: clock.advance(ms / 1000))
+        with clock.patch(publish_timeout), patch.object(ComposerLocator, 'is_enabled', enabled):
+            budget = app._ensure_publish_budget()
+            clock.advance(897.5)
+            asyncio.run(app._wait_until_publishable(page, budget))
+        self.assertEqual(probes, [1000, 500])
+        self.assertEqual(clock.now, 899.5)
+        self.assertEqual(page.submit_clicks, 0)
+
     def setUp(self):
         self.stack = ExitStack()
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()
@@ -397,6 +433,24 @@ class FacebookProfileCliTests(unittest.TestCase):
             finally: logger.remove(sink)
         self.assertFalse(self.pw.chromium.persistent_calls)
         self.assertFalse((self.root / 'browser_profiles').exists())
+
+    def test_managed_checkpoint_during_upload_exits_ten_before_submission(self):
+        from tests.fakes import FakeBrowser, FakeManagedProvider
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        path = self.root / 'video.mp4'
+        path.touch()
+        for mode in ('multilogin', 'adspower'):
+            with self.subTest(mode=mode):
+                context = Context()
+                context.page_type = ComposerPage
+                context.expire_during_edit = True
+                provider = FakeManagedProvider(mode=mode)
+                self.pw.chromium.queue_connect_browser(FakeBrowser([context]))
+                with patch.object(facebook, 'resolve_managed_provider', return_value=provider):
+                    code, _, err = self.run_cli('upload-video', '--account', 'Creator', '--file', str(path), '--title', 'caption')
+                self.assertEqual(code, 10, err)
+                self.assertEqual(context.pages[-1].submit_clicks, 0)
+                self.assertNotIn('publish_attempted=true', err)
 
     def test_managed_uploads_borrow_provider_context_and_ignore_local_sources(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser

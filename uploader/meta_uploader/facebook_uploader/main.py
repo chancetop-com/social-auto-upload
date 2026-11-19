@@ -12,11 +12,13 @@ import re
 from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright, expect
+from patchright.async_api import TimeoutError as BrowserTimeoutError
 
 from uploader.publish_timeout import PublishTimeoutBudget
 from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
+from utils.dom import reject_ambiguous
 from utils.errors import LoginRequiredError
 from utils.local_browser_session import local_browser_session
 from utils.humanize import Humanizer
@@ -47,12 +49,13 @@ FACEBOOK_LAUNCH_KWARGS: dict[str, object] = {"channel": "chrome"}
 FACEBOOK_CONTEXT_KWARGS: dict[str, object] = {}
 FACEBOOK_INIT_SCRIPT = False
 
-_FACEBOOK_LOGIN_URL_MARKERS = (
-    "/login",
+_FACEBOOK_VERIFICATION_URL_MARKERS = (
     "checkpoint",
     "two_step_verification",
     "/authentication/",
+    "captcha",
 )
+_FACEBOOK_LOGIN_URL_MARKERS = ("/login", *_FACEBOOK_VERIFICATION_URL_MARKERS)
 
 
 def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> None:
@@ -63,10 +66,12 @@ def _raise_if_login_required(page: Page, *, publish_attempted: bool = False) -> 
     is observed after the publish click was dispatched.
     """
     current_url = str(getattr(page, "url", "") or "").lower()
-    if any(marker in current_url for marker in _FACEBOOK_LOGIN_URL_MARKERS):
+    verification = any(marker in current_url for marker in _FACEBOOK_VERIFICATION_URL_MARKERS)
+    if verification or "/login" in current_url:
+        action = "完成验证" if verification else "重新登录"
         raise LoginRequiredError(
-            "Facebook 上传过程中需要重新登录（登录页/验证码/二次验证）："
-            "请在 Multilogin 应用中登录 Profile 后重试。",
+            f"Facebook 需要{action}；请在托管浏览器应用中打开 Profile，{action}后重试。",
+            reason="verification" if verification else "login",
             publish_attempted=publish_attempted,
         )
 
@@ -138,7 +143,7 @@ def _account_alias(account_file=None, account_name=None):
 
 async def _local_login_guard(page, *, publish_attempted=False):
     url = str(page.url).lower()
-    verification = any(marker in url for marker in ("checkpoint", "two_step_verification", "/authentication/", "captcha"))
+    verification = any(marker in url for marker in _FACEBOOK_VERIFICATION_URL_MARKERS)
     login = "/login" in url
     if not verification and not login:
         email = page.locator(FACEBOOK_LOGIN_INPUT)
@@ -294,35 +299,38 @@ class FacebookPost:
         await expect(editor).to_have_count(1)
         return editor
 
-    async def _find_publish_button(self, page: Page):
+    async def _find_publish_button(self, page: Page, *, allow_pending: bool = False):
         # 发帖 form 的最后一个业务动作是提交，前面的按钮分别为编辑器关闭、隐私及附件编辑。
         # 图文/视频实际 DOM 均已检查；嵌套 dialog 实际是编辑器标题栏，不能把它当提交区域。
         form = page.locator(FACEBOOK_PUBLISH_FORM)
-        await expect(form).to_have_count(1)
         button = form.get_by_role('button').last
+        if allow_pending:
+            if not await reject_ambiguous(form, "Facebook 发帖表单"):
+                return None
+            return button if await button.is_visible() else None
+        await expect(form).to_have_count(1)
         await expect(button).to_be_visible()
         return button
 
-    async def _wait_until_publishable(self, page: Page, budget: PublishTimeoutBudget) -> None:
-        deadline = asyncio.get_running_loop().time() + budget.clamp_seconds(180)
-        while asyncio.get_running_loop().time() < deadline:
-            budget.check_pre_click()
-            if getattr(self, "_local_mode", False):
-                await _local_login_guard(page)
-            error = page.locator('[role="dialog"] [role="alert"]')
+    async def _upload_ready(self, page: Page, budget: PublishTimeoutBudget) -> bool:
+        if getattr(self, "_local_mode", False):
+            await _local_login_guard(page)
+        else:
+            _raise_if_login_required(page)
+        error = page.locator('[role="dialog"] [role="alert"]')
+        try:
             if await error.count() and await error.first.is_visible():
-                message = (await error.first.inner_text()).strip()
+                message = (await error.first.inner_text(timeout=budget.clamp_ms(1000))).strip()
                 if message:
                     raise RuntimeError(f"Facebook 视频上传失败: {message}")
-            try:
-                publish_button = await self._find_publish_button(page)
-                if await publish_button.is_enabled():
-                    return
-            except RuntimeError as exc:
-                if "未找到 Facebook 发布按钮" not in str(exc):
-                    raise
-            await page.wait_for_timeout(1000)
-        raise TimeoutError("Facebook 视频上传或处理超时，发布按钮未就绪")
+            button = await self._find_publish_button(page, allow_pending=True)
+            return button is not None and await button.is_enabled(timeout=budget.clamp_ms(1000))
+        except BrowserTimeoutError:
+            return False  # 表单重挂载；下一轮重新检查登录、错误提示和按钮。
+
+    async def _wait_until_publishable(self, page: Page, budget: PublishTimeoutBudget) -> None:
+        while not await budget.wait_for_upload(self._upload_ready(page, budget)):
+            await page.wait_for_timeout(budget.clamp_ms(1000))
 
     async def _publish_and_verify(
         self, page: Page, budget: PublishTimeoutBudget
@@ -390,9 +398,8 @@ class FacebookPost:
         file_input = page.locator(FACEBOOK_MEDIA_INPUT)
         if await file_input.count() != 1:
             raise RuntimeError("首页发帖影音上传控件不唯一，未上传")
-        await file_input.set_input_files([str(file) for file in self.files])
-
         budget = self._ensure_publish_budget()
+        await file_input.set_input_files([str(file) for file in self.files], timeout=budget.remaining_ms())
         # 选择素材后 composer 异步挂载；不能在同一轮立即检查 count 就判输入框不存在。
         await page.locator(FACEBOOK_COMPOSER_READY).wait_for(
             timeout=budget.clamp_ms(30000)

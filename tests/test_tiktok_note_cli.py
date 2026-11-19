@@ -165,7 +165,7 @@ class _Locator:
             return self.page.caption_text or self.page.title_text or ""
         return ""
 
-    async def get_attribute(self, name: str):
+    async def get_attribute(self, name: str, *, timeout=None):
         if "text=Post" in self.selector:
             return None if self.page.post_enabled else "disabled"
         if 'item_id=' in self.selector:
@@ -175,7 +175,7 @@ class _Locator:
     async def is_visible(self) -> bool:
         return self._count > 0
 
-    async def is_enabled(self) -> bool:
+    async def is_enabled(self, *, timeout=None) -> bool:
         if "text=Post" in self.selector or "role=button" in self.selector:
             return self.page.post_enabled
         return True
@@ -183,7 +183,7 @@ class _Locator:
     async def wait_for(self, **kwargs) -> None:
         return None
 
-    async def set_input_files(self, files) -> None:
+    async def set_input_files(self, files, *, timeout=None) -> None:
         self.page.events.append(("set_input_files", tuple(files)))
         self.page.input_files = list(files)
 

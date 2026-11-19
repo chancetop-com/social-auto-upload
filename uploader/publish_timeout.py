@@ -9,14 +9,17 @@
 """
 from __future__ import annotations
 
+import asyncio
 import time
+from collections.abc import Awaitable
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from uploader.publish_gate import wait_until_publish_allowed
 from utils.errors import PublishResultUnknownError
 
 PUBLISH_TIMEOUT_SECONDS = 15 * 60
+_T = TypeVar("_T")
 
 
 class PublishTimeoutBudget:
@@ -54,13 +57,26 @@ class PublishTimeoutBudget:
         if self.remaining_seconds() <= 0:
             raise self.pre_click_error()
 
-    def clamp_ms(self, default_ms: int) -> int:
-        """把本次等待收紧到剩余预算；预算耗尽时按点击前超时报错。"""
+    async def wait_for_upload(self, probe: Awaitable[_T]) -> _T:
+        """取消到期仍未结束的上传探测，只接受截止前返回的结果。"""
+        try:
+            result = await asyncio.wait_for(probe, timeout=self.remaining_seconds())
+        except asyncio.TimeoutError:
+            self.check_pre_click()
+            raise
+        self.check_pre_click()
+        return result
+
+    def remaining_ms(self) -> int:
+        """供点击前的浏览器等待使用，至少 1ms，避免 0 被解释为无限等待。"""
         remaining = self.remaining_seconds()
         if remaining <= 0:
             raise self.pre_click_error()
-        remaining_ms = max(1, int(remaining * 1000))
-        return min(default_ms, remaining_ms)
+        return max(1, int(remaining * 1000))
+
+    def clamp_ms(self, default_ms: int) -> int:
+        """把本次等待收紧到剩余预算；预算耗尽时按点击前超时报错。"""
+        return min(default_ms, self.remaining_ms())
 
     def clamp_seconds(self, default_seconds: float) -> float:
         """``clamp_ms`` 的秒版本。"""

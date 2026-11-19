@@ -381,11 +381,11 @@ class TikTokProfileCliTests(unittest.TestCase):
                 with self.subTest(action=action, state=state, managed=managed):
                     page = _StudioPage() if action == 'upload-note' else self.video_page()
                     page.readiness_reads = 0
-                    async def becomes_disabled(locator):
+                    async def becomes_disabled(locator, *, timeout=None):
                         if locator.selector in ('[data-e2e="post_video_button"]', 'role=button[name=/^Post$/]'):
                             page.readiness_reads += 1
                             return page.readiness_reads == 1
-                        return await is_enabled(locator)
+                        return await is_enabled(locator, timeout=timeout)
                     self.context.pages = [page]
                     self.context.state = 'login' if state == 'login' else 'valid'
                     provider = FakeManagedProvider() if managed else None
@@ -413,9 +413,9 @@ class TikTokProfileCliTests(unittest.TestCase):
             async def inner_text(inner):
                 if '/video/' in inner.selector: return 'Video caption'
                 return await super(Locator, inner).inner_text()
-            async def get_attribute(inner, name):
+            async def get_attribute(inner, name, *, timeout=None):
                 if '/video/' in inner.selector and name == 'href': return 'https://www.tiktok.com/@creator/video/1234567890'
-                return await super(Locator, inner).get_attribute(name)
+                return await super(Locator, inner).get_attribute(name, timeout=timeout)
             async def click(inner, **kwargs):
                 await super(Locator, inner).click(**kwargs)
                 if inner.selector == '[data-e2e="post_video_button"]':
@@ -431,7 +431,7 @@ class TikTokProfileCliTests(unittest.TestCase):
                 return Locator(inner, selector, count=count)
             def expect_file_chooser(inner):
                 class Chooser:
-                    async def set_files(chooser, file): inner.input_files = [file]
+                    async def set_files(chooser, file, *, timeout=None): inner.input_files = [file]
                 class Manager:
                     @property
                     def value(manager):

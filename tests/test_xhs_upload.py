@@ -10,9 +10,8 @@ filled once the media is actually ready.
 * the 2nd image onwards goes through the ``+`` tile → ``expect_file_chooser``
   (fallback: the single ``multiple`` file input), never ``inputs[0]``/``.first``;
 * video — the one ARM predicate (``_arm_ready``) is the completion signal,
-  1s polling, window ``min(600s, remaining budget)``, with the two structural
-  failure state (``div.fail``) aborting
-  immediately.
+  polled every second until the shared deadline. A failure signal
+  (``div.fail``) aborts immediately.
 
 Every failure is a plain ``RuntimeError`` (exit 1, definitely not published):
 no per-media / per-index exit codes, no keyword scanning, no retry, no
@@ -27,6 +26,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 import uploader.publish_timeout as publish_timeout
+import uploader.rednote_uploader.main as rednote_main
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_clock import FakeClock
 from tests.fakes_xhs_dom import FakeLocator, RecordingLocator, RecordingPage
@@ -386,25 +386,17 @@ class Decision09UploadNoteCompletionTests(unittest.TestCase):
             self.assertFalse(asyncio.run(ready(1)))  # 瓦片 2 的遮罩还在
             self.assertTrue(asyncio.run(ready(1)))  # 遮罩消失
 
-    def test_abort_window_is_sixty_seconds_and_names_the_image(self):
-        page = _note_page(counts=[0], tiles=[_tile(None)])
+    def test_second_image_can_finish_after_sixty_seconds(self):
+        page = _note_page(counts=[1, 2], tiles=[_tile(None), _tile([1] * 122 + [0])])
         clock = FakeClock()
         with clock.patch(xhs_main, publish_timeout, dom):
-            with self.assertRaises(RuntimeError) as ctx:
-                asyncio.run(
-                    xhs_main._note_upload_gate(
-                        page,
-                        ["a.png"],
-                        budget=_budget(),
-                        mode="local",
-                        humanizer=_humanizer(page),
-                    )
+            asyncio.run(
+                xhs_main._note_upload_gate(
+                    page, ["a.png", "b.png"], budget=_budget(), mode="local",
+                    humanizer=_humanizer(page),
                 )
-
-        self.assertIn("第 1 张 / 共 1 张", str(ctx.exception))
-        self.assertIn("未点击发布", str(ctx.exception))
-        self.assertAlmostEqual(sum(clock.sleep_calls), 60.0)
-        self.assertTrue(all(delay == 0.5 for delay in clock.sleep_calls))
+            )
+        self.assertEqual(sum(clock.sleep_calls), 62.0)  # 1s between images + 61s uploading
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +405,55 @@ class Decision09UploadNoteCompletionTests(unittest.TestCase):
 
 
 class Decision09UploadNoteQuietRecheckTests(unittest.TestCase):
+    def test_stalled_quiet_read_stops_at_deadline_even_if_page_stays_unresponsive(self):
+        async def run(module):
+            page = _note_page(counts=[1], tiles=[_tile(None)])
+            evaluate = page.evaluate
+            stalled = asyncio.Event()
+
+            async def slow_page(expression, *args):
+                if expression == dom._READ_QUIET_JS or stalled.is_set():
+                    stalled.set()
+                    await asyncio.Event().wait()
+                return await evaluate(expression, *args)
+
+            budget = publish_timeout.PublishTimeoutBudget("fixture", timeout_seconds=0.05)
+            with patch.object(page, "evaluate", slow_page), self.assertRaisesRegex(RuntimeError, "尚未点击发布"):
+                await asyncio.wait_for(module._note_upload_gate(
+                    page, ["a.png"], budget=budget, mode="local", humanizer=_humanizer(page)
+                ), 2)
+            self.assertTrue(stalled.is_set())
+
+        for module in (xhs_main, rednote_main):
+            with self.subTest(module=module.__name__):
+                asyncio.run(run(module))
+
+    def test_late_tile_or_final_count_cannot_confirm_upload(self):
+        for module in (xhs_main, rednote_main):
+            for late_read in (1, 2):
+                with self.subTest(module=module.__name__, late_read=late_read):
+                    clock = FakeClock()
+                    page = _note_page(counts=[1], tiles=[_tile(None)])
+                    reads = 0
+
+                    async def tile_count(page):
+                        nonlocal reads
+                        reads += 1
+                        if reads == late_read:
+                            clock.advance(1.5)
+                        return 1
+
+                    with clock.patch(module, publish_timeout, dom), patch.object(
+                        module, "_note_preview_tile_count", tile_count
+                    ):
+                        budget = _budget()
+                        clock.advance(899)
+                        with self.assertRaisesRegex(RuntimeError, "尚未点击发布"):
+                            asyncio.run(module._note_upload_gate(
+                                page, ["a.png"], budget=budget, mode="local", humanizer=_humanizer(page)
+                            ))
+                    self.assertEqual(reads, late_read)
+
     def _run(self, page):
         clock = FakeClock()
         with clock.patch(xhs_main, publish_timeout, dom):
@@ -447,24 +488,25 @@ class Decision09UploadNoteQuietRecheckTests(unittest.TestCase):
             recorder.lines,
         )
 
-    def test_fewer_than_n_keeps_waiting_to_the_window_then_aborts(self):
+    def test_fewer_than_n_keeps_waiting_until_original_deadline(self):
         page = _note_page(counts=[1, 0], tiles=[_tile(None)])
         clock = FakeClock()
         with clock.patch(xhs_main, publish_timeout, dom):
+            budget = _budget()
+            clock.advance(815)
             with self.assertRaises(RuntimeError) as ctx:
                 asyncio.run(
                     xhs_main._note_upload_gate(
                         page,
                         ["a.png"],
-                        budget=_budget(),
+                        budget=budget,
                         mode="local",
                         humanizer=_humanizer(page),
                     )
                 )
 
-        self.assertIn("第 1 张 / 共 1 张", str(ctx.exception))
-        self.assertIn("未点击发布", str(ctx.exception))
-        self.assertAlmostEqual(sum(clock.sleep_calls), 60.0)
+        self.assertEqual(str(ctx.exception), str(budget.pre_click_error()))
+        self.assertEqual(sum(clock.sleep_calls), 85)
 
     def test_dom_not_quiet_only_warns(self):
         page = _note_page(counts=[1], tiles=[_tile(None)], quiet=False)
@@ -480,7 +522,7 @@ class Decision09UploadNoteQuietRecheckTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 4. Note input errors abort immediately (no 60s wait)
+# 4. Note input errors abort before upload polling
 # ---------------------------------------------------------------------------
 
 
@@ -526,7 +568,7 @@ class Decision09UploadNoteInputErrorTests(unittest.TestCase):
                     )
                 )
 
-        # 只有输入挂载的有界等待，没有进入 60s 上传窗口。
+        # 只有输入挂载的有界等待，没有进入上传完成轮询。
         self.assertLess(
             sum(clock.sleep_calls),
             xhs_main.XHS_UPLOAD_ANCHOR_TIMEOUT_MS / 1000.0 + 1.0,
@@ -579,6 +621,20 @@ def _video_page(
 
 
 class Decision09UploadVideoGateTests(unittest.TestCase):
+    def test_stalled_login_or_failure_probe_is_cancelled_at_deadline(self):
+        async def run(module, probe):
+            async def stalled(*args, **kwargs):
+                await asyncio.Event().wait()
+
+            budget = publish_timeout.PublishTimeoutBudget("fixture", timeout_seconds=0.05)
+            with patch.object(module, probe, stalled), self.assertRaisesRegex(RuntimeError, "尚未点击发布"):
+                await asyncio.wait_for(module._video_upload_gate(_video_page(), budget=budget, mode="local"), 2)
+
+        for module in (xhs_main, rednote_main):
+            for probe in ("_check_blocked", "_video_upload_failure"):
+                with self.subTest(module=module.__name__, probe=probe):
+                    asyncio.run(run(module, probe))
+
     def _run(self, page, *, budget=None):
         clock = FakeClock()
         with clock.patch(xhs_main, publish_timeout, dom):
@@ -620,21 +676,76 @@ class Decision09UploadVideoGateTests(unittest.TestCase):
         self.assertEqual(clock.sleep_calls, [])
         self.assertEqual(page.locator(PUBLISH).click_count, 0)
 
-    def test_ready_window_is_clamped_to_six_hundred_seconds(self):
-        page = _video_page(button=_PublishButton("disabled", enabled=False))
-        clock = FakeClock()
-        with clock.patch(xhs_main, publish_timeout, dom):
-            with self.assertRaises(RuntimeError) as ctx:
-                asyncio.run(
-                    xhs_main._video_upload_gate(
-                        page, budget=_budget(), mode="local"
-                    )
-                )
+    def test_video_can_finish_after_ten_minutes(self):
+        for module, host in ((xhs_main, "creator.xiaohongshu.com"), (rednote_main, "creator.rednote.com")):
+            with self.subTest(host=host):
+                page = _video_page(button=_PublishButton("uploading"))
+                page.url = f"https://{host}/publish/publish?target=video"
+                clock = FakeClock()
 
-        self.assertIn("600", str(ctx.exception))
-        self.assertIn("未点击发布", str(ctx.exception))
-        self.assertAlmostEqual(sum(clock.sleep_calls), 600.0)
-        self.assertTrue(all(delay == 1.0 for delay in clock.sleep_calls))
+                async def ready_after_upload():
+                    return clock.now >= 605
+
+                with clock.patch(module, publish_timeout, dom), patch.object(
+                    page.locator(PUBLISH), "is_enabled", ready_after_upload
+                ):
+                    asyncio.run(module._video_upload_gate(page, budget=_budget(), mode="local"))
+                self.assertEqual(sum(clock.sleep_calls), 605)
+
+    def test_detached_button_attributes_cannot_confirm_upload_at_deadline(self):
+        for module in (xhs_main, rednote_main):
+            with self.subTest(module=module.__name__):
+                clock = FakeClock()
+                page = _video_page()
+                timeouts = []
+
+                async def detached(name, *, timeout):
+                    timeouts.append(timeout)
+                    clock.advance(timeout / 1000)
+                    raise module.BrowserTimeoutError("button detached")
+
+                with clock.patch(module, publish_timeout, dom), patch.object(
+                    page.locator(PUBLISH), "get_attribute", detached
+                ):
+                    budget = _budget()
+                    clock.advance(899.5)
+                    with self.assertRaisesRegex(RuntimeError, "尚未点击发布"):
+                        asyncio.run(module._video_upload_gate(page, budget=budget, mode="local"))
+                self.assertEqual(timeouts, [500])
+                self.assertEqual(clock.now, 900)
+
+    def test_ready_result_arriving_at_deadline_is_rejected(self):
+        for module in (xhs_main, rednote_main):
+            with self.subTest(module=module.__name__):
+                clock = FakeClock()
+                async def late_ready(page, *, budget):
+                    clock.advance(budget.remaining_seconds())
+                    return True, None
+
+                with clock.patch(module, publish_timeout, dom), patch.object(module, "_arm_ready", late_ready):
+                    with self.assertRaisesRegex(RuntimeError, "尚未点击发布"):
+                        asyncio.run(module._video_upload_gate(_video_page(), budget=_budget(), mode="local"))
+
+    def test_stalled_geometry_probe_is_cancelled_at_the_upload_deadline(self):
+        async def scenario(module):
+            page = _video_page()
+            cancelled = asyncio.Event()
+
+            async def stalled():
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.set()
+
+            budget = publish_timeout.PublishTimeoutBudget("fixture", timeout_seconds=0.1)
+            with patch.object(page.locator(PUBLISH), "bounding_box", stalled):
+                with self.assertRaisesRegex(RuntimeError, "尚未点击发布"):
+                    await asyncio.wait_for(module._video_upload_gate(page, budget=budget, mode="local"), 2)
+            self.assertTrue(cancelled.is_set())
+
+        for module in (xhs_main, rednote_main):
+            with self.subTest(module=module.__name__):
+                asyncio.run(scenario(module))
 
     def test_ready_window_is_clamped_by_the_remaining_budget(self):
         page = _video_page(button=_PublishButton("disabled", enabled=False))
@@ -667,7 +778,7 @@ class Decision09UploadVideoGateTests(unittest.TestCase):
                     )
                 )
 
-        self.assertAlmostEqual(sum(clock.sleep_calls), 600.0)
+        self.assertEqual(sum(clock.sleep_calls), publish_timeout.PUBLISH_TIMEOUT_SECONDS)
 
 
 if __name__ == "__main__":

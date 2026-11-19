@@ -1,17 +1,20 @@
 """Instagram formal CLI with real configuration, Profile and session ownership."""
+import asyncio
 import io
 import os
 import tempfile
 import unittest
 from contextlib import ExitStack, redirect_stderr, redirect_stdout, chdir
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import conf
 import sau_cli
 from sau_commands import instagram
 from tests.fakes import FakeContext, FakePlaywright
+from tests.fakes_clock import FakeClock
 from tests.test_mlx_tiktok import _AsyncCM
+from uploader import publish_timeout
 from uploader.meta_uploader.insgraph_uploader import main, posts
 from utils.local_profile import acquire_local_profile
 
@@ -262,6 +265,7 @@ class InstagramProfileCliTests(unittest.TestCase):
                     self.assertFalse(self.pw.chromium.persistent_calls)
 
     def test_editor_rejects_early_share_without_dispatching_it(self):
+        self.stack.enter_context(FakeClock().patch(main, publish_timeout))
         class EarlyShareLocator(ComposerLocator):
             def get_by_role(self, role, **kwargs):
                 if role == 'button' and 'name' in kwargs:
@@ -284,6 +288,27 @@ class InstagramProfileCliTests(unittest.TestCase):
                 code, _, err = self.run_cli(action, '--account', 'Creator', option, str(path), '--title', 'caption', '--no-publish')
                 self.assertEqual(code, 1, err)
                 self.assertEqual(self.context.pages[-1].share_clicks, 0)
+
+    def test_upload_waits_for_an_enabled_next_button_and_rejects_duplicates(self):
+        for matches in (1, 2):
+            with self.subTest(matches=matches):
+                clock = FakeClock()
+                page = ComposerPage(self.context)
+                action = ComposerLocator(page, 'action', matches)
+                action.is_enabled = AsyncMock(side_effect=lambda **kwargs: clock.now >= 45)
+                app = main.InstagramUploader(title='caption', image_files=[self.root / 'photo.png'])
+                with clock.patch(main, publish_timeout), patch.object(main, '_primary_action', return_value=action):
+                    upload = app._upload_files(page, budget=app.start_publish_budget())
+                    if matches == 1:
+                        asyncio.run(upload)
+                        self.assertGreaterEqual(clock.now, 45)
+                        self.assertLess(clock.now, 46)
+                    else:
+                        with self.assertRaisesRegex(main.ElementUnusableError, 'ambiguous:2'):
+                            asyncio.run(upload)
+                        action.is_enabled.assert_not_awaited()
+                        self.assertEqual(clock.now, 0)
+                self.assertEqual(page.step, 0)
 
     def test_local_composer_uses_observed_continue_label_before_share(self):
         class ChineseLocator(ComposerLocator):
@@ -509,7 +534,7 @@ class ComposerLocator(Locator):
                 if getattr(self.page.context, 'outcome', None) == 'click-login':
                     self.page.url = 'https://www.instagram.com/accounts/login/'
                     raise OSError('click response lost after dispatch')
-    async def set_input_files(self, files): self.page.files = files
+    async def set_input_files(self, files, *, timeout=None): self.page.files = files
     async def inner_text(self): return str(self.page.step) if self.kind == 'heading' else self.page.caption
     async def focus(self): pass
 

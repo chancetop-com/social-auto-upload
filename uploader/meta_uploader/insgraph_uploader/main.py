@@ -755,19 +755,26 @@ class InstagramUploader:
         )
         paths = [self.video_file] if self.video_file else self.image_files
         await file_input.set_input_files(  # native-click: file；不可坐标化的 <input type=file>
-            [str(p.resolve()) for p in paths]
+            [str(p.resolve()) for p in paths], timeout=budget.remaining_ms()
         )
         if self.video_file:
             # 实际 Reels 介绍使用 reels_nux_icon；只按素材名片段识别，关闭动作复用
             # “对话框最后一个按钮”，不依赖语言、hash 类名或父子层级。
             reels_intro = page.get_by_role('dialog').filter(
                 has=page.locator('img[src*="reels_nux"]'))
-            await self._dismiss_prompt(page, reels_intro, humanizer=humanizer)
-        # 裁剪标题栏主动作实际出现，才可推进；上传失败或未知弹窗阻断会保留现场并报错。
+            await budget.wait_for_upload(self._dismiss_prompt(page, reels_intro, humanizer=humanizer))
+        # 首个“下一步”可能在素材仍在处理时出现。用上传预算等到它唯一且可用。
         action = await _primary_action(dialog)
-        await expect(action).to_have_count(
-            1, timeout=budget.clamp_ms(60_000)
-        )
+        while True:
+            budget.check_pre_click()
+            if await budget.wait_for_upload(reject_ambiguous(action, 'Instagram 裁剪下一步')) == 1:
+                try:
+                    if await action.is_enabled(timeout=budget.clamp_ms(200)):
+                        budget.check_pre_click()
+                        return
+                except BrowserTimeoutError:
+                    pass  # 按钮在两次读取之间卸载，下轮重新解析。
+            await asyncio.sleep(budget.clamp_seconds(0.2))
 
     async def _advance_media_editor(self, page: Page, *, budget: PublishTimeoutBudget) -> None:
         """裁剪、编辑两步各等待标题改变，最终以 Lexical 配文输入框确认。"""

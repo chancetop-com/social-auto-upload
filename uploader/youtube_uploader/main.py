@@ -389,38 +389,33 @@ async def _click_if_present(
 
 async def _wait_upload_complete(
     page: Page,
-    max_polls: int = 360,
     *,
-    budget: PublishTimeoutBudget | None = None,
+    budget: PublishTimeoutBudget,
 ) -> bool:
-    """等网页上传从 X% 跑到 100% 再发布。浏览器上传靠窗口开着才传得完，
-    若上传到一半就点发布并关闭浏览器，上传会被掐断卡在中途（如 76%）。
-    出现“处理/检查/上传完成”或不再“正在上传”即视为传完。
-    max_polls*5s 是平台上限，实际还受 15 分钟发布总预算约束。"""
+    """在剩余发布预算内等到 Studio 显示上传完成、处理或检查状态。"""
     last = ""
-    for _ in range(max_polls):
-        if budget is not None:
-            budget.check_pre_click()
+    while True:
+        budget.check_pre_click()
         txt = ""
         for sel in (".progress-label", "span.progress-label", "ytcp-video-upload-progress"):
             loc = page.locator(sel).first
             try:
-                if await loc.count():
-                    txt = (await loc.inner_text()).strip()
+                texts = await budget.wait_for_upload(loc.all_inner_texts())
+                if texts:
+                    txt = texts[0].strip()
                     if txt:
                         break
             except Exception:
-                pass
+                budget.check_pre_click()
         if txt:
             if any(k in txt for k in ("处理", "检查", "上传完成", "已上传", "Processing", "complete", "Checks", "Finished")):
+                budget.check_pre_click()
                 youtube_logger.info(_msg("✅", f"上传完成: {txt[:40]}"))
                 return True
             if txt != last:
                 youtube_logger.info(_msg("⏳", f"上传中: {txt[:40]}"))
                 last = txt
-        await page.wait_for_timeout(5000)
-    youtube_logger.warning(_msg("⚠️", "等上传超时(30min)，仍尝试发布"))
-    return False
+        await page.wait_for_timeout(budget.clamp_ms(5000))
 
 
 class YouTubeVideo(BaseVideoUploader):
@@ -537,7 +532,7 @@ class YouTubeVideo(BaseVideoUploader):
         # 1) 选择视频文件
         file_input = page.locator('input[type="file"]').first
         await file_input.wait_for(state="attached", timeout=60000)
-        await file_input.set_input_files(self.file_path)
+        await file_input.set_input_files(self.file_path, timeout=self.publish_budget.remaining_ms())
         _raise_if_login_required(page, mode=mode)
 
         # 2) 等详情对话框

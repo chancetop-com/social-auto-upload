@@ -13,7 +13,9 @@ import conf
 import sau_cli
 from sau_commands import youtube as command
 from tests.fakes import FakeContext, FakePage, FakePlaywright
+from tests.fakes_clock import FakeClock
 from tests.fakes_xhs_dom import RecordingLocator, RecordingKeyboard
+from uploader import publish_timeout
 from uploader.youtube_uploader import main as uploader
 from utils.local_profile import acquire_local_profile
 
@@ -68,6 +70,27 @@ class StudioContext(FakeContext):
 
 
 class YouTubeProfilesTests(unittest.TestCase):
+    def test_replaced_progress_label_does_not_block_completion_fallback(self):
+        clock = FakeClock()
+
+        class ReplacedLabel(RecordingLocator):
+            async def all_inner_texts(self):
+                return []
+
+            async def inner_text(self, *, timeout):
+                clock.advance(timeout / 1000)
+                raise TimeoutError("progress label was replaced")
+
+        page = UploadPage()
+        page.selectors['.progress-label'] = ReplacedLabel('old progress')
+        page.selectors['span.progress-label'] = RecordingLocator('absent', count=0)
+        page.selectors['ytcp-video-upload-progress'] = RecordingLocator('current', text='Checks complete')
+        with clock.patch(publish_timeout):
+            budget = publish_timeout.PublishTimeoutBudget('YouTube')
+            clock.advance(120)
+            self.assertTrue(asyncio.run(uploader._wait_upload_complete(page, budget=budget)))
+            self.assertEqual(budget.remaining_seconds(), 780)
+
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)

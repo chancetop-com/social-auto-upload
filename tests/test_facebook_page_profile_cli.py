@@ -13,7 +13,9 @@ import conf
 import sau_cli
 from sau_commands import facebook_page as command
 from tests.fakes import FakeContext, FakePlaywright
+from tests.fakes_clock import FakeClock
 from tests.test_mlx_tiktok import _AsyncCM
+from uploader import publish_timeout
 from uploader.meta_uploader.facebook_page_uploader import main, posts
 from utils.local_profile import acquire_local_profile
 
@@ -338,6 +340,30 @@ class FacebookPageProfileCliTests(unittest.TestCase):
         self.assertEqual(code,1,err)
         self.assertEqual(self.context.pages[-1].publish_clicks,0)
 
+    def test_slow_video_upload_uses_time_left_after_file_selection(self):
+        clock = FakeClock()
+        uploader = main.MetaBusinessUploader("facebook-page", title="test", video_file="clip.mp4")
+        page = ComposerPage(self.context)
+        waits = []
+        delays = iter((10, 240))  # Filename appears after 10s, then 4min to reach 100%.
+
+        class UploadStatus(Locator):
+            async def wait_for(self, *, state, timeout):
+                waits.append(timeout)
+                delay = next(delays)
+                if timeout < delay * 1000:
+                    raise TimeoutError("upload still in progress")
+                clock.advance(delay)
+
+        with clock.patch(publish_timeout), patch.object(main, "expect", Expect), patch.object(
+            page, "get_by_text", return_value=UploadStatus()
+        ):
+            budget = uploader.start_publish_budget()
+            clock.advance(120)
+            asyncio.run(uploader._upload_files(page))
+            self.assertEqual(waits, [780_000, 770_000])
+            self.assertEqual(budget.remaining_seconds(), 530)
+
 
 class Expect:
     def __init__(self, locator): self.locator = locator
@@ -430,7 +456,7 @@ class ComposerPage(Page):
     async def wait_for_url(self, *args, **kwargs): pass
     def expect_file_chooser(self):
         return _AsyncCM(SimpleNamespace(value=AwaitableValue(SimpleNamespace(set_files=self.set_files))))
-    async def set_files(self, files): self.files = files
+    async def set_files(self, files, *, timeout=None): self.files = files
     def expect_response(self, *args, **kwargs):
         return _AsyncCM(SimpleNamespace(value=AwaitableValue(SimpleNamespace(json=self.payload))))
     async def payload(self):

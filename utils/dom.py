@@ -967,6 +967,8 @@ async def wait_dom_quiet(
             await asyncio.sleep(sleep_ms / 1000.0)
     finally:
         try:
+            # 到期取消读取时，别让同一无响应页面上的清理 RPC 再次阻塞退出。
+            _clamp_ms(cap_ms, budget)
             await page.evaluate(_DISCONNECT_QUIET_JS)
         except Exception:
             pass

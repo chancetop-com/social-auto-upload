@@ -377,19 +377,21 @@ class MetaBusinessUploader(BaseVideoUploader):
         files = [str(self.video_file)] if self.video_file else [str(path) for path in self.image_files]
         async with page.expect_file_chooser() as chooser_info:
             await trigger.click()  # native-click: file；原生文件选择器必须与 set_files 配对，坐标点击无法携带文件
-        await (await chooser_info.value).set_files(files)
+        budget = self.publish_budget
+        await (await chooser_info.value).set_files(files, timeout=budget.remaining_ms())
         # 视频在新版 Business Suite 会进入“创建 Reels”向导，不渲染 video 标签；
         # 图片则留在原 composer。两种状态都必须等到文件名或向导业务标题出现。
         if self.video_file:
-            await page.get_by_text(self.video_file.name, exact=True).wait_for(state="visible", timeout=self.publish_budget.clamp_ms(180_000))
+            await page.get_by_text(self.video_file.name, exact=True).wait_for(state="visible", timeout=budget.remaining_ms())
             # 新版 Reel 向导有独立业务 surface；不依赖 Create reel/创建 Reels 标题。
-            await page.locator('[data-surface$="lib:bizweb_create_reel"]').wait_for()
-            await dismiss_guidance_cards(page)
-            await page.get_by_text('100%', exact=True).wait_for(state='visible', timeout=self.publish_budget.clamp_ms(180000))
+            await page.locator('[data-surface$="lib:bizweb_create_reel"]').wait_for(timeout=budget.remaining_ms())
+            await budget.wait_for_upload(dismiss_guidance_cards(page))
+            await page.get_by_text('100%', exact=True).wait_for(state='visible', timeout=budget.remaining_ms())
         else:
             # 上传后媒体区生成服务端预览及像素尺寸；不以中文“移除照片”或正文框代表上传完成。
-            await expect(media.locator('img')).to_have_count(len(files), timeout=self.publish_budget.clamp_ms(180000))
-            await expect(media.get_by_text(re.compile(r"^\d+ x \d+$")).filter(visible=True)).to_have_count(len(files), timeout=self.publish_budget.clamp_ms(180000))
+            await expect(media.locator('img')).to_have_count(len(files), timeout=budget.remaining_ms())
+            await expect(media.get_by_text(re.compile(r"^\d+ x \d+$")).filter(visible=True)).to_have_count(len(files), timeout=budget.remaining_ms())
+        budget.check_pre_click()
 
     async def _fill_caption(self, page: Page) -> None:
         humanizer = self._humanizer(page)

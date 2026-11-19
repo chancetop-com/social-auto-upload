@@ -17,6 +17,14 @@ class PublishTimeoutBudgetTests(unittest.TestCase):
     def test_default_budget_is_fifteen_minutes(self):
         self.assertEqual(PUBLISH_TIMEOUT_SECONDS, 15 * 60)
 
+    def test_upload_probe_timeout_keeps_its_cause_when_budget_remains(self):
+        async def probe():
+            raise asyncio.TimeoutError("browser read timed out")
+
+        budget = PublishTimeoutBudget("测试平台")
+        with self.assertRaisesRegex(asyncio.TimeoutError, "browser read timed out"):
+            asyncio.run(budget.wait_for_upload(probe()))
+
     def test_pre_click_timeout_is_regular_failure(self):
         budget = PublishTimeoutBudget("测试平台")
         budget.deadline = time.monotonic() - 1
