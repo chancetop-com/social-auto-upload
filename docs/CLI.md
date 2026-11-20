@@ -185,8 +185,8 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 | `rednote upload-note` | 网页：中文界面已有带 AI 声明的双图验收，到达发布前（观察阶段：发布前）；CLI：回读 `.d-select-description` 并断言菜单收起，缺失、空值或其他标签退出 `1`；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
 | `instagram upload-video` | 网页：简体中文 Creator Reel，开关由关切到开，分享前读到 `true`；历史英文 Personal 发布后读到 `AI content`。受控页另覆盖已关、入口缺失、禁用、不可读与「放弃帖子？」遮挡。CLI：省略保持页面原值；`--ai-generated` 须回读开启；`--no-ai-generated` 已关记 `default_off`、从开切到关并回读记 `set`、确认入口缺失记 `default_off`/`entry_missing`、遮挡记 `mismatch`/`editor_obscured`（退出 1，Share 零点击）。样本：Creator，简体中文，`--no-publish` 分享前；Personal 英文为历史发布后对照 | 网页：首个同名 `Shanghai`，候选只显示名称；CLI：按候选整行匹配，已接入；样本：Creator，简体中文 | 网页：分享前正文含 `#color #study`；CLI：`--tags` 合并进配文；样本：Creator，简体中文 |
 | `instagram upload-note` | 网页：简体中文 Creator 两图轮播，开关原本已关，分享前读到 `false`；另一次「放弃帖子？」遮挡导致读值为空，旧记录误记为入口缺失；历史英文 Personal 发布后读到 `AI content`。CLI：省略保持页面原值；`--ai-generated` 须回读开启；`--no-ai-generated` 已关记 `default_off`、从开切到关并回读记 `set`、确认入口缺失记 `default_off`/`entry_missing`、遮挡记 `mismatch`/`editor_obscured`（退出 1，Share 零点击）。样本：Creator，简体中文，`--no-publish` 分享前；Personal 英文为历史发布后对照 | 网页：首个同名 `Shanghai`，选中后名称一致；CLI：按候选整行匹配，已接入；样本：Creator，简体中文 | 网页：分享前正文含 `#color #study`；CLI：`--tags` 合并进配文；样本：Creator，简体中文 |
-| `tiktok upload-video` | 网页：仅发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：视频配文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--title` 配文；样本：英文 Studio，`lukechen` |
-| `tiktok upload-note` | 网页：仅公开账号图片帖发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：图片帖正文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--note` 正文；样本：英文 Studio，`lukechen` |
+| `tiktok upload-video` | 网页：仅发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行分行显示名称与英国地址，收起后只显示 `London Eye`；CLI：已接入 `--location`，按名称忽略大小写与空白取首个同名行，收起后回读；样本：英文 Studio，`lukechen`，账号类型未核验，发布前候选 + 受控页面离线验收；CLI 实机样本未实测 | 网页：视频配文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--title` 配文；样本：英文 Studio，`lukechen` |
+| `tiktok upload-note` | 网页：仅公开账号图片帖发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行分行显示名称与英国地址，收起后只显示 `London Eye`；CLI：已接入 `--location`，与视频相同的同名匹配与回读；样本：英文 Studio，`lukechen`，账号类型未核验，发布前候选 + 受控页面离线验收；CLI 实机样本未实测 | 网页：图片帖正文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--note` 正文；样本：英文 Studio，`lukechen` |
 
 ## 日志
 
@@ -755,6 +755,7 @@ sau tiktok check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID"
 sau tiktok upload-video \
   --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
+  --location "London Eye" \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
   --schedule "2026-10-21T02:30:00Z" --thumbnail videos/demo.png
 
@@ -763,6 +764,7 @@ sau tiktok upload-note \
   --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --images videos/demo1.png videos/demo2.png \
   --title "图文标题" --note "图文正文" --tags 图文,测试 \
+  --location "London Eye" \
   --privacy friends --no-comments --aigc
 
 # AdsPower 模式（--folder-id 可省略）
@@ -796,6 +798,7 @@ sau tiktok upload-video \
 | 参数 | 取值 | 含义 |
 | --- | --- | --- |
 | `--privacy` | `public` / `friends` / `followers` / `only-me` | 设置隐私级别；账号类型不匹配时回读失败并退出 `1` |
+| `--location TEXT` | 文本 | 按完整地点名称选择：忽略大小写、去首尾空白并合并连续空白，按页面顺序点击第一个同名候选。成功须候选列表收起且控件读回所点名称；终端报告请求值、所点行名称与可见地址、最终值。无同名候选、入口缺失、列表未收起、读值为空或不符均退出 `1`；空白值退出 `2` |
 | `--no-comments` | 开关 | 关闭评论 |
 | `--disable-reuse` | 开关 | 关闭内容复用；同时影响 Duet、Stitch、Stickers 和 Story |
 | `--aigc` / `--no-aigc` | 互斥 | 三态 AI 生成内容标识：省略时完全不读取、不点击、不展开 AI 入口，保留页面当前值；`--aigc` 须读到开：入口缺失、仍为关且可见禁用、或回读失败退出 `1`；`--no-aigc` 已关记 `default_off`，从开切关并读回记 `set`，入口确实缺失记 `default_off`/`entry_missing`（终值未知）并继续，可见但禁用且仍为开或无法读值退出 `1` |
@@ -814,6 +817,7 @@ sau tiktok upload-video \
 | `--note` | 否 | Description，≤4000 字符（含 tags 展开后的文本）；不传且无 tags 时不改动页面输入 |
 | `--notef` | 否 | 从本地 txt/md 读取 Description；与 `--note` 互斥 |
 | `--tags` | 否 | 逗号分隔，规范化后追加到 Description；最多 50 个 |
+| `--location` | 否 | 与视频相同：按完整名称选择地点，忽略大小写与空白，取首个同名行；省略时保留页面原值 |
 | `--schedule` | 否 | 与视频相同的 `YYYY-MM-DDTHH:MM:00Z` |
 | `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义；AI 三态与终端 `requested` / `applied` / `status` / `reason` / `continue` 诊断相同 |
 
@@ -824,6 +828,7 @@ sau tiktok upload-video \
 - 图片仅支持 JPG / JPEG / PNG / WEBP（扩展名大小写不敏感），单张 ≤50 MB。
 - 图片数量、格式、大小，以及 Title/Description/hashtag 超限、`--note`/`--notef` 冲突、`--branded-content --privacy only-me` 都在启动浏览器前校验失败并退出 `2`，不会截断后继续。
 - 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
+- 帖子地点按三态处理：省略 `--location` 时不读取、不搜索、不点击地点控件，保留页面原值；显式请求时终端打印一行 `TikTok 帖子地点: option=location requested=... candidate=... address=... final=... status=... reason=... continue=...`。成功须候选列表收起且控件读回所点行的名称。无同名候选（含空列表或仅近似名称）记 `no_match`/`no_same_name_candidate`；入口缺失记 `unsupported`/`entry_missing`；只有页面明确提示资格限制才记 `account_ineligible`；列表未收起、读值为空或不符分别记 `list_not_collapsed`、`final_empty`、`final_mismatch`。以上失败均退出 `1`，发布按钮零点击。空白 `--location` 在启动浏览器前退出 `2`。
 - AI 声明按三态报告：省略 `--aigc` / `--no-aigc` 时不读取、不点击 AI 开关，保留页面原值，结果记 `not_requested` 且不打印 AI 行；显式请求时终端打印一行 `TikTok AI 声明: option=aigc requested=... applied=... status=... reason=... continue=...`。`status=set` 和 `default_off` 可继续；`default_off` + `reason=entry_missing` 表示入口缺失、终值未知；`unsupported`、`mismatch` 或 `continue=no` 退出 `1`，发布按钮零点击。开关可见但禁用且仍为开、可见但无法读值（`reason=read_error`）或首次运行的 `Turn on` 对话框失败（`reason=dialog_error`）都按 `mismatch` 停止。
 - 账号没有 Photos tab（未在图文灰度内）时，`upload-note` 在选文件前退出 `1`，不会把图片送进视频 input。
 - 退出码 `9` 表示发布结果未知：发布点击已发出但未确认成功；**禁止自动重发**，先到 TikTok Studio → Content/Posts 按标题与发布时间核对。

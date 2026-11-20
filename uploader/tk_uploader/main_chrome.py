@@ -60,6 +60,11 @@ _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
 TIKTOK_RESULT_READ_TIMEOUT_MS = 30_000
 TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS = 3_000
 TIKTOK_HASHTAG_SETTLE_MS = 600
+#: Location search: how long to wait for the listbox rows, then for the list
+#: to collapse after a row click.  Both are page-state waits, not fixed sleeps.
+TIKTOK_LOCATION_SUGGESTION_TIMEOUT_MS = 5_000
+TIKTOK_LOCATION_COLLAPSE_TIMEOUT_MS = 5_000
+TIKTOK_LOCATION_POLL_MS = 100
 #: ``--no-publish`` dry run: upper bound for the publish-ready wait.  It is
 #: also clamped by whatever remains of the shared publish budget.
 TIKTOK_DRY_RUN_READY_TIMEOUT_MS = 60_000
@@ -400,6 +405,7 @@ class TiktokPublishOptions:
     aigc: bool | None = None
     your_brand: bool | None = None
     branded_content: bool | None = None
+    location: str | None = None         # exact candidate name; None = untouched
 
 
 # AI disclosure outcome vocabulary, aligned with the Instagram options record.
@@ -449,6 +455,147 @@ def format_ai_outcome(outcome: TiktokAiOutcome) -> str:
         f"status={outcome.status} reason={reason} "
         f"continue={'yes' if outcome.can_continue else 'no'}"
     )
+
+
+# Post-location outcome vocabulary.  ``no_match`` is distinct from
+# ``unsupported``: the first means the search produced no same-name row, the
+# second means the page entry is missing or explicitly restricted.
+LOCATION_NOT_REQUESTED = "not_requested"
+LOCATION_SET = "set"
+LOCATION_NO_MATCH = "no_match"
+LOCATION_UNSUPPORTED = "unsupported"
+LOCATION_MISMATCH = "mismatch"
+
+LOCATION_NO_SAME_NAME = "no_same_name_candidate"
+LOCATION_ENTRY_MISSING = "entry_missing"
+LOCATION_ACCOUNT_INELIGIBLE = "account_ineligible"
+LOCATION_CONTROL_DISABLED = "control_disabled"
+LOCATION_SEARCH_ERROR = "search_error"
+LOCATION_CLICK_ERROR = "click_error"
+LOCATION_LIST_NOT_COLLAPSED = "list_not_collapsed"
+LOCATION_FINAL_EMPTY = "final_empty"
+LOCATION_FINAL_MISMATCH = "final_mismatch"
+LOCATION_READ_ERROR = "read_error"
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokLocationOutcome:
+    """Terminal result for one ``--location`` request.
+
+    ``candidate_name``/``candidate_address`` describe the row that was clicked
+    (the address may be absent); ``final_value`` is the collapsed control's
+    visible value.  Unobserved values stay ``None`` and are never guessed.
+    """
+
+    requested: str | None
+    status: str
+    candidate_name: str | None = None
+    candidate_address: str | None = None
+    final_value: str | None = None
+    reason: str | None = None
+
+    @property
+    def can_continue(self) -> bool:
+        return self.status in (LOCATION_NOT_REQUESTED, LOCATION_SET)
+
+
+def format_location_outcome(outcome: TiktokLocationOutcome) -> str:
+    """One machine-greppable line with the clicked row and final value."""
+
+    def value(text: str | None) -> str:
+        return "null" if text is None else repr(text)
+
+    return (
+        "TikTok 帖子地点: option=location "
+        f"requested={value(outcome.requested)} "
+        f"candidate={value(outcome.candidate_name)} "
+        f"address={value(outcome.candidate_address)} "
+        f"final={value(outcome.final_value)} "
+        f"status={outcome.status} reason={outcome.reason or '-'} "
+        f"continue={'yes' if outcome.can_continue else 'no'}"
+    )
+
+
+def normalize_location_text(text: str | None) -> str:
+    """Name comparison: trim, collapse consecutive whitespace, ignore case."""
+    return " ".join(str(text or "").split()).casefold()
+
+
+def parse_location_row(text: str) -> tuple[str, str | None]:
+    """Split a candidate row into its visible name and address.
+
+    Studio renders the name on the first line and the address on the
+    following line(s).  A name-only row yields ``(name, None)`` and is still a
+    valid exact match; the address is evidence, never part of matching.
+    """
+    lines = [line.strip() for line in str(text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return "", None
+    name = " ".join(lines[0].split())
+    address = " ".join(" ".join(lines[1:]).split()) or None
+    return name, address
+
+
+# Explicit restriction copy only.  A missing entry alone must never be
+# reported as ineligible, and an unrelated ``... aren't available`` hint (for
+# example the private-account Duet/Stitch hint) must not match.  Every pattern
+# therefore keeps the location subject and the negation adjacent, or requires
+# an explicit account/region qualifier.
+_LOCATION_INELIGIBLE_PATTERNS = (
+    re.compile(
+        r"(?:location|地点)\s*(?:is|are|was|were)?\s*"
+        r"(?:not|isn['’]t|aren['’]t)\s*"
+        r"(?:available|supported|offered|eligible)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:location|地点)\s*(?:不可用|不支持|不符合资格|无法使用|无法选择)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:can['’]?t|cannot|unable\s+to|无法|不能)"
+        r"[^.\n]{0,20}"
+        r"(?:add|select|use|choose|添加|选择|设置)"
+        r"[^.\n]{0,20}(?:location|地点)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:account|账号)\s*(?:is|are)?\s*"
+        r"(?:not\s+eligible|ineligible|不符合资格|无资格)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:location|地点)[^.\n]{0,40}"
+        r"(?:not\s+available|unavailable|not\s+supported|not\s+eligible|"
+        r"ineligible|不可用|不支持|不符合资格)"
+        r"[^.\n]{0,40}"
+        r"(?:(?:this|your|当前|该)\s*(?:account|账号)|"
+        r"region|country|地区|国家|年龄|age)",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _location_restriction_message(body: str | None) -> str | None:
+    """Return the explicit restriction sentence, or ``None``."""
+    if not body:
+        return None
+    text = " ".join(str(body).split())
+    for pattern in _LOCATION_INELIGIBLE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0).strip()
+    return None
+
+
+async def _read_location_restriction(page) -> str | None:
+    """Read the page body and look for an explicit location restriction."""
+    try:
+        body = await page.locator("body").inner_text()
+    except Exception:
+        return None
+    return _location_restriction_message(body)
 
 
 # Page copy -> CLI/API semantic value.  ``Only you`` and ``Private`` are the
@@ -731,6 +878,263 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         return await self._trigger.count()
 
 
+class TiktokLocationCandidate:
+    """One visible candidate row: name on the first line, address after it."""
+
+    def __init__(
+        self,
+        name: str,
+        address: str | None = None,
+        *,
+        locator=None,
+        humanizer: Humanizer | None = None,
+    ) -> None:
+        self.name = name
+        self.address = address
+        self._locator = locator
+        self._humanizer = humanizer
+
+    async def click(self) -> None:
+        if self._locator is None:
+            raise NotImplementedError
+        await _humanized_click(self._humanizer, self._locator)
+
+
+class TiktokLocationControl:
+    """Location combobox seam: search, ordered rows, collapse and readback.
+
+    ``candidates`` is the selector-description tuple used by the shared error
+    context; the live rows come from ``candidate_rows`` so tests can provide
+    in-memory candidates without modelling the DOM.
+    """
+
+    candidates: tuple[str, ...] = ()
+    candidate_index: int | None = None
+
+    async def count(self) -> int:
+        raise NotImplementedError
+
+    async def is_visible(self) -> bool:
+        raise NotImplementedError
+
+    async def is_disabled(self) -> bool:
+        raise NotImplementedError
+
+    async def search(self, text: str) -> None:
+        raise NotImplementedError
+
+    async def candidate_rows(self) -> list[TiktokLocationCandidate]:
+        raise NotImplementedError
+
+    async def wait_collapsed(self) -> bool:
+        raise NotImplementedError
+
+    async def read_value(self) -> str:
+        raise NotImplementedError
+
+    async def get_attribute(self, name: str) -> str | None:
+        raise NotImplementedError
+
+
+_LOCATION_INPUT_SELECTORS = (
+    "input.Select__searchInput",
+    'input[placeholder*="Search locations" i]',
+    'input[placeholder*="地点" i]',
+)
+
+
+class _LocatorLocationControl(TiktokLocationControl):
+    """Studio ``poi_container`` adapter over a Patchright locator."""
+
+    def __init__(
+        self,
+        input_locator,
+        container,
+        *,
+        page,
+        row_scope=None,
+        candidates: tuple[str, ...] = (),
+        humanizer: Humanizer | None = None,
+    ) -> None:
+        self._input_locator = input_locator
+        self._container = container
+        self._page = page
+        self._row_scope = row_scope
+        self.candidates = candidates
+        self._humanizer = humanizer
+
+    async def _input(self):
+        locator = self._input_locator
+        try:
+            total = await locator.count()
+        except Exception:
+            total = 0
+        if total > 1:
+            for index in range(total):
+                node = locator.nth(index)
+                try:
+                    if await node.is_visible():
+                        return node
+                except Exception:
+                    continue
+        first = getattr(locator, "first", None)
+        return first if first is not None else locator
+
+    async def count(self) -> int:
+        return await self._input_locator.count()
+
+    async def is_visible(self) -> bool:
+        try:
+            return bool(await (await self._input()).is_visible())
+        except Exception:
+            # A transient probe error must not turn into a false
+            # "entry missing"; the search/readback will carry the real error.
+            return True
+
+    async def is_disabled(self) -> bool:
+        target = await self._input()
+        try:
+            if await target.is_disabled():
+                return True
+            if str(
+                await target.get_attribute("readonly")
+            ).lower() == "true":
+                return True
+        except Exception:
+            pass
+        try:
+            classes = (
+                (await self._container.get_attribute("class")) or ""
+            ).casefold()
+            return _classes_mark_disabled(classes)
+        except Exception:
+            return False
+
+    async def get_attribute(self, name: str) -> str | None:
+        return await (await self._input()).get_attribute(name)
+
+    async def search(self, text: str) -> None:
+        target = await self._input()
+        if self._humanizer is None:
+            # Direct construction (offline seam) has no page-backed Humanizer.
+            await target.fill(text)
+        else:
+            humanizer = self._humanizer
+            await _humanized_click(humanizer, target)
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.press("Delete")
+            await humanizer.type_text(text)
+        await self._wait_for_rows()
+
+    async def _wait_for_rows(self) -> None:
+        deadline = (
+            time.monotonic() + TIKTOK_LOCATION_SUGGESTION_TIMEOUT_MS / 1000
+        )
+        while True:
+            if await self.candidate_rows():
+                return
+            if time.monotonic() >= deadline:
+                return
+            await self._page.wait_for_timeout(TIKTOK_LOCATION_POLL_MS)
+
+    async def _rows_in_scope(self, scope) -> list[TiktokLocationCandidate]:
+        # Prefer the semantic listbox; fall back to any visible option row.
+        for selector in ('[role="listbox"] [role="option"]', '[role="option"]'):
+            try:
+                options = scope.locator(selector)
+                total = await options.count()
+            except Exception:
+                continue
+            rows: list[TiktokLocationCandidate] = []
+            for index in range(total):
+                node = options.nth(index)
+                try:
+                    if not await node.is_visible():
+                        continue
+                    text = await node.inner_text()
+                except Exception:
+                    continue
+                name, address = parse_location_row(text)
+                if not name:
+                    continue
+                rows.append(
+                    TiktokLocationCandidate(
+                        name,
+                        address,
+                        locator=node,
+                        humanizer=self._humanizer,
+                    )
+                )
+            if rows:
+                return rows
+        return []
+
+    async def candidate_rows(self) -> list[TiktokLocationCandidate]:
+        # Current Studio portals the listbox to the page root; an
+        # iframe-scoped list is still covered by the base scope first.  Only
+        # visible rows count, so a hidden stale listbox cannot mask the open
+        # one or turn into a false no-match.
+        seen: set[int] = set()
+        for scope in (self._row_scope, self._page):
+            if scope is None or id(scope) in seen:
+                continue
+            seen.add(id(scope))
+            rows = await self._rows_in_scope(scope)
+            if rows:
+                return rows
+        return []
+
+    async def _expanded(self) -> bool | None:
+        target = await self._input()
+        for node in (target, self._container):
+            try:
+                aria = await node.get_attribute("aria-expanded")
+            except Exception:
+                aria = None
+            if aria is not None:
+                return str(aria).lower() == "true"
+        return None
+
+    async def wait_collapsed(self) -> bool:
+        deadline = (
+            time.monotonic() + TIKTOK_LOCATION_COLLAPSE_TIMEOUT_MS / 1000
+        )
+        while True:
+            expanded = await self._expanded()
+            rows = await self.candidate_rows()
+            # Both signals matter: a stale ``aria-expanded=true`` means the
+            # combobox is still open even if the visible rows briefly vanish.
+            if expanded is not True and not rows:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await self._page.wait_for_timeout(TIKTOK_LOCATION_POLL_MS)
+
+    async def read_value(self) -> str:
+        target = await self._input()
+        try:
+            value = (await target.input_value()).strip()
+        except Exception:
+            value = ""
+        if value:
+            return value
+        # Fallback for a future chip-only rendering: the container's visible
+        # text minus its label/placeholder.  The input value is the evidence
+        # recorded on the current Studio.
+        try:
+            text = await self._container.inner_text()
+        except Exception:
+            return ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.casefold() in ("location", "search locations", "地点"):
+                continue
+            return line
+        return ""
+
+
 @dataclass(frozen=True, slots=True)
 class TiktokSettingsControls:
     """Resolved controls for one ``apply_options`` run."""
@@ -742,6 +1146,7 @@ class TiktokSettingsControls:
     brand_switch: TiktokOptionControl | None = None
     your_brand: TiktokOptionControl | None = None
     branded_content: TiktokOptionControl | None = None
+    location: "TiktokLocationControl | None" = None
 
 
 def _page_url(page) -> str:
@@ -1452,10 +1857,14 @@ class TiktokBaseUploader(BaseVideoUploader):
         """
         options = getattr(self, "options", None)
         self.ai_outcome = TiktokAiOutcome(None, None, AI_NOT_REQUESTED)
+        self.location_outcome = TiktokLocationOutcome(
+            None, LOCATION_NOT_REQUESTED
+        )
         if options is None:
             return
         if (
             options.privacy is None
+            and options.location is None
             and options.allow_comments is None
             and options.allow_reuse is None
             and options.aigc is None
@@ -1468,6 +1877,10 @@ class TiktokBaseUploader(BaseVideoUploader):
         await self._expand_advanced_settings(page)
         controls = await self.resolve_option_controls(page)
         url = _page_url(page)
+        if options.location is not None:
+            await self._apply_location_option(
+                controls.location, options.location, page=page, url=url
+            )
         if options.privacy is not None:
             await _set_privacy_option(
                 controls.privacy, options.privacy, url=url
@@ -1504,6 +1917,241 @@ class TiktokBaseUploader(BaseVideoUploader):
         if options is None:
             return False
         return options.your_brand is True or options.branded_content is True
+
+    def _record_location_outcome(self, outcome: TiktokLocationOutcome) -> None:
+        """Store and print the location field outcome; keep the summary intact."""
+        self.location_outcome = outcome
+        print(format_location_outcome(outcome))
+
+    async def _apply_location_option(
+        self,
+        control: TiktokLocationControl | None,
+        requested: str,
+        *,
+        page,
+        url: str,
+    ) -> None:
+        """Search by exact name, click the first same-name row, then read back.
+
+        Success requires both the candidate list to be collapsed/gone and the
+        control to show the clicked row's name.  Every failure stops the chain
+        before the publish click.
+        """
+        query = " ".join(str(requested).split())
+        if control is None:
+            # Only an explicit page prompt may use account-ineligible wording;
+            # a genuinely absent entry is reported as entry_missing.
+            restriction = await _read_location_restriction(page)
+            if restriction:
+                outcome = TiktokLocationOutcome(
+                    requested=query,
+                    status=LOCATION_UNSUPPORTED,
+                    reason=LOCATION_ACCOUNT_INELIGIBLE,
+                )
+                self._record_location_outcome(outcome)
+                raise _option_error(
+                    option="location",
+                    stage="resolve",
+                    requested=query,
+                    actual="account-ineligible",
+                    control=None,
+                    url=url,
+                    detail=restriction,
+                )
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_UNSUPPORTED,
+                reason=LOCATION_ENTRY_MISSING,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="resolve",
+                requested=query,
+                actual="control-not-found",
+                control=None,
+                url=url,
+                candidates=tuple(
+                    label for label, _ in self._option_candidate_factories(
+                        "location"
+                    )
+                ),
+            )
+
+        if await control.is_disabled():
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_UNSUPPORTED,
+                reason=LOCATION_CONTROL_DISABLED,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="resolve",
+                requested=query,
+                actual="control-disabled",
+                control=control,
+                url=url,
+            )
+
+        try:
+            await control.search(query)
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                reason=LOCATION_SEARCH_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="search",
+                requested=query,
+                actual="search-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
+
+        rows = await control.candidate_rows()
+        exact = [
+            row
+            for row in rows
+            if normalize_location_text(row.name)
+            == normalize_location_text(query)
+        ]
+        if not exact:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_NO_MATCH,
+                reason=LOCATION_NO_SAME_NAME,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="match",
+                requested=query,
+                actual="no-same-name",
+                control=control,
+                url=url,
+                candidates=tuple(row.name for row in rows[:10]),
+            )
+
+        candidate = exact[0]
+        candidate_name = " ".join(str(candidate.name).split())
+        candidate_address = (
+            " ".join(str(candidate.address).split())
+            if candidate.address
+            else None
+        )
+        try:
+            await candidate.click()
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_CLICK_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="click",
+                requested=query,
+                actual="click-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
+
+        if not await control.wait_collapsed():
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_LIST_NOT_COLLAPSED,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="collapse",
+                requested=query,
+                actual="list-open",
+                control=control,
+                url=url,
+            )
+
+        try:
+            final_value = (await control.read_value()).strip()
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_READ_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="readback",
+                requested=query,
+                actual="read-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
+
+        if not final_value:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_FINAL_EMPTY,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="readback",
+                requested=query,
+                actual="empty",
+                control=control,
+                url=url,
+            )
+
+        if normalize_location_text(final_value) != normalize_location_text(
+            candidate_name
+        ):
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                final_value=final_value,
+                reason=LOCATION_FINAL_MISMATCH,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="readback",
+                requested=query,
+                actual=final_value,
+                control=control,
+                url=url,
+            )
+
+        self._record_location_outcome(
+            TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_SET,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                final_value=final_value,
+            )
+        )
 
     @staticmethod
     def _require_option_control(control, option, requested, url) -> None:
@@ -1799,6 +2447,8 @@ class TiktokBaseUploader(BaseVideoUploader):
         if options is None:
             return []
         names = []
+        if options.location is not None:
+            names.append("location")
         if options.privacy is not None:
             names.append("privacy")
         if options.allow_comments is not None:
@@ -1819,6 +2469,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         if name in ("your_brand", "branded_content"):
             return getattr(options, name) is True
         return {
+            "location": options.location,
             "privacy": options.privacy,
             "comments": options.allow_comments,
             "reuse": options.allow_reuse,
@@ -1838,11 +2489,61 @@ class TiktokBaseUploader(BaseVideoUploader):
             humanizer=self._option_humanizer(),
         )
 
+    def _location_control(self, input_locator, container):
+        return _LocatorLocationControl(
+            input_locator,
+            container,
+            page=self._option_page,
+            row_scope=self.locator_base,
+            humanizer=self._option_humanizer(),
+        )
+
     def _option_candidate_factories(self, name: str):
         """Ordered candidates per spec §5.5: data-e2e, role, then text."""
         base = self.locator_base
         if base is None:
             return ()
+
+        if name == "location":
+            poi = base.locator('[data-e2e="poi_container"]')
+            page_scope = (
+                self._option_page
+                if getattr(self, "_option_page", None) is not None
+                else base
+            )
+            return (
+                (
+                    'data-e2e=poi_container+input.Select__searchInput',
+                    lambda: self._location_control(
+                        poi.locator("input.Select__searchInput"), poi
+                    ),
+                ),
+                (
+                    'data-e2e=poi_container+input[placeholder*="Search locations" i]',
+                    lambda: self._location_control(
+                        poi.locator(
+                            'input[placeholder*="Search locations" i]'
+                        ),
+                        poi,
+                    ),
+                ),
+                (
+                    'input[placeholder*="Search locations" i]',
+                    lambda: self._location_control(
+                        page_scope.locator(
+                            'input[placeholder*="Search locations" i]'
+                        ),
+                        poi,
+                    ),
+                ),
+                (
+                    'input[placeholder*="地点" i]',
+                    lambda: self._location_control(
+                        page_scope.locator('input[placeholder*="地点" i]'),
+                        poi,
+                    ),
+                ),
+            )
 
         if name == "privacy":
             def from_container():
@@ -2153,10 +2854,15 @@ class TiktokBaseUploader(BaseVideoUploader):
 
             # The AI entry is decided by ``_apply_aigc_option``: missing is
             # fatal for ``--aigc`` and a ``default_off/entry_missing`` fallback
-            # for ``--no-aigc``.  It must not be aggregated into the generic
-            # control-not-found error here.
+            # for ``--no-aigc``.  The location entry is decided by
+            # ``_apply_location_option``: missing is always a distinct
+            # ``entry_missing`` diagnostic, never aggregated generically and
+            # never conflated with ``account_ineligible``.  Both must not be
+            # aggregated into the generic control-not-found error here.
             still_missing = [
-                name for name in still_missing if name != "aigc"
+                name
+                for name in still_missing
+                if name not in ("aigc", "location")
             ]
             if still_missing:
                 url = _page_url(page)
@@ -2185,6 +2891,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             brand_switch=resolved.get("brand_switch"),
             your_brand=resolved.get("your_brand"),
             branded_content=resolved.get("branded_content"),
+            location=resolved.get("location"),
         )
 
     async def apply_cover(self, page) -> None:
