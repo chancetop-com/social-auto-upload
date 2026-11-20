@@ -710,6 +710,24 @@ class InlineCaptionFailureTests(InlineTopicTestBase):
         self.assertEqual(env.page.mouse.up_count, 0)
 
 
+class InlineCaptionLegacyTagIsolationTests(InlineTopicTestBase):
+    def test_legacy_tag_cap_never_touches_the_caption(self):
+        caption = " ".join(f"#topic{i}" for i in range(12))
+        tags = [f"tag{i}" for i in range(12)]
+        app = self.app_for("upload-video", caption)
+        app.tags = list(tags)
+
+        with patch.object(
+            xhs_main, "_cap_tags", wraps=xhs_main._cap_tags
+        ) as cap:
+            asyncio.run(app.validate_base_args(check_cookie=False))
+
+        self.assertEqual(app.desc, caption)
+        self.assertEqual(app.tags, tags[:10])
+        self.assertEqual(cap.call_args_list[0].args[0], tags)
+        self.assertEqual(cap.call_count, 1)
+
+
 class InlineCaptionEmptyTests(InlineTopicTestBase):
     def test_omitted_caption_does_not_touch_the_editor(self):
         env = InlineTopicEnv()
