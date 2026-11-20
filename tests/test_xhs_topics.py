@@ -759,7 +759,7 @@ class InlineCaptionNoPublishTests(InlineTopicTestBase):
     def test_no_publish_stops_after_topic_readback_and_before_any_click(self):
         caption = "Today #coffee, then done."
         env = InlineTopicEnv()
-        env.suggestions = {"coffee": [{"label": "#coffee"}]}
+        env.suggestions = {"coffee": [{"label": "#coffee", "new": True}]}
         app = self.app_for("upload-note", caption)
         app.no_publish = True
 

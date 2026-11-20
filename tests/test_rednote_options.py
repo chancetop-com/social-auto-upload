@@ -672,7 +672,9 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_publish_stops_after_topic_readback_and_before_any_click(self):
         caption = "Today #coffee, then done."
-        await self.inline_topic_page({"coffee": [{"label": "#coffee"}]})
+        await self.inline_topic_page(
+            {"coffee": [{"label": "#coffee", "new": True}]}
+        )
         app = self.inline_app("upload-note", caption)
         app.no_publish = True
 
