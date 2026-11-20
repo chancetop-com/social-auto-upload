@@ -908,8 +908,9 @@ class PlatformWideClickHoverTests(unittest.IsolatedAsyncioTestCase):
             and isinstance(node.func, ast.Name)
             and node.func.id == "_humanized_click"
         ]
-        # Two pre-existing option adapters plus the 25 sites converted here.
-        self.assertEqual(len(wrapped), 27, wrapped)
+        # Two pre-existing option adapters, the 25 sites converted here, and
+        # the two location adapter sites.
+        self.assertEqual(len(wrapped), 29, wrapped)
 
     # -- AIGC first-run dialog ------------------------------------------
     @staticmethod
