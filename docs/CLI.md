@@ -557,11 +557,21 @@ sau xiaohongshu upload-video --account creator \
 ```bash
 sau youtube login --account creator --headed
 sau youtube check --account creator
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频"
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #示例话题" --tags tag1,tag2 --playlist "我的系列" --visibility public
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频" --desc "第一行 #咖啡，配上 #咖啡。链接 https://example.com/#片段 原样保留"
 ```
 
 YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维码。`--visibility` 可选 `public`、`unlisted` 或 `private`，`--playlist` 可选。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
+
+简介 `--desc` 是公开配文，也是 YouTube 唯一的话题来源：
+
+- 每个 `#话题` 按出现顺序逐处输出，重复词保留；`#咖啡，配上` 只把 `咖啡` 计为话题，逗号留在原文；`https://…/#片段`、`http://…` 和 `www.…` 中的 `#片段` 不计，链接原样保留。
+- 标题独立填写并回读，标题里的 `#话题` 不计入简介结果。标题不再触发 `#` 补全，避免候选点选改写标题。
+- 简介与标题写入后按写入时的归一化（`\r\n`→`\n`、制表符→空格）逐字回读。吞字、错位或意外追加会指出首处差异偏移、期望/实际文本与长度，退出 `1`，发布点击零次。
+- 简介超过 5000 字符的本地预检，或简介附近出现可见的整帖错误提示时，退出 `1`，发布点击零次。
+- Studio 后台关键词：传 `--tags` 时沿用旧行为写入关键词；不传时**网页有能力、CLI 未接入（保留页面原值）**。简介话题不会复制到关键词栏。
+- 终端逐处输出形如 `YouTube 简介话题 1/2：#咖啡 保留文字（简介全文逐字回读一致）` 的结果。YouTube 只以简介全文回读为证据，不声称话题已关联。
+- 以上为受控/离线 Studio（本地 Chromium）验证，**真实 YouTube 账号未实测**；`--tags` 的统一移除由后续迁移验收。
 
 YouTube 本地模式默认系统 Chrome、有头，已有 `LOCAL_CHROME_HEADLESS=True` 保留；显式 `--headed`/`--headless` 优先。`LOCAL_CHROME_PATH` 非空时优先使用并识别实际种类；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。只要求所选浏览器可用，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。
 
