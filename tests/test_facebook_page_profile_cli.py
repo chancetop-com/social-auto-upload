@@ -167,15 +167,16 @@ class FacebookPageProfileCliTests(unittest.TestCase):
         self.profile(); self.context.page_type = ComposerPage
         self.stack.enter_context(patch.object(main, 'expect', Expect))
         media = self.root / 'clip.mp4'; media.write_bytes(b'fixture')
+        body = "第一行 #bodyTopic，配上 #bodyTopic。\n链接 https://example.com/#片段 原样保留"
         code, out, err = self.run_cli(
             'upload-video', '--account', 'Creator', '--file', str(media),
-            '--title', '#titleTopic 独立标题', '--desc', '正文 #bodyTopic #bodyTopic',
+            '--title', '#titleTopic 独立标题', '--desc', body,
             '--page', 'Page A',
         )
         self.assertEqual(code, 0, err)
         page = self.context.pages[-1]
         self.assertEqual(page.title, '#titleTopic 独立标题')
-        self.assertEqual(page.caption, '正文 #bodyTopic #bodyTopic')
+        self.assertEqual(page.caption, body)
         self.assertEqual(page.keyword, 'Prefilled keyword')
         record = json.loads(out)
         self.assertEqual([topic['text'] for topic in record['topics']],

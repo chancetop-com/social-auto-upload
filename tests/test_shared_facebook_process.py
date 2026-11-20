@@ -199,18 +199,19 @@ def test_page_note_reads_back_title_plus_note_and_reports_topics(facebook_profil
 def test_page_reel_reports_body_topics_only_and_keeps_prefilled_keyword(facebook_profile):
     profile, site = facebook_profile
     result = profile.root / 'page-reel.json'
+    body = "第一行 #bodyTopic，配上 #bodyTopic。\n链接 https://example.com/#片段 原样保留"
     media = profile.root / 'reel.mp4'
     media.touch()
     with peer_draft(profile):
         child = profile.command(
             1, 'facebook-page', '--file', str(media), '--title', '#titleTopic 独立标题',
-            '--desc', '正文 #bodyTopic #bodyTopic', '--page', 'Page A', '--result', str(result),
+            '--desc', body, '--page', 'Page A', '--result', str(result),
             action='upload-video', env={'HUMANIZE': '0'},
         )
         finish(child, 0)
     post, = site.posts
     assert (post['title'], post['caption'], post['keyword']) == (
-        '#titleTopic 独立标题', '正文 #bodyTopic #bodyTopic', 'Prefilled keyword')
+        '#titleTopic 独立标题', body, 'Prefilled keyword')
     record = json.loads(result.read_text())
     assert [topic['text'] for topic in record['topics']] == ['#bodyTopic', '#bodyTopic']
     assert record['status'] == 'processing'
