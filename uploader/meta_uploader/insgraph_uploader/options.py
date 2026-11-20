@@ -24,6 +24,8 @@ MISMATCH = "mismatch"
 # 无法应用时的归因，仅在需要时写入 reason。
 ENTRY_MISSING = "entry_missing"
 ACCOUNT_INELIGIBLE = "account_ineligible"
+# 创建页被前台确认框遮挡或处于 aria-hidden：不能把读不到当成“入口缺失”。
+EDITOR_OBSCURED = "editor_obscured"
 
 # 控件 resolve() 的三态结果。
 PRESENT = "present"
@@ -80,9 +82,12 @@ class OptionMismatchError(RuntimeError):
     后续选项，并把错误文案并入最终的聚合错误（例如地点无精确匹配时的候选列表）。
     """
 
-    def __init__(self, message: str, *, applied: object = None) -> None:
+    def __init__(
+        self, message: str, *, applied: object = None, reason: str | None = None
+    ) -> None:
         super().__init__(message)
         self.applied = applied
+        self.reason = reason
 
 
 def normalize_text(text: str) -> str:
