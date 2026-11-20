@@ -26,11 +26,21 @@ ENTRY_MISSING = "entry_missing"
 ACCOUNT_INELIGIBLE = "account_ineligible"
 # 创建页被前台确认框遮挡或处于 aria-hidden：不能把读不到当成“入口缺失”。
 EDITOR_OBSCURED = "editor_obscured"
+# 地点控件的失败分支；与 TikTok 的地点词汇保持一致。
+CONTROL_DISABLED = "control_disabled"
+NO_CANDIDATES = "no_candidates"
+NO_SAME_NAME = "no_same_name_candidate"
+SELECTION_FAILED = "selection_failed"
+LIST_NOT_COLLAPSED = "list_not_collapsed"
+FINAL_EMPTY = "final_empty"
+FINAL_MISMATCH = "final_mismatch"
 
-# 控件 resolve() 的三态结果。
+# 控件 resolve() 的结果。
 PRESENT = "present"
 MISSING = "missing"
 INELIGIBLE = "ineligible"
+# 入口存在但被禁用，且页面没有明确说明资格限制：不能归因为账号不可用。
+UNAVAILABLE = "unavailable"
 
 # 结果文件字段顺序。
 OPTION_KEYS = ("location", "alt_text", "comments", "ai_generated")
@@ -190,6 +200,8 @@ def option_status(
         return _unavailable_status(requested, kind, ENTRY_MISSING)
     if presence == INELIGIBLE:
         return _unavailable_status(requested, kind, ACCOUNT_INELIGIBLE)
+    if presence == UNAVAILABLE:
+        return _unavailable_status(requested, kind, CONTROL_DISABLED)
     if presence != PRESENT:
         raise ValueError(f"未知的控件 presence: {presence!r}")
     if kind == "toggle":
@@ -212,7 +224,9 @@ def option_failures(record: dict) -> list[str]:
         if status not in (UNSUPPORTED, MISMATCH):
             continue
         reason = entry.get("reason")
-        failures.append(f"{key}={status}({reason})" if reason else f"{key}={status}")
+        detail = entry.get("detail")
+        label = f"{key}={status}({reason})" if reason else f"{key}={status}"
+        failures.append(f"{label}: {detail}" if detail else label)
     return failures
 
 

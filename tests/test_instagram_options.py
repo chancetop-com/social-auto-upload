@@ -18,12 +18,14 @@ from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
     APPLY_ORDER,
+    CONTROL_DISABLED,
     DEFAULT_OFF,
     ENTRY_MISSING,
     MISMATCH,
     NOT_REQUESTED,
     OPTION_KEYS,
     SET,
+    UNAVAILABLE,
     UNSUPPORTED,
     InstagramPublishOptions,
     OptionMismatchError,
@@ -129,6 +131,8 @@ class InstagramOptionLogicTests(unittest.TestCase):
             (None, None, 'toggle', 'missing', False, (NOT_REQUESTED, None)),
             ('Shanghai', None, 'value', 'missing', False, (UNSUPPORTED, ENTRY_MISSING)),
             ('Shanghai', None, 'value', 'ineligible', False, (UNSUPPORTED, ACCOUNT_INELIGIBLE)),
+            # 入口存在但禁用且页面没有明确资格限制：不能写成账号不可用。
+            ('Shanghai', None, 'value', 'unavailable', False, (UNSUPPORTED, CONTROL_DISABLED)),
             (True, None, 'toggle', 'missing', False, (UNSUPPORTED, ENTRY_MISSING)),
             (True, None, 'toggle', 'ineligible', False, (UNSUPPORTED, ACCOUNT_INELIGIBLE)),
             (False, None, 'toggle', 'missing', False, (DEFAULT_OFF, ENTRY_MISSING)),
