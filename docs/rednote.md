@@ -28,16 +28,18 @@ sau rednote check --account creator
 ```bash
 sau rednote upload-video --account creator \
   --file videos/demo.mp4 --title "Hello rednote" \
-  --desc "Video description" --tags travel,life --no-publish
+  --desc "Video description" --tags travel,life --location "人民公园" --no-publish
 
 sau rednote upload-note --account creator \
   --images videos/demo1.png videos/demo2.png --title "Hello rednote" \
-  --note "Photo description" --tags travel,life --no-publish
+  --note "Photo description" --tags travel,life --location "人民公园" --no-publish
 ```
 
 `--no-publish` 仍会向 Rednote 上传素材并填写内容，到发布按钮就绪后停止，不点击发布。去掉它才会实际提交。本地和托管模式成功时 CLI 均输出 `素材已上传，发布前检查已通过；已停止，未点击发布按钮。`。
 
 第一版参数与小红书一致：视频 `--thumbnail`、原创/内容类型声明、`--schedule`（UTC、精确到分钟）、`--not-before`（UTC、可精确到秒）等。完整参数以 `sau rednote upload-video --help` / `upload-note --help` 为准。显式封面和声明必须设置、回读成功，否则停止在发布前；不静默换用首帧或省略声明。内容类型声明点选后先确认下拉菜单已收起，再回读 `[lass="declaration-wrapper"]` 内的 `.d-select-description`；找不到入口、终值为空或显示其他标签都会在发布前退出 `1`，终端报告请求值、终值和原因，发布按钮点击零次。不传 `--content-type` 时完全不操作该控件，页面原本已选的 AI 声明保持不动；同一命令重复传入不同内容类型在解析阶段退出 `2`。来源声明还要核对确认后显示的媒体名称或拍摄日期/地点，不能只检查类型名称。`--shoot-location` 使用候选中的完整地点名称；只匹配名称，不把地址或名称前缀的包含关系当成匹配，重名时停止。定时在填写后及发布前检查开关和分钟值。话题以最终 `data-topic` 回读为准，包括页面自动转换；错词或重复插入会停止。标题长度、正文长度、标签数及定时窗口仍沿用小红书限制。
+
+帖子地点用 `--location "地点名"` 单独请求，和自主拍摄声明里的 `--shoot-location` 是两个独立控件。`--location` 按候选行的完整名称匹配（去掉首尾空白、合并连续空白、忽略大小写），取页面顺序第一个同名行；「房山人民公园」这类近似名会跳过。选中后须同时满足列表已收起、地点控件回读所选名称，终端报告请求、所点行及其可见地址和终值，再保留原成功摘要。省略 `--location` 时不读取也不点击地点控件，页面原值保持不动；显式空串或纯空白在上传前退出 `2`。无同名候选、入口缺失、页面明确提示资格限制、列表未收起、终值为空或不符都在发布前退出 `1`，发布按钮点击零次；只有页面明确提示资格限制时才写「账号不可用」。
 
 ## 托管浏览器模式
 
