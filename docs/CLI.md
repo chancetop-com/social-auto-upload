@@ -179,14 +179,14 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 
 | 命令 | AI 声明 | 帖子地点 | 配文话题 |
 | --- | --- | --- | --- |
-| `xiaohongshu upload-video` | 网页：显式选择 AI 后的终值未实测；CLI：`--content-type ai` 设置失败可告警继续；样本：未实测 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`180`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`180`，账号类型未核验 |
-| `xiaohongshu upload-note` | 网页：下拉可见「笔记含AI合成内容」，选中终值未实测；CLI：`--content-type ai` 设置失败可告警继续；样本：未实测 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`180`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`180`，账号类型未核验 |
-| `rednote upload-video` | 网页：已有回读匹配并到达发布前；CLI：要求回读；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
-| `rednote upload-note` | 网页：已有带 AI 声明的双图验收，到达发布前；CLI：要求回读；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
+| `xiaohongshu upload-video` | 网页：zh-CN 实机下拉含「笔记含AI合成内容」，声明入口 `innerText` 在选择后变为所选标签；AI 终值未实测（观察阶段：入口与下拉，未到发布前）；CLI：`--content-type ai` 等菜单收起后回读入口文本，缺失、空值或其他标签退出 `1` 且零发布点击；样本：未实测 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`180`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`180`，账号类型未核验 |
+| `xiaohongshu upload-note` | 网页：zh-CN 实机图文下拉可见「笔记含AI合成内容」；AI 终值未实测（观察阶段：下拉，未到发布前）；CLI：`--content-type ai` 等菜单收起后回读入口文本，缺失、空值或其他标签退出 `1` 且零发布点击；样本：未实测 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`180`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`180`，账号类型未核验 |
+| `rednote upload-video` | 网页：中文界面已有 AI 声明 `.d-select-description` 回读匹配并到达发布前（观察阶段：发布前）；CLI：回读 `.d-select-description` 并断言菜单收起，缺失、空值或其他标签退出 `1`；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
+| `rednote upload-note` | 网页：中文界面已有带 AI 声明的双图验收，到达发布前（观察阶段：发布前）；CLI：回读 `.d-select-description` 并断言菜单收起，缺失、空值或其他标签退出 `1`；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
 | `instagram upload-video` | 网页：简体中文 Creator Reel，开关由关切到开，分享前读到 `true`；历史英文 Personal 发布后读到 `AI content`。受控页另覆盖已关、入口缺失、禁用、不可读与「放弃帖子？」遮挡。CLI：省略保持页面原值；`--ai-generated` 须回读开启；`--no-ai-generated` 已关记 `default_off`、从开切到关并回读记 `set`、确认入口缺失记 `default_off`/`entry_missing`、遮挡记 `mismatch`/`editor_obscured`（退出 1，Share 零点击）。样本：Creator，简体中文，`--no-publish` 分享前；Personal 英文为历史发布后对照 | 网页：首个同名 `Shanghai`，候选只显示名称；CLI：按候选整行匹配，已接入；样本：Creator，简体中文 | 网页：分享前正文含 `#color #study`；CLI：`--tags` 合并进配文；样本：Creator，简体中文 |
 | `instagram upload-note` | 网页：简体中文 Creator 两图轮播，开关原本已关，分享前读到 `false`；另一次「放弃帖子？」遮挡导致读值为空，旧记录误记为入口缺失；历史英文 Personal 发布后读到 `AI content`。CLI：省略保持页面原值；`--ai-generated` 须回读开启；`--no-ai-generated` 已关记 `default_off`、从开切到关并回读记 `set`、确认入口缺失记 `default_off`/`entry_missing`、遮挡记 `mismatch`/`editor_obscured`（退出 1，Share 零点击）。样本：Creator，简体中文，`--no-publish` 分享前；Personal 英文为历史发布后对照 | 网页：首个同名 `Shanghai`，选中后名称一致；CLI：按候选整行匹配，已接入；样本：Creator，简体中文 | 网页：分享前正文含 `#color #study`；CLI：`--tags` 合并进配文；样本：Creator，简体中文 |
-| `tiktok upload-video` | 网页：视频发布后读到创作者 AI 标识；CLI：已接入 `--aigc` / `--no-aigc`；样本：英文 Studio，`lukechen`，账号类型未核验 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：视频配文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--title` 配文；样本：英文 Studio，`lukechen` |
-| `tiktok upload-note` | 网页：公开账号图片帖发布后读到创作者 AI 标识；CLI：已接入 `--aigc` / `--no-aigc`；样本：英文 Studio，`lukechen`，账号类型未核验 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：图片帖正文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--note` 正文；样本：英文 Studio，`lukechen` |
+| `tiktok upload-video` | 网页：仅发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：视频配文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--title` 配文；样本：英文 Studio，`lukechen` |
+| `tiktok upload-note` | 网页：仅公开账号图片帖发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：图片帖正文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--note` 正文；样本：英文 Studio，`lukechen` |
 
 ## 日志
 
@@ -520,14 +520,16 @@ sau xiaohongshu upload-video --account creator \
 
 约束：
 
-- 不传 `--original` / `--no-original` / `--content-type` 时，页面完全保持默认；
+- 不传 `--original` / `--no-original` / `--content-type` 时，页面完全保持默认；即使页面原本已开启 AI 声明或原创，也不读取、不切换；终端把 AI 声明记为「未请求」；
+- 同一命令重复传入不同的 `--content-type` 值（例如 `ai` 与 `marketing`）在参数解析阶段退出 `2`，不会启动浏览器或上传素材；重复传入同一个值允许；
 - `--original` 与 `--content-type repost` 互斥；
 - `--no-original` 不能与 `self-shot` / `repost` 组合；
 - `--repost-source` 只能与 `--content-type repost` 一起使用，且不能为空；
 - `--shoot-location` / `--shoot-date` 只能与 `--content-type self-shot` 一起使用，两者都必填，日期格式为 `YYYY-MM-DD`；
 - 以上组合错误会在启动浏览器前退出 `2`；
 - **原创 `--original` 是硬闸**：点前读状态，未开则点击并确认须知；任一步失败退出 `1`（确定未发布）；
-- `--no-original` 与内容类型声明失败只记 warning 并继续，不阻断发布；封面设置失败同样 warning 并回退到视频首帧；
+- **显式内容类型也是硬闸**：点选后先确认声明菜单已收起，再回读声明入口文本。找不到入口、回读为空或显示其他内容类型时退出 `1`（确定未发布），不会 warning 继续；终端同时报告请求值、页面终值与原因；
+- `--no-original` 失败仍只记 warning 并继续；封面设置失败同样 warning 并回退到视频首帧；
 - 加 `--no-publish` 时，内容、声明与定时设置完成后继续跑到 ARM 就绪（含 C1/C2/C3 与定时回读），不点击「发布」，也不等待 `--not-before`。
 
 ### 小红书元数据与定时校验
@@ -555,11 +557,21 @@ sau xiaohongshu upload-video --account creator \
 ```bash
 sau youtube login --account creator --headed
 sau youtube check --account creator
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频"
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #示例话题" --tags tag1,tag2 --playlist "我的系列" --visibility public
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频" --desc "第一行 #咖啡，配上 #咖啡。链接 https://example.com/#片段 原样保留"
 ```
 
 YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维码。`--visibility` 可选 `public`、`unlisted` 或 `private`，`--playlist` 可选。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
+
+简介 `--desc` 是公开配文，也是 YouTube 唯一的话题来源：
+
+- 每个 `#话题` 按出现顺序逐处输出，重复词保留；`#咖啡，配上` 只把 `咖啡` 计为话题，逗号留在原文；`https://…/#片段`、`http://…` 和 `www.…` 中的 `#片段` 不计，链接原样保留。
+- 标题独立填写并回读，标题里的 `#话题` 不计入简介结果。标题不再触发 `#` 补全，避免候选点选改写标题。
+- 简介与标题写入后按写入时的归一化（`\r\n`→`\n`、制表符→空格）逐字回读。吞字、错位或意外追加会指出首处差异偏移、期望/实际文本与长度，退出 `1`，发布点击零次。
+- 简介超过 5000 字符的本地预检，或简介附近出现可见的整帖错误提示时，退出 `1`，发布点击零次。
+- Studio 后台关键词：传 `--tags` 时沿用旧行为写入关键词；不传时**网页有能力、CLI 未接入（保留页面原值）**。简介话题不会复制到关键词栏。
+- 终端逐处输出形如 `YouTube 简介话题 1/2：#咖啡 保留文字（简介全文逐字回读一致）` 的结果。YouTube 只以简介全文回读为证据，不声称话题已关联。
+- 以上为受控/离线 Studio（本地 Chromium）验证，**真实 YouTube 账号未实测**；`--tags` 的统一移除由后续迁移验收。
 
 YouTube 本地模式默认系统 Chrome、有头，已有 `LOCAL_CHROME_HEADLESS=True` 保留；显式 `--headed`/`--headless` 优先。`LOCAL_CHROME_PATH` 非空时优先使用并识别实际种类；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。只要求所选浏览器可用，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。
 
@@ -786,7 +798,7 @@ sau tiktok upload-video \
 | `--privacy` | `public` / `friends` / `followers` / `only-me` | 设置隐私级别；账号类型不匹配时回读失败并退出 `1` |
 | `--no-comments` | 开关 | 关闭评论 |
 | `--disable-reuse` | 开关 | 关闭内容复用；同时影响 Duet、Stitch、Stickers 和 Story |
-| `--aigc` / `--no-aigc` | 互斥 | 开启/关闭 AI 生成内容标识；不传则保持页面默认 |
+| `--aigc` / `--no-aigc` | 互斥 | 三态 AI 生成内容标识：省略时完全不读取、不点击、不展开 AI 入口，保留页面当前值；`--aigc` 须读到开：入口缺失、仍为关且可见禁用、或回读失败退出 `1`；`--no-aigc` 已关记 `default_off`，从开切关并读回记 `set`，入口确实缺失记 `default_off`/`entry_missing`（终值未知）并继续，可见但禁用且仍为开或无法读值退出 `1` |
 | `--your-brand` | 开关 | 声明为自家品牌推广，会自动打开品牌声明总开关 |
 | `--branded-content` | 开关 | 声明为付费品牌内容；不能与 `--privacy only-me` 同时使用（本地退出 `2`） |
 | `--thumbnail` | 文件路径 | 自定义视频封面，语义不变 |
@@ -803,7 +815,7 @@ sau tiktok upload-video \
 | `--notef` | 否 | 从本地 txt/md 读取 Description；与 `--note` 互斥 |
 | `--tags` | 否 | 逗号分隔，规范化后追加到 Description；最多 50 个 |
 | `--schedule` | 否 | 与视频相同的 `YYYY-MM-DDTHH:MM:00Z` |
-| `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义 |
+| `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义；AI 三态与终端 `requested` / `applied` / `status` / `reason` / `continue` 诊断相同 |
 
 `upload-note` 没有 `--disable-reuse`、`--thumbnail` 或 `--cover-index`：图片帖没有内容复用设置，第 1 张即封面。
 
@@ -812,6 +824,7 @@ sau tiktok upload-video \
 - 图片仅支持 JPG / JPEG / PNG / WEBP（扩展名大小写不敏感），单张 ≤50 MB。
 - 图片数量、格式、大小，以及 Title/Description/hashtag 超限、`--note`/`--notef` 冲突、`--branded-content --privacy only-me` 都在启动浏览器前校验失败并退出 `2`，不会截断后继续。
 - 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
+- AI 声明按三态报告：省略 `--aigc` / `--no-aigc` 时不读取、不点击 AI 开关，保留页面原值，结果记 `not_requested` 且不打印 AI 行；显式请求时终端打印一行 `TikTok AI 声明: option=aigc requested=... applied=... status=... reason=... continue=...`。`status=set` 和 `default_off` 可继续；`default_off` + `reason=entry_missing` 表示入口缺失、终值未知；`unsupported`、`mismatch` 或 `continue=no` 退出 `1`，发布按钮零点击。开关可见但禁用且仍为开、可见但无法读值（`reason=read_error`）或首次运行的 `Turn on` 对话框失败（`reason=dialog_error`）都按 `mismatch` 停止。
 - 账号没有 Photos tab（未在图文灰度内）时，`upload-note` 在选文件前退出 `1`，不会把图片送进视频 input。
 - 退出码 `9` 表示发布结果未知：发布点击已发出但未确认成功；**禁止自动重发**，先到 TikTok Studio → Content/Posts 按标题与发布时间核对。
 - 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关；机器信号只有退出码与 stderr。

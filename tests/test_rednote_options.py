@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import tempfile
 import time
@@ -40,9 +41,21 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         self.humanizer = self.app._humanizer(self.page)
 
     async def declaration_page(
-        self, labels, *, wrapper='lass="declaration-wrapper"', persist=True
+        self,
+        labels,
+        *,
+        wrapper='lass="declaration-wrapper"',
+        persist=True,
+        close=True,
+        selected=None,
     ):
         options = "".join(f'<div class="d-option">{label}</div>' for label in labels)
+        selected_js = (
+            "document.querySelector('.d-select-description').textContent = "
+            f"{json.dumps(selected)};"
+            if selected is not None
+            else "document.querySelector('.d-select-description').textContent = option.textContent;"
+        )
         await self.page.set_content(f"""
           <div {wrapper} onclick="document.querySelector('.d-popover').style.display='block'">
             <div class="d-select-content"><div class="d-select-description">unset</div></div>
@@ -51,8 +64,8 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
           <script>
           document.querySelectorAll('.d-option').forEach(option => option.onclick = () => {{
             document.body.dataset.selected = option.textContent;
-            if ({str(persist).lower()}) document.querySelector('.d-select-description').textContent = option.textContent;
-            document.querySelector('.d-popover').style.display = 'none';
+            if ({str(persist).lower()}) {selected_js}
+            if ({str(close).lower()}) document.querySelector('.d-popover').style.display = 'none';
           }});
           </script>
         """)
@@ -64,6 +77,65 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await self.page.get_attribute("body", "data-selected"), "笔记含AI合成内容"
         )
+        self.assertEqual(
+            self.app.declaration_report,
+            {
+                "requested": "ai",
+                "requested_label": "笔记含AI合成内容",
+                "observed": "笔记含AI合成内容",
+                "status": "set",
+            },
+        )
+
+    async def test_declaration_menu_must_collapse_before_readback(self):
+        await self.declaration_page(["笔记含AI合成内容"], close=False)
+        self.app.content_type = "ai"
+        with self.assertRaisesRegex(RuntimeError, "菜单未收起.*尚未点击发布"):
+            await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+
+    async def test_empty_selected_value_is_a_pre_publish_failure(self):
+        await self.declaration_page(["笔记含AI合成内容"], selected="")
+        self.app.content_type = "ai"
+        with self.assertRaises(RuntimeError) as ctx:
+            await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        message = str(ctx.exception)
+        self.assertIn("请求=ai", message)
+        self.assertIn("终值=（空）", message)
+        self.assertIn("选中的内容类型为空", message)
+        self.assertIn("尚未点击发布", message)
+
+    async def test_other_selected_value_is_a_pre_publish_failure(self):
+        await self.declaration_page(
+            ["笔记含AI合成内容"], selected="内容包含营销广告"
+        )
+        self.app.content_type = "ai"
+        with self.assertRaises(RuntimeError) as ctx:
+            await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        message = str(ctx.exception)
+        self.assertIn("请求=ai", message)
+        self.assertIn("终值=内容包含营销广告", message)
+        self.assertIn("回读不符", message)
+        self.assertIn("尚未点击发布", message)
+
+    async def test_missing_declaration_entry_reports_request_and_reason(self):
+        await self.declaration_page(["笔记含AI合成内容"], wrapper='class="other"')
+        self.app.content_type = "ai"
+        original = rednote.wait_resolved
+
+        async def fast(*args, **kwargs):
+            kwargs["timeout_ms"] = 0
+            return await original(*args, **kwargs)
+
+        with patch.object(rednote, "wait_resolved", fast):
+            with self.assertRaises(RuntimeError) as ctx:
+                await self.app.apply_declarations(
+                    self.page, humanizer=self.humanizer
+                )
+        message = str(ctx.exception)
+        self.assertIn("请求=ai", message)
+        self.assertIn("终值=未读到", message)
+        self.assertIn("未找到内容类型声明入口", message)
+        self.assertIn("尚未点击发布", message)
 
     async def test_unverified_english_label_is_not_guessed(self):
         await self.declaration_page(["Contains AI-generated content"])
@@ -84,6 +156,20 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.app.apply_declarations(self.page, humanizer=self.humanizer)
         self.assertIsNone(await self.page.get_attribute("body", "data-selected"))
+
+    async def test_omitted_content_type_keeps_the_page_preset(self):
+        await self.page.set_content("""
+          <div lass="declaration-wrapper">
+            <div class="d-select-description">笔记含AI合成内容</div>
+          </div>
+        """)
+        self.app.content_type = None
+        await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        self.assertEqual(
+            await self.page.locator(".d-select-description").inner_text(),
+            "笔记含AI合成内容",
+        )
+        self.assertIsNone(self.app.declaration_report)
 
     async def cover_page(self, label, *, close=True, update=True):
         await self.page.set_content(f"""
@@ -178,6 +264,21 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
                             self.page, humanizer=humanizer
                         )
                 self.assertEqual(humanizer.click.await_count, clicks)
+
+    async def test_original_and_ai_are_combinable(self):
+        await self.declaration_page(["笔记含AI合成内容"])
+        await self.page.evaluate(
+            """() => document.body.insertAdjacentHTML(
+              'afterbegin',
+              '<div class="original-wrapper"><button class="d-switch" role="switch" aria-checked="true">Original</button></div>'
+            )"""
+        )
+        self.app.original_declaration = True
+        self.app.content_type = "ai"
+        await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        self.assertEqual(
+            self.app.declaration_report["observed"], "笔记含AI合成内容"
+        )
 
     async def test_new_topic_is_not_an_existing_topic_candidate(self):
         await self.page.set_content("""<div id="creator-editor-topic-container">
