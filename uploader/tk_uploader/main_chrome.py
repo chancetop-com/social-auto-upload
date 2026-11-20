@@ -3753,7 +3753,10 @@ class TiktokBaseUploader(BaseVideoUploader):
                     await humanizer.press("Escape")
                     await page.wait_for_timeout(100)
 
-            if await self._topic_hard_limit_visible(page):
+            if (
+                len(linked) >= TIKTOK_MAX_HASHTAG_COUNT
+                and await self._topic_hard_limit_visible(page)
+            ):
                 outcome = TiktokTopicOutcome(
                     occurrence=occurrence,
                     status=TOPIC_TEXT,
