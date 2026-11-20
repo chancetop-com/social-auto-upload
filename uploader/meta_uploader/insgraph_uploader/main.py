@@ -974,13 +974,18 @@ class InstagramUploader:
         status: str,
         reason: str | None = None,
         detail: str | None = None,
+        extra: dict | None = None,
     ) -> None:
-        """写入单项结果；reason/detail 仅在需要归因时出现。"""
+        """写入单项结果；reason/detail/extra 仅在需要归因或取证时出现。"""
         record = {'requested': requested, 'applied': applied, 'status': status}
         if reason is not None:
             record['reason'] = reason
         if detail is not None:
             record['detail'] = detail
+        # 兼容追加：地点所点行证据（candidate_*）不能覆盖既有结果键。
+        for name, value in (extra or {}).items():
+            if value is not None and name not in record:
+                record[name] = value
         self.result['options'][key] = record
 
     async def _reject_obscured_composer(self, page: Page) -> None:
@@ -1059,7 +1064,14 @@ class InstagramUploader:
             status, reason = option_status(
                 requested, None, kind=kind, presence=presence
             )
-            self._record_option(key, requested, applied, status, reason)
+            self._record_option(
+                key,
+                requested,
+                applied,
+                status,
+                reason,
+                detail=getattr(control, 'last_detail', None),
+            )
             return
         current = await control.read()
         if kind == 'toggle' and current is None:
@@ -1071,7 +1083,14 @@ class InstagramUploader:
         status, reason = option_status(requested, current, kind=kind)
         if status in (SET, DEFAULT_OFF):
             # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
-            self._record_option(key, requested, current, status, reason)
+            self._record_option(
+                key,
+                requested,
+                current,
+                status,
+                reason,
+                extra=getattr(control, 'last_evidence', None),
+            )
             return
         budget.check_pre_click()
         await control.set(requested)
@@ -1079,7 +1098,14 @@ class InstagramUploader:
         status, reason = option_status(
             requested, applied, kind=kind, presence=PRESENT, acted=True
         )
-        self._record_option(key, requested, applied, status, reason)
+        self._record_option(
+            key,
+            requested,
+            applied,
+            status,
+            reason,
+            extra=getattr(control, 'last_evidence', None),
+        )
 
     async def _apply_options(
         self, page: Page, *, budget: PublishTimeoutBudget, controls: dict | None = None
@@ -1118,6 +1144,9 @@ class InstagramUploader:
                         error.applied,
                         MISMATCH,
                         reason=error.reason,
+                        extra=getattr(
+                            controls.get(key), 'last_evidence', None
+                        ),
                     )
                     details.append(f'{key}: {str(error) or type(error).__name__}')
                 await self._log_option_outcome(key, page)

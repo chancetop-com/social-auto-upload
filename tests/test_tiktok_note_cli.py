@@ -149,6 +149,8 @@ class _Locator:
             return self.page.body_text
         if 'item_id=' in self.selector:
             return self.page.caption_text or self.page.title_text or ""
+        if self.selector.endswith("div.public-DraftEditor-content"):
+            return self.page.caption_text
         return ""
 
     async def get_attribute(self, name: str, *, timeout=None):
@@ -604,6 +606,13 @@ class UploadNoteValidationTests(unittest.TestCase):
             self._assert_exit_2_without_browser(
                 self._argv(images, "--tags", ",".join(tags))
             )
+
+    def test_inline_topics_over_50_are_not_statically_rejected(self):
+        # Inline occurrences are associations, not camera-ready text: the
+        # uploader keeps the 51st word and reports the per-post limit.  Only
+        # the legacy --tags list keeps its preflight rejection until ticket 26.
+        caption = " ".join(f"#tag{index}" for index in range(51))
+        tiktok_command._validate_note_metadata(None, caption, [])
 
     def test_missing_notef_file_exits_2_without_browser(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

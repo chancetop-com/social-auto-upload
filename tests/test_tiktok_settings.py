@@ -2939,6 +2939,18 @@ class HashtagEntityTests(unittest.TestCase):
         self.assertNotIn(("press", "Space"), page.keyboard.events)
         self.assertNotIn(("press", "Backspace"), page.keyboard.events)
 
+    def test_same_name_add_row_is_clicked_as_an_exact_candidate(self):
+        page = self._Page(
+            ["#fieldstudy1120e\nAdd", "#1120spasfieldst\n1 post"]
+        )
+        video = _uploader(TiktokPublishOptions())
+
+        self.assertTrue(
+            asyncio.run(video._apply_hashtag(page, "fieldstudy1120e"))
+        )
+
+        self.assertEqual(page.clicked, ["#fieldstudy1120e\nAdd"])
+
     def test_selected_suggestion_is_accepted_with_enter(self):
         page = self._Page(["#tiktok\n2.0B posts"])
         page.options[0].selected = True
