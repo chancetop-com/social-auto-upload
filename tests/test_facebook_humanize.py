@@ -86,6 +86,7 @@ class _ComposerEditor(FakeLocator):
         draft: str = "",
         count: int = 1,
         events: list,
+        readback: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -94,6 +95,7 @@ class _ComposerEditor(FakeLocator):
             attributes={"contenteditable": "true"},
         )
         self.buffer = draft
+        self.readback = readback
         self.selected = False
         self.box = {"x": 40.0, "y": 60.0, "width": 320.0, "height": 120.0}
         self.events = events
@@ -102,7 +104,7 @@ class _ComposerEditor(FakeLocator):
         return dict(self.box)
 
     async def inner_text(self) -> str:
-        return self.buffer
+        return self.buffer if self.readback is None else self.readback
 
     async def click(self, **kwargs) -> None:
         # HUMANIZE=0 的快速路径；HUMANIZE=1 不允许走到这里。
@@ -284,11 +286,14 @@ def _paper(
     tags: list[str] | None = None,
     draft: str = "旧草稿",
     editor_count: int = 1,
+    readback: str | None = None,
 ):
     """构造一次 ``_publish_on_page`` 所需的 fake 页面与上传器。"""
     events: list = []
     state = {"published": False}
-    editor = _ComposerEditor("editor", draft=draft, count=editor_count, events=events)
+    editor = _ComposerEditor(
+        "editor", draft=draft, count=editor_count, events=events, readback=readback
+    )
     publish = _PublishButton(state=state, events=events)
     form = FakeLocator(
         "form",
@@ -429,6 +434,60 @@ class FacebookComposerReadbackTests(unittest.TestCase):
         )
         humanizer = app._humanizer_instance
         self.assertEqual(humanizer.pause_count(humanizer.profile.after_type), 1)
+
+    def test_verified_caption_becomes_the_public_caption(self):
+        page, editor, publish, app = _paper(
+            title="标题 #重复", description="正文 #咖啡，配上 #咖啡。", tags=[]
+        )
+
+        _run(app, page)
+
+        self.assertEqual(app.public_caption, "标题 #重复\n\n正文 #咖啡，配上 #咖啡。")
+
+    def test_swallowed_or_extra_text_stops_before_publish_with_first_difference(self):
+        for readback in (
+            "标题\n\n正",
+            "标题\n\n正文 EXTRA",
+            "题标\n\n正文",
+        ):
+            with self.subTest(readback=readback):
+                page, editor, publish, app = _paper(
+                    title="标题", description="正文", tags=[], readback=readback
+                )
+
+                with (
+                    patch.object(facebook_main, "Humanizer", _RecordingHumanizer),
+                    patch.object(facebook_main, "expect", _Expect),
+                    self.assertRaises(RuntimeError) as caught,
+                ):
+                    asyncio.run(app._publish_on_page(page))
+
+                message = str(caught.exception)
+                self.assertIn("首处差异偏移", message)
+                self.assertIn("期望", message)
+                self.assertIn("实际", message)
+                self.assertIn("未点击发布", message)
+                self.assertIsNone(app.public_caption)
+                # 正文聚焦一次；发布按钮零次坐标按下。
+                self.assertEqual(page.mouse.down_count, 1)
+
+    def test_over_limit_caption_stops_before_any_typing_or_publish(self):
+        page, editor, publish, app = _paper(
+            title="标题", description="字" * 63206, tags=[]
+        )
+
+        with (
+            patch.object(facebook_main, "Humanizer", _RecordingHumanizer),
+            patch.object(facebook_main, "expect", _Expect),
+            self.assertRaises(RuntimeError) as caught,
+        ):
+            asyncio.run(app._publish_on_page(page))
+
+        self.assertIn("硬限制", str(caught.exception))
+        self.assertIn("63206", str(caught.exception))
+        self.assertIsNone(app.public_caption)
+        self.assertEqual(page.mouse.down_count, 0)
+        self.assertEqual(page.keyboard.actions, [])
 
 
 class _PublishFailingHumanizer(_RecordingHumanizer):

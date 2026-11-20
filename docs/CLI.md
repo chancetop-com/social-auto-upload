@@ -591,11 +591,11 @@ sau youtube reset-profile --account creator --browser-kind chrome
 ```powershell
 sau facebook login --account creator
 sau facebook check --account creator
-sau facebook upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文"
-sau facebook upload-note --account creator --images videos/demo1.png --title "图文标题" --note "正文"
+sau facebook upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "第一行 #咖啡，配上 #咖啡。链接 https://example.com/#片段 原样保留"
+sau facebook upload-note --account creator --images videos/demo1.png --title "图文标题" --note "图文正文 #图文 #测试"
 sau facebook-page login --account creator
-sau facebook-page upload-note --account creator --page "我的 Page" --images videos/demo1.png --title "图文标题" --note "正文" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
-sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
+sau facebook-page upload-note --account creator --page "我的 Page" --images videos/demo1.png --title "图文标题" --note "图文正文 #图文 #测试" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
+sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "Reel 标题" --desc "Reel 正文 #话题 #测试" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
 
 Facebook 全部本地动作复用 `browser_profiles/<chrome|chromium>/facebook/<原始别名>`，与 `facebook-page` 隔离。默认系统 Chrome、有头；显式 `--local-browser chromium` 使用配套完整 Chromium，`LOCAL_CHROME_PATH` 优先于种类选择。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留已有配置。启动失败不回退，不固定 viewport、不修改语言；只需安装所选来源。先 `sau facebook login --account creator --headed`，正常关闭后同配置 check；旧 JSON 不读取、导入或导出。别名可重新登录其他账号，两类浏览器可登录不同账号。缺少 Profile 或明确未登录退出 10，验证挑战保留 verification 提示；页面/权限/网络异常退出 1。重建用 `sau facebook reset-profile --account creator --browser-kind chrome`，无需浏览器 binary，只清空指定资料；重建不是重发旧任务的许可。
@@ -603,6 +603,16 @@ Facebook 全部本地动作复用 `browser_profiles/<chrome|chromium>/facebook/<
 个人主页支持视频、图片及正文立即发布，目前未接入个人主页定时。Page 视频和图文支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，填写前按浏览器时区换算，要求至少提前 2 小时；不传即立即提交。当前实现核对页面日期/时间及原作品列表安排。`--page` 应填写准确 Page 名称。
 
 Page 发布结果默认保存在 `.local/meta-results/`，也可用 `--result` 指定 JSON 文件。结果包含 `page_id`、`page_name`、`content_id`（视频处理中可能暂时没有）和状态。`scheduled` 表示平台已确认排期并核对原记录；`published` 表示图文已发布并核对原记录；立即发布视频在创建响应无错误且完成弹窗出现后返回 `processing`，表示平台已受理并正在处理，不能当成已经公开播放，后续作品编号由平台生成时再查询。`submission_unknown` 仅表示提交响应或完成证据没有确认，必须先查原记录，禁止直接重发。
+
+配文话题只从最终公开配文识别，按出现顺序逐处报告，重复词保留：
+
+- 个人主页没有独立标题字段：公开配文为 `--title`、空行和 `--desc`（图文入口为 `--note`）的组合，标题里的 `#话题` 也计入配文结果。写入后逐字回读；吞字、错位或意外追加会指出首处差异偏移、期望/实际文本与长度，退出 `1`，发布点击零次。
+- Page 图文与个人主页相同：公开配文为标题、空行和正文。Page Reel 若页面提供独立标题输入，标题写入独立字段并逐字回读，公开配文只取 `--desc`；独立标题里的 `#话题` 不计入正文话题。
+- Page Reel 的独立关键词栏保留页面原值：CLI 不定位、不写入，也不把正文话题复制进去。
+- 配文超过 63206 字符的本地硬限制时，在上传发布或排期前退出 `1`，发布与排期点击零次。
+- 个人主页逐处输出 `Facebook 配文话题 1/2：#咖啡 保留文字（配文全文逐字回读一致）`。Page 在 `--result` JSON 追加 `topics` 数组（`index`、`text`、`name`、`start`、`end`、`status`、`reason`），保留原有 `platform`、`title`、`status`、`page_id`、`page_name`、`content_id`、`schedule` 键。
+- 旧 `--tags` 当前仍可选，标签继续追加到公开配文末尾；这些 `#标签` 也属于最终公开配文并参与话题结果。统一移除由后续迁移执行。
+- 以上为受控/离线的本地 Chromium 页面验证；真实 Facebook 账号和网页界面**未实测**。
 
 ### 查询与删除
 

@@ -1,6 +1,7 @@
 """Facebook Page CLI with real Profile/config/session and external browser fakes."""
 import asyncio
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -140,6 +141,92 @@ class FacebookPageProfileCliTests(unittest.TestCase):
         self.assertEqual(calls[0]['user_data_dir'], calls[1]['user_data_dir'])
         self.assertFalse(self.context.storage_state_calls)
         self.assertTrue(self.context.closed)
+
+    def test_page_note_reads_back_title_and_note_and_reports_topics(self):
+        self.profile(); self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        self.stack.enter_context(patch.object(posts, 'expect', Expect))
+        media = self.root / 'photo.png'; media.write_bytes(b'fixture')
+        note = "正文 #咖啡，配上 #咖啡。\n链接 https://example.com/#片段 原样保留"
+        code, out, err = self.run_cli(
+            'upload-note', '--account', 'Creator', '--images', str(media),
+            '--title', '图文 #图文', '--note', note, '--page', 'Page A',
+        )
+        self.assertEqual(code, 0, err)
+        page = self.context.pages[-1]
+        self.assertEqual(page.caption, f"图文 #图文\n\n{note}")
+        record = json.loads(out)
+        self.assertEqual([topic['text'] for topic in record['topics']],
+                         ['#图文', '#咖啡', '#咖啡'])
+        self.assertEqual([topic['index'] for topic in record['topics']], [1, 2, 3])
+        self.assertEqual(record['title'], '图文 #图文')
+        self.assertEqual(record['status'], 'published')
+        self.assertEqual(page.publish_clicks, 1)
+
+    def test_page_reel_separate_title_reports_body_topics_and_keeps_keyword(self):
+        self.profile(); self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        media = self.root / 'clip.mp4'; media.write_bytes(b'fixture')
+        code, out, err = self.run_cli(
+            'upload-video', '--account', 'Creator', '--file', str(media),
+            '--title', '#titleTopic 独立标题', '--desc', '正文 #bodyTopic #bodyTopic',
+            '--page', 'Page A',
+        )
+        self.assertEqual(code, 0, err)
+        page = self.context.pages[-1]
+        self.assertEqual(page.title, '#titleTopic 独立标题')
+        self.assertEqual(page.caption, '正文 #bodyTopic #bodyTopic')
+        self.assertEqual(page.keyword, 'Prefilled keyword')
+        record = json.loads(out)
+        self.assertEqual([topic['text'] for topic in record['topics']],
+                         ['#bodyTopic', '#bodyTopic'])
+        self.assertEqual(record['status'], 'processing')
+        self.assertEqual(page.publish_clicks, 1)
+
+    def test_page_caption_and_title_rewrites_stop_before_publish(self):
+        self.profile(); self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        media = self.root / 'photo.png'; media.write_bytes(b'fixture')
+        for mutation in ('swallow', 'misplace', 'extra'):
+            self.context.caption_mutation = mutation
+            with self.subTest(mutation=mutation):
+                code, out, err = self.run_cli(
+                    'upload-note', '--account', 'Creator', '--images', str(media),
+                    '--title', '标题', '--note', '正文 #话题', '--page', 'Page A',
+                )
+                self.assertEqual(code, 1, err)
+                self.assertIn('首处差异偏移', err)
+                self.assertIn('期望', err)
+                self.assertIn('实际', err)
+                self.assertNotIn('topics', out)
+                self.assertEqual(self.context.pages[-1].publish_clicks, 0)
+        self.context.caption_mutation = None
+        clip = self.root / 'clip.mp4'; clip.write_bytes(b'fixture')
+        self.context.title_mutation = 'extra'
+        code, _, err = self.run_cli(
+            'upload-video', '--account', 'Creator', '--file', str(clip),
+            '--title', '#titleTopic 独立标题', '--desc', '正文 #bodyTopic', '--page', 'Page A',
+        )
+        self.assertEqual(code, 1, err)
+        self.assertIn('Reel 独立标题读回不一致', err)
+        self.assertEqual(self.context.pages[-1].publish_clicks, 0)
+
+    def test_page_caption_hard_limit_stops_before_publish(self):
+        self.profile(); self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        for action, option, filename in [('upload-video', '--file', 'clip.mp4'),
+                                         ('upload-note', '--images', 'photo.png')]:
+            with self.subTest(action=action):
+                media = self.root / filename; media.write_bytes(b'fixture')
+                option_name = '--desc' if action == 'upload-video' else '--note'
+                code, _, err = self.run_cli(
+                    action, '--account', 'Creator', option, str(media),
+                    '--title', '标题', option_name, '字' * 63207, '--page', 'Page A',
+                )
+                self.assertEqual(code, 1, err)
+                self.assertIn('硬限制', err)
+                self.assertIn('63206', err)
+                self.assertEqual(self.context.pages[-1].publish_clicks, 0)
 
     def test_expiry_and_submission_outcomes_preserve_phase_through_cleanup_failure(self):
         self.profile()
@@ -399,9 +486,14 @@ class ComposerLocator(Locator):
     async def is_checked(self): return False
     async def inner_text(self):
         if self.kind == 'combo': return self.page.selected_page
-        if self.kind == 'caption': return self.page.caption
+        if self.kind == 'caption': return self.page.readback_caption()
         if self.kind == 'row': return self.page.context.author_page + ' original'
         return 'original'
+    async def input_value(self):
+        if self.kind == 'title': return self.page.readback_title()
+        if self.kind == 'keyword': return self.page.keyword
+        if self.kind == 'caption': return self.page.readback_caption()
+        return ''
     async def get_attribute(self, name): return 'step' if self.name == self.page.step else None
     async def focus(self): self.page.focused = self.kind
     async def click(self, **kwargs):
@@ -428,16 +520,27 @@ class ComposerPage(Page):
     def __init__(self, context):
         super().__init__(context)
         self.files, self.caption, self.selected_page = [], '', getattr(context,'initial_page','Page A')
+        self.title, self.keyword = '', 'Prefilled keyword'
         self.publish_clicks, self.step, self.completion = 0, 0, True
         self.focused = None
         context.author_page = getattr(context, 'author_page', 'Page A')
         self.keyboard = SimpleNamespace(press=self.press, insert_text=self.insert_text)
     @property
     def video(self): return bool(self.files and self.files[0].endswith('.mp4'))
+    def observation(self, value, mutation):
+        if mutation == 'swallow': return value[:-1]
+        if mutation == 'misplace': return value[-1:] + value[:-1]
+        if mutation == 'extra': return value + ' EXTRA'
+        return value
+    def readback_caption(self): return self.observation(self.caption, getattr(self.context, 'caption_mutation', None))
+    def readback_title(self): return self.observation(self.title, getattr(self.context, 'title_mutation', None))
     async def press(self, key):
-        if key == 'Delete' and self.focused == 'caption': self.caption = ''
+        if key == 'Delete':
+            if self.focused == 'caption': self.caption = ''
+            if self.focused == 'title': self.title = ''
     async def insert_text(self, text):
         if self.focused == 'caption': self.caption += text
+        if self.focused == 'title': self.title += text
         if getattr(self.context, 'expire_during_edit', False): self.url = 'https://www.facebook.com/checkpoint/'
     async def goto(self, url, **kwargs):
         response = await super().goto(url, **kwargs)
@@ -447,7 +550,7 @@ class ComposerPage(Page):
         if 'email' in selector or '/latest/home' in selector: return super().locator(selector)
         if 'combobox' in selector: return ComposerLocator(self, 'combo')
         if 'bizweb_create_post:media' in selector: return ComposerLocator(self, 'media')
-        if 'input[type="text"]' in selector: return ComposerLocator(self, 'title')
+        if 'input[type="text"]' in selector: return ComposerLocator(self, 'title', int(self.video))
         if 'contenteditable' in selector: return ComposerLocator(self, 'caption')
         if 'role="dialog"' in selector: return ComposerLocator(self, 'completion', int(self.completion))
         return ComposerLocator(self, selector)

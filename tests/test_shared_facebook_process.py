@@ -80,7 +80,8 @@ class FacebookSite:
                     self.respond(site.personal_outcome.encode(), 'text/plain')
                     return
                 assert self.path == '/api/graphql'
-                data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
+                data = parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode(),
+                                 keep_blank_values=True)
                 site.posts.append({k: v[0] for k, v in data.items() if k != 'fb_api_req_friendly_name'})
                 site.page_response.wait(20)
                 creation = {} if site.page_unknown else {'items': [{'pending_publish_content_id': '543'}]}
@@ -112,7 +113,8 @@ def test_managed_page_note_uses_exact_page_even_when_another_starts_with_its_nam
                             '--page', 'Page A', '--result', str(result),
                             action='upload-note', env={'HUMANIZE': '0'})
         finish(child, 0)
-    assert site.posts == [{'actor': 'Page A', 'id': '111', 'caption': 'Page note', 'file': 'photo.png'}]
+    assert site.posts == [{'actor': 'Page A', 'id': '111', 'caption': 'Page note', 'file': 'photo.png',
+                           'title': '', 'keyword': 'Prefilled keyword'}]
     record = json.loads(result.read_text())
     assert (record['status'], record['page_name'], record['page_id']) == ('published', 'Page A', '111')
 
@@ -149,6 +151,69 @@ def test_personal_video_reports_its_submission_and_preserves_peer_draft(facebook
         assert ('publish_attempted=true' in output.splitlines()) == (outcome == 'login')
         post, = site.personal_posts
         assert (post['actor'], post['files'], post['clicks']) == ('Personal author', ['clip.mp4'], 1)
+
+
+@pytest.mark.parametrize(('action', 'text_option'), [('upload-video', '--desc'), ('upload-note', '--note')])
+def test_personal_caption_topics_are_reported_from_the_exact_readback(facebook_profile, action, text_option):
+    profile, site = facebook_profile
+    body = "第一行 #咖啡，配上 #咖啡。\n链接 https://example.com/#片段 原样保留"
+    expected = f"标题 #重复\n\n{body}"
+    media = profile.root / ('clip.mp4' if action == 'upload-video' else 'photo.png')
+    media.touch()
+    with peer_draft(profile):
+        child = profile.command(
+            1, 'facebook', '--file' if action == 'upload-video' else '--images', str(media),
+            '--title', '标题 #重复', text_option, body, action=action, env={'HUMANIZE': '0'},
+        )
+        output = finish(child, 0)
+    post, = site.personal_posts
+    assert post['caption'] == expected
+    assert [line for line in output.splitlines() if line.startswith('Facebook 配文话题')] == [
+        'Facebook 配文话题 1/3：#重复 保留文字（配文全文逐字回读一致）',
+        'Facebook 配文话题 2/3：#咖啡 保留文字（配文全文逐字回读一致）',
+        'Facebook 配文话题 3/3：#咖啡 保留文字（配文全文逐字回读一致）',
+    ]
+
+
+def test_page_note_reads_back_title_plus_note_and_reports_topics(facebook_profile):
+    profile, site = facebook_profile
+    note = "正文 #咖啡，配上 #咖啡。\n链接 https://example.com/#片段 原样保留"
+    result = profile.root / 'page-note.json'
+    media = profile.root / 'photo.png'
+    media.touch()
+    with peer_draft(profile):
+        child = profile.command(
+            1, 'facebook-page', '--images', str(media), '--title', '图文 #图文',
+            '--note', note, '--page', 'Page A', '--result', str(result),
+            action='upload-note', env={'HUMANIZE': '0'},
+        )
+        finish(child, 0)
+    post, = site.posts
+    assert post['caption'] == f"图文 #图文\n\n{note}"
+    record = json.loads(result.read_text())
+    assert [topic['text'] for topic in record['topics']] == ['#图文', '#咖啡', '#咖啡']
+    assert [topic['index'] for topic in record['topics']] == [1, 2, 3]
+    assert (record['platform'], record['status'], record['title']) == ('facebook-page', 'published', '图文 #图文')
+
+
+def test_page_reel_reports_body_topics_only_and_keeps_prefilled_keyword(facebook_profile):
+    profile, site = facebook_profile
+    result = profile.root / 'page-reel.json'
+    media = profile.root / 'reel.mp4'
+    media.touch()
+    with peer_draft(profile):
+        child = profile.command(
+            1, 'facebook-page', '--file', str(media), '--title', '#titleTopic 独立标题',
+            '--desc', '正文 #bodyTopic #bodyTopic', '--page', 'Page A', '--result', str(result),
+            action='upload-video', env={'HUMANIZE': '0'},
+        )
+        finish(child, 0)
+    post, = site.posts
+    assert (post['title'], post['caption'], post['keyword']) == (
+        '#titleTopic 独立标题', '正文 #bodyTopic #bodyTopic', 'Prefilled keyword')
+    record = json.loads(result.read_text())
+    assert [topic['text'] for topic in record['topics']] == ['#bodyTopic', '#bodyTopic']
+    assert record['status'] == 'processing'
 
 
 @pytest.mark.parametrize(('platform', 'path'), [('facebook', '/'), ('facebook-page', '/latest/composer/')])
@@ -192,7 +257,8 @@ def test_personal_editor_keeps_its_author_while_page_selects_waits_and_submits(f
                             extra=('--page', 'Page A'))
     composer = matching_page(profile, lambda p: 'business.facebook.com' in p.url, business)
     assert personal_draft() == expected
-    assert (composer.get_by_role('combobox').inner_text(), urlsplit(composer.url).query,
+    assert (composer.locator('[data-surface$="bizweb_create_post:left_panel"] [role="combobox"]').inner_text(),
+            urlsplit(composer.url).query,
             composer.locator('[contenteditable]').inner_text()) == ('Page A', 'asset_id=111', 'Business note')
     assert not site.posts and not site.personal_posts
 
@@ -210,10 +276,12 @@ def test_personal_editor_keeps_its_author_while_page_selects_waits_and_submits(f
     finish(business, 0)
     assert not profile.stops and not site.personal_posts
     assert site.posts == [{'actor': 'Page A', 'id': '111', 'caption': 'Business note',
-                           'file': 'facebook-page.png'}]
+                           'file': 'facebook-page.png', 'title': '', 'keyword': 'Prefilled keyword'}]
     assert personal_draft() == expected
     assert composer.is_closed()
-    page.locator('[contenteditable]').fill('Personal note continued')
+    page.locator('[contenteditable]').press('ControlOrMeta+A')
+    page.locator('[contenteditable]').press('Delete')
+    page.locator('[contenteditable]').type('Personal note continued')
     advance(profile, 20)
     finish(personal, 0)
     post, = site.personal_posts
@@ -235,7 +303,8 @@ def test_page_video_uses_its_own_preview_and_observes_only_its_submission(facebo
                                 action='upload-video', env={'HUMANIZE': '0'})
         finish(child, code)
         assert site.visits == ['/latest/composer/', '/latest/composer/']
-        assert site.posts == [{'actor': 'Page A', 'id': '111', 'caption': 'My reel', 'file': 'reel.mp4'}]
+        assert site.posts == [{'actor': 'Page A', 'id': '111', 'caption': '', 'file': 'reel.mp4',
+                               'title': 'My reel', 'keyword': 'Prefilled keyword'}]
         assert json.loads(result.read_text())['status'] == status
 
 

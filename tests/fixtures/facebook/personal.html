@@ -14,10 +14,26 @@ button { padding: 14px; margin: 12px; }
 <div id="composer" role="dialog" aria-modal="true" hidden><form>
 <a id="actor" href="/profile.php?id=777">Personal author</a>
 <button type="button">Close</button>
-<div role="textbox" contenteditable="true">Existing draft</div>
+<div role="textbox" contenteditable="true"></div>
 <button type="button" onclick="submitFixture()">Post</button></form></div>
 <p id="success"></p>
 <script>
+// Controlled composer: store literal line breaks so innerText is the public text.
+const composer = document.querySelector('[contenteditable]');
+composer.style.whiteSpace = 'pre-wrap';
+let composerText = '';
+composer.addEventListener('beforeinput', event => {
+  event.preventDefault();
+  if (event.inputType.startsWith('delete')) composerText = '';
+  else if (event.inputType.startsWith('insert')) composerText += (event.data ?? '\n');
+  composer.textContent = composerText;
+  const range = document.createRange();
+  range.selectNodeContents(composer);
+  range.collapse(false);
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+});
 let submitted = 0;
 async function submitFixture() {
  const response = await fetch('/fixture-published', {method:'POST', body:JSON.stringify({
