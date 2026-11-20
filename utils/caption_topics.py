@@ -104,3 +104,32 @@ def text_results(
         TopicResult(occurrence=occurrence, status=STATUS_TEXT, reason=reason)
         for occurrence in topics.occurrences
     )
+
+
+def _visible_char(value: str, index: int) -> str:
+    if index >= len(value):
+        return "（结尾）"
+    return {
+        "\n": "\\n",
+        "\t": "\\t",
+        "\r": "\\r",
+        "\u00a0": "空格(U+00A0)",
+    }.get(value[index], value[index])
+
+
+def describe_caption_difference(expected: str, actual: str | None) -> str:
+    """Point out the first difference between the intended and read-back caption."""
+    if actual is None:
+        return "实际正文未读到"
+    if expected == actual:
+        return "全文一致"
+    limit = min(len(expected), len(actual))
+    index = 0
+    while index < limit and expected[index] == actual[index]:
+        index += 1
+    return (
+        f"第 {index + 1} 个字符不同："
+        f"期望「{_visible_char(expected, index)}」，"
+        f"实际「{_visible_char(actual, index)}」；"
+        f"期望全文「{expected}」，实际全文「{actual}」"
+    )

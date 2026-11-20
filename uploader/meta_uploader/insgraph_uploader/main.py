@@ -58,6 +58,7 @@ from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
 from utils.dom import ElementUnusableError, check, reject_ambiguous, visible_element_snapshot
+from utils.caption_topics import describe_caption_difference
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -356,20 +357,6 @@ def _normalise_caption_text(text: str) -> str:
     return str(text).replace('\r\n', '\n').replace('\r', '\n').rstrip()
 
 
-def _caption_difference(expected: str, actual: str) -> str:
-    """指出首个不同字符，覆盖吞字、错位与多余追加三类改写。"""
-    limit = min(len(expected), len(actual))
-    index = next((i for i in range(limit) if expected[i] != actual[i]), limit)
-    if index == limit and len(expected) == len(actual):
-        return '内容一致'
-    window = 16
-    return (
-        f'第 {index + 1} 个字符起不同：'
-        f'期望 {expected[index:index + window]!r}，'
-        f'实际 {actual[index:index + window]!r}'
-    )
-
-
 async def _read_back_caption(
     editor: Locator,
     caption: str,
@@ -397,7 +384,7 @@ async def _read_back_caption(
         if time.monotonic() >= deadline:
             raise AssertionError(
                 'Instagram 配文回读不一致：'
-                f'{_caption_difference(expected, actual)}；'
+                f'{describe_caption_difference(expected, actual)}；'
                 f'期望 {expected!r}，实际 {actual!r}'
             )
         await page.wait_for_timeout(CAPTION_READBACK_POLL_MS)

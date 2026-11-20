@@ -10,6 +10,7 @@ from __future__ import annotations
 from utils.caption_topics import (
     STATUS_TEXT,
     TopicResult,
+    describe_caption_difference,
     parse_caption_topics,
     text_results,
 )
@@ -138,3 +139,22 @@ def test_text_results_keep_one_status_per_occurrence_in_order():
 
 def test_text_results_are_empty_when_the_caption_has_no_topics():
     assert text_results(parse_caption_topics("没有话题")) == ()
+
+
+def test_caption_difference_names_the_first_differing_character():
+    assert (
+        describe_caption_difference("今天 #咖啡，结束", "今天 #咖啡 结束")
+        == "第 7 个字符不同：期望「，」，实际「 」；"
+        "期望全文「今天 #咖啡，结束」，实际全文「今天 #咖啡 结束」"
+    )
+
+
+def test_caption_difference_makes_newlines_and_endings_visible():
+    assert "期望「\\n」，实际「（结尾）」" in describe_caption_difference(
+        "第一行\n", "第一行"
+    )
+    assert "实际「空格(U+00A0)」" in describe_caption_difference(
+        "话题", "话题\u00a0"
+    )
+    assert describe_caption_difference("逐字一致", "逐字一致") == "全文一致"
+    assert describe_caption_difference("正文", None) == "实际正文未读到"
