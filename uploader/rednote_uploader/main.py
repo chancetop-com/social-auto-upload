@@ -37,6 +37,13 @@ from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_session import provider_label
 from utils.browser_time import page_wall_clock
+from utils.caption_topics import (
+    STATUS_LINKED,
+    STATUS_TEXT,
+    TopicOccurrence,
+    describe_caption_difference,
+    parse_caption_topics,
+)
 from utils.controls import read_switch_state
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
@@ -297,9 +304,58 @@ REDNOTE_TOPIC_MAX_CLICKS = 3
 REDNOTE_TOPIC_READBACK_CANDIDATES = (
     Candidate('div.tiptap[role="textbox"] a[data-topic]'),
 )
+# 配文原位话题：整段正文按锚点渲染回读（每个 a[data-topic] = '#' + name）。
+# 块级节点之间补换行；ProseMirror 的尾随 <br> 和分隔 img 不进入正文。
+REDNOTE_CAPTION_READBACK_JS = """
+(root) => {
+  const blocks = new Set([
+    'P', 'DIV', 'LI', 'UL', 'OL', 'BLOCKQUOTE',
+    'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE'
+  ]);
+  let out = '';
+  const walk = (node) => {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        out += child.nodeValue;
+        continue;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+      if (child.tagName === 'A' && child.hasAttribute('data-topic')) {
+        let name = '';
+        try {
+          name = (JSON.parse(child.getAttribute('data-topic') || '{}') || {}).name || '';
+        } catch (error) {
+          name = '';
+        }
+        out += '#' + name;
+        continue;
+      }
+      if (child.tagName === 'IMG') continue;
+      if (child.tagName === 'BR') {
+        const trailing = child.classList
+          && child.classList.contains('ProseMirror-trailingBreak');
+        if (!trailing) out += '\\n';
+        continue;
+      }
+      if (blocks.has(child.tagName)) {
+        if (out.length && !out.endsWith('\\n')) out += '\\n';
+        const before = out.length;
+        walk(child);
+        if (out.length === before) out += '\\n';
+        continue;
+      }
+      walk(child);
+    }
+  };
+  walk(root);
+  return out.endsWith('\\n') ? out.slice(0, -1) : out;
+}
+"""
 
 # 标签上限的唯一口径：只在校验期截断（spec §3 U7）。
 REDNOTE_MAX_TAGS = 10
+# 原位话题的关联上限：超出后第 11 个及以后只保留文字，绝不截断正文。
+REDNOTE_TOPIC_ASSOCIATION_LIMIT = REDNOTE_MAX_TAGS
 
 # ---------------------------------------------------------------------------
 # 元数据长度与回读（spec §3 U8）。
@@ -1578,6 +1634,10 @@ class RednoteBaseUploader(BaseVideoUploader):
         self.declaration_report: dict[str, str | None] | None = None
         # 帖子地点成功后的结果；None 表示未请求或未验证。
         self.location_report: dict[str, str | None] | None = None
+        # 配文原位话题的逐项结果；None/[] 表示正文里没有可识别的话题。
+        self.topic_results: list[dict[str, str | int | None]] | None = None
+        # 输入完成、追加换行前的整段正文回读（逐字一致才放行）。
+        self.caption_readback: str | None = None
 
     async def validate_base_args(self):
         if self.publish_strategy not in {
@@ -1935,9 +1995,10 @@ class RednoteBaseUploader(BaseVideoUploader):
             publish_clicked=False,
         )
 
-    async def fill_desc(
-        self, page: Page, *, humanizer: Humanizer | None = None
-    ) -> None:
+    async def fill_desc(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
+        # 每次正文输入只报告本次结果；重复调用不保留上一次的回读。
+        self.topic_results = None
+        self.caption_readback = None
         if not getattr(self, "desc", ""):
             return
 
@@ -1960,8 +2021,300 @@ class RednoteBaseUploader(BaseVideoUploader):
         await humanizer.press("Backspace")
         await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
-        await humanizer.type_text(self.desc)
+        topics = parse_caption_topics(self.desc)
+        if topics.occurrences:
+            # 有 #话题 时按原稿逐段输入，并在每个词的原位置点选同名候选。
+            await self._type_caption_with_topics(page, topics, humanizer)
+        else:
+            await humanizer.type_text(self.desc)
         await humanizer.press("Enter")
+
+    @staticmethod
+    def _topic_report(
+        occurrence: TopicOccurrence,
+        status: str,
+        reason: str | None = None,
+    ) -> dict[str, str | int | None]:
+        return {
+            "index": occurrence.index,
+            "name": occurrence.name,
+            "text": occurrence.text,
+            "status": status,
+            "reason": reason,
+        }
+
+    def _caption_failure(
+        self,
+        reason: str,
+        *,
+        occurrence: TopicOccurrence | None = None,
+    ) -> ElementUnusableError:
+        what = "配文正文" if occurrence is None else f"配文话题『{occurrence.text}』"
+        error = ElementUnusableError(
+            what=what,
+            role="attached",
+            selector=REDNOTE_BODY_CANDIDATES[0].selector,
+            reason=reason,
+            publish_clicked=False,
+        )
+        if occurrence is not None:
+            error.topic = occurrence.text
+            error.occurrence_index = occurrence.index
+        return error
+
+    async def _read_caption_body(self, page: Page) -> str | None:
+        """按文档顺序回读正文：话题锚点读作 ``#`` + ``name``，其余逐字保留。"""
+        try:
+            body = REDNOTE_BODY_CANDIDATES[0].build(page)
+            value = await body.evaluate(REDNOTE_CAPTION_READBACK_JS)
+        except Exception:
+            return None
+        return value if isinstance(value, str) else None
+
+    async def _read_caption_until(
+        self,
+        page: Page,
+        accepted: set[str],
+        *,
+        window_ms: int = REDNOTE_TOPIC_READBACK_WINDOW_MS,
+    ) -> str | None:
+        """短轮询正文，直到读到 ``accepted`` 之一或窗口结束；返回最后一次读值。"""
+        deadline = (
+            time.monotonic() + self._topic_window_ms(window_ms) / 1000
+        )
+        actual: str | None = None
+        while True:
+            actual = await self._read_caption_body(page)
+            if actual is not None and actual in accepted:
+                return actual
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return actual
+            await asyncio.sleep(
+                min(REDNOTE_TOPIC_READBACK_POLL_SECONDS, remaining)
+            )
+
+    async def _assert_caption_associations(
+        self, page: Page, expected_names: list[str]
+    ) -> None:
+        raw = await self._read_topic_nodes(page)
+        if raw is None:
+            raise self._caption_failure(
+                "配文话题回读不可用：读不到正文编辑器的话题锚点"
+            )
+        observed = [_parse_topic_name(item) for item in raw]
+        expected_norm = [_normalise_topic(name) for name in expected_names]
+        observed_norm = [_normalise_topic(name) for name in observed]
+        if observed_norm != expected_norm:
+            raise self._caption_failure(
+                "配文话题关联回读不一致："
+                f"期望 {expected_names}，实际 {observed}"
+            )
+
+    async def _close_topic_suggestions(
+        self, page: Page, humanizer: Humanizer
+    ) -> None:
+        """收起候选列表但不输入空格：降级/超限时正文必须逐字保留。"""
+        try:
+            if await page.locator(REDNOTE_TOPIC_ITEM_SELECTOR).count():
+                await humanizer.press("Escape")
+        except Exception:
+            pass
+
+    async def _type_caption_segment(
+        self, humanizer: Humanizer, text: str
+    ) -> None:
+        """逐段输入；换行走 Enter，保持编辑器块结构与真实键盘一致。"""
+        parts = text.split("\n")
+        for index, part in enumerate(parts):
+            if index:
+                await humanizer.press("Enter")
+            if part:
+                await humanizer.type_text(part)
+
+    async def _type_caption_with_topics(
+        self,
+        page: Page,
+        topics,
+        humanizer: Humanizer,
+    ) -> None:
+        caption = topics.text
+        results: list[dict[str, str | int | None]] = []
+        linked_names: list[str] = []
+        cursor = 0
+        for occurrence in topics.occurrences:
+            segment = caption[cursor:occurrence.start]
+            if segment:
+                await self._type_caption_segment(humanizer, segment)
+            await humanizer.type_text(occurrence.text)
+
+            if len(linked_names) >= REDNOTE_TOPIC_ASSOCIATION_LIMIT:
+                await self._close_topic_suggestions(page, humanizer)
+                results.append(
+                    self._topic_report(
+                        occurrence,
+                        STATUS_TEXT,
+                        f"已达可关联上限 {REDNOTE_TOPIC_ASSOCIATION_LIMIT}",
+                    )
+                )
+                cursor = occurrence.end
+                continue
+
+            linked, reason = await self._associate_inline_topic(
+                page, occurrence, humanizer
+            )
+            if not linked:
+                results.append(self._topic_report(occurrence, STATUS_TEXT, reason))
+                cursor = occurrence.end
+                continue
+
+            linked_names.append(occurrence.name)
+            cursor = await self._settle_inline_topic(
+                page, occurrence, caption, humanizer, linked_names
+            )
+            results.append(self._topic_report(occurrence, STATUS_LINKED))
+
+        tail = caption[cursor:]
+        if tail:
+            await self._type_caption_segment(humanizer, tail)
+
+        actual = await self._read_caption_until(page, {caption})
+        if actual != caption:
+            raise self._caption_failure(
+                "配文回读与预期不一致："
+                f"{describe_caption_difference(caption, actual)}"
+            )
+        await self._assert_caption_associations(page, linked_names)
+        self.caption_readback = actual
+        self.topic_results = results
+
+    async def _associate_inline_topic(
+        self,
+        page: Page,
+        occurrence: TopicOccurrence,
+        humanizer: Humanizer,
+    ) -> tuple[bool, str | None]:
+        """点选同名候选（含「新建话题」）；无同名行时保留文字。"""
+        started = time.monotonic()
+        deadline = (
+            started + self._topic_window_ms(REDNOTE_TOPIC_READY_WINDOW_MS) / 1000
+        )
+        attempts = 0
+        baseline = await self._read_topic_nodes(page)
+        if baseline is None:
+            raise self._caption_failure(
+                "配文话题回读不可用：读不到正文编辑器的话题锚点",
+                occurrence=occurrence,
+            )
+
+        while attempts < REDNOTE_TOPIC_MAX_CLICKS and time.monotonic() < deadline:
+            self.publish_budget.check_pre_click()
+            candidate, item_count = await self._scan_topic_candidate(
+                page, occurrence.name
+            )
+            if candidate is None:
+                if attempts > 0 or item_count > 0:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(REDNOTE_TOPIC_POLL_SECONDS, remaining))
+                continue
+
+            try:
+                clicked = await click_topic_candidate(candidate, humanizer)
+            finally:
+                await asyncio.gather(
+                    candidate.dispose(), return_exceptions=True
+                )
+            if not clicked:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(REDNOTE_TOPIC_POLL_SECONDS, remaining))
+                continue
+
+            attempts += 1
+            new_nodes = await self._readback_new_topics(page, baseline)
+            if new_nodes is None:
+                raise self._caption_failure(
+                    "配文话题回读不可用：读不到正文编辑器的话题锚点",
+                    occurrence=occurrence,
+                )
+            if new_nodes:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(REDNOTE_TOPIC_POLL_SECONDS, remaining))
+
+        new_nodes = await self._readback_new_topics(page, baseline)
+        if new_nodes is None:
+            raise self._caption_failure(
+                "配文话题回读不可用：读不到正文编辑器的话题锚点",
+                occurrence=occurrence,
+            )
+        if len(new_nodes) > 1:
+            raise self._caption_failure(
+                "点选后正文出现多个话题锚点："
+                f"期望 1 个「{occurrence.text}」，实际 {len(new_nodes)} 个",
+                occurrence=occurrence,
+            )
+        if not new_nodes:
+            if attempts == 0:
+                await self._close_topic_suggestions(page, humanizer)
+                return False, "无同名候选"
+            raise self._caption_failure(
+                "已点选同名候选，但正文没有出现话题锚点",
+                occurrence=occurrence,
+            )
+        observed = _parse_topic_name(new_nodes[0])
+        if _normalise_topic(observed) != _normalise_topic(occurrence.name):
+            raise self._caption_failure(
+                "选中的话题与原词不符："
+                f"期望「{occurrence.text}」，实际「#{observed or ''}」",
+                occurrence=occurrence,
+            )
+        return True, None
+
+    async def _settle_inline_topic(
+        self,
+        page: Page,
+        occurrence: TopicOccurrence,
+        caption: str,
+        humanizer: Humanizer,
+        linked_names: list[str],
+    ) -> int:
+        """处理编辑器自动追加的 U+00A0，并复验关联仍在原位置。"""
+        expected = caption[: occurrence.end]
+        with_space = expected + "\u00a0"
+        actual = await self._read_caption_until(page, {expected, with_space})
+        if actual not in {expected, with_space}:
+            raise self._caption_failure(
+                "配文话题落点与预期不一致："
+                f"{describe_caption_difference(expected, actual)}",
+                occurrence=occurrence,
+            )
+
+        if actual == expected:
+            await self._assert_caption_associations(page, linked_names)
+            return occurrence.end
+
+        if caption[occurrence.end : occurrence.end + 1] == "\u00a0":
+            # 作者原本就在这个话题后写了不换行空格：保留编辑器追加的一个。
+            await self._assert_caption_associations(page, linked_names)
+            return occurrence.end + 1
+
+        await humanizer.press("Backspace")
+        after = await self._read_caption_until(page, {expected})
+        if after != expected:
+            raise self._caption_failure(
+                "移除自动空格后配文与预期不一致："
+                f"{describe_caption_difference(expected, after)}",
+                occurrence=occurrence,
+            )
+        await self._assert_caption_associations(page, linked_names)
+        return occurrence.end
 
     async def fill_tags(
         self, page: Page, *, humanizer: Humanizer | None = None
@@ -2023,17 +2376,16 @@ class RednoteBaseUploader(BaseVideoUploader):
             details = await page.evaluate(
                 """({items, nameSelector}) => items.map(item => ({
                     name: item.querySelector(nameSelector)?.textContent,
-                    isNew: !!item.querySelector('.newTopic'),
                     attached: item.isConnected
                 }))""",
                 {"items": items, "nameSelector": REDNOTE_TOPIC_ITEM_NAME_CHILD_SELECTOR},
             )
             target = _normalise_topic(tag)
+            # 同名「新建话题」和普通同名行一样可点选（issue 13/24）。
             matches = [
                 item
                 for item, detail in zip(items, details)
                 if detail["attached"]
-                and not detail["isNew"]
                 and _normalise_topic(detail.get("name")) == target
             ]
             if not matches:

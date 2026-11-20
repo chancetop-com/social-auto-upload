@@ -7,6 +7,28 @@ AI_DECLARATION_NOT_REQUESTED = "AI 声明：未请求（保留页面当前值）
 LOCATION_NOT_REQUESTED = "帖子地点：未请求（保留页面当前值）"
 
 
+def report_caption_topics(request, prefix: str) -> None:
+    """Print one inline-topic result per caption occurrence, in order.
+
+    ``prefix`` keeps the platform summary distinguishable from the existing
+    success line (for example ``Xiaohongshu 配文话题 1/2：#coffee 已关联``).
+    Duplicates are preserved.  No caption topic means no extra line, so the
+    omitted/empty-caption path stays byte-for-byte unchanged.
+    """
+    results = getattr(request, "topic_results", None)
+    if not results:
+        return
+    total = len(results)
+    for item in results:
+        text = item.get("text") or ""
+        if item.get("status") == "linked":
+            outcome = "已关联"
+        else:
+            reason = item.get("reason") or "未关联"
+            outcome = f"保留文字，{reason}"
+        print(f"{prefix} 配文话题 {item.get('index')}/{total}：{text} {outcome}")
+
+
 def report_location(request):
     """Print the post-location request and its page readback (ticket 18).
 
