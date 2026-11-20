@@ -410,6 +410,9 @@ def _validate_note_metadata(
         )
 
     if len(tags) > TIKTOK_MAX_HASHTAG_COUNT:
+        # Legacy ``--tags`` only (ticket 26 removes the flag).  Inline
+        # ``#topic`` occurrences in the caption are never statically rejected:
+        # the uploader keeps every word and reports the 51st onward as text.
         raise UsageError(
             f"图片帖 hashtag 过多：{len(tags)} 个，"
             f"上限 {TIKTOK_MAX_HASHTAG_COUNT} 个。"

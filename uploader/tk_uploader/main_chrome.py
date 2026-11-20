@@ -49,6 +49,13 @@ from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.log import tiktok_logger
+from utils.caption_topics import (
+    STATUS_LINKED as TOPIC_LINKED,
+    STATUS_TEXT as TOPIC_TEXT,
+    CaptionTopics,
+    TopicOccurrence,
+    parse_caption_topics,
+)
 
 # Managed uploads keep their existing ignored-option diagnostics. The local
 # persistent path never consumes these legacy metadata exports.
@@ -514,6 +521,96 @@ def format_location_outcome(outcome: TiktokLocationOutcome) -> str:
         f"status={outcome.status} reason={outcome.reason or '-'} "
         f"continue={'yes' if outcome.can_continue else 'no'}"
     )
+
+
+#: TikTok caption-topic evidence vocabulary.  ``linked`` means the editor
+#: mention span was read back with the same name; ``text`` means the occurrence
+#: stayed plain text (no same-name row or the per-post association limit).
+TOPIC_NO_SAME_NAME = "no_same_name_candidate"
+TOPIC_ASSOCIATION_LIMIT = "association_limit"
+TOPIC_HARD_LIMIT = "hard_limit"
+TOPIC_WRONG_TOPIC = "wrong_topic"
+TOPIC_CAPTION_MISMATCH = "caption_mismatch"
+TOPIC_READ_ERROR = "read_error"
+TOPIC_SELECT_ERROR = "select_error"
+TOPIC_MISMATCH = "mismatch"
+
+
+class TiktokTopicError(RuntimeError):
+    """A per-occurrence caption-topic failure (CLI exit 1)."""
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokTopicOutcome:
+    """Terminal evidence for one caption ``#topic`` occurrence."""
+
+    occurrence: TopicOccurrence
+    status: str
+    reason: str | None = None
+    can_continue: bool = True
+
+    @property
+    def index(self) -> int:
+        return self.occurrence.index
+
+    @property
+    def text(self) -> str:
+        return self.occurrence.text
+
+
+def _topic_result_label(outcome: TiktokTopicOutcome) -> str:
+    """Human-readable counterpart of the machine status/reason pair."""
+
+    if outcome.status == TOPIC_LINKED:
+        return "已关联"
+    if outcome.reason == TOPIC_NO_SAME_NAME:
+        return "保留文字，无同名候选"
+    if outcome.reason == TOPIC_ASSOCIATION_LIMIT:
+        return "保留文字，已达可关联上限"
+    if outcome.reason == TOPIC_HARD_LIMIT:
+        return "保留文字，整帖硬限制"
+    if outcome.status == TOPIC_MISMATCH:
+        return "回读不一致"
+    return "-"
+
+
+def format_topic_outcome(outcome: TiktokTopicOutcome) -> str:
+    """One machine-greppable line per occurrence, in caption order."""
+
+    return (
+        "TikTok 配文话题: "
+        f"index={outcome.index} "
+        f"text={outcome.text!r} "
+        f"status={outcome.status} "
+        f"reason={outcome.reason or '-'} "
+        f"continue={'yes' if outcome.can_continue else 'no'} "
+        f"result={_topic_result_label(outcome)}"
+    )
+
+
+def _caption_difference(expected: str, observed: str) -> str:
+    """Describe the first divergence without dumping the whole caption."""
+
+    limit = min(len(expected), len(observed))
+    index = 0
+    while index < limit and expected[index] == observed[index]:
+        index += 1
+    expected_char = expected[index] if index < len(expected) else "<end>"
+    observed_char = observed[index] if index < len(observed) else "<end>"
+    return (
+        f"first-difference={index} "
+        f"expected-char={expected_char!r} observed-char={observed_char!r}"
+    )
+
+
+def _normalise_caption_newlines(text: str) -> str:
+    """Only the platform's line-ending handling is normalised."""
+
+    return str(text).replace("\r\n", "\n").replace("\r", "\n")
 
 
 def normalize_location_text(text: str | None) -> str:
@@ -1644,6 +1741,8 @@ class TiktokBaseUploader(BaseVideoUploader):
 
     #: Last AI disclosure outcome; ``not_requested`` until a run applies options.
     ai_outcome: TiktokAiOutcome | None = None
+    #: Last caption-topic evidence, one entry per occurrence in caption order.
+    topic_outcomes: list[TiktokTopicOutcome] = []
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
@@ -3271,6 +3370,287 @@ class TiktokBaseUploader(BaseVideoUploader):
                 return
             await page.wait_for_timeout(100)
 
+    def _topic_scopes(self, page):
+        """Scopes to search for TikTok's hashtag suggestion rows."""
+
+        scopes = []
+        if self.locator_base is not None:
+            scopes.append(self.locator_base)
+        if not any(scope is page for scope in scopes):
+            scopes.append(page)
+        return scopes
+
+    async def _poll_exact_topic_option(
+        self, page, wanted: str, scopes
+    ) -> tuple[object, bool] | None:
+        """Wait for the first same-name suggestion row.
+
+        Returns ``(option_handle, aria_selected)``; every other handle is
+        disposed.  ``None`` means no row whose first line is exactly ``wanted``
+        appeared before the settle/timeout window.  The caller owns the
+        returned handle and must dispose it after clicking.
+        """
+
+        wanted_casefold = wanted.casefold()
+        deadline = (
+            time.monotonic() + TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS / 1000
+        )
+        settle_deadline = None
+        rendered = False
+        while True:
+            for scope in scopes:
+                try:
+                    # A snapshot pins each option to the node whose name we read.
+                    # Re-resolving nth after an async refresh can wait 30s or click
+                    # a different hashtag at the same position.
+                    options = await scope.locator(
+                        '[role="option"]'
+                    ).element_handles()
+                except Exception:
+                    continue
+                keep = None
+                try:
+                    if options:
+                        rendered = True
+                    for option in options:
+                        try:
+                            first_line = (
+                                await option.inner_text()
+                            ).strip().splitlines()[0].strip()
+                        except Exception:
+                            continue
+                        if not first_line.startswith("#"):
+                            continue
+                        if first_line.casefold() != wanted_casefold:
+                            continue
+                        selected = False
+                        try:
+                            selected = (
+                                str(
+                                    await option.get_attribute(
+                                        "aria-selected"
+                                    )
+                                ).lower()
+                                == "true"
+                            )
+                        except Exception:
+                            selected = False
+                        keep = (option, selected)
+                        break
+                finally:
+                    for option in options:
+                        if keep is None or option is not keep[0]:
+                            try:
+                                await option.dispose()
+                            except Exception:
+                                pass
+                if keep is not None:
+                    return keep
+
+            now = time.monotonic()
+            if rendered and settle_deadline is None:
+                # Let a partially rendered list settle before giving up, but
+                # don't wait the full timeout when the dropdown is already up.
+                settle_deadline = now + TIKTOK_HASHTAG_SETTLE_MS / 1000
+            if settle_deadline is not None and now >= settle_deadline:
+                return None
+            if not rendered and now >= deadline:
+                return None
+            await page.wait_for_timeout(200)
+
+    async def _read_topic_state(self, editor) -> tuple[str, list[str]]:
+        """Read the editor text and mention spans in document order."""
+
+        try:
+            text = await editor.inner_text()
+        except Exception as exc:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=read text-error "
+                f"detail={exc}",
+                reason=TOPIC_READ_ERROR,
+            ) from exc
+        mentions: list[str] = []
+        try:
+            locator = editor.locator(
+                'span.mention[data-testid="mentionText"]'
+            )
+            count = await locator.count()
+            for index in range(count):
+                node = locator.nth(index)
+                mentions.append((await node.inner_text()).strip())
+        except Exception as exc:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=read mention-error "
+                f"detail={exc}",
+                reason=TOPIC_READ_ERROR,
+            ) from exc
+        return text, mentions
+
+    async def _topic_hard_limit_visible(self, page) -> bool:
+        """True when the page shows a whole-post hashtag hard-limit error."""
+
+        try:
+            body = await page.locator("body").inner_text()
+        except Exception:
+            return False
+        return bool(
+            re.search(
+                r"(?:maximum number of hashtags|too many hashtags|"
+                r"hashtag(?:s)? limit|can(?:'|no)t add more hashtags|"
+                r"最多.{0,8}(?:话题|标签)|(?:话题|标签).{0,8}上限)",
+                str(body or ""),
+                re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _compose_caption(text: str | None, tags) -> str:
+        """Final public caption: body plus legacy ``--tags`` after a newline."""
+
+        body = str(text or "")
+        hashtags = " ".join(f"#{tag}" for tag in (tags or []))
+        if not hashtags:
+            return body
+        return f"{body}\n{hashtags}" if body else hashtags
+
+    def _record_topic_outcome(self, outcome: TiktokTopicOutcome) -> None:
+        self.topic_outcomes.append(outcome)
+        print(format_topic_outcome(outcome))
+
+    async def _insert_topic_in_place(
+        self,
+        page,
+        editor,
+        occurrence: TopicOccurrence,
+        humanizer: Humanizer,
+        caption: str,
+        *,
+        allow_association: bool,
+        linked: list[str],
+    ) -> tuple[bool, str | None, int]:
+        """Type one occurrence and select its same-name row in place.
+
+        Returns ``(linked, reason, next_cursor)``.  Any readback that does not
+        prove the association and the exact surrounding text raises a
+        ``RuntimeError`` (CLI exit 1) before the publish step.
+        """
+
+        prefix = caption[: occurrence.end]
+        text_before, _ = await self._read_topic_state(editor)
+        if text_before != caption[: occurrence.start]:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=before-topic "
+                f"index={occurrence.index} text={occurrence.text!r} "
+                f"expected={caption[: occurrence.start]!r} "
+                f"observed={text_before!r} 未点击发布",
+                reason=TOPIC_CAPTION_MISMATCH,
+            )
+
+        if not allow_association:
+            await humanizer.type_text(occurrence.text)
+            await humanizer.press("Escape")
+            await page.wait_for_timeout(100)
+            text_after, mentions = await self._read_topic_state(editor)
+            if text_after != prefix or mentions != list(linked):
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=text-fallback "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={prefix!r} observed={text_after!r} "
+                    f"mentions={mentions!r} 未点击发布",
+                    reason=TOPIC_CAPTION_MISMATCH,
+                )
+            return False, TOPIC_ASSOCIATION_LIMIT, occurrence.end
+
+        await humanizer.type_text(occurrence.text)
+        match = await self._poll_exact_topic_option(
+            page, occurrence.text, self._topic_scopes(page)
+        )
+        if match is None:
+            # Keep the typed word in place and close the suggestion popup
+            # without accepting an approximate row.
+            await humanizer.press("Escape")
+            await page.wait_for_timeout(100)
+            text_after, mentions = await self._read_topic_state(editor)
+            if text_after != prefix or mentions != list(linked):
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=text-fallback "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={prefix!r} observed={text_after!r} "
+                    f"mentions={mentions!r} 未点击发布",
+                    reason=TOPIC_CAPTION_MISMATCH,
+                )
+            return False, TOPIC_NO_SAME_NAME, occurrence.end
+
+        option, selected = match
+        try:
+            if selected:
+                # The typed tag is already the focused suggestion; Enter
+                # accepts it without viewport/overlay issues.
+                await humanizer.press("Enter")
+            else:
+                await _humanized_click(humanizer, option)
+        except Exception as exc:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=select "
+                f"index={occurrence.index} text={occurrence.text!r} "
+                f"detail={exc} 未点击发布",
+                reason=TOPIC_SELECT_ERROR,
+            ) from exc
+        finally:
+            try:
+                await option.dispose()
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(300)
+        await self._wait_for_no_options(self._topic_scopes(page), page)
+
+        text_after, mentions = await self._read_topic_state(editor)
+        expected_mentions = [*linked, occurrence.text]
+        if mentions != expected_mentions:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=mention-readback "
+                f"index={occurrence.index} text={occurrence.text!r} "
+                f"expected={expected_mentions!r} observed={mentions!r} "
+                "未点击发布",
+                reason=TOPIC_WRONG_TOPIC,
+            )
+        if text_after == prefix + " ":
+            next_char = caption[occurrence.end: occurrence.end + 1]
+            if next_char == " ":
+                # The platform space is the author's own space: consume it
+                # instead of typing a second one.
+                return True, None, occurrence.end + 1
+            await humanizer.press("Backspace")
+            await page.wait_for_timeout(100)
+            text_after, mentions = await self._read_topic_state(editor)
+            if text_after != prefix:
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=auto-space "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={prefix!r} observed={text_after!r} "
+                    "未点击发布",
+                    reason=TOPIC_CAPTION_MISMATCH,
+                )
+            if mentions != expected_mentions:
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=auto-space-mention "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={expected_mentions!r} observed={mentions!r} "
+                    "未点击发布",
+                    reason=TOPIC_WRONG_TOPIC,
+                )
+            return True, None, occurrence.end
+        if text_after == prefix:
+            return True, None, occurrence.end
+        raise TiktokTopicError(
+            "TikTok 配文话题: stage=caption-readback "
+            f"index={occurrence.index} text={occurrence.text!r} "
+            f"expected={prefix!r} observed={text_after!r} "
+            f"{_caption_difference(prefix, text_after)} 未点击发布",
+            reason=TOPIC_CAPTION_MISMATCH,
+        )
+
     async def _apply_hashtag(
         self, page, tag: str, *, humanizer: Humanizer | None = None
     ) -> bool:
@@ -3284,97 +3664,43 @@ class TiktokBaseUploader(BaseVideoUploader):
         with a different one.
         """
         humanizer = humanizer or self._humanizer(page)
-        wanted = f"#{tag}".casefold()
-        scopes = []
-        if self.locator_base is not None:
-            scopes.append(self.locator_base)
-        if not any(scope is page for scope in scopes):
-            scopes.append(page)
+        wanted = f"#{tag}"
+        scopes = self._topic_scopes(page)
 
         # Character by character: the dropdown reacts to real key events.
         await humanizer.type_text("#" + tag)
-        deadline = (
-            time.monotonic() + TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS / 1000
-        )
-        settle_deadline = None
-        suggestion_failed = False
-        while True:
-            rendered = False
-            for scope in scopes:
+        match = await self._poll_exact_topic_option(page, wanted, scopes)
+        if match is not None:
+            option, selected = match
+            clicked = False
+            try:
+                if selected:
+                    # The typed tag is already the focused suggestion;
+                    # Enter accepts it without viewport/overlay issues.
+                    await humanizer.press("Enter")
+                else:
+                    try:
+                        await _humanized_click(humanizer, option)
+                        clicked = True
+                    except Exception as exc:
+                        # Keep the plain text and fire the association
+                        # suggestion instead of aborting the publish.  A click
+                        # that may have been dispatched is never retried.
+                        tiktok_logger.warning(
+                            f"  [-] tag #{tag} suggestion click failed: {exc}"
+                        )
+            finally:
                 try:
-                    # A snapshot pins each option to the node whose name we read.
-                    # Re-resolving nth after an async refresh can wait 30s or click
-                    # a different hashtag at the same position.
-                    options = await scope.locator('[role="option"]').element_handles()
+                    await option.dispose()
                 except Exception:
-                    continue
-                try:
-                    if options:
-                        rendered = True
-                    for option in options:
-                        try:
-                            first_line = (
-                                await option.inner_text()
-                            ).strip().splitlines()[0].strip()
-                        except Exception:
-                            continue
-                        if not first_line.startswith("#"):
-                            continue
-                        if first_line.casefold() == wanted:
-                            selected = False
-                            try:
-                                selected = (
-                                    str(
-                                        await option.get_attribute(
-                                            "aria-selected"
-                                        )
-                                    ).lower()
-                                    == "true"
-                                )
-                            except Exception:
-                                selected = False
-                            if selected:
-                                # The typed tag is already the focused suggestion;
-                                # Enter accepts it without viewport/overlay issues.
-                                await humanizer.press("Enter")
-                            else:
-                                try:
-                                    await _humanized_click(humanizer, option)
-                                except Exception as exc:
-                                    # Keep the plain text and fire the association
-                                    # suggestion instead of aborting the publish.
-                                    # A click that may have been dispatched is
-                                    # never retried (the loop exits below).
-                                    tiktok_logger.warning(
-                                        f"  [-] tag #{tag} suggestion click failed: {exc}"
-                                    )
-                                    suggestion_failed = True
-                                    break
-                            await page.wait_for_timeout(300)
-                            tiktok_logger.info(
-                                f"  [-] tag #{tag} inserted as hashtag entity"
-                            )
-                            await self._wait_for_no_options(scopes, page)
-                            return True
-                finally:
-                    await asyncio.gather(
-                        *(option.dispose() for option in options), return_exceptions=True
-                    )
-                if suggestion_failed:
-                    break
-
-            if suggestion_failed:
-                break
-            now = time.monotonic()
-            if rendered and settle_deadline is None:
-                # Let a partially rendered list settle before giving up, but
-                # don't wait the full timeout when the dropdown is already up.
-                settle_deadline = now + TIKTOK_HASHTAG_SETTLE_MS / 1000
-            if settle_deadline is not None and now >= settle_deadline:
-                break
-            if not rendered and now >= deadline:
-                break
-            await page.wait_for_timeout(200)
+                    pass
+            if clicked or selected:
+                await page.wait_for_timeout(300)
+                tiktok_logger.info(
+                    f"  [-] tag #{tag} inserted as hashtag entity"
+                )
+                await self._wait_for_no_options(scopes, page)
+                return True
 
         # No exact suggestion: one Space is enough for a plain-text tag (the
         # old insert/space/backspace dance only produced the same result).
@@ -3407,19 +3733,123 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         await page.wait_for_timeout(1000)  # 等待1秒
 
-        await humanizer.type_text(text)
-        await page.wait_for_timeout(1000)  # 等待1秒
-        await humanizer.press("End")
+        caption = self._compose_caption(text, tags)
+        self.topic_outcomes: list[TiktokTopicOutcome] = []
+        if not caption:
+            # Nothing public to verify; the clear sequence above is unchanged.
+            return
 
-        await humanizer.press("Enter")
+        parsed: CaptionTopics = parse_caption_topics(caption)
+        cursor = 0
+        linked: list[str] = []
+        for occurrence in parsed.occurrences:
+            segment = caption[cursor: occurrence.start]
+            if segment:
+                await humanizer.type_text(segment)
+                if "#" in segment:
+                    # A URL fragment or a bare ``#`` is not a topic.  Close any
+                    # suggestion popup it opened before typing the next real
+                    # occurrence.
+                    await humanizer.press("Escape")
+                    await page.wait_for_timeout(100)
 
-        # tag part
-        for index, tag in enumerate(tags, start=1):
-            tiktok_logger.info("Setting the %s tag" % index)
-            await humanizer.press("End")
-            await page.wait_for_timeout(300)
-            await self._apply_hashtag(page, tag, humanizer=humanizer)
-            await humanizer.press("End")
+            if await self._topic_hard_limit_visible(page):
+                outcome = TiktokTopicOutcome(
+                    occurrence=occurrence,
+                    status=TOPIC_TEXT,
+                    reason=TOPIC_HARD_LIMIT,
+                    can_continue=False,
+                )
+                self._record_topic_outcome(outcome)
+                raise RuntimeError(
+                    "TikTok 配文话题: 整帖话题数量触及页面硬限制，"
+                    f"停止在 index={occurrence.index} text={occurrence.text!r}；"
+                    "配文原稿保留，未点击发布。"
+                )
+
+            allow = len(linked) < TIKTOK_MAX_HASHTAG_COUNT
+            try:
+                linked_ok, reason, cursor = await self._insert_topic_in_place(
+                    page,
+                    editor_locator,
+                    occurrence,
+                    humanizer,
+                    caption,
+                    allow_association=allow,
+                    linked=linked,
+                )
+            except TiktokTopicError as exc:
+                self._record_topic_outcome(
+                    TiktokTopicOutcome(
+                        occurrence=occurrence,
+                        status=TOPIC_MISMATCH,
+                        reason=exc.reason,
+                        can_continue=False,
+                    )
+                )
+                raise
+            if linked_ok:
+                linked.append(occurrence.text)
+                self._record_topic_outcome(
+                    TiktokTopicOutcome(
+                        occurrence=occurrence, status=TOPIC_LINKED
+                    )
+                )
+                if (
+                    len(linked) >= TIKTOK_MAX_HASHTAG_COUNT
+                    and occurrence.index == len(parsed.occurrences)
+                    and await self._topic_hard_limit_visible(page)
+                ):
+                    print(
+                        "TikTok 配文话题: status=text "
+                        "reason=hard_limit continue=no "
+                        "result=保留文字，整帖硬限制"
+                    )
+                    raise RuntimeError(
+                        "TikTok 配文话题: 整帖话题数量触及页面硬限制；"
+                        "配文原稿保留，未点击发布。"
+                    )
+            else:
+                self._record_topic_outcome(
+                    TiktokTopicOutcome(
+                        occurrence=occurrence,
+                        status=TOPIC_TEXT,
+                        reason=reason,
+                    )
+                )
+
+        tail = caption[cursor:]
+        if tail:
+            await humanizer.type_text(tail)
+
+        # Whole-caption gate: every character, every mention, in order.
+        observed_text, observed_mentions = await self._read_topic_state(
+            editor_locator
+        )
+        expected_text = _normalise_caption_newlines(caption)
+        actual_text = _normalise_caption_newlines(observed_text)
+        if actual_text != expected_text:
+            print(
+                "TikTok 配文回读: status=mismatch continue=no "
+                f"{_caption_difference(expected_text, actual_text)} "
+                f"expected={expected_text!r} observed={actual_text!r}"
+            )
+            raise RuntimeError(
+                "TikTok 配文回读不一致："
+                f"{_caption_difference(expected_text, actual_text)} "
+                f"expected={expected_text!r} observed={actual_text!r} "
+                "未点击发布。"
+            )
+        if observed_mentions != linked:
+            print(
+                "TikTok 配文话题标记回读: status=mismatch continue=no "
+                f"expected={linked!r} observed={observed_mentions!r}"
+            )
+            raise RuntimeError(
+                "TikTok 配文话题标记回读不一致："
+                f"expected={linked!r} observed={observed_mentions!r} "
+                "未点击发布。"
+            )
 
     async def wait_publish_ready(
         self,
