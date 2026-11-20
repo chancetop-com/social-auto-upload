@@ -1204,7 +1204,7 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("长", [action[1] for action in page.keyboard.actions if action[0] == "press"])
         self.assertEqual(page.editor.buffer, text)
 
-    async def test_humanize_zero_uses_fast_path_for_caption_and_hashtag(self):
+    async def test_humanize_zero_uses_fast_path_for_inline_caption_topic(self):
         page, base = _hashtag_page(option_texts=["#tiktok\n2.0B posts"])
         video = _video()
         video.locator_base = base
@@ -1212,15 +1212,15 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict(os.environ, {"HUMANIZE": "0"}):
             humanizer = video._humanizer(page)
-            await video.fill_caption(page, "New caption", ["tiktok"])
+            await video.fill_caption(page, "New caption #tiktok", [])
 
-        # One bulk insert for the caption block, one for the hashtag.
+        # One bulk insert for the text segment, one for the inline topic.
         inserts = [
             action[1]
             for action in page.keyboard.actions
             if action[0] == "insert_text"
         ]
-        self.assertEqual(inserts, ["New caption\n", "#tiktok"])
+        self.assertEqual(inserts, ["New caption ", "#tiktok"])
         # The suggestion is taken through the library's own click (fast path).
         self.assertEqual(option.native_click_calls, 1)
         self.assertEqual(page.mouse.down_count, 0)

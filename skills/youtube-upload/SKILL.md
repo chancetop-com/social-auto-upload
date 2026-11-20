@@ -15,10 +15,10 @@ summary: 使用 sau 登录 YouTube、检查 Profile 并上传视频。
 ```powershell
 sau youtube login --account creator --headed
 sau youtube check --account creator
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "简介" --tags tag1,tag2 --visibility public
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "标题" --desc "简介 #tag1 #tag2" --visibility public
 ```
 
-标题最多 100 个字符。`--visibility` 可选 `public`、`unlisted`、`private`，默认 `public`；`--thumbnail` 指定封面，`--playlist` 指定已有播放列表。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
+标题最多 100 个字符。公开话题写在 `--desc` 里；旧 `--tags` 已移除，传入会退出 `2`，它原来写入的是 Studio 后台关键词而不是公开配文。Studio 关键词栏保留页面预填值，CLI 不写入。`--visibility` 可选 `public`、`unlisted`、`private`，默认 `public`；`--thumbnail` 指定封面，`--playlist` 指定已有播放列表。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
 
 ## 本地运行与恢复
 
@@ -52,16 +52,16 @@ reset-profile 显式清除指定种类，不需安装浏览器；保留其他种
 export MLX_API_TOKEN="<token>"
 sau youtube check --folder-id <folder_id> --profile-id <profile_id>
 sau youtube upload-video --folder-id <folder_id> --profile-id <profile_id> \
-  --file videos/demo.mp4 --title "标题" --desc "简介" --tags tag1,tag2 --visibility public
+  --file videos/demo.mp4 --title "标题" --desc "简介 #tag1 #tag2" --visibility public
 
 # AdsPower（--folder-id 可省略）
 unset MLX_API_TOKEN
 export ADSPOWER_API_KEY="$KEY"
 sau youtube check --profile-id <profile_id>
 sau youtube upload-video --profile-id <profile_id> \
-  --file videos/demo.mp4 --title "标题" --desc "简介" --tags tag1,tag2 --visibility public
+  --file videos/demo.mp4 --title "标题" --desc "简介 #tag1 #tag2" --visibility public
 ```
 
 托管模式采用相同 headless 优先级，忽略 `LOCAL_BROWSER`、`--local-browser`、`LOCAL_CHROME_PATH` 和 `YT_PROXY`，出口 IP 由 Profile 决定。Profile 必须已人工登录且无待处理验证码/2FA。
 
-发布前再次核对账号、视频、标题、说明、标签、可见范围及立即/not-before 意图。上传或发布遇到超时时先查 YouTube Studio 中的原视频，不盲目重传。上传成功不等于审核完成或公开视频已可播放。
+发布前再次核对账号、视频、标题、说明中的公开 `#话题`、可见范围及立即/not-before 意图。上传或发布遇到超时时先查 YouTube Studio 中的原视频，不盲目重传。上传成功不等于审核完成或公开视频已可播放。

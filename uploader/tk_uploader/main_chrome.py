@@ -3504,14 +3504,15 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
 
     @staticmethod
-    def _compose_caption(text: str | None, tags) -> str:
-        """Final public caption: body plus legacy ``--tags`` after a newline."""
+    def _compose_caption(text: str | None, _tags=None) -> str:
+        """Final public caption: the caption text itself.
 
-        body = str(text or "")
-        hashtags = " ".join(f"#{tag}" for tag in (tags or []))
-        if not hashtags:
-            return body
-        return f"{body}\n{hashtags}" if body else hashtags
+        ``tags`` remains accepted for direct Python API compatibility, but the
+        CLI no longer supplies it: inline ``#topic`` text is the only topic
+        source and is linked in place by ``fill_caption``.
+        """
+
+        return str(text or "")
 
     def _record_topic_outcome(self, outcome: TiktokTopicOutcome) -> None:
         self.topic_outcomes.append(outcome)
@@ -3711,8 +3712,9 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         return False
 
-    async def fill_caption(self, page, text, tags, *, editor=None) -> None:
-
+    async def fill_caption(self, page, text, tags=None, *, editor=None) -> None:
+        # ``tags`` is a legacy direct-API argument; only inline caption text is
+        # used so duplicate/appended tag blocks can never enter the public post.
         editor_locator = (
             editor
             if editor is not None
@@ -3733,7 +3735,7 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         await page.wait_for_timeout(1000)  # 等待1秒
 
-        caption = self._compose_caption(text, tags)
+        caption = self._compose_caption(text)
         self.topic_outcomes: list[TiktokTopicOutcome] = []
         if not caption:
             # Nothing public to verify; the clear sequence above is unchanged.
@@ -4261,7 +4263,7 @@ class TiktokVideo(TiktokBaseUploader):
         )
 
     async def fill_metadata(self, page) -> None:
-        await self.fill_caption(page, self.title, self.tags)
+        await self.fill_caption(page, self.title)
 
     async def apply_cover(self, page) -> None:
         if not self.thumbnail_path:
@@ -4791,12 +4793,11 @@ class TiktokNote(TiktokBaseUploader):
             await self._fill_title(page)
 
         note_text = self.note or ""
-        tags = list(self.tags or [])
-        if not note_text and not tags:
+        if not note_text:
             return
 
         editor = await self._resolve_caption_editor(page)
-        await self.fill_caption(page, note_text, tags, editor=editor)
+        await self.fill_caption(page, note_text, editor=editor)
 
     async def apply_options(self, page) -> None:
         """Reuse the shared option steps, minus the content-reuse control.

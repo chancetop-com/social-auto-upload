@@ -22,7 +22,6 @@ from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
     parse_image_files,
-    parse_tags,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -77,8 +76,9 @@ def register(platform_parsers):
             "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
         )
         upload_video_parser.add_argument("--title", required=True)
-        upload_video_parser.add_argument("--desc", default="")
-        upload_video_parser.add_argument("--tags", default="")
+        upload_video_parser.add_argument(
+            "--desc", default="", help="正文；公开话题写为 #话题"
+        )
         upload_video_parser.add_argument("--page", default=None, help="Business Suite 发布主体名称；不传使用当前主体")
         upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP_ZH)
         upload_video_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
@@ -94,8 +94,9 @@ def register(platform_parsers):
             "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
         )
         upload_note_parser.add_argument("--title", required=True)
-        upload_note_parser.add_argument("--note", default="")
-        upload_note_parser.add_argument("--tags", default="")
+        upload_note_parser.add_argument(
+            "--note", default="", help="正文；公开话题写为 #话题"
+        )
         upload_note_parser.add_argument("--page", default=None, help="Business Suite 发布主体名称；不传使用当前主体")
         upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP_ZH)
         upload_note_parser.add_argument("--proxy", default=FACEBOOK_PAGE_PROXY, help="代理地址；不传时直连")
@@ -239,7 +240,7 @@ async def run(args):
             account_name=account_label,
             title=args.title,
             description=args.desc if args.action == "upload-video" else args.note,
-            tags=parse_tags(args.tags),
+            tags=[],
             video_file=args.file if args.action == "upload-video" else None,
             image_files=parse_image_files(args.images) if args.action == "upload-note" else None,
             schedule=args.schedule or 0,

@@ -22,7 +22,6 @@ from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    parse_tags,
 )
 from sau_commands.browser import (
     add_browser_flags,
@@ -83,8 +82,11 @@ def register(platform_parsers):
         "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
     )
     facebook_upload_video_parser.add_argument("--title", required=True, help="Post title, merged into Facebook caption")
-    facebook_upload_video_parser.add_argument("--desc", default="", help="Optional post description")
-    facebook_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    facebook_upload_video_parser.add_argument(
+        "--desc",
+        default="",
+        help="Optional post description; write public topics as #hashtags here",
+    )
     facebook_upload_video_parser.add_argument(
         "--proxy",
         default=FACEBOOK_PROXY,
@@ -101,8 +103,11 @@ def register(platform_parsers):
         "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
     )
     facebook_note.add_argument("--title", required=True)
-    facebook_note.add_argument("--note", default="")
-    facebook_note.add_argument("--tags", default="")
+    facebook_note.add_argument(
+        "--note",
+        default="",
+        help="Optional post body; write public topics as #hashtags here",
+    )
     facebook_note.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
     add_not_before_flag(facebook_note)
     add_local_runtime_flags(facebook_note)
@@ -293,7 +298,7 @@ async def run(args):
                 title=args.title,
                 files=args.images,
                 description=args.note,
-                tags=parse_tags(args.tags),
+                tags=[],
                 headless=args.headless,
                 publish_not_before=args.not_before,
             )
@@ -302,7 +307,7 @@ async def run(args):
             args.post_published = True
             return 0
 
-        app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
+        app = FacebookPost(args.title, args.images, args.note, [],
                            account_name=args.account, proxy=args.proxy, headless=args.headless, local_browser=args.local_browser)
         app.publish_not_before = args.not_before
         await app.main()
@@ -317,7 +322,7 @@ async def run(args):
             video_file=args.file,
             title=args.title,
             description=args.desc,
-            tags=parse_tags(args.tags),
+            tags=[],
             proxy=args.proxy,
             debug=args.debug,
             headless=args.headless,

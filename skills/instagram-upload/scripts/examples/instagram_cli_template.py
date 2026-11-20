@@ -6,7 +6,7 @@ commands = [
     [
         'sau', 'instagram', 'upload-video', '--account', 'account_a',
         '--file', 'videos/demo.mp4', '--title', 'Instagram Reel 示例',
-        '--desc', '视频简介', '--tags', 'life,share',
+        '--desc', '视频简介 #life #share',
     ],
     [
         'sau', 'instagram', 'upload-note', '--account', 'account_a',

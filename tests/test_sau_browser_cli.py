@@ -167,8 +167,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             account="creator",
             file=Path("demo.mp4"),
             title="视频标题",
-            desc="视频简介",
-            tags="测试,视频",
+            desc="视频简介 #测试 #视频",
             schedule=0,
             thumbnail=None,
             debug=False,
@@ -179,7 +178,8 @@ class BrowserCliDispatchTests(unittest.TestCase):
 
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "视频标题")
-        self.assertEqual(request.description, "视频简介")
+        self.assertEqual(request.description, "视频简介 #测试 #视频")
+        self.assertEqual(request.tags, [])
         self.assertFalse(request.headless)
 
     def test_dispatch_xiaohongshu_upload_note_uses_headless_request(self):
@@ -189,8 +189,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             account="creator",
             images=[Path("1.png"), Path("2.png")],
             title="图文标题",
-            note="图文正文",
-            tags="测试,图文",
+            note="图文正文 #测试 #图文",
             schedule=0,
             debug=False,
             headless=True,
@@ -200,7 +199,8 @@ class BrowserCliDispatchTests(unittest.TestCase):
 
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "图文标题")
-        self.assertEqual(request.note, "图文正文")
+        self.assertEqual(request.note, "图文正文 #测试 #图文")
+        self.assertEqual(request.tags, [])
         self.assertTrue(request.headless)
         self.assertEqual(len(request.image_files), 2)
 
@@ -212,7 +212,6 @@ class BrowserCliDispatchTests(unittest.TestCase):
             images=[Path("1.png")],
             title="图文标题",
             note="图文正文",
-            tags="",
             schedule=0,
             debug=False,
             headless=True,

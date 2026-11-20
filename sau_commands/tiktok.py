@@ -15,7 +15,6 @@ from sau_commands.arguments import (
     SCHEDULE_HELP,
     add_not_before_flag,
     add_local_runtime_flags,
-    parse_tags,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -33,7 +32,6 @@ from uploader.tk_uploader.main_chrome import (
     TIKTOK_INIT_SCRIPT,
     TIKTOK_LAUNCH_KWARGS,
     TIKTOK_MAX_DESCRIPTION_LENGTH,
-    TIKTOK_MAX_HASHTAG_COUNT,
     TIKTOK_MAX_IMAGE_BYTES,
     TIKTOK_MAX_IMAGE_COUNT,
     TIKTOK_MAX_TITLE_LENGTH,
@@ -176,9 +174,8 @@ def register(platform_parsers):
     upload_video_parser.add_argument(
         "--file", required=True, type=media_source, help="Video file path or direct URL"
     )
-    upload_video_parser.add_argument("--title", required=True, help="Video title")
     upload_video_parser.add_argument(
-        "--tags", default="", help="Comma-separated tags, such as tag1,tag2"
+        "--title", required=True, help="Video caption; write public topics as #hashtags here"
     )
     upload_video_parser.add_argument(
         "--schedule", type=schedule_value, help=SCHEDULE_HELP
@@ -217,16 +214,13 @@ def register(platform_parsers):
     note_group.add_argument(
         "--note",
         default=None,
-        help="Photo Description text; omit to leave it empty",
+        help="Photo Description text; write public topics as #hashtags here",
     )
     note_group.add_argument(
         "--notef",
         default=None,
         type=_read_note_file,
         help="Read the Description from a local txt/md file",
-    )
-    upload_note_parser.add_argument(
-        "--tags", default="", help="Comma-separated tags, such as tag1,tag2"
     )
     upload_note_parser.add_argument(
         "--schedule", type=schedule_value, help=SCHEDULE_HELP
@@ -370,29 +364,21 @@ def _note_text(args) -> str | None:
     return getattr(args, "notef", None)
 
 
-def _render_description(note: str | None, tags: list[str]) -> str:
-    """Text the page will hold after tags are expanded to ``#tag`` chips."""
-    text = note or ""
-    if not tags:
-        return text
-    hashtags = " ".join(f"#{tag}" for tag in tags)
-    return f"{text}\n{hashtags}" if text else hashtags
-
-
 def _validate_note_metadata(
     title: str | None,
     note: str | None,
-    tags: list[str],
     *,
     scheduled: bool = False,
 ) -> None:
-    """Reject over-limit Title/Description/hashtags before any browser work.
+    """Reject over-limit Title/Description before any browser work.
 
     Values are never truncated; each failure is a usage error (exit 2).
+    Inline ``#topic`` occurrences are kept in the caption, never statically
+    rejected: the uploader reports the 51st association onward as text.
     """
     if scheduled and not (title or note):
         raise UsageError(
-            "定时图片帖必须提供 --title 或 --note/--notef：仅 tags 无法在 "
+            "定时图片帖必须提供 --title 或 --note/--notef：正文为空无法在 "
             "Content 列表稳定定位该帖，发布后也无法核验定时是否成功。"
         )
 
@@ -402,20 +388,10 @@ def _validate_note_metadata(
             f"上限 {TIKTOK_MAX_TITLE_LENGTH} 字符（不会截断）。"
         )
 
-    description = _render_description(note, tags)
-    if len(description) > TIKTOK_MAX_DESCRIPTION_LENGTH:
+    if len(note or "") > TIKTOK_MAX_DESCRIPTION_LENGTH:
         raise UsageError(
-            f"图片帖 Description 过长：{len(description)} 字符，"
+            f"图片帖 Description 过长：{len(note or '')} 字符，"
             f"上限 {TIKTOK_MAX_DESCRIPTION_LENGTH} 字符（不会截断）。"
-        )
-
-    if len(tags) > TIKTOK_MAX_HASHTAG_COUNT:
-        # Legacy ``--tags`` only (ticket 26 removes the flag).  Inline
-        # ``#topic`` occurrences in the caption are never statically rejected:
-        # the uploader keeps every word and reports the 51st onward as text.
-        raise UsageError(
-            f"图片帖 hashtag 过多：{len(tags)} 个，"
-            f"上限 {TIKTOK_MAX_HASHTAG_COUNT} 个。"
         )
 
 
@@ -533,12 +509,11 @@ async def run(args):
         image_files = [Path(path) for path in args.images]
         title = getattr(args, "title", None)
         note = _note_text(args)
-        tags = parse_tags(getattr(args, "tags", ""))
         _validate_note_images(image_files)
         _validate_note_metadata(
-            title, note, tags, scheduled=bool(args.schedule)
+            title, note, scheduled=bool(args.schedule)
         )
-        note_inputs = (image_files, title, note, tags)
+        note_inputs = (image_files, title, note, [])
 
     if args.action == "login":
         # Multilogin profiles are logged in through the Multilogin app.
@@ -603,7 +578,7 @@ async def run(args):
             account_label=account_label,
             video_file=args.file,
             title=args.title,
-            tags=parse_tags(args.tags),
+            tags=[],
             publish_date=args.schedule or 0,
             thumbnail_file=args.thumbnail,
             debug=args.debug,

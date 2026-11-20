@@ -13,7 +13,7 @@ summary: 使用独立 Rednote Profile 完成登录、检查及发布流程。
 1. 运行 `sau rednote --help` 确认安装支持此平台；命令不存在或浏览器缺失时，读取 [运行前提](references/runtime-requirements.md)。
 2. 确认内容类型、账号及发布意图。测试接入时使用 `--no-publish`，只有用户要求发布时才省略该参数。干跑仍会向平台上传素材。
 3. 本地先用 `sau rednote login --account <name> --headed` 登录，再用 `sau rednote check --account <name>` 检查。登录窗口与日常 Chrome 会话独立；等待 CLI 确认成功并关闭会话。仅 login 引导登录，业务中失效先结束本次命令。
-4. 视频使用 `upload-video --file <path> --title <title> --desc <body>`；图文使用 `upload-note --images <paths...> --title <title> --note <body>`。可加 `--tags tag1,tag2`，完整参数查询各子命令的 `--help`。
+4. 视频使用 `upload-video --file <path> --title <title> --desc <body>`；图文使用 `upload-note --images <paths...> --title <title> --note <body>`。公开话题写成正文里的 `#话题`；旧 `--tags` 已移除，传入会退出 `2`。完整参数查询各子命令的 `--help`。
 5. 根据退出码报告结果：干跑成功仅表示发布前准备完成。`9` 或 `publish_attempted=true` 必须人工核对是否已发布；`10` 先恢复登录或完成人机验证。
 
 默认域名为 `https://creator.rednote.com`，可用独立的 `SAU_REDNOTE_CREATOR_BASE_URL` 覆盖。身份只保存在 `browser_profiles/<chrome|chromium>/rednote/<原始别名>`：平台、别名、实际浏览器种类隔离；旧 JSON 不参与读写或清理。别名可重新登录不同账号。
