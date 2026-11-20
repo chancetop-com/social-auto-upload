@@ -1996,6 +1996,9 @@ class RednoteBaseUploader(BaseVideoUploader):
         )
 
     async def fill_desc(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
+        # 每次正文输入只报告本次结果；重复调用不保留上一次的回读。
+        self.topic_results = None
+        self.caption_readback = None
         if not getattr(self, "desc", ""):
             return
 
