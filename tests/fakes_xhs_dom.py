@@ -201,6 +201,9 @@ class FakeLocator:
     async def element_handles(self) -> list["FakeLocator"]:
         return [self.nth(index) for index in range(await self.count())]
 
+    async def element_handle(self) -> "FakeLocator":
+        return self.nth(0)
+
     async def dispose(self) -> None:
         pass
 

@@ -28,6 +28,7 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.caption_topics import parse_caption_topics, text_results
 from utils.errors import UsageError
 from utils.local_browser import resolve_headless
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
@@ -95,6 +96,18 @@ async def login_youtube_account(account_name, headless=None, *, local_browser=No
 
 async def check_youtube_account(account_name, headless=None, *, local_browser=None):
     return await youtube_setup(account_name=account_name, headless=headless, local_browser=local_browser)
+
+
+def _report_description_topics(description: str) -> None:
+    """Print one text-level result per description topic, in caption order."""
+    topics = parse_caption_topics(description)
+    results = text_results(topics, reason="简介全文逐字回读一致")
+    total = len(results)
+    for result in results:
+        print(
+            f"YouTube 简介话题 {result.occurrence.index}/{total}："
+            f"{result.occurrence.text} 保留文字（{result.reason}）"
+        )
 
 
 def _build_youtube_uploader(request: YouTubeVideoUploadRequest) -> YouTubeVideo:
@@ -202,6 +215,7 @@ async def run(args):
             local_browser=local_browser,
         )
         await upload_youtube_video(request, target=target)
+        _report_description_topics(request.description)
         print(f"YouTube video upload submitted: {request.video_file}")
         args.post_published = True
         return 0

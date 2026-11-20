@@ -1,8 +1,10 @@
 import sau_commands.xiaohongshu
 import asyncio
+import io
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -102,6 +104,58 @@ class BrowserCliParserTests(unittest.TestCase):
         )
         with self.assertRaises(UsageError):
             sau_commands.xiaohongshu._validate_declarations(args)
+
+
+class ContentTypeParserTests(unittest.TestCase):
+    """Repeated --content-type values must not silently overwrite each other."""
+
+    def _argv(self, platform, action, content_types):
+        self.media = self.tmp / "media.png"
+        self.media.write_bytes(b"media")
+        mode = ["--file", str(self.media)] if action == "upload-video" else [
+            "--images",
+            str(self.media),
+        ]
+        argv = [platform, action, "--account", "creator", "--title", "标题", *mode]
+        for value in content_types:
+            argv.extend(["--content-type", value])
+        return argv
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def _parse(self, platform, action, content_types):
+        parser = sau_cli.build_parser()
+        return parser.parse_args(self._argv(platform, action, content_types))
+
+    def test_one_content_type_is_kept(self):
+        for platform in ("xiaohongshu", "rednote"):
+            for action in ("upload-video", "upload-note"):
+                with self.subTest(platform=platform, action=action):
+                    args = self._parse(platform, action, ["ai"])
+                    self.assertEqual(args.content_type, "ai")
+
+    def test_the_same_content_type_repeated_is_accepted(self):
+        for platform in ("xiaohongshu", "rednote"):
+            with self.subTest(platform=platform):
+                args = self._parse(platform, "upload-video", ["ai", "ai"])
+                self.assertEqual(args.content_type, "ai")
+
+    def test_conflicting_content_types_exit_2_before_dispatch(self):
+        for platform in ("xiaohongshu", "rednote"):
+            for action in ("upload-video", "upload-note"):
+                with self.subTest(platform=platform, action=action):
+                    parser = sau_cli.build_parser()
+                    stderr = io.StringIO()
+                    with redirect_stderr(stderr), self.assertRaises(SystemExit) as ctx:
+                        parser.parse_args(
+                            self._argv(platform, action, ["ai", "marketing"])
+                        )
+                    self.assertEqual(ctx.exception.code, 2)
+                    message = stderr.getvalue()
+                    self.assertIn("--content-type", message)
+                    self.assertIn("ai", message)
+                    self.assertIn("marketing", message)
 
 
 class BrowserCliDispatchTests(unittest.TestCase):

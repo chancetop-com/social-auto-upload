@@ -311,6 +311,30 @@ class YouTubeEventSequenceTests(unittest.TestCase):
         self.assertLess(kinds.index("hit-test"), first_down)
         self.assertEqual(kinds.count("hit-test"), 2)
 
+    def test_title_hashtags_are_typed_literally_without_autocomplete(self):
+        timeline = Timeline()
+        keyboard = BufferKeyboard(timeline)
+        title_box = ClickableLocator("title", timeline=timeline)
+        page = _hashtag_page(
+            timeline,
+            keyboard,
+            text_locator=title_box,
+            candidates={},
+            dropdown_open=False,
+        )
+        humanizer = NamedHumanizer(page, timeline)
+
+        asyncio.run(
+            youtube_main._fill_editable(
+                page, TITLE_INPUT, "#Shorts 标题", humanizer, allow_hashtags=False
+            )
+        )
+
+        # The `#` reaches the title as plain text, never through candidate code.
+        self.assertEqual(keyboard.finish(), ["#Shorts 标题"])
+        self.assertEqual(page.mouse.down_count, 1)  # focus click only
+        self.assertNotIn(("press", "Escape"), keyboard.actions)
+
     def test_hashtag_miss_keeps_plain_text_and_dismisses_the_dropdown(self):
         timeline = Timeline()
         keyboard = BufferKeyboard(timeline)
@@ -627,6 +651,10 @@ class YouTubePublishDispatchGuardTests(unittest.TestCase):
         with (
             patch.object(youtube_main, "_click_if_present", _click_if_present),
             patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(youtube_main, "_verify_editable", AsyncMock()),
+            patch.object(
+                youtube_main, "_description_limit_message", AsyncMock(return_value=None)
+            ),
             patch.object(
                 youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
             ),
@@ -695,6 +723,10 @@ class YouTubePostPublishCloseTests(unittest.TestCase):
         with (
             patch.object(youtube_main, "_click_if_present", _click_if_present),
             patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(youtube_main, "_verify_editable", AsyncMock()),
+            patch.object(
+                youtube_main, "_description_limit_message", AsyncMock(return_value=None)
+            ),
             patch.object(
                 youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
             ),
