@@ -952,12 +952,14 @@ class _LocatorLocationControl(TiktokLocationControl):
         container,
         *,
         page,
+        row_scope=None,
         candidates: tuple[str, ...] = (),
         humanizer: Humanizer | None = None,
     ) -> None:
         self._input_locator = input_locator
         self._container = container
         self._page = page
+        self._row_scope = row_scope
         self.candidates = candidates
         self._humanizer = humanizer
 
@@ -1035,43 +1037,52 @@ class _LocatorLocationControl(TiktokLocationControl):
                 return
             await self._page.wait_for_timeout(TIKTOK_LOCATION_POLL_MS)
 
-    async def _option_locator(self):
-        page = self._page
-        options = page.locator('[role="listbox"] [role="option"]')
-        try:
-            if await options.count():
-                return options
-        except Exception:
-            pass
-        return page.locator('[role="option"]')
-
-    async def candidate_rows(self) -> list[TiktokLocationCandidate]:
-        options = await self._option_locator()
-        try:
-            total = await options.count()
-        except Exception:
-            return []
-        rows: list[TiktokLocationCandidate] = []
-        for index in range(total):
-            node = options.nth(index)
+    async def _rows_in_scope(self, scope) -> list[TiktokLocationCandidate]:
+        # Prefer the semantic listbox; fall back to any visible option row.
+        for selector in ('[role="listbox"] [role="option"]', '[role="option"]'):
             try:
-                if not await node.is_visible():
-                    continue
-                text = await node.inner_text()
+                options = scope.locator(selector)
+                total = await options.count()
             except Exception:
                 continue
-            name, address = parse_location_row(text)
-            if not name:
-                continue
-            rows.append(
-                TiktokLocationCandidate(
-                    name,
-                    address,
-                    locator=node,
-                    humanizer=self._humanizer,
+            rows: list[TiktokLocationCandidate] = []
+            for index in range(total):
+                node = options.nth(index)
+                try:
+                    if not await node.is_visible():
+                        continue
+                    text = await node.inner_text()
+                except Exception:
+                    continue
+                name, address = parse_location_row(text)
+                if not name:
+                    continue
+                rows.append(
+                    TiktokLocationCandidate(
+                        name,
+                        address,
+                        locator=node,
+                        humanizer=self._humanizer,
+                    )
                 )
-            )
-        return rows
+            if rows:
+                return rows
+        return []
+
+    async def candidate_rows(self) -> list[TiktokLocationCandidate]:
+        # Current Studio portals the listbox to the page root; an
+        # iframe-scoped list is still covered by the base scope first.  Only
+        # visible rows count, so a hidden stale listbox cannot mask the open
+        # one or turn into a false no-match.
+        seen: set[int] = set()
+        for scope in (self._row_scope, self._page):
+            if scope is None or id(scope) in seen:
+                continue
+            seen.add(id(scope))
+            rows = await self._rows_in_scope(scope)
+            if rows:
+                return rows
+        return []
 
     async def _expanded(self) -> bool | None:
         target = await self._input()
@@ -2483,6 +2494,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             input_locator,
             container,
             page=self._option_page,
+            row_scope=self.locator_base,
             humanizer=self._option_humanizer(),
         )
 
