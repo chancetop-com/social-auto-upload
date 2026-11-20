@@ -402,6 +402,55 @@ class TiktokPublishOptions:
     branded_content: bool | None = None
 
 
+# AI disclosure outcome vocabulary, aligned with the Instagram options record.
+AI_NOT_REQUESTED = "not_requested"
+AI_SET = "set"
+AI_DEFAULT_OFF = "default_off"
+AI_UNSUPPORTED = "unsupported"
+AI_MISMATCH = "mismatch"
+AI_ENTRY_MISSING = "entry_missing"
+AI_READ_ERROR = "read_error"
+AI_DIALOG_ERROR = "dialog_error"
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokAiOutcome:
+    """Terminal result for one tri-state AI disclosure request.
+
+    ``applied`` stays ``None`` when the page value was never observed (a
+    genuinely missing entry or an unreadable switch).  ``default_off`` with
+    ``entry_missing`` is the only continuing outcome whose final value is
+    unknown; it must never be presented as an observed ``false``.
+    """
+
+    requested: bool | None
+    applied: bool | None
+    status: str
+    reason: str | None = None
+
+    @property
+    def can_continue(self) -> bool:
+        return self.status in (AI_NOT_REQUESTED, AI_SET, AI_DEFAULT_OFF)
+
+
+def format_ai_outcome(outcome: TiktokAiOutcome) -> str:
+    """One machine-greppable line: requested/applied/status/reason/continue."""
+
+    def tri(value: bool | None) -> str:
+        if value is None:
+            return "null"
+        return "true" if value else "false"
+
+    reason = outcome.reason or "-"
+    return (
+        "TikTok AI 声明: option=aigc "
+        f"requested={tri(outcome.requested)} "
+        f"applied={tri(outcome.applied)} "
+        f"status={outcome.status} reason={reason} "
+        f"continue={'yes' if outcome.can_continue else 'no'}"
+    )
+
+
 # Page copy -> CLI/API semantic value.  ``Only you`` and ``Private`` are the
 # same option in two A/B variants; ``Everyone`` and ``Public`` likewise.
 _PRIVACY_LABELS = {
@@ -1188,6 +1237,9 @@ class TiktokBaseUploader(BaseVideoUploader):
     upload_url = TIKTOK_UPLOAD_URL
     upload_entry_selector = TIKTOK_UPLOAD_ENTRY_SELECTOR
 
+    #: Last AI disclosure outcome; ``not_requested`` until a run applies options.
+    ai_outcome: TiktokAiOutcome | None = None
+
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
             "TikTok",
@@ -1399,6 +1451,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         control interaction, not even a read.
         """
         options = getattr(self, "options", None)
+        self.ai_outcome = TiktokAiOutcome(None, None, AI_NOT_REQUESTED)
         if options is None:
             return
         if (
@@ -1440,10 +1493,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
         if options.aigc is not None:
-            self._require_option_control(
-                controls.aigc, "aigc", options.aigc, url
+            await self._apply_aigc_option(
+                controls.aigc, options.aigc, page=page, url=url
             )
-            await self._set_aigc_option(controls.aigc, options.aigc, page=page, url=url)
         if self._brand_requested():
             await self._apply_brand_options(controls, page=page, url=url)
 
@@ -1465,6 +1517,49 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
 
+    def _record_ai_outcome(self, outcome: TiktokAiOutcome) -> None:
+        """Store and print the AI field outcome; never replace the summary."""
+        self.ai_outcome = outcome
+        print(format_ai_outcome(outcome))
+
+    async def _apply_aigc_option(
+        self,
+        control: TiktokOptionControl | None,
+        requested: bool,
+        *,
+        page,
+        url: str,
+    ) -> None:
+        if control is None:
+            # ``--aigc`` without the entry cannot be verified: stop.  An
+            # explicit ``--no-aigc`` treats a genuinely absent entry as the
+            # platform default (contract 04), but the final value stays
+            # unknown and is reported as ``applied=null``.
+            outcome = TiktokAiOutcome(
+                requested=requested,
+                applied=None,
+                status=AI_UNSUPPORTED if requested else AI_DEFAULT_OFF,
+                reason=AI_ENTRY_MISSING,
+            )
+            self._record_ai_outcome(outcome)
+            if requested:
+                raise _option_error(
+                    option="aigc",
+                    stage="resolve",
+                    requested=requested,
+                    actual="control-not-found",
+                    control=None,
+                    url=url,
+                    candidates=tuple(
+                        label
+                        for label, _ in self._option_candidate_factories(
+                            "aigc"
+                        )
+                    ),
+                )
+            return
+        await self._set_aigc_option(control, requested, page=page, url=url)
+
     async def _set_aigc_option(
         self,
         control: TiktokOptionControl,
@@ -1473,19 +1568,46 @@ class TiktokBaseUploader(BaseVideoUploader):
         page,
         url: str,
     ) -> None:
-        current = await _guarded_state(
-            _read_switch_state,
-            control,
-            option="aigc",
-            stage="read",
-            requested=requested,
-            url=url,
-        )
+        try:
+            current = await _guarded_state(
+                _read_switch_state,
+                control,
+                option="aigc",
+                stage="read",
+                requested=requested,
+                url=url,
+            )
+        except Exception:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=None,
+                    status=AI_MISMATCH,
+                    reason=AI_READ_ERROR,
+                )
+            )
+            raise
         if current == requested:
             # Already satisfied, even when the account-level setting disabled
             # the switch: no click and no dialog.
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=current,
+                    status=AI_SET if requested else AI_DEFAULT_OFF,
+                )
+            )
             return
         if await control.is_disabled():
+            # Visible, disabled and still on the opposite value: the request
+            # cannot be honoured and publishing must stop.
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=current,
+                    status=AI_MISMATCH,
+                )
+            )
             raise _option_error(
                 option="aigc",
                 stage="disabled",
@@ -1495,17 +1617,46 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
         await control.click()  # native-click: manage；控件底座内部走 Humanizer
-        if requested:
-            await self._confirm_aigc_turn_on(page)
-        actual = await _guarded_state(
-            _read_switch_state,
-            control,
-            option="aigc",
-            stage="readback",
-            requested=requested,
-            url=url,
-        )
+        try:
+            if requested:
+                await self._confirm_aigc_turn_on(page)
+        except Exception:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=None,
+                    status=AI_MISMATCH,
+                    reason=AI_DIALOG_ERROR,
+                )
+            )
+            raise
+        try:
+            actual = await _guarded_state(
+                _read_switch_state,
+                control,
+                option="aigc",
+                stage="readback",
+                requested=requested,
+                url=url,
+            )
+        except Exception:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=None,
+                    status=AI_MISMATCH,
+                    reason=AI_READ_ERROR,
+                )
+            )
+            raise
         if actual != requested:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=actual,
+                    status=AI_MISMATCH,
+                )
+            )
             raise _option_error(
                 option="aigc",
                 stage="readback",
@@ -1514,6 +1665,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 control=control,
                 url=url,
             )
+        self._record_ai_outcome(
+            TiktokAiOutcome(
+                requested=requested,
+                applied=actual,
+                status=AI_SET,
+            )
+        )
 
     async def _confirm_aigc_turn_on(self, page) -> None:
         """Click the first-run ``Labeling AI-generated content`` -> ``Turn on``.
@@ -1993,6 +2151,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 else:
                     resolved[name] = control
 
+            # The AI entry is decided by ``_apply_aigc_option``: missing is
+            # fatal for ``--aigc`` and a ``default_off/entry_missing`` fallback
+            # for ``--no-aigc``.  It must not be aggregated into the generic
+            # control-not-found error here.
+            still_missing = [
+                name for name in still_missing if name != "aigc"
+            ]
             if still_missing:
                 url = _page_url(page)
                 details = []

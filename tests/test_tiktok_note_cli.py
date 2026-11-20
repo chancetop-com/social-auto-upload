@@ -1219,9 +1219,18 @@ class UploadNoteMetadataTests(unittest.TestCase):
 
 
 class _FakeToggle:
-    def __init__(self, checked: bool, *, click_toggles: bool = True) -> None:
+    def __init__(
+        self,
+        checked: bool,
+        *,
+        click_toggles: bool = True,
+        disabled: bool = False,
+        unreadable: bool = False,
+    ) -> None:
         self.checked = checked
         self.click_toggles = click_toggles
+        self.disabled = disabled
+        self.unreadable = unreadable
         self.checked_reads = 0
         self.disabled_reads = 0
         self.click_calls = 0
@@ -1229,11 +1238,13 @@ class _FakeToggle:
 
     async def is_checked(self) -> bool:
         self.checked_reads += 1
+        if self.unreadable:
+            raise RuntimeError("locator detached while reading the state")
         return self.checked
 
     async def is_disabled(self) -> bool:
         self.disabled_reads += 1
-        return False
+        return self.disabled
 
     async def click(self) -> None:
         self.click_calls += 1
@@ -1242,6 +1253,8 @@ class _FakeToggle:
 
     async def get_attribute(self, name: str) -> str | None:
         if name == "aria-checked":
+            if self.unreadable:
+                return None
             return "true" if self.checked else "false"
         return None
 
@@ -1341,6 +1354,258 @@ class UploadNoteOptionTests(unittest.TestCase):
         resolver = AsyncMock(return_value=controls)
         note.resolve_option_controls = resolver
         return resolver
+
+    def _run_option_cli(self, page, controls, extra_args):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "cover.png"
+            image.write_bytes(b"x")
+            session, session_cm, factory = _fake_session(_StudioContext(page))
+            with (
+                patch.object(
+                    tk_main, "TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS", 0
+                ),
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    TiktokNote,
+                    "resolve_option_controls",
+                    new=AsyncMock(return_value=controls),
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-note",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--images",
+                        str(image),
+                        *extra_args,
+                    ]
+                )
+        return code, out, err, page, session_cm
+
+    def test_cli_no_aigc_missing_entry_reaches_no_publish_stop(self):
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=None),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=default_off", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=yes", out)
+        self.assertIn("素材已上传，发布前检查已通过；已停止，未点击发布按钮。", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_no_aigc_disabled_and_still_on_exits_1_without_publish(self):
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=_FakeToggle(True, disabled=True)),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("applied=true", out)
+        self.assertIn("status=mismatch", out)
+        self.assertIn("continue=no", out)
+        self.assertIn("aigc", err)
+        self.assertIn("stage=disabled", err)
+        self.assertFalse(page.publish_clicked)
+        self.assertNotIn("素材已上传", out)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_no_aigc_visible_but_unreadable_exits_1_without_publish(self):
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=_FakeToggle(False, unreadable=True)),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=mismatch", out)
+        self.assertIn("reason=read_error", out)
+        self.assertIn("continue=no", out)
+        self.assertIn("aigc", err)
+        self.assertIn("stage=read", err)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_no_aigc_on_to_off_reports_set_and_stops_before_publish(self):
+        page = _StudioPage()
+        aigc = _FakeToggle(True)
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=aigc),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=false", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+        self.assertIn("素材已上传，发布前检查已通过；已停止，未点击发布按钮。", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_aigc_omitted_preserves_preset_and_reports_not_requested(self):
+        aigc = _FakeToggle(True)
+        note = self._note(TiktokPublishOptions(allow_comments=False))
+        self._install(
+            note,
+            _note_controls(comments=_FakeToggle(True), aigc=aigc),
+        )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.checked_reads, 0)
+        self.assertEqual(aigc.disabled_reads, 0)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(note.ai_outcome.requested)
+        self.assertEqual(note.ai_outcome.status, "not_requested")
+        self.assertEqual(out.getvalue(), "")
+
+    def test_no_aigc_missing_entry_continues_as_default_off(self):
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=None))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertEqual(note.ai_outcome.requested, False)
+        self.assertIsNone(note.ai_outcome.applied)
+        self.assertEqual(note.ai_outcome.status, "default_off")
+        self.assertEqual(note.ai_outcome.reason, "entry_missing")
+        line = out.getvalue()
+        self.assertIn("requested=false", line)
+        self.assertIn("applied=null", line)
+        self.assertIn("status=default_off", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=yes", line)
+
+    def test_no_aigc_already_off_reports_default_off_without_click(self):
+        aigc = _FakeToggle(False)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(note.ai_outcome.applied, False)
+        self.assertEqual(note.ai_outcome.status, "default_off")
+        self.assertIsNone(note.ai_outcome.reason)
+        line = out.getvalue()
+        self.assertIn("applied=false", line)
+        self.assertIn("status=default_off", line)
+        self.assertIn("continue=yes", line)
+
+    def test_no_aigc_on_to_off_reports_set(self):
+        aigc = _FakeToggle(True)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(note.ai_outcome.applied, False)
+        self.assertEqual(note.ai_outcome.status, "set")
+        line = out.getvalue()
+        self.assertIn("requested=false", line)
+        self.assertIn("applied=false", line)
+        self.assertIn("status=set", line)
+        self.assertIn("continue=yes", line)
+
+    def test_no_aigc_readback_still_on_fails_mismatch(self):
+        aigc = _FakeToggle(True, click_toggles=False)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertIn("stage=readback", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(note.ai_outcome.applied, True)
+        self.assertEqual(note.ai_outcome.status, "mismatch")
+        self.assertIn("continue=no", out.getvalue())
+
+    def test_no_aigc_disabled_and_still_on_fails_mismatch(self):
+        aigc = _FakeToggle(True, disabled=True)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertIn("stage=disabled", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(note.ai_outcome.applied, True)
+        self.assertEqual(note.ai_outcome.status, "mismatch")
+        line = out.getvalue()
+        self.assertIn("applied=true", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("continue=no", line)
+
+    def test_no_aigc_visible_but_unreadable_fails_mismatch(self):
+        aigc = _FakeToggle(False, unreadable=True)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertIn("stage=read", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(note.ai_outcome.applied)
+        self.assertEqual(note.ai_outcome.status, "mismatch")
+        self.assertEqual(note.ai_outcome.reason, "read_error")
+        line = out.getvalue()
+        self.assertIn("applied=null", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=read_error", line)
+        self.assertIn("continue=no", line)
 
     def test_privacy_comments_aigc_and_brand_are_applied_and_read_back(self):
         privacy = _FakePrivacy("Everyone", ["Everyone", "Friends", "Only you"])
@@ -1448,6 +1713,11 @@ class UploadNoteOptionTests(unittest.TestCase):
         self.assertNotIn("submitted", out)
         self.assertIn("aigc", err)
         self.assertIn("control-not-found", err)
+        self.assertIn("requested=true", out)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=unsupported", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=no", out)
         self.assertEqual(session_cm.exit_calls, 1)
 
 
