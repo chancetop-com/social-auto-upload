@@ -1,6 +1,7 @@
 # 24: 小红书与 Rednote 在配文原位关联话题
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 21
 
 ## What to build

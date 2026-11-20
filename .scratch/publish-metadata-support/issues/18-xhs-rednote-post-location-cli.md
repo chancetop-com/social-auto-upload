@@ -1,6 +1,7 @@
 # 18: 小红书与 Rednote 按名称设置帖子地点
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build

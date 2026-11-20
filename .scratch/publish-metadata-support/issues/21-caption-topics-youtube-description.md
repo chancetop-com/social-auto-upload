@@ -1,6 +1,7 @@
 # 21: 从公开配文识别话题，先接通 YouTube 简介
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build

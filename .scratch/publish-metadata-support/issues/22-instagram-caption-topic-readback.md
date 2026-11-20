@@ -1,6 +1,7 @@
 # 22: Instagram 核对完整配文并报告逐词结果
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 21
 
 ## What to build

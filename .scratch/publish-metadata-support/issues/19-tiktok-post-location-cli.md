@@ -1,6 +1,7 @@
 # 19: TikTok 为视频与 Photos 设置帖子地点
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build
