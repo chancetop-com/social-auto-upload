@@ -77,6 +77,14 @@ def _add_publish_option_flags(parser, *, include_reuse: bool) -> None:
         ),
     )
     parser.add_argument(
+        "--location",
+        default=None,
+        help=(
+            "Set the post location by exact name (case-insensitive, whitespace "
+            "collapsed; first same-name candidate); omit to leave the page default"
+        ),
+    )
+    parser.add_argument(
         "--no-comments",
         action="store_true",
         help="Turn off Allow comments; omit to leave the page default",
@@ -252,12 +260,13 @@ class TiktokVideoUploadRequest:
 def _build_publish_options(args) -> TiktokPublishOptions | None:
     """Map CLI flags to the uploader's tri-state options.
 
-    Every ``None`` means "do not touch the page default".  When all six are
+    Every ``None`` means "do not touch the page default".  When all seven are
     ``None`` the legacy code path stays genuinely untouched (``options=None``).
     Absent brand flags stay ``None``; the uploader normalizes the other brand
     checkbox to an explicit ``False`` only when a brand disclosure is requested.
     """
     privacy = getattr(args, "privacy", None) or None
+    location = getattr(args, "location", None)
     allow_comments = False if getattr(args, "no_comments", False) else None
     allow_reuse = False if getattr(args, "disable_reuse", False) else None
     aigc = getattr(args, "aigc", None)
@@ -265,6 +274,7 @@ def _build_publish_options(args) -> TiktokPublishOptions | None:
     branded_content = getattr(args, "branded_content", None)
     if (
         privacy is None
+        and location is None
         and allow_comments is None
         and allow_reuse is None
         and aigc is None
@@ -274,12 +284,26 @@ def _build_publish_options(args) -> TiktokPublishOptions | None:
         return None
     return TiktokPublishOptions(
         privacy=privacy,
+        location=location,
         allow_comments=allow_comments,
         allow_reuse=allow_reuse,
         aigc=aigc,
         your_brand=your_brand,
         branded_content=branded_content,
     )
+
+
+def _validate_location(args) -> None:
+    """Reject an explicit empty/whitespace location before any browser work.
+
+    ``None`` means "leave the page default untouched"; argparse cannot tell
+    ``--location ""`` from an omitted flag, so this is a runtime usage error.
+    """
+    location = getattr(args, "location", None)
+    if location is not None and not location.strip():
+        raise UsageError(
+            "--location 不能为空或纯空白：省略该参数以保留页面原值。"
+        )
 
 
 def _validate_branded_content_privacy(args) -> None:
@@ -496,6 +520,7 @@ async def run(args):
         return run_reset_profile(args)
     # Reject impossible option combinations before resolving the Profile or
     # touching any browser/session state (exit 2).
+    _validate_location(args)
     _validate_branded_content_privacy(args)
 
     note_inputs = None
