@@ -833,6 +833,8 @@ class UploadNoteCliTests(unittest.TestCase):
                         "--no-comments",
                         "--no-aigc",
                         "--your-brand",
+                        "--location",
+                        "  London   Eye ",
                     ]
                 )
 
@@ -852,6 +854,7 @@ class UploadNoteCliTests(unittest.TestCase):
                 aigc=False,
                 your_brand=True,
                 branded_content=None,
+                location="  London   Eye ",
             ),
         )
         self.assertIsNone(request.options.allow_reuse)

@@ -2573,6 +2573,15 @@ class TiktokOptionCliFlowTests(unittest.TestCase):
         self.assertIsNone(request.options.your_brand)
         self.assertIsNone(request.options.branded_content)
 
+    def test_cli_location_reaches_the_request(self):
+        code, _, _, builder = self._run_upload(
+            ["--location", "  London   Eye "]
+        )
+        self.assertEqual(code, 0)
+        request = builder.call_args.args[0]
+        self.assertEqual(request.options.location, "  London   Eye ")
+        self.assertIsNone(request.options.aigc)
+
     def test_cli_aigc_missing_control_exits_1_without_publish_click(self):
         base = _PublishBase()
         app = _uploader(TiktokPublishOptions(aigc=True))
