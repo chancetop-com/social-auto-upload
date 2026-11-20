@@ -1,6 +1,7 @@
 # 16: TikTok 区分 AI 开关已关、缺失和读值失败
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build
