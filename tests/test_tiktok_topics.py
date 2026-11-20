@@ -655,6 +655,46 @@ class TiktokInlineTopicTests(unittest.TestCase):
         success.assert_not_called()
         uploader.click_publish.assert_not_awaited()
 
+    def test_caption_damage_never_reaches_the_publish_step(self):
+        cases = {
+            "swallowed": {"swallow": 2},
+            "extra": {"extra": " #extra"},
+            "misplaced": {
+                "transform": lambda env: setattr(
+                    env, "buffer", env.buffer.replace("Today ", "", 1) + "Today "
+                )
+            },
+            "wrong-topic": {"wrong_mention": "#coffeecreamer"},
+        }
+        for label, kwargs in cases.items():
+            with self.subTest(case=label):
+                env = TopicEnv()
+                env.add_suggestion("coffee", **kwargs)
+                caption = "Today #coffee,"
+                app = _video(env, caption)
+                app.click_publish = AsyncMock()
+                for name in (
+                    "open_upload_page",
+                    "attach_media",
+                    "wait_media_ready",
+                    "apply_options",
+                    "apply_cover",
+                    "apply_schedule",
+                ):
+                    setattr(app, name, AsyncMock())
+
+                with patch.dict(os.environ, {"HUMANIZE": "0"}), redirect_stdout(
+                    io.StringIO()
+                ):
+                    with self.assertRaises(RuntimeError):
+                        asyncio.run(
+                            app._upload_on_page(
+                                env.page, managed=False, budget=None
+                            )
+                        )
+
+                app.click_publish.assert_not_awaited()
+
     def test_no_publish_stops_after_topic_readback(self):
         env = TopicEnv()
         env.add_suggestion("coffee")
