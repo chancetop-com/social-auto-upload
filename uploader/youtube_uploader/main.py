@@ -68,6 +68,14 @@ AUTOCOMPLETE_VISIBLE = (
 HASHTAG_CANDIDATE_TIMEOUT_MS = 1500
 #: 一段 `#` 话题：`#` 后到空白 / 下一个 `#` 之前。
 _HASHTAG_RE = re.compile(r"#[^\s#]+")
+#: YouTube 简介整帖硬限制（平台文档口径：5000 字符）。
+YOUTUBE_DESCRIPTION_MAX_LENGTH = 5000
+#: 简介字段附近的整帖错误提示。选择器来自受控页面；真实账号界面未实测。
+YOUTUBE_DESCRIPTION_ERROR = (
+    "#description-error:visible, "
+    "#description-textarea .error:visible, "
+    "ytcp-form-input-container:has(#description-textarea) .error-message:visible"
+)
 
 # Historical managed-session hints are retained for identical ignored-option logs.
 # Local sessions use local_context_kwargs() and the shared native browser resolver.
@@ -266,6 +274,58 @@ def _normalise_text(text: str, *, multiline: bool) -> str:
     return value.replace("\n", " ")
 
 
+def _first_difference(expected: str, actual: str) -> int:
+    """Return the first differing code-point offset (or the shorter length)."""
+    for offset, (want, got) in enumerate(zip(expected, actual)):
+        if want != got:
+            return offset
+    return min(len(expected), len(actual))
+
+
+def _context(text: str, offset: int, radius: int = 12) -> str:
+    return text[max(0, offset - radius):offset + radius]
+
+
+def _readback_error(label: str, expected: str, actual: str) -> RuntimeError:
+    offset = _first_difference(expected, actual)
+    return RuntimeError(
+        f"YouTube {label}读回不一致：首处差异偏移 {offset}；"
+        f"期望 {_context(expected, offset)!r}，实际 {_context(actual, offset)!r}"
+        f"（期望长度 {len(expected)}，实际长度 {len(actual)}）；未点击发布"
+    )
+
+
+async def _read_editable(page: Page, selector: str, *, multiline: bool) -> str:
+    raw = await page.locator(selector).first.inner_text()
+    return _normalise_text(raw, multiline=multiline)
+
+
+async def _verify_editable(
+    page: Page,
+    selector: str,
+    expected: str,
+    *,
+    label: str,
+    multiline: bool,
+) -> None:
+    """Compare the typed field's page value with the same normalization as the writer."""
+    actual = await _read_editable(page, selector, multiline=multiline)
+    if actual != expected:
+        raise _readback_error(label, expected, actual)
+
+
+async def _description_limit_message(page: Page) -> str | None:
+    """Return a visible Studio description/post hard-limit message, if any."""
+    error = page.locator(YOUTUBE_DESCRIPTION_ERROR)
+    if await error.count() == 0:
+        return None
+    try:
+        message = (await error.first.inner_text()).strip()
+    except Exception:
+        message = ""
+    return message or "页面显示简介长度错误"
+
+
 async def _select_hashtag_candidate(
     page: Page,
     humanizer: Humanizer,
@@ -327,6 +387,7 @@ async def _fill_editable(
     humanizer: Humanizer,
     *,
     multiline: bool = False,
+    allow_hashtags: bool = True,
 ):
     """逐字填 YouTube Studio 的 contenteditable 富文本框（标题/简介）。
 
@@ -335,9 +396,10 @@ async def _fill_editable(
     1. ``humanizer.click`` 聚焦 → ``ControlOrMeta+A`` → ``Delete`` 清空；
     2. 逐字 ``type_text``：ASCII（含 ``#``）走真实按键，中文/emoji 走
        ``insert_text``；
-    3. 每段 ``#tag`` 后等 ``ytcp-hashtag-autocomplete`` 候选项，按文本**全等**
-       点选；等不到 / 没有全等项 / 点选失败 → 保留纯文本、Escape 收起浮层，
-       继续输入剩余内容；
+    3. ``allow_hashtags`` 为真时，每段 ``#tag`` 后等 ``ytcp-hashtag-autocomplete``
+       候选项，按文本**全等**点选；等不到 / 没有全等项 / 点选失败 → 保留纯文本、
+       Escape 收起浮层，继续输入剩余内容。标题必须传 ``False``：候选点选可能
+       改写标题，标题只保留自己的原文；
     4. 收尾 ``_dismiss_autocomplete``，避免浮层盖住“继续/发布”。
 
     旧 docstring 的「``#`` 会让浮层卡死，所以只能一次性 fill」结论**作废**：
@@ -351,7 +413,10 @@ async def _fill_editable(
     await humanizer.press("ControlOrMeta+A")
     await humanizer.press("Delete")
     if value:
-        await _type_with_hashtags(page, humanizer, value)
+        if allow_hashtags:
+            await _type_with_hashtags(page, humanizer, value)
+        else:
+            await humanizer.type_text(value)
     await page.wait_for_timeout(400)
     await _dismiss_autocomplete(page, humanizer)
 
@@ -540,19 +605,45 @@ class YouTubeVideo(BaseVideoUploader):
             state="visible", timeout=self.publish_budget.clamp_ms(120000)
         )
 
-        # 3) 标题
+        # 3) 标题：独立字段，绝不走 # 补全（候选点选会改写标题）；写入后回读原文。
         youtube_logger.info(_msg("✍️", "填写标题"))
-        await _fill_editable(page, "#title-textarea #textbox", self.title[:100], humanizer)
+        title_value = _normalise_text(self.title[:100], multiline=False)
+        await _fill_editable(
+            page, "#title-textarea #textbox", title_value, humanizer,
+            allow_hashtags=False,
+        )
+        await _verify_editable(
+            page, "#title-textarea #textbox", title_value,
+            label="标题", multiline=False,
+        )
 
-        # 4) 简介
-        if self.description.strip():
+        # 4) 简介：公开配文；话题只从这里识别，标题中的 # 不计入。
+        description_value = _normalise_text(self.description, multiline=True)
+        if len(description_value) > YOUTUBE_DESCRIPTION_MAX_LENGTH:
+            raise RuntimeError(
+                f"YouTube 简介超出整帖硬限制（{len(description_value)} > "
+                f"{YOUTUBE_DESCRIPTION_MAX_LENGTH} 字符）；未点击发布"
+            )
+        if description_value.strip():
             youtube_logger.info(_msg("✍️", "填写简介"))
             await _fill_editable(
                 page,
                 "#description-textarea #textbox",
-                self.description,
+                description_value,
                 humanizer,
                 multiline=True,
+            )
+            await _verify_editable(
+                page,
+                "#description-textarea #textbox",
+                description_value,
+                label="简介",
+                multiline=True,
+            )
+        limit_message = await _description_limit_message(page)
+        if limit_message:
+            raise RuntimeError(
+                f"YouTube 简介触及整帖硬限制：{limit_message}；未点击发布"
             )
 
         # 5) 封面（处理到一定进度才允许传，失败不致命）
