@@ -410,6 +410,7 @@ async def upload_rednote_video(
     await app.main()
     request.declaration_report = getattr(app, "declaration_report", None)
     request.location_report = getattr(app, "location_report", None)
+    request.topic_results = getattr(app, "topic_results", None)
     return None
 
 
@@ -443,6 +444,7 @@ async def upload_rednote_note(
     await app.main()
     request.declaration_report = getattr(app, "declaration_report", None)
     request.location_report = getattr(app, "location_report", None)
+    request.topic_results = getattr(app, "topic_results", None)
     return None
 
 

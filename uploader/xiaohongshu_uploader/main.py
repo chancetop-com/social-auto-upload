@@ -51,7 +51,7 @@ from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
-from utils.errors import LoginRequiredError
+from utils.errors import LocationVerificationError, LoginRequiredError
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
 from utils.text_validation import validate_single_line
@@ -65,7 +65,6 @@ from utils.login_qrcode import save_data_url_image
 from utils.log import xiaohongshu_logger
 from utils.post_location import LocationReport
 from utils.post_location import LocationRow
-from utils.post_location import LocationVerificationError
 from utils.post_location import match_eligibility_notice
 from utils.post_location import no_match_reason
 from utils.post_location import normalise_location_name
@@ -1119,7 +1118,7 @@ async def _clear_known_overlays(
 
 
 def format_tag_cap_warning(tags) -> str:
-    """标签超限的唯一文案：CLI 与上传器校验期共用（spec §3 U7）。"""
+    """标签超限的唯一文案：仅直接 Python API 调用（CLI 已不传 tags）。"""
     items = list(tags or [])
     dropped = items[XHS_MAX_TAGS:]
     return (

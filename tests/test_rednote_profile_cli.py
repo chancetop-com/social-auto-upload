@@ -203,6 +203,54 @@ class RednoteProfileCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assert_editor_stopped(page, media, 'Profile note', 'Note body', out)
 
+    def test_local_mode_prints_per_topic_lines_before_the_success_summary(self):
+        from tests.fakes_clock import FakeClock
+        from tests.test_xhs_submit import _note_page, _video_page
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        media = self.root / 'media.mp4'
+        image = self.root / 'image.png'
+        media.write_bytes(b'media')
+        image.write_bytes(b'image')
+        caption = '今天 #咖啡，重复 #咖啡。'
+        for action, flags, body_flag in [
+            ('upload-video', ['--file', str(media)], '--desc'),
+            ('upload-note', ['--images', str(image)], '--note'),
+        ]:
+            with self.subTest(action=action):
+                page = (
+                    _video_page() if action == 'upload-video' else _note_page()
+                )
+                self.prepare_editor(page)
+                env = prepare_topic_cli_page(page)
+                self.context.created_pages = []
+                with FakeClock().patch(rednote):
+                    code, out, err = self.cli(
+                        action,
+                        '--account',
+                        'creator',
+                        '--title',
+                        'Title',
+                        '--no-publish',
+                        body_flag,
+                        caption,
+                        *flags,
+                    )
+                self.assertEqual(code, 0, err)
+                lines = out.splitlines()
+                self.assertEqual(
+                    [line for line in lines if '配文话题' in line],
+                    [
+                        'Rednote 配文话题 1/2：#咖啡 已关联',
+                        'Rednote 配文话题 2/2：#咖啡 已关联',
+                    ],
+                )
+                self.assertIn(
+                    '素材已上传，发布前检查已通过；已停止，未点击发布按钮。',
+                    lines,
+                )
+                self.assertEqual(env.body.text, caption + '\n')
+                self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+
     def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):
         from tests.test_xhs_submit import _note_page
         media = self.root / 'image.png'

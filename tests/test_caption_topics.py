@@ -141,6 +141,30 @@ def test_text_results_are_empty_when_the_caption_has_no_topics():
     assert text_results(parse_caption_topics("没有话题")) == ()
 
 
+def test_topic_result_as_dict_is_the_shared_result_schema():
+    report = parse_caption_topics("正文 #a 与 #咖啡")
+    results = text_results(report, reason="配文全文逐字回读一致")
+
+    assert results[0].as_dict() == {
+        "index": 1,
+        "text": "#a",
+        "name": "a",
+        "start": 3,
+        "end": 5,
+        "status": STATUS_TEXT,
+        "reason": "配文全文逐字回读一致",
+    }
+    assert results[1].as_dict() == {
+        "index": 2,
+        "text": "#咖啡",
+        "name": "咖啡",
+        "start": 8,
+        "end": 11,
+        "status": STATUS_TEXT,
+        "reason": "配文全文逐字回读一致",
+    }
+
+
 def test_caption_difference_names_the_first_differing_character():
     assert (
         describe_caption_difference("今天 #咖啡，结束", "今天 #咖啡 结束")

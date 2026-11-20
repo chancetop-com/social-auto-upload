@@ -774,6 +774,95 @@ class TiktokInlineTopicTests(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertEqual(uploader.topic_outcomes, [])
 
+    def test_local_cli_prints_per_word_topic_lines_before_the_summary(self):
+        env = TopicEnv()
+        env.add_suggestion("coffee")
+        caption = "Today #coffee,"
+        app = _video(env, caption)
+        app.no_publish = True
+        app.click_publish = AsyncMock()
+        for name in (
+            "open_upload_page",
+            "attach_media",
+            "wait_media_ready",
+            "apply_options",
+            "apply_cover",
+            "apply_schedule",
+            "wait_publish_ready",
+        ):
+            setattr(app, name, AsyncMock())
+
+        async def upload(_playwright=None, session=None):
+            await app._upload_on_page(env.page, managed=False, budget=None)
+
+        app.upload = upload
+        builder = MagicMock(return_value=app)
+        session_cm = _AsyncCM(SimpleNamespace(context=object()))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = Path(tmp_dir) / "demo.mp4"
+            video.write_bytes(b"video")
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "HOME": tmp_dir,
+                        "HUMANIZE": "0",
+                        "MLX_API_TOKEN": "",
+                        "ADSPOWER_API_KEY": "",
+                    },
+                ),
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(
+                    tiktok_command,
+                    "local_browser_session",
+                    new=MagicMock(return_value=session_cm),
+                ),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_video_uploader", new=builder
+                ),
+            ):
+                out, err = io.StringIO(), io.StringIO()
+                with redirect_stdout(out):
+                    from contextlib import redirect_stderr
+
+                    with redirect_stderr(err):
+                        code = sau_cli.main(
+                            [
+                                "tiktok",
+                                "upload-video",
+                                "--account",
+                                "creator",
+                                "--file",
+                                str(video),
+                                "--title",
+                                caption,
+                                "--no-publish",
+                            ]
+                        )
+                out = out.getvalue()
+                err = err.getvalue()
+
+        self.assertEqual(code, 0, err)
+        self.assertIn(
+            "TikTok 配文话题: index=1 text='#coffee' status=linked "
+            "reason=- continue=yes",
+            out,
+        )
+        self.assertIn(
+            "素材已上传，发布前检查已通过；已停止，未点击发布按钮。", out
+        )
+        app.click_publish.assert_not_awaited()
+
     def test_cli_topic_mismatch_exits_1_with_zero_publish_clicks(self):
         env = TopicEnv()
         env.add_suggestion("coffee", wrong_mention="#coffeecreamer")

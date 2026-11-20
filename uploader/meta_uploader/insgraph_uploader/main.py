@@ -1042,9 +1042,15 @@ class InstagramUploader:
         presence = await control.resolve()
         if presence != PRESENT:
             applied = None
-            # 显式关闭时，可见但禁用的开关仍可能读到开启；必须按实际回读判定，
-            # 不能因为“不可用”就一律记 default_off 放行（ticket 17）。
-            if presence == INELIGIBLE and kind == 'toggle' and requested is False:
+            # AI 声明（ticket 17）显式关闭时，可见但禁用的开关仍可能读到开启；
+            # 必须按实际回读判定，不能因为“不可用”就一律记 default_off 放行。
+            # 评论关闭沿用旧契约：入口缺失/禁用即视为已满足，不读取开关。
+            if (
+                key == 'ai_generated'
+                and presence == INELIGIBLE
+                and kind == 'toggle'
+                and requested is False
+            ):
                 try:
                     applied = await control.read()
                 except Exception as error:
@@ -1080,6 +1086,11 @@ class InstagramUploader:
             return
         current = await control.read()
         if kind == 'toggle' and current is None:
+            if key == 'comments' and requested is False:
+                # 评论关闭不把“读不到”升级成失败：沿用旧行为记 default_off，
+                # 且不盲点开关（ticket 17 的严格规则只针对 AI 声明）。
+                self._record_option(key, requested, None, DEFAULT_OFF)
+                return
             # 可见但读不到状态：不盲点开关，直接按 mismatch 停在 Share 前。
             raise OptionMismatchError(
                 f'Instagram {key} 开关可见，但无法回读当前值',

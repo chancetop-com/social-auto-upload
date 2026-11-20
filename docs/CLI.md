@@ -736,7 +736,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 | 参数 | 命令 | 行为 |
 |---|---|---|
 | `--location TEXT` | `upload-video`、`upload-note` | 在 Instagram 的联想列表里按候选**名称**选择：去掉首尾空白、合并连续空白、忽略大小写；候选行若名称/地址分行，只比较第一行名称，点页面顺序第一个同名行并记录该行可见地址。要求列表/行收起且地点框回读所选名称；无候选、只有近似候选、入口缺失、页面明确资格限制、列表未收起或回读为空/不符均退出 `1`、不点击 Share，结果记录原因 |
-| `--no-comments` | `upload-video`、`upload-note` | 请求关闭评论；入口不存在（`default_off`）或禁用但回读已关闭时可继续；可见但禁用且仍为开启、或无法回读时退出 `1` |
+| `--no-comments` | `upload-video`、`upload-note` | 请求关闭评论；入口不存在或不可用（含可见但禁用）视为已满足（`default_off`，退出 `0`），不读取开关；开关可见但无法回读时同样记 `default_off` 并继续，不盲点 |
 | `--ai-generated` | `upload-video`、`upload-note` | 请求打开 AI 生成标识；入口缺失、不可用或回读仍为关闭时退出 `1`，不点击 Share |
 | `--no-ai-generated` | `upload-video`、`upload-note` | 请求关闭 AI 生成标识；可见开关已关、从开切到关并回读、或确认入口缺失时可继续；可见但禁用且仍为开启、或无法回读时退出 `1` |
 | `--alt-text TEXT` | 仅 `upload-note` | 每张图片一条替代文字，可重复；条数必须为 0 或正好等于 `--images` 张数，每条 1–1000 字符，不会截断 |

@@ -304,6 +304,53 @@ class InlineTopicEnv:
         self.menu.clear()
 
 
+class FocusAwareCaptionBody(CaptionBody):
+    """Caption body that only accepts typed text while focused.
+
+    The local-mode CLI fills the title first and the caption second through the
+    same keyboard double.  Track the caption editor's real focus so the title
+    cannot leak into the caption readback.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.focused = False
+
+    async def focus(self, **kwargs) -> None:
+        await super().focus(**kwargs)
+        self.focused = True
+
+    def insert_text(self, value: str) -> None:
+        if self.focused:
+            super().insert_text(value)
+
+
+def prepare_topic_cli_page(page: RecordingPage) -> InlineTopicEnv:
+    """Script a local-mode CLI page with the inline-topic editor doubles."""
+    env = InlineTopicEnv()
+    env.body = FocusAwareCaptionBody()
+    page._selectors.update(
+        {
+            TOPIC_CONTAINER: env.container,
+            TOPIC_ITEMS: env.menu,
+            TOPIC_READBACK: env.nodes,
+            BODY_EDITOR: env.body,
+            ".feature-guide__btn": FakeLocator("guide", count=0),
+        }
+    )
+    page.keyboard = env.keyboard
+
+    def evaluate(expression, arg=None):
+        if "items.map" in str(expression):
+            return env._snapshot(expression, arg)
+        if "performance.now" in str(expression):
+            return {"since": 10_000}
+        return True
+
+    page._evaluate_handler = evaluate
+    return env
+
+
 class InlineTopicTestBase(TopicTestBase):
     def app_for(self, action: str, caption: str):
         if action == "upload-note":
