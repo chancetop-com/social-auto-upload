@@ -20,7 +20,12 @@ from uploader.xiaohongshu_uploader.main import (
     probe_session,
     xiaohongshu_setup,
 )
-from sau_commands.output import report_ai_declaration, report_location, report_upload_success
+from sau_commands.output import (
+    report_ai_declaration,
+    report_caption_topics,
+    report_location,
+    report_upload_success,
+)
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
@@ -250,6 +255,7 @@ class XiaohongshuVideoUploadRequest:
     local_browser: str | None = None
     declaration_report: dict[str, str | None] | None = None
     location_report: dict[str, str | None] | None = None
+    topic_results: list[dict[str, str | int | None]] | None = None
 
 
 @dataclass(slots=True)
@@ -274,6 +280,7 @@ class XiaohongshuNoteUploadRequest:
     local_browser: str | None = None
     declaration_report: dict[str, str | None] | None = None
     location_report: dict[str, str | None] | None = None
+    topic_results: list[dict[str, str | int | None]] | None = None
 
 
 async def login_xiaohongshu_account(account_name: str, headless=None, local_browser=None) -> dict:
@@ -397,6 +404,7 @@ async def upload_xiaohongshu_video(
                 await app.xiaohongshu_upload_video(session=session)
         request.declaration_report = getattr(app, "declaration_report", None)
         request.location_report = getattr(app, "location_report", None)
+        request.topic_results = getattr(app, "topic_results", None)
         return None
 
     app = _build_video_uploader(request)
@@ -429,6 +437,7 @@ async def upload_xiaohongshu_note(
                 await app.xiaohongshu_upload_note(session=session)
         request.declaration_report = getattr(app, "declaration_report", None)
         request.location_report = getattr(app, "location_report", None)
+        request.topic_results = getattr(app, "topic_results", None)
         return None
 
     app = _build_note_uploader(request)
@@ -530,6 +539,7 @@ async def run(args):
         )
         report_ai_declaration(request)
         report_location(request)
+        report_caption_topics(request, "Xiaohongshu")
         args.post_published = report_upload_success(request, "Xiaohongshu video", request.video_file)
         return 0
 
@@ -562,6 +572,7 @@ async def run(args):
         )
         report_ai_declaration(request)
         report_location(request)
+        report_caption_topics(request, "Xiaohongshu")
         args.post_published = report_upload_success(request, "Xiaohongshu note", f"{len(request.image_files)} images")
         return 0
 

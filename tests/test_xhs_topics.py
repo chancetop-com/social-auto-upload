@@ -17,6 +17,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from types import SimpleNamespace
@@ -27,11 +28,13 @@ import uploader.publish_timeout as publish_timeout
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_clock import FakeClock
 from tests.fakes_xhs_dom import (
+    CaptionBody,
     FakeLocator,
     RecordingKeyboard,
     RecordingLocator,
     RecordingPage,
 )
+from utils.caption_topics import STATUS_LINKED, STATUS_TEXT
 from utils.dom import ElementUnusableError
 
 TOPIC_CONTAINER = "#creator-editor-topic-container"
@@ -135,14 +138,20 @@ class MenuItems(FakeLocator):
 class TopicItem(FakeLocator):
     """One rendered candidate; ``.name`` carries the visible (``#``-prefixed) text."""
 
-    def __init__(self, label: str) -> None:
+    def __init__(self, label: str, *, is_new: bool = False) -> None:
+        children = {".name": FakeLocator(f"topic-name:{label}", text=label)}
+        if is_new:
+            children[".newTopic"] = FakeLocator(
+                f"topic-new:{label}", text="新建话题"
+            )
         super().__init__(
             f"topic-item:{label}",
-            children={".name": FakeLocator(f"topic-name:{label}", text=label)},
+            children=children,
             evaluate_handler=self._evaluate,
             box={"x": 0.0, "y": 0.0, "width": 200.0, "height": 30.0},
         )
         self.label = label
+        self.is_new = is_new
         self.on_click = None
 
     @staticmethod
@@ -215,6 +224,124 @@ class TopicTestBase(unittest.TestCase):
 
     def keyboard_actions(self, env: TopicEnv):
         return list(env.page.keyboard.actions)
+
+
+class InlineKeyboard(RecordingKeyboard):
+    """Types into :class:`CaptionBody` and swaps the candidate list on ``#topic``."""
+
+    def __init__(self, env: "InlineTopicEnv") -> None:
+        super().__init__()
+        self.env = env
+        self.query: str | None = None
+
+    async def insert_text(self, text: str, **kwargs) -> None:
+        await super().insert_text(text, **kwargs)
+        self.env.body.insert_text(text)
+        match = re.fullmatch(r"#([^\s#]+)", text)
+        if match is None:
+            return
+        self.query = match.group(1)
+        rows = self.env.suggestions.get(self.query)
+        if rows is None:
+            rows = [{"label": "#" + self.query}]
+        items = []
+        for row in rows:
+            item = TopicItem(
+                row["label"], is_new=bool(row.get("new", False))
+            )
+            item.on_click = lambda clicked, spec=row: self.env.choose(
+                clicked, spec
+            )
+            items.append(item)
+        self.env.menu.set_items(items)
+
+    async def press(self, key: str, **kwargs) -> None:
+        await super().press(key, **kwargs)
+        if key == "Backspace":
+            self.env.body.backspace()
+        elif key == "Enter":
+            self.env.body.insert_text("\n")
+        elif key == "Escape":
+            self.env.menu.clear()
+
+
+class InlineTopicEnv:
+    """Caption editor + suggestion feed that replaces the typed word with a chip."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.nodes = TopicNodes(self.events)
+        self.menu = MenuItems()
+        self.container = FakeLocator("topic-container", count=1)
+        self.body = CaptionBody()
+        self.suggestions: dict[str, list[dict]] = {}
+        self.page = RecordingPage(
+            selectors={
+                TOPIC_CONTAINER: self.container,
+                TOPIC_ITEMS: self.menu,
+                TOPIC_READBACK: self.nodes,
+                BODY_EDITOR: self.body,
+                ".feature-guide__btn": FakeLocator("guide", count=0),
+            },
+            evaluate_handler=self._snapshot,
+        )
+        self.keyboard = InlineKeyboard(self)
+        self.page.keyboard = self.keyboard
+        self.items: list[TopicItem] = []
+
+    @staticmethod
+    def _snapshot(expression, arg=None):
+        if "items.map" not in expression or arg.get("nameSelector") != ".name":
+            raise AssertionError(f"Unexpected page evaluation: {expression}")
+        return [{"name": item.label, "attached": True} for item in arg["items"]]
+
+    def choose(self, item: TopicItem, spec: dict) -> None:
+        self.events.append("click")
+        self.body.choose(self.keyboard.query or "", spec.get("behaviour", {}))
+        self.nodes.add(
+            spec.get("behaviour", {}).get("name", self.keyboard.query) or ""
+        )
+        self.menu.clear()
+
+
+class InlineTopicTestBase(TopicTestBase):
+    def app_for(self, action: str, caption: str):
+        if action == "upload-note":
+            return xhs_main.XiaoHongShuNote(
+                image_paths=["a.png"],
+                note=caption,
+                tags=[],
+                publish_date=0,
+                account_file="account.json",
+                title="标题",
+            )
+        return xhs_main.XiaoHongShuVideo(
+            title="标题",
+            file_path="demo.mp4",
+            tags=[],
+            publish_date=0,
+            account_file="account.json",
+            desc=caption,
+        )
+
+    def run_fill_desc(self, env: InlineTopicEnv, app, *, budget_seconds=None):
+        clock = FakeClock(start=100.0)
+        with clock.patch(xhs_main, publish_timeout), _fast_humanize():
+            if budget_seconds is not None:
+                budget = app.start_publish_budget()
+                budget.deadline = clock.now + budget_seconds
+            asyncio.run(app.fill_desc(env.page))
+        return clock
+
+    def assert_linked(self, app, env, caption: str, names: list[str]) -> None:
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.anchor_names, names)
+        self.assertEqual(
+            [item["status"] for item in app.topic_results or []],
+            [STATUS_LINKED] * len(names),
+        )
+        self.assertEqual(app.topic_results[0]["text"], "#" + names[0])
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +460,317 @@ class Decision08TopicDegradeTests(TopicTestBase):
             [("insert_text", "#旅行"), ("press", "Space")],
         )
         self.assertAlmostEqual(sum(clock.sleep_calls), 5.0, places=6)
+
+
+class InlineCaptionSelectionTests(InlineTopicTestBase):
+    def _run(self, action: str):
+        caption = "Today #coffee, then #qzx974631sau."
+        env = InlineTopicEnv()
+        env.suggestions = {
+            "coffee": [{"label": "#coffee"}],
+            "qzx974631sau": [{"label": "#qzx974631sau", "new": True}],
+        }
+        app = self.app_for(action, caption)
+
+        self.run_fill_desc(env, app)
+
+        self.assert_linked(
+            app, env, caption, ["coffee", "qzx974631sau"]
+        )
+        self.assertNotIn("\u00a0", env.body.text)
+        self.assertEqual(
+            [item["reason"] for item in app.topic_results], [None, None]
+        )
+        actions = env.page.keyboard.actions
+        self.assertEqual(
+            [action for action in actions if action[0] == "press"],
+            [
+                ("press", "Backspace"),
+                ("press", "ControlOrMeta+A"),
+                ("press", "Delete"),
+                ("press", "Backspace"),
+                ("press", "Backspace"),
+                ("press", "Enter"),
+            ],
+        )
+        self.assertEqual(env.body.readback_calls >= 1, True)
+
+    def test_video_links_ordinary_and_new_topic_candidates_in_place(self):
+        self._run("upload-video")
+
+    def test_note_links_ordinary_and_new_topic_candidates_in_place(self):
+        self._run("upload-note")
+
+
+class InlineCaptionPreservationTests(InlineTopicTestBase):
+    def test_duplicates_punctuation_newlines_and_url_fragments_stay_verbatim(self):
+        caption = (
+            "第一行 #咖啡，紧邻。#咖啡！\n"
+            "链接 https://example.com/#片段 保留\n"
+            "Mixed #Coffee_2 end"
+        )
+        env = InlineTopicEnv()
+        env.suggestions = {
+            "咖啡": [{"label": "#咖啡"}],
+            "Coffee_2": [{"label": "#Coffee_2"}],
+        }
+        app = self.app_for("upload-video", caption)
+
+        self.run_fill_desc(env, app)
+
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.anchor_names, ["咖啡", "咖啡", "Coffee_2"])
+        self.assertEqual(
+            [(item["index"], item["text"]) for item in app.topic_results],
+            [(1, "#咖啡"), (2, "#咖啡"), (3, "#Coffee_2")],
+        )
+        self.assertNotIn("\u00a0", env.body.text)
+        self.assertIn("https://example.com/#片段", env.body.text)
+        typed = [
+            action[1]
+            for action in env.page.keyboard.actions
+            if action[0] == "insert_text"
+        ]
+        self.assertTrue(
+            any("https://example.com/#片段 保留" in value for value in typed)
+        )
+        self.assertTrue(any("Mixed " in value for value in typed))
+        presses = [
+            action[1]
+            for action in env.page.keyboard.actions
+            if action[0] == "press"
+        ]
+        self.assertEqual(presses.count("Enter"), 3)  # two authored newlines + final
+
+    def test_author_authored_nbsp_survives_the_auto_space_handling(self):
+        caption = "#coffee\u00a0next"
+        env = InlineTopicEnv()
+        env.suggestions = {"coffee": [{"label": "#coffee"}]}
+        app = self.app_for("upload-note", caption)
+
+        self.run_fill_desc(env, app)
+
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.text.count("\u00a0"), 1)
+        self.assertEqual(env.body.anchor_names, ["coffee"])
+        self.assertEqual(
+            [item["status"] for item in app.topic_results], [STATUS_LINKED]
+        )
+
+
+class InlineCaptionFallbackTests(InlineTopicTestBase):
+    def test_approximate_only_keeps_the_word_in_place_and_continues(self):
+        caption = "今天 #coffee，结束"
+        env = InlineTopicEnv()
+        env.suggestions = {"coffee": [{"label": "#coffeecreamer"}]}
+        app = self.app_for("upload-video", caption)
+
+        self.run_fill_desc(env, app)
+
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.anchor_names, [])
+        self.assertEqual(
+            app.topic_results,
+            [
+                {
+                    "index": 1,
+                    "name": "coffee",
+                    "text": "#coffee",
+                    "status": STATUS_TEXT,
+                    "reason": "无同名候选",
+                }
+            ],
+        )
+        self.assertEqual(env.events.count("click"), 0)
+        self.assertIn(("press", "Escape"), env.page.keyboard.actions)
+        self.assertNotIn(("press", "Space"), env.page.keyboard.actions)
+
+    def test_eleventh_inline_topic_stays_fully_readable_while_ten_link(self):
+        caption = " ".join(f"#tag{i}" for i in range(12))
+        env = InlineTopicEnv()
+        env.suggestions = {
+            f"tag{i}": [{"label": f"#tag{i}"}] for i in range(12)
+        }
+        app = self.app_for("upload-note", caption)
+
+        self.run_fill_desc(env, app)
+
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.anchor_names, [f"tag{i}" for i in range(10)])
+        self.assertEqual(env.events.count("click"), 10)
+        statuses = [item["status"] for item in app.topic_results]
+        self.assertEqual(statuses, [STATUS_LINKED] * 10 + [STATUS_TEXT] * 2)
+        self.assertEqual(
+            [item["reason"] for item in app.topic_results[-2:]],
+            ["已达可关联上限 10", "已达可关联上限 10"],
+        )
+        # 第 11、12 个词仍在正文里，没有被截断或丢弃。
+        self.assertIn("#tag10", env.body.text)
+        self.assertIn("#tag11", env.body.text)
+        self.assertEqual(len(app.topic_results), 12)
+
+
+class InlineCaptionFailureTests(InlineTopicTestBase):
+    def _run_failure(self, behaviour: dict, *, caption="今天 #coffee，结束"):
+        env = InlineTopicEnv()
+        env.suggestions = {
+            "coffee": [{"label": "#coffee", "behaviour": behaviour}]
+        }
+        app = self.app_for("upload-video", caption)
+        with self.assertRaises(ElementUnusableError) as ctx:
+            self.run_fill_desc(env, app)
+        error = ctx.exception
+        self.assertFalse(error.publish_clicked)
+        self.assertIn("未点击发布", str(error))
+        return error, env
+
+    def test_wrong_topic_selection_stops_with_the_observed_name(self):
+        error, _env = self._run_failure({"name": "coffeecreamer"})
+        self.assertIn("选中的话题与原词不符", error.reason)
+        self.assertIn("期望「#coffee」", error.reason)
+        self.assertIn("实际「#coffeecreamer」", error.reason)
+
+    def test_swallowed_text_stops_with_the_first_difference(self):
+        error, _env = self._run_failure({"mode": "swallow"})
+        self.assertIn("个字符不同", error.reason)
+        self.assertIn("期望全文", error.reason)
+
+    def test_misplaced_topic_stops_with_the_first_difference(self):
+        error, _env = self._run_failure({"mode": "misplace"})
+        self.assertIn("个字符不同", error.reason)
+
+    def test_extra_text_after_selection_stops_with_the_first_difference(self):
+        error, _env = self._run_failure({"mode": "extra"})
+        self.assertIn("个字符不同", error.reason)
+        self.assertIn("EXTRA", error.reason)
+
+    def test_whole_post_hard_limit_stops_before_publish(self):
+        caption = "今天 #coffee，结束"
+        env = InlineTopicEnv()
+        env.suggestions = {"coffee": [{"label": "#coffee"}]}
+        env.page._selectors[xhs_main.XHS_BODY_LENGTH_ERROR_SELECTOR] = FakeLocator(
+            "body-error", count=1
+        )
+        app = self.app_for("upload-note", caption)
+
+        with self.assertRaises(ElementUnusableError) as ctx:
+            self.run_fill_and_limit(env, app)
+
+        self.assertEqual(
+            ctx.exception.reason, "正文超出平台长度上限（长度错误节点存在）"
+        )
+        self.assertFalse(ctx.exception.publish_clicked)
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.anchor_names, ["coffee"])
+
+    def run_fill_and_limit(self, env: InlineTopicEnv, app):
+        clock = FakeClock(start=100.0)
+        with clock.patch(xhs_main, publish_timeout), _fast_humanize():
+            app.start_publish_budget()
+            asyncio.run(app.fill_desc(env.page))
+            asyncio.run(app._assert_body_not_over_limit(env.page))
+        return clock
+
+    def test_publish_chain_stops_at_the_topic_failure_and_never_arms(self):
+        caption = "今天 #coffee，结束"
+        env = InlineTopicEnv()
+        env.suggestions = {
+            "coffee": [{"label": "#coffee", "behaviour": {"mode": "swallow"}}]
+        }
+        app = self.app_for("upload-note", caption)
+        wait_for_arm = AsyncMock()
+
+        async def run():
+            with (
+                patch.object(xhs_main, "_run_dom_quiet_gate", AsyncMock()),
+                patch.object(xhs_main, "_clear_known_overlays", AsyncMock()),
+                patch.object(xhs_main, "_note_upload_gate", AsyncMock()),
+                patch.object(xhs_main, "_check_blocked", AsyncMock()),
+                patch.object(xhs_main, "_wait_for_arm", wait_for_arm),
+                patch.object(app, "fill_title", AsyncMock()),
+                patch.object(
+                    app, "_verify_schedule_before_fire", AsyncMock()
+                ),
+            ):
+                await app.upload_note_content(env.page, mode="local")
+
+        with FakeClock(start=100.0).patch(
+            xhs_main, publish_timeout
+        ), _fast_humanize(), self.assertRaises(ElementUnusableError) as ctx:
+            asyncio.run(run())
+
+        self.assertIn("个字符不同", ctx.exception.reason)
+        self.assertFalse(ctx.exception.publish_clicked)
+        wait_for_arm.assert_not_awaited()
+        self.assertEqual(env.page.mouse.down_count, 0)
+        self.assertEqual(env.page.mouse.up_count, 0)
+
+
+class InlineCaptionEmptyTests(InlineTopicTestBase):
+    def test_omitted_caption_does_not_touch_the_editor(self):
+        env = InlineTopicEnv()
+        app = self.app_for("upload-video", "")
+
+        self.run_fill_desc(env, app)
+
+        self.assertEqual(env.page.keyboard.actions, [])
+        self.assertEqual(env.body.readbacks, [])
+        self.assertIsNone(app.topic_results)
+
+    def test_caption_without_topics_keeps_the_existing_typing_path(self):
+        caption = "今天喝了咖啡，配上栗子蛋糕。"
+        env = InlineTopicEnv()
+        app = self.app_for("upload-note", caption)
+
+        self.run_fill_desc(env, app)
+
+        self.assertEqual(
+            [action for action in env.page.keyboard.actions if action[0] == "insert_text"],
+            [("insert_text", caption)],
+        )
+        self.assertEqual(env.body.readbacks, [])
+        self.assertIsNone(app.topic_results)
+        self.assertEqual(env.body.text, caption + "\n")
+
+
+class InlineCaptionNoPublishTests(InlineTopicTestBase):
+    def test_no_publish_stops_after_topic_readback_and_before_any_click(self):
+        caption = "Today #coffee, then done."
+        env = InlineTopicEnv()
+        env.suggestions = {"coffee": [{"label": "#coffee"}]}
+        app = self.app_for("upload-note", caption)
+        app.no_publish = True
+
+        async def run():
+            with (
+                patch.object(xhs_main, "_run_dom_quiet_gate", AsyncMock()),
+                patch.object(xhs_main, "_clear_known_overlays", AsyncMock()),
+                patch.object(xhs_main, "_note_upload_gate", AsyncMock()),
+                patch.object(xhs_main, "_check_blocked", AsyncMock()),
+                patch.object(xhs_main, "_wait_for_arm", AsyncMock()),
+                patch.object(app, "fill_title", AsyncMock()),
+                patch.object(
+                    app, "_verify_schedule_before_fire", AsyncMock()
+                ),
+            ):
+                await app.upload_note_content(env.page, mode="local")
+
+        with FakeClock(start=100.0).patch(
+            xhs_main, publish_timeout
+        ), _fast_humanize():
+            asyncio.run(run())
+
+        self.assertEqual(env.body.readbacks[-1], caption)
+        self.assertEqual(env.body.anchor_names, ["coffee"])
+        self.assertEqual(
+            [item["status"] for item in app.topic_results], [STATUS_LINKED]
+        )
+        self.assertEqual(env.page.mouse.down_count, 0)
+        self.assertEqual(env.page.mouse.up_count, 0)
 
 
 class Decision08TopicOutcomeTests(TopicTestBase):
@@ -637,6 +1075,98 @@ class Decision08TopicTagCapTests(TopicTestBase):
             if action[0] == "insert_text"
         ]
         self.assertEqual(typed, [f"#{tag}" for tag in tags])
+
+
+class InlineCaptionCliTests(unittest.TestCase):
+    def _args(self, action: str = "upload-video"):
+        return SimpleNamespace(
+            action=action,
+            tags="",
+            file="demo.mp4",
+            images=["a.png"],
+            title="标题",
+            desc="今天 #咖啡，重复 #咖啡。",
+            note="今天 #咖啡，重复 #咖啡。",
+            schedule=None,
+            thumbnail=None,
+            debug=False,
+            headless=True,
+            not_before=None,
+            account="acct",
+            location=None,
+            original=None,
+            content_type=None,
+            repost_source=None,
+            shoot_location=None,
+            shoot_date=None,
+            no_publish=True,
+        )
+
+    def test_per_occurrence_lines_are_distinguishable_from_the_success_summary(self):
+        for action, upload_name in (
+            ("upload-video", "upload_xiaohongshu_video"),
+            ("upload-note", "upload_xiaohongshu_note"),
+        ):
+            with self.subTest(action=action):
+                args = self._args(action)
+
+                async def fake_upload(request, **_kwargs):
+                    request.topic_results = [
+                        {
+                            "index": 1,
+                            "name": "咖啡",
+                            "text": "#咖啡",
+                            "status": STATUS_LINKED,
+                            "reason": None,
+                        },
+                        {
+                            "index": 2,
+                            "name": "咖啡",
+                            "text": "#咖啡",
+                            "status": STATUS_TEXT,
+                            "reason": "无同名候选",
+                        },
+                    ]
+
+                with patch.object(
+                    xhs_command,
+                    "_validate_declarations",
+                    return_value=(None, None, None, None, None),
+                ), patch.object(
+                    xhs_command, "resolve_managed_provider", return_value=None
+                ), patch.object(
+                    xhs_command, "require_local_account"
+                ), patch.object(
+                    xhs_command, "resolve_account_label", return_value="acct"
+                ), patch.object(
+                    xhs_command, "managed_ignored_keys", return_value=()
+                ), patch.object(
+                    xhs_command, upload_name, new=fake_upload
+                ), redirect_stdout(
+                    io.StringIO()
+                ) as out, redirect_stderr(
+                    io.StringIO()
+                ):
+                    code = asyncio.run(xhs_command.run(args))
+
+                self.assertEqual(code, 0)
+                lines = out.getvalue().splitlines()
+                self.assertEqual(
+                    [line for line in lines if "配文话题" in line],
+                    [
+                        "Xiaohongshu 配文话题 1/2：#咖啡 已关联",
+                        "Xiaohongshu 配文话题 2/2：#咖啡 保留文字，无同名候选",
+                    ],
+                )
+                self.assertIn(
+                    "素材已上传，发布前检查已通过；已停止，未点击发布按钮。",
+                    lines,
+                )
+                self.assertIn(
+                    f"Xiaohongshu {'video' if action == 'upload-video' else 'note'} upload: "
+                    f"{'demo.mp4' if action == 'upload-video' else '1 images'}",
+                    lines,
+                )
 
 
 class Decision08TopicTagCapCliTests(unittest.TestCase):
