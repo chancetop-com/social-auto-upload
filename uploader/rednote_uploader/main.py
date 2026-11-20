@@ -331,6 +331,11 @@ REDNOTE_DECLARATION_TRIGGER_CANDIDATES = (
     Candidate(REDNOTE_DECLARATION_CONTAINER_SELECTOR),
 )
 REDNOTE_DECLARATION_OPTION_SELECTOR = ".declaration-drop-down .d-option"
+# 菜单收起断言：从刚点的选项向上找声明弹层（一级/二级菜单共用）。
+REDNOTE_DECLARATION_MENU_XPATH = (
+    "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '),"
+    " ' d-popover ')][1]"
+)
 REDNOTE_DECLARATION_CONFIRM_CANDIDATES = (Candidate(".dialog-footer button.bg-red"),)
 REDNOTE_SOURCE_MODAL_CANDIDATES = (Candidate(".d-modal.self-shooting-contain"),)
 REDNOTE_SHOOT_LOCATION_CANDIDATES = (Candidate(".address-input input"),)
@@ -926,6 +931,21 @@ def _is_creator_url(url: str) -> bool:
 
 def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
+
+
+def _declaration_failure_message(
+    *,
+    content_type: str,
+    requested_label: str,
+    observed: str | None,
+    reason: str,
+) -> str:
+    """发布前声明失败的唯一终端口径：请求 / 终值 / 原因。"""
+    shown = "未读到" if observed is None else (observed or "（空）")
+    return (
+        f"内容类型声明失败：请求={content_type}（{requested_label}），"
+        f"终值={shown}，原因={reason}；尚未点击发布。"
+    )
 
 
 async def _run_dom_quiet_gate(page: Page, *, budget: PublishTimeoutBudget) -> None:
@@ -1529,6 +1549,8 @@ class RednoteBaseUploader(BaseVideoUploader):
         self.shoot_location = (shoot_location or "").strip()
         self.shoot_date = (shoot_date or "").strip()
         self.no_publish = no_publish
+        # 显式内容类型声明成功后的回读结果；None 表示未请求或未验证。
+        self.declaration_report: dict[str, str | None] | None = None
 
     async def validate_base_args(self):
         if self.publish_strategy not in {
@@ -2262,60 +2284,107 @@ class RednoteBaseUploader(BaseVideoUploader):
     async def _add_content_declaration(
         self, page: Page, *, humanizer: Humanizer
     ) -> None:
+        """显式内容类型：设置 → 等菜单收起 → 回读 ``.d-select-description``。
+
+        与小红书一样，任何缺失、空值或其他标签都在发布前退出 1。来源声明
+        还要核对确认后的 ``.notation`` 明细。
+        """
         content_type = self.content_type
         label = REDNOTE_CONTENT_TYPE_LABELS.get(content_type)
         source_label = REDNOTE_SOURCE_DECLARATION_LABELS.get(content_type)
         if label is None and source_label is None:
             raise ValueError(f"未知的内容类型声明: {content_type}")
+        expected = source_label or label
+        observed: str | None = None
+        reason: str | None = None
+        phase = "entry"
 
         try:
-            await self._open_content_declaration_menu(page, humanizer=humanizer)
+            trigger = await self._open_content_declaration_menu(
+                page, humanizer=humanizer
+            )
+            phase = "option"
             if source_label:
                 await self._click_declaration_option(
                     page, "内容来源声明", humanizer=humanizer
                 )
                 await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
-                await self._click_declaration_option(
+                option = await self._click_declaration_option(
                     page, source_label, humanizer=humanizer
                 )
             else:
-                await self._click_declaration_option(page, label, humanizer=humanizer)
+                option = await self._click_declaration_option(
+                    page, label, humanizer=humanizer
+                )
             await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
+            await self._assert_declaration_menu_collapsed(option)
 
             if content_type == "self-shot":
                 await self._fill_self_shot(page, humanizer=humanizer)
             elif content_type == "repost":
                 await self._fill_repost_source(page, humanizer=humanizer)
 
-            selected_label = source_label or label
-            selected = await _resolve_anchor(
-                page,
-                "内容类型声明回读",
-                (
-                    Candidate(
-                        "declaration wrapper .d-select-description",
-                        factory=lambda scope: scope.locator(
-                            REDNOTE_DECLARATION_CONTAINER_SELECTOR
-                        ).locator(".d-select-description"),
-                    ),
-                ),
-                role="visible",
-                budget=self.publish_budget,
-            )
-            actual = (await selected.locator.inner_text()).strip().casefold()
-            expected = {selected_label.casefold()}
-            if actual not in expected:
-                raise RuntimeError(
-                    f"声明回读不符：期望 {self.content_type}，实际 {actual!r}"
-                )
+            observed = await self._read_selected_declaration(trigger)
+            if observed is None:
+                reason = "未读到选中的内容类型"
+            elif not observed:
+                reason = "选中的内容类型为空"
+            elif observed.casefold() != expected.casefold():
+                reason = "回读不符（选中的内容类型与请求不符）"
             await self._verify_source_details(page)
-            rednote_logger.success(
-                _msg("🧾", f"内容类型声明已设置：{source_label or label}")
+        except ElementMissingError as exc:
+            if phase == "entry":
+                reason = "未找到内容类型声明入口"
+            else:
+                reason = f"未找到声明选项：{exc.what}"
+        except ElementUnusableError as exc:
+            target = "内容类型声明入口" if phase == "entry" else "声明选项"
+            reason = f"{target}不可用：{getattr(exc, 'reason', '') or exc}"
+        except Exception as exc:
+            reason = f"声明设置失败：{exc}"
+
+        if reason is not None:
+            raise RuntimeError(
+                _declaration_failure_message(
+                    content_type=content_type,
+                    requested_label=expected,
+                    observed=observed,
+                    reason=reason,
+                )
+            )
+
+        self.declaration_report = {
+            "requested": content_type,
+            "requested_label": expected,
+            "observed": observed,
+            "status": "set",
+        }
+        rednote_logger.success(
+            _msg("🧾", f"内容类型声明已设置并回读：{observed}")
+        )
+
+    @staticmethod
+    async def _read_selected_declaration(trigger) -> str | None:
+        """读收起后显示的选中值；读不到返回 ``None``（区别于读到空串）。"""
+        description = trigger.locator(".d-select-description")
+        try:
+            if not await description.count():
+                return None
+            text = await description.first.inner_text()
+        except Exception:
+            return None
+        return text.strip()
+
+    async def _assert_declaration_menu_collapsed(self, option) -> None:
+        """选项点击后，所属声明弹层必须已隐藏（菜单收起后才能回读）。"""
+        menu = option.locator(REDNOTE_DECLARATION_MENU_XPATH)
+        try:
+            await menu.wait_for(
+                state="hidden",
+                timeout=self._wait_ms(REDNOTE_DECLARATION_CONFIRM_TIMEOUT_MS),
             )
         except Exception as exc:
-            raise RuntimeError(
-                f"Rednote 内容类型声明设置或回读失败，尚未点击发布：{exc}"
-            ) from exc
+            raise RuntimeError("内容类型声明菜单未收起") from exc
 
     async def _verify_source_details(self, page: Page) -> None:
         """类型在打开弹窗前就会更新，只有确认后的 notation 能证明来源已保存。"""
@@ -2338,7 +2407,7 @@ class RednoteBaseUploader(BaseVideoUploader):
 
     async def _open_content_declaration_menu(
         self, page: Page, *, humanizer: Humanizer
-    ) -> None:
+    ):
         trigger = await _resolve_anchor(
             page,
             "内容类型声明入口",
@@ -2361,10 +2430,11 @@ class RednoteBaseUploader(BaseVideoUploader):
         await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
         await humanizer.click(trigger.locator)
         await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
+        return trigger.locator
 
     async def _click_declaration_option(
         self, page: Page, label: str, *, humanizer: Humanizer
-    ) -> None:
+    ):
         option = await _resolve_anchor(
             page,
             f"声明选项:{label}",
@@ -2373,6 +2443,7 @@ class RednoteBaseUploader(BaseVideoUploader):
             budget=self.publish_budget,
         )
         await humanizer.click(option.locator)
+        return option.locator
 
     async def _fill_self_shot(self, page: Page, *, humanizer: Humanizer) -> None:
         """填写「自主拍摄」弹窗的拍摄地点和拍摄日期并确认。"""

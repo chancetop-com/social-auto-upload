@@ -20,11 +20,12 @@ from uploader.xiaohongshu_uploader.main import (
     probe_session,
     xiaohongshu_setup,
 )
-from sau_commands.output import report_upload_success
+from sau_commands.output import report_ai_declaration, report_upload_success
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     SCHEDULE_HELP,
+    ContentTypeAction,
     add_not_before_flag,
     add_local_runtime_flags,
     parse_image_files,
@@ -76,6 +77,7 @@ def _add_declaration_flags(parser) -> None:
         "--content-type",
         choices=CONTENT_TYPE_CHOICES,
         default=None,
+        action=ContentTypeAction,
         help=CONTENT_TYPE_HELP,
     )
     parser.add_argument(
@@ -223,6 +225,7 @@ class XiaohongshuVideoUploadRequest:
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
+    declaration_report: dict[str, str | None] | None = None
 
 
 @dataclass(slots=True)
@@ -244,6 +247,7 @@ class XiaohongshuNoteUploadRequest:
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
+    declaration_report: dict[str, str | None] | None = None
 
 
 async def login_xiaohongshu_account(account_name: str, headless=None, local_browser=None) -> dict:
@@ -363,10 +367,12 @@ async def upload_xiaohongshu_video(
                 extra_ignored=ignored_keys,
             ) as session:
                 await app.xiaohongshu_upload_video(session=session)
+        request.declaration_report = getattr(app, "declaration_report", None)
         return None
 
     app = _build_video_uploader(request)
     await app.main()
+    request.declaration_report = getattr(app, "declaration_report", None)
     return None
 
 
@@ -391,10 +397,12 @@ async def upload_xiaohongshu_note(
                 extra_ignored=ignored_keys,
             ) as session:
                 await app.xiaohongshu_upload_note(session=session)
+        request.declaration_report = getattr(app, "declaration_report", None)
         return None
 
     app = _build_note_uploader(request)
     await app.main()
+    request.declaration_report = getattr(app, "declaration_report", None)
     return None
 
 
@@ -485,6 +493,7 @@ async def run(args):
         await upload_xiaohongshu_video(
             request, target=target, ignored_keys=ignored_keys
         )
+        report_ai_declaration(request)
         args.post_published = report_upload_success(request, "Xiaohongshu video", request.video_file)
         return 0
 
@@ -514,6 +523,7 @@ async def run(args):
         await upload_xiaohongshu_note(
             request, target=target, ignored_keys=ignored_keys
         )
+        report_ai_declaration(request)
         args.post_published = report_upload_success(request, "Xiaohongshu note", f"{len(request.image_files)} images")
         return 0
 
