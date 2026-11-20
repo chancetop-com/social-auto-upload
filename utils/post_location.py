@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from utils.text_compare import normalize_text
+
 #: 页面明确写出这些限制时才报告「账号不可用」。只看地点控件附近，不扫全页。
 ELIGIBILITY_PHRASES: tuple[str, ...] = (
     "当前账号暂不支持添加地点",
@@ -29,9 +31,7 @@ ELIGIBILITY_PHRASES: tuple[str, ...] = (
 
 def normalise_location_name(value: Any) -> str:
     """Trim, collapse whitespace and casefold; ``None`` becomes ``""``."""
-    if value is None:
-        return ""
-    return " ".join(str(value).split()).casefold()
+    return normalize_text(value)
 
 
 @dataclass(frozen=True)
@@ -115,56 +115,3 @@ def no_match_reason(
     shown = "、".join(names) if names else "（名称不可读）"
     suffix = "…" if len(rows) > limit else ""
     return f"无同名候选（仅有近似候选：{shown}{suffix}）"
-
-
-def location_failure_message(
-    *,
-    requested: str,
-    clicked_name: str | None = None,
-    address: str | None = None,
-    final_name: str | None = None,
-    reason: str,
-) -> str:
-    clicked = (
-        "未点选"
-        if clicked_name is None
-        else format_clicked_row(clicked_name, address)
-    )
-    if final_name is None:
-        final = "未读到"
-    elif not final_name:
-        final = "（空）"
-    else:
-        final = final_name
-    return (
-        f"帖子地点设置失败：请求={requested}，所点行={clicked}，"
-        f"终值={final}，原因={reason}；尚未点击发布。"
-    )
-
-
-class LocationVerificationError(RuntimeError):
-    """Pre-publish location failure carrying the same fields as the CLI line."""
-
-    def __init__(
-        self,
-        *,
-        requested: str,
-        reason: str,
-        clicked_name: str | None = None,
-        address: str | None = None,
-        final_name: str | None = None,
-    ) -> None:
-        self.requested = requested
-        self.reason = reason
-        self.clicked_name = clicked_name
-        self.address = address
-        self.final_name = final_name
-        super().__init__(
-            location_failure_message(
-                requested=requested,
-                clicked_name=clicked_name,
-                address=address,
-                final_name=final_name,
-                reason=reason,
-            )
-        )

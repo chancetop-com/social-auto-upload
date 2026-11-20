@@ -106,15 +106,7 @@ def _caption_topic_records(caption: str) -> list[dict[str, object]]:
     """One text-level evidence record per public caption topic, in order."""
     reason = "配文全文逐字回读一致"
     return [
-        {
-            "index": result.occurrence.index,
-            "text": result.occurrence.text,
-            "name": result.occurrence.name,
-            "start": result.occurrence.start,
-            "end": result.occurrence.end,
-            "status": result.status,
-            "reason": result.reason,
-        }
+        result.as_dict()
         for result in text_results(parse_caption_topics(caption), reason=reason)
     ]
 

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from utils.errors import UsageError
 from utils.caption_topics import parse_caption_topics, text_results
+from utils.text_compare import normalize_text as _normalize_text
 
 if TYPE_CHECKING:  # 只用于类型标注：本模块保持零浏览器依赖。
     from uploader.publish_timeout import PublishTimeoutBudget
@@ -103,7 +104,7 @@ class OptionMismatchError(RuntimeError):
 
 def normalize_text(text: str) -> str:
     """空白折叠 + casefold，供地点与替代文字比较。"""
-    return " ".join(text.split()).casefold()
+    return _normalize_text(text)
 
 
 def clamp_wait(budget: 'PublishTimeoutBudget | None', default_ms: int) -> int:
@@ -252,15 +253,7 @@ def caption_topic_records(caption: str) -> list[dict]:
     """
     reason = '配文全文逐字回读一致'
     return [
-        {
-            'index': result.occurrence.index,
-            'text': result.occurrence.text,
-            'name': result.occurrence.name,
-            'start': result.occurrence.start,
-            'end': result.occurrence.end,
-            'status': result.status,
-            'reason': result.reason,
-        }
+        result.as_dict()
         for result in text_results(parse_caption_topics(caption), reason=reason)
     ]
 

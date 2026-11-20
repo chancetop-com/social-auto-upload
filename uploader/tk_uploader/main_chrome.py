@@ -46,6 +46,7 @@ from pathlib import Path
 from utils.humanize import DEFAULT_PROFILE
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
+from utils.text_compare import normalize_text
 from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.log import tiktok_logger
@@ -615,7 +616,7 @@ def _normalise_caption_newlines(text: str) -> str:
 
 def normalize_location_text(text: str | None) -> str:
     """Name comparison: trim, collapse consecutive whitespace, ignore case."""
-    return " ".join(str(text or "").split()).casefold()
+    return normalize_text(text)
 
 
 def parse_location_row(text: str) -> tuple[str, str | None]:

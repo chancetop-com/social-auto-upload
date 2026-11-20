@@ -51,6 +51,18 @@ class TopicResult:
     status: str
     reason: str | None = None
 
+    def as_dict(self) -> dict[str, str | int | None]:
+        """Result-file record shared by Instagram and Facebook Page."""
+        return {
+            "index": self.occurrence.index,
+            "text": self.occurrence.text,
+            "name": self.occurrence.name,
+            "start": self.occurrence.start,
+            "end": self.occurrence.end,
+            "status": self.status,
+            "reason": self.reason,
+        }
+
 
 def _is_topic_char(char: str) -> bool:
     return char == "_" or char.isalnum()

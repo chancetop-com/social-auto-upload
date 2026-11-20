@@ -70,6 +70,31 @@ class LocationNormalisationTests(unittest.TestCase):
                 self.assertEqual(normalise_location_name(raw), expected)
 
 
+class LocationErrorContractTests(unittest.TestCase):
+    def test_shared_leaf_error_keeps_its_fields_and_message(self):
+        from utils.errors import LocationVerificationError
+
+        error = LocationVerificationError(
+            requested="人民公园",
+            clicked_name="人民公园",
+            address="上海市黄浦区南京西路231号",
+            final_name="人民公园",
+            reason="终值不符",
+        )
+
+        self.assertEqual(error.requested, "人民公园")
+        self.assertEqual(error.clicked_name, "人民公园")
+        self.assertEqual(error.address, "上海市黄浦区南京西路231号")
+        self.assertEqual(error.final_name, "人民公园")
+        self.assertEqual(error.reason, "终值不符")
+        self.assertEqual(
+            str(error),
+            "帖子地点设置失败：请求=人民公园，"
+            "所点行=人民公园 · 上海市黄浦区南京西路231号，"
+            "终值=人民公园，原因=终值不符；尚未点击发布。",
+        )
+
+
 class LocationDomTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.enterContext(patch.dict(os.environ, {"HUMANIZE": "0"}))

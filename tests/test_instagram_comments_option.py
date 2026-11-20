@@ -125,17 +125,47 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
             self.assertEqual(control.calls, ["resolve"])
             self.assertEqual(app.result["options"]["ai_generated"]["status"], NOT_REQUESTED)
 
-    def test_ineligible_but_already_off_is_default_off(self):
+    def test_ineligible_off_request_stays_default_off_without_reading(self):
+        """评论关闭请求不读禁用开关：沿用入口缺失的 default_off 语义。"""
         with tempfile.TemporaryDirectory() as folder:
             app = self._app(InstagramPublishOptions(comments=False), folder=folder)
             control = _FakeCommentsControl(presence="ineligible", values=[False])
             self._apply(app, {"comments": control})
-            # 入口不可用时仍回读实际状态：spec §5.2 该行 applied=false。
-            self.assertEqual(control.calls, ["resolve", "read"])
+            self.assertEqual(control.calls, ["resolve"])
             record = app.result["options"]["comments"]
             self.assertEqual(record["status"], DEFAULT_OFF)
             self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
-            self.assertIs(record["applied"], False)
+            self.assertIsNone(record["applied"])
+
+    def test_ineligible_but_still_on_stays_default_off(self):
+        """禁用且仍为开的评论开关不按 AI 声明的严格规则失败。"""
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(InstagramPublishOptions(comments=False), folder=folder)
+            control = _FakeCommentsControl(presence="ineligible", values=[True])
+            self._apply(app, {"comments": control})
+            self.assertEqual(control.calls, ["resolve"])
+            self.assertEqual(
+                app.result["options"]["comments"],
+                {
+                    "requested": False,
+                    "applied": None,
+                    "status": DEFAULT_OFF,
+                    "reason": ACCOUNT_INELIGIBLE,
+                },
+            )
+            self.assertEqual(app.result["options"]["ai_generated"]["status"], NOT_REQUESTED)
+
+    def test_visible_but_unreadable_stays_default_off_without_clicking(self):
+        """评论关闭请求读不到状态时沿用旧行为，不盲点开关。"""
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(InstagramPublishOptions(comments=False), folder=folder)
+            control = _FakeCommentsControl([], presence="present")
+            self._apply(app, {"comments": control})
+            self.assertEqual(control.calls, ["resolve", "read"])
+            self.assertEqual(
+                app.result["options"]["comments"],
+                {"requested": False, "applied": None, "status": DEFAULT_OFF},
+            )
 
 
 class _FakeSwitch:
