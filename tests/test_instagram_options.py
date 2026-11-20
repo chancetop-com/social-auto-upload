@@ -30,6 +30,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     InstagramPublishOptions,
     OptionMismatchError,
     alt_texts_match,
+    caption_topic_records,
     empty_option_record,
     location_matches,
     normalize_text,
@@ -180,6 +181,58 @@ class InstagramOptionLogicTests(unittest.TestCase):
         )
 
 
+class InstagramCaptionTopicLogicTests(unittest.TestCase):
+    """A7：配文话题只从最终公开配文识别，保留顺序、重复与原文偏移。"""
+
+    def test_caption_topics_keep_order_duplicates_url_fragments_and_offsets(self):
+        caption = (
+            "第一行 #coffee，配 #咖啡。\n\n"
+            "重复 #coffee 与 #Coffee! 链接 https://example.com/page/#frag\n"
+            "空行后 #咖啡_2 与 #a1_b 结束"
+        )
+
+        records = caption_topic_records(caption)
+
+        self.assertEqual(
+            [record["text"] for record in records],
+            ["#coffee", "#咖啡", "#coffee", "#Coffee", "#咖啡_2", "#a1_b"],
+        )
+        self.assertEqual(
+            [record["name"] for record in records],
+            ["coffee", "咖啡", "coffee", "Coffee", "咖啡_2", "a1_b"],
+        )
+        self.assertEqual([record["index"] for record in records], list(range(1, 7)))
+        # URL 片段不是话题，但链接本身原样保留在原文偏移里。
+        self.assertNotIn("#frag", [record["text"] for record in records])
+        for record in records:
+            self.assertEqual(
+                caption[record["start"]:record["end"]], record["text"]
+            )
+        # 紧邻标点留在话题之外，空行与换行不被改写。
+        self.assertEqual(caption[records[1]["end"]], "。")
+        self.assertIn("\n\n重复", caption)
+
+    def test_every_caption_topic_is_reported_as_text_evidence_in_order(self):
+        records = caption_topic_records("正文 #a 与 #a")
+
+        self.assertEqual(
+            [record["index"] for record in records], [1, 2]
+        )
+        self.assertEqual([record["text"] for record in records], ["#a", "#a"])
+        self.assertEqual([record["status"] for record in records], ["text", "text"])
+        self.assertEqual(
+            [record["reason"] for record in records],
+            ["配文全文逐字回读一致", "配文全文逐字回读一致"],
+        )
+        self.assertEqual(
+            set(records[0]),
+            {"index", "text", "name", "start", "end", "status", "reason"},
+        )
+
+    def test_caption_without_topics_reports_an_empty_list(self):
+        self.assertEqual(caption_topic_records("正文没有井号话题。"), [])
+
+
 class InstagramOptionValidationTests(unittest.TestCase):
     """A5：§3.3 静态校验全部映射为 UsageError（退出码 2）。"""
 
@@ -294,17 +347,21 @@ class InstagramCommandRequestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             image = Path(folder) / 'image.png'
             image.touch()
+            video = Path(folder) / 'video.mp4'
+            video.touch()
             upload = AsyncMock()
-            with patch.object(InstagramUploader, 'upload', upload), \
-                    contextlib.redirect_stdout(io.StringIO()), \
-                    contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(
-                    sau_cli.main([
-                        'instagram', 'upload-note', '--account', 'creator',
-                        '--images', str(image), '--title', 'x' * 2201,
-                    ]),
-                    2,
-                )
+            commands = (
+                ['instagram', 'upload-note', '--account', 'creator',
+                 '--images', str(image), '--title', 'x' * 2201],
+                ['instagram', 'upload-video', '--account', 'creator',
+                 '--file', str(video), '--title', 'x' * 2201],
+            )
+            for argv in commands:
+                with self.subTest(argv=argv), \
+                        patch.object(InstagramUploader, 'upload', upload), \
+                        contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(sau_cli.main(argv), 2)
             upload.assert_not_awaited()
 
 
