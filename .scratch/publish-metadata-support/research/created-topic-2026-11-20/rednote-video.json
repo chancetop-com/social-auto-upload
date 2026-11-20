@@ -1,0 +1,90 @@
+{
+  "observed_at": "2026-11-20T18:01:42+08:00",
+  "platform": "rednote",
+  "post_type": "video",
+  "local_profile": "rednote",
+  "account_type": "not verified",
+  "browser": "local Chrome",
+  "media": [
+    "check-video.mp4"
+  ],
+  "query": "#fieldstudy1120c",
+  "requested_caption": "Field notes #fieldstudy1120c, after rain.",
+  "publish_attempted": false,
+  "editor_selector": ".publish-page div.tiptap[role=textbox][contenteditable=true]:visible",
+  "page": "/publish/publish",
+  "document_lang": null,
+  "observed_labels": [
+    "话题",
+    "添加地点"
+  ],
+  "initial_editor_text": "\n",
+  "editor_before_selection": {
+    "raw_text": "Field notes #fieldstudy1120c",
+    "caption": "Field notes #fieldstudy1120c",
+    "topics": []
+  },
+  "candidate_rows": [
+    "#fieldstudy1120c\n新建话题"
+  ],
+  "selected_label": "#fieldstudy1120c\n新建话题",
+  "gesture": "click exact visible row",
+  "after_selection": {
+    "raw_text": "Field notes #fieldstudy1120c[话题]# ",
+    "caption": "Field notes #fieldstudy1120c ",
+    "topics": [
+      {
+        "name": "fieldstudy1120c",
+        "html": "<a class=\"tiptap-topic\" data-topic=\"{&quot;id&quot;:&quot;6b001a9d000000002200ffd1&quot;,&quot;link&quot;:&quot;&quot;,&quot;name&quot;:&quot;fieldstudy1120c&quot;}\" contenteditable=\"false\">#fieldstudy1120c<span class=\"content-hide\">[话题]#</span></a>"
+      }
+    ]
+  },
+  "removed_auto_space": "U+00A0",
+  "after_backspace": {
+    "raw_text": "Field notes #fieldstudy1120c[话题]#\n",
+    "caption": "Field notes #fieldstudy1120c",
+    "topics": [
+      {
+        "name": "fieldstudy1120c",
+        "html": "<a class=\"tiptap-topic\" data-topic=\"{&quot;id&quot;:&quot;6b001a9d000000002200ffd1&quot;,&quot;link&quot;:&quot;&quot;,&quot;name&quot;:&quot;fieldstudy1120c&quot;}\" contenteditable=\"false\">#fieldstudy1120c<span class=\"content-hide\">[话题]#</span></a>"
+      }
+    ]
+  },
+  "before_blur": {
+    "raw_text": "Field notes #fieldstudy1120c[话题]#, after rain.",
+    "caption": "Field notes #fieldstudy1120c, after rain.",
+    "topics": [
+      {
+        "name": "fieldstudy1120c",
+        "html": "<a class=\"tiptap-topic\" data-topic=\"{&quot;id&quot;:&quot;6b001a9d000000002200ffd1&quot;,&quot;link&quot;:&quot;&quot;,&quot;name&quot;:&quot;fieldstudy1120c&quot;}\" contenteditable=\"false\">#fieldstudy1120c<span class=\"content-hide\">[话题]#</span></a>"
+      }
+    ]
+  },
+  "final_editor": {
+    "raw_text": "Field notes #fieldstudy1120c[话题]#, after rain.",
+    "caption": "Field notes #fieldstudy1120c, after rain.",
+    "topics": [
+      {
+        "name": "fieldstudy1120c",
+        "html": "<a class=\"tiptap-topic\" data-topic=\"{&quot;id&quot;:&quot;6b001a9d000000002200ffd1&quot;,&quot;link&quot;:&quot;&quot;,&quot;name&quot;:&quot;fieldstudy1120c&quot;}\" contenteditable=\"false\">#fieldstudy1120c<span class=\"content-hide\">[话题]#</span></a>"
+      }
+    ]
+  },
+  "final_editor_html": "<p>Field notes <a class=\"tiptap-topic\" data-topic=\"{&quot;id&quot;:&quot;6b001a9d000000002200ffd1&quot;,&quot;link&quot;:&quot;&quot;,&quot;name&quot;:&quot;fieldstudy1120c&quot;}\" contenteditable=\"false\">#fieldstudy1120c<span class=\"content-hide\">[话题]#</span></a>, after rain.</p>",
+  "matches_requested_caption": true,
+  "matches_requested_topic": true,
+  "result": "verified",
+  "popup_paths": [],
+  "stop_point": "caption read after leaving editor, before publish",
+  "earlier_attempt": {
+    "observed_at": "2026-11-20T17:59:47+08:00",
+    "stop_point": "enter caption in editor",
+    "error": "editor did not receive focus",
+    "last_editor": {
+      "raw_text": "\n",
+      "caption": "",
+      "topics": []
+    },
+    "publish_attempted": false
+  }
+}

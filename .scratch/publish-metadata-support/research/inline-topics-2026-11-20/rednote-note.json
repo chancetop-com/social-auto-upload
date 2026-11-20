@@ -1,0 +1,462 @@
+{
+  "date": "2026-11-20",
+  "platform": "rednote",
+  "post_type": "note",
+  "profile_alias": "rednote",
+  "account_type": "not verified",
+  "browser": "local Chrome",
+  "page": "/publish/publish",
+  "media": [
+    "check-1.png"
+  ],
+  "language": {
+    "document": "",
+    "browser": "zh-CN"
+  },
+  "ui_labels": [
+    "话题",
+    "添加地点"
+  ],
+  "publish_attempted": false,
+  "requested_caption": "Today #coffee, then #qzx974631sau.",
+  "caption_editor": ".publish-page div.tiptap[role=textbox][contenteditable=true]",
+  "exact_candidate": {
+    "query": "#coffee",
+    "selected_row": "#coffee\n5.6亿浏览",
+    "gesture": "click exact existing candidate",
+    "visible_rows": [
+      {
+        "name": "#coffee",
+        "new": false,
+        "label": "#coffee\n5.6亿浏览"
+      },
+      {
+        "name": "#coffee探店",
+        "new": false,
+        "label": "#coffee探店\n1008万浏览"
+      },
+      {
+        "name": "#coffee咖啡",
+        "new": false,
+        "label": "#coffee咖啡\n348.3万浏览"
+      },
+      {
+        "name": "#coffee水杯",
+        "new": false,
+        "label": "#coffee水杯\n56.9万浏览"
+      },
+      {
+        "name": "#coffee杯子",
+        "new": false,
+        "label": "#coffee杯子\n104.5万浏览"
+      },
+      {
+        "name": "#coffee户外",
+        "new": false,
+        "label": "#coffee户外\n22.1万浏览"
+      },
+      {
+        "name": "#coffee365",
+        "new": false,
+        "label": "#coffee365\n79.1万浏览"
+      },
+      {
+        "name": "#coffee杯子推荐",
+        "new": false,
+        "label": "#coffee杯子推荐\n5185浏览"
+      },
+      {
+        "name": "#Coffee☕",
+        "new": false,
+        "label": "#Coffee☕\n59.9万浏览"
+      },
+      {
+        "name": "#5coffee",
+        "new": false,
+        "label": "#5coffee\n226.3万浏览"
+      },
+      {
+        "name": "#3coffee",
+        "new": false,
+        "label": "#3coffee\n64.7万浏览"
+      },
+      {
+        "name": "#6COFFEE",
+        "new": false,
+        "label": "#6COFFEE\n33.3万浏览"
+      },
+      {
+        "name": "#盐Coffee",
+        "new": false,
+        "label": "#盐Coffee\n5.6万浏览"
+      },
+      {
+        "name": "#㫪coffee",
+        "new": false,
+        "label": "#㫪coffee\n22.4万浏览"
+      },
+      {
+        "name": "#28coffee",
+        "new": false,
+        "label": "#28coffee\n52.6万浏览"
+      },
+      {
+        "name": "#虎口COFFEE",
+        "new": false,
+        "label": "#虎口COFFEE\n24万浏览"
+      },
+      {
+        "name": "#33coffee",
+        "new": false,
+        "label": "#33coffee\n150.3万浏览"
+      },
+      {
+        "name": "#V7COFFEE",
+        "new": false,
+        "label": "#V7COFFEE\n37.3万浏览"
+      },
+      {
+        "name": "#x3coffee",
+        "new": false,
+        "label": "#x3coffee\n169.9万浏览"
+      },
+      {
+        "name": "#他木coffee",
+        "new": false,
+        "label": "#他木coffee\n263.9万浏览"
+      },
+      {
+        "name": "#垚森coffee",
+        "new": false,
+        "label": "#垚森coffee\n12.9万浏览"
+      },
+      {
+        "name": "#Coffee4U",
+        "new": false,
+        "label": "#Coffee4U\n20.5万浏览"
+      },
+      {
+        "name": "#梨屋coffee",
+        "new": false,
+        "label": "#梨屋coffee\n4.5万浏览"
+      },
+      {
+        "name": "#勇勇coffee",
+        "new": false,
+        "label": "#勇勇coffee\n28.3万浏览"
+      },
+      {
+        "name": "#COFFEE42",
+        "new": false,
+        "label": "#COFFEE42\n48.4万浏览"
+      },
+      {
+        "name": "#白窑coffee",
+        "new": false,
+        "label": "#白窑coffee\n11.5万浏览"
+      },
+      {
+        "name": "#C3COFFEE",
+        "new": false,
+        "label": "#C3COFFEE\n12.5万浏览"
+      },
+      {
+        "name": "#白话coffee",
+        "new": false,
+        "label": "#白话coffee\n42.1万浏览"
+      },
+      {
+        "name": "#黄学珍coffee",
+        "new": false,
+        "label": "#黄学珍coffee\n812.2万浏览"
+      },
+      {
+        "name": "#103coffee",
+        "new": false,
+        "label": "#103coffee\n174.6万浏览"
+      },
+      {
+        "name": "#N23COFFEE",
+        "new": false,
+        "label": "#N23COFFEE\n19.8万浏览"
+      },
+      {
+        "name": "#晤书房coffee",
+        "new": false,
+        "label": "#晤书房coffee\n3万浏览"
+      },
+      {
+        "name": "#离荒岛coffee",
+        "new": false,
+        "label": "#离荒岛coffee\n60.4万浏览"
+      },
+      {
+        "name": "#製冰社coffee",
+        "new": false,
+        "label": "#製冰社coffee\n22.2万浏览"
+      },
+      {
+        "name": "#云啡啡coffee",
+        "new": false,
+        "label": "#云啡啡coffee\n24万浏览"
+      },
+      {
+        "name": "#一只尼coffee",
+        "new": false,
+        "label": "#一只尼coffee\n74.8万浏览"
+      },
+      {
+        "name": "#2333coffee",
+        "new": false,
+        "label": "#2333coffee\n65.2万浏览"
+      },
+      {
+        "name": "#老围咖啡coffee",
+        "new": false,
+        "label": "#老围咖啡coffee\n27.7万浏览"
+      },
+      {
+        "name": "#1932coffee",
+        "new": false,
+        "label": "#1932coffee\n55.9万浏览"
+      },
+      {
+        "name": "#光合作用coffee",
+        "new": false,
+        "label": "#光合作用coffee\n9万浏览"
+      },
+      {
+        "name": "#小羊微微COFFEE",
+        "new": false,
+        "label": "#小羊微微COFFEE\n32.3万浏览"
+      },
+      {
+        "name": "#路边小鸟coffee",
+        "new": false,
+        "label": "#路边小鸟coffee\n19.1万浏览"
+      },
+      {
+        "name": "#淄博歌子coffee",
+        "new": false,
+        "label": "#淄博歌子coffee\n7.2万浏览"
+      },
+      {
+        "name": "#露华行深coffee",
+        "new": false,
+        "label": "#露华行深coffee\n8.6万浏览"
+      },
+      {
+        "name": "#柯基小白和coffee",
+        "new": false,
+        "label": "#柯基小白和coffee\n92.6万浏览"
+      },
+      {
+        "name": "#五十五朵云coffee",
+        "new": false,
+        "label": "#五十五朵云coffee\n23.1万浏览"
+      },
+      {
+        "name": "#Grace粒Coffee",
+        "new": false,
+        "label": "#Grace粒Coffee\n9.2万浏览"
+      },
+      {
+        "name": "#泰版纳颂秘翁coffee",
+        "new": false,
+        "label": "#泰版纳颂秘翁coffee\n24万浏览"
+      },
+      {
+        "name": "#D2coffee迪图咖啡",
+        "new": false,
+        "label": "#D2coffee迪图咖啡\n4.1万浏览"
+      },
+      {
+        "name": "#B5coffee无限续杯",
+        "new": false,
+        "label": "#B5coffee无限续杯\n58.8万浏览"
+      }
+    ]
+  },
+  "after_selection": {
+    "innerText": "Today #coffee[话题]# ",
+    "textContent": "Today #coffee[话题]# ",
+    "tree": {
+      "tag": "div",
+      "class": "tiptap ProseMirror ProseMirror-focused",
+      "contenteditable": "true",
+      "children": [
+        {
+          "tag": "p",
+          "children": [
+            "Today ",
+            {
+              "tag": "a",
+              "class": "tiptap-topic",
+              "data-topic": "{\"id\":\"5466c718d6e4a9202cae5590\",\"link\":\"xhsdiscover://topic/v2/5bf644dfd8a82b000133d64f\",\"name\":\"coffee\"}",
+              "contenteditable": "false",
+              "children": [
+                "#coffee",
+                {
+                  "tag": "span",
+                  "class": "content-hide",
+                  "children": [
+                    "[话题]#"
+                  ]
+                }
+              ]
+            },
+            " "
+          ]
+        }
+      ]
+    }
+  },
+  "first_run_without_removing_auto_space": {
+    "innerText": "Today #coffee[话题]# , then #qzx974631sau.",
+    "tree": {
+      "tag": "div",
+      "class": "tiptap ProseMirror ProseMirror-focused",
+      "contenteditable": "true",
+      "children": [
+        {
+          "tag": "p",
+          "children": [
+            "Today ",
+            {
+              "tag": "a",
+              "class": "tiptap-topic",
+              "data-topic": "{\"id\":\"5466c718d6e4a9202cae5590\",\"link\":\"xhsdiscover://topic/v2/5bf644dfd8a82b000133d64f\",\"name\":\"coffee\"}",
+              "contenteditable": "false",
+              "children": [
+                "#coffee",
+                {
+                  "tag": "span",
+                  "class": "content-hide",
+                  "children": [
+                    "[话题]#"
+                  ]
+                }
+              ]
+            },
+            " , then ",
+            {
+              "tag": "span",
+              "class": "suggestion",
+              "children": [
+                "#qzx974631sau."
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "after_one_backspace": {
+    "innerText": "Today #coffee[话题]#\n",
+    "textContent": "Today #coffee[话题]#",
+    "tree": {
+      "tag": "div",
+      "class": "tiptap ProseMirror ProseMirror-focused",
+      "contenteditable": "true",
+      "children": [
+        {
+          "tag": "p",
+          "children": [
+            "Today ",
+            {
+              "tag": "a",
+              "class": "tiptap-topic",
+              "data-topic": "{\"id\":\"5466c718d6e4a9202cae5590\",\"link\":\"xhsdiscover://topic/v2/5bf644dfd8a82b000133d64f\",\"name\":\"coffee\"}",
+              "contenteditable": "false",
+              "children": [
+                "#coffee",
+                {
+                  "tag": "span",
+                  "class": "content-hide",
+                  "children": [
+                    "[话题]#"
+                  ]
+                }
+              ]
+            },
+            {
+              "tag": "img",
+              "class": "ProseMirror-separator",
+              "children": []
+            },
+            {
+              "tag": "br",
+              "class": "ProseMirror-trailingBreak",
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "second_candidate_search": {
+    "query": "#qzx974631sau",
+    "changes": [
+      {
+        "seconds": 0.3,
+        "rows": []
+      },
+      {
+        "seconds": 0.9,
+        "rows": [
+          {
+            "name": "#qzx974631sau",
+            "new": true,
+            "label": "#qzx974631sau\n新建话题"
+          }
+        ]
+      }
+    ],
+    "observed_seconds": 5.2
+  },
+  "second_candidate_gesture": "No selection. Pressed Escape, then typed the final period.",
+  "final_editor": {
+    "innerText": "Today #coffee[话题]#, then #qzx974631sau.",
+    "textContent": "Today #coffee[话题]#, then #qzx974631sau.",
+    "tree": {
+      "tag": "div",
+      "class": "tiptap ProseMirror ProseMirror-focused",
+      "contenteditable": "true",
+      "children": [
+        {
+          "tag": "p",
+          "children": [
+            "Today ",
+            {
+              "tag": "a",
+              "class": "tiptap-topic",
+              "data-topic": "{\"id\":\"5466c718d6e4a9202cae5590\",\"link\":\"xhsdiscover://topic/v2/5bf644dfd8a82b000133d64f\",\"name\":\"coffee\"}",
+              "contenteditable": "false",
+              "children": [
+                "#coffee",
+                {
+                  "tag": "span",
+                  "class": "content-hide",
+                  "children": [
+                    "[话题]#"
+                  ]
+                }
+              ]
+            },
+            ", then ",
+            {
+              "tag": "span",
+              "class": "suggestion",
+              "children": [
+                "#qzx974631sau."
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "caption_readback": "Today #coffee, then #qzx974631sau.",
+  "caption_readback_method": "Read the editor in document order. At each a[data-topic], use # plus the name in data-topic. Preserve all other text, including whitespace.",
+  "matches_requested_caption": true
+}

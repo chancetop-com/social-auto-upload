@@ -1,0 +1,149 @@
+{
+  "date": "2026-11-20",
+  "browser": "local Chrome",
+  "account_alias": "lukechen",
+  "post_type": "video",
+  "language": "en",
+  "editor_path": "/tiktokstudio/upload",
+  "entry_text": [
+    "Videos",
+    "Photos",
+    "Select video"
+  ],
+  "editor_text": [
+    "check-video-12s.mp4",
+    "Details",
+    "Location",
+    "Settings",
+    "Followers",
+    "Show more"
+  ],
+  "account_hint": [
+    "Duet and Stitch aren’t available on videos from private accounts"
+  ],
+  "field": [
+    {
+      "data-e2e": "poi_container",
+      "class": "jsx-159738805 FormField"
+    },
+    {
+      "role": "input",
+      "class": "Select__searchInput",
+      "placeholder": "Search locations",
+      "type": "text"
+    }
+  ],
+  "searches": [
+    {
+      "query": "Qzx974631zz",
+      "aria_expanded": "true",
+      "popup_role": "listbox",
+      "option_role": "option",
+      "options": [
+        {
+          "name": "Zzyzx",
+          "address": "California, United States"
+        },
+        {
+          "name": "Zzyzx Road - The actual road",
+          "address": "Rd, Zzyzx, CA, United States"
+        },
+        {
+          "name": "Phoenix",
+          "address": "Arizona, United States"
+        },
+        {
+          "name": "XQZ",
+          "address": "No. 333A Beach Rd, Singapore"
+        },
+        {
+          "name": "Xqz",
+          "address": "712 Clementi West St 2, Singapore"
+        },
+        {
+          "name": "ZZx/民泊",
+          "address": "日本神奈川県湯河原町足柄下郡福浦12-4"
+        },
+        {
+          "name": "Zzzzz",
+          "address": "6498 La Reina Rd, Las Cruces, NM 88012, USA"
+        },
+        {
+          "name": "Lexington",
+          "address": "Lexington County, South Carolina, United States"
+        },
+        {
+          "name": "QZX Services",
+          "address": "695 Stone Canyon Dr, Las Cruces, NM 88011, USA"
+        },
+        {
+          "name": "Atx",
+          "address": "8660 Atlantic Ave, South Gate, United States"
+        }
+      ],
+      "exact_name_matches": 0
+    },
+    {
+      "query": "London Eye",
+      "aria_expanded": "true",
+      "popup_role": "listbox",
+      "option_role": "option",
+      "options": [
+        {
+          "name": "London Eye",
+          "address": "Riverside Building, County Hall, Westminster Bridge Rd, London SE1 7PB, United Kingdom"
+        },
+        {
+          "name": "London Eye View Waterloo BigBen Westminster LM3",
+          "address": "113 Lower Marsh, Lambeth, London, SE1 7AE, United Kingdom"
+        },
+        {
+          "name": "London",
+          "address": "Greater London, United Kingdom"
+        },
+        {
+          "name": "London",
+          "address": "California, United States"
+        },
+        {
+          "name": "Los Angeles",
+          "address": "Los Angeles, CA, United States"
+        },
+        {
+          "name": "London",
+          "address": "Queensmill Rd, London SW6 6JS, UK"
+        },
+        {
+          "name": "Longdon",
+          "address": "United Kingdom"
+        },
+        {
+          "name": "London Eye",
+          "address": "Dolgoprudnyy, Moscow, Russia"
+        },
+        {
+          "name": "Neko Health Marylebone, London, UK 🇬🇧",
+          "address": "9 St Vincent St, London W1U 4DA, UK"
+        },
+        {
+          "name": "London Eye Afternoon Tea",
+          "address": "Riverside building, Country hall, Westminster bridge road, London, United Kingdom"
+        }
+      ],
+      "exact_name_matches": 2
+    }
+  ],
+  "clicked_option": {
+    "name": "London Eye",
+    "address": "Riverside Building, County Hall, Westminster Bridge Rd, London SE1 7PB, United Kingdom",
+    "name_matches": 2,
+    "full_row_matches": 1
+  },
+  "after_click": {
+    "aria_expanded": "false",
+    "visible_options": [],
+    "input_value": "London Eye",
+    "clear_button_visible": true
+  },
+  "publish_attempted": false
+}

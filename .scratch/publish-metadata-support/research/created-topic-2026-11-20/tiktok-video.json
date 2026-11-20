@@ -1,0 +1,83 @@
+{
+  "observed_at": "2026-11-20T17:59:47+08:00",
+  "platform": "tiktok",
+  "post_type": "video",
+  "local_profile": "lukechen",
+  "account_type": "not verified",
+  "browser": "local Chrome",
+  "media": [
+    "check-video-12s.mp4"
+  ],
+  "query": "#fieldstudy1120e",
+  "requested_caption": "Field notes #fieldstudy1120e, after rain.",
+  "publish_attempted": false,
+  "editor_selector": "[data-e2e=\"caption_container\"] div.public-DraftEditor-content[contenteditable=true]:visible",
+  "page": "/tiktokstudio/upload",
+  "document_lang": "en",
+  "observed_labels": [
+    "Description",
+    "Hashtags",
+    "Cover",
+    "Followers",
+    "Post"
+  ],
+  "initial_editor_text": "check-video-12s",
+  "editor_before_selection": {
+    "raw_text": "Field notes #fieldstudy1120e",
+    "caption": "Field notes #fieldstudy1120e",
+    "topics": []
+  },
+  "candidate_rows": [
+    "#fieldstudy1120e\nAdd",
+    "#1120spasfieldst\n1 post"
+  ],
+  "selected_label": "#fieldstudy1120e\nAdd",
+  "gesture": "click exact visible row",
+  "after_selection": {
+    "raw_text": "Field notes #fieldstudy1120e ",
+    "caption": "Field notes #fieldstudy1120e ",
+    "topics": [
+      {
+        "name": "fieldstudy1120e",
+        "html": "<span class=\"mention\" spellcheck=\"false\" data-testid=\"mentionText\"><span data-offset-key=\"8i1qo-1-0\"><span data-text=\"true\">#fieldstudy1120e</span></span></span>"
+      }
+    ]
+  },
+  "removed_auto_space": "U+0020",
+  "after_backspace": {
+    "raw_text": "Field notes #fieldstudy1120e",
+    "caption": "Field notes #fieldstudy1120e",
+    "topics": [
+      {
+        "name": "fieldstudy1120e",
+        "html": "<span class=\"mention\" spellcheck=\"false\" data-testid=\"mentionText\"><span data-offset-key=\"8i1qo-1-0\"><span data-text=\"true\">#fieldstudy1120e</span></span></span>"
+      }
+    ]
+  },
+  "before_blur": {
+    "raw_text": "Field notes #fieldstudy1120e, after rain.",
+    "caption": "Field notes #fieldstudy1120e, after rain.",
+    "topics": [
+      {
+        "name": "fieldstudy1120e",
+        "html": "<span class=\"mention\" spellcheck=\"false\" data-testid=\"mentionText\"><span data-offset-key=\"8i1qo-1-0\"><span data-text=\"true\">#fieldstudy1120e</span></span></span>"
+      }
+    ]
+  },
+  "final_editor": {
+    "raw_text": "Field notes #fieldstudy1120e, after rain.",
+    "caption": "Field notes #fieldstudy1120e, after rain.",
+    "topics": [
+      {
+        "name": "fieldstudy1120e",
+        "html": "<span class=\"mention\" spellcheck=\"false\" data-testid=\"mentionText\"><span data-offset-key=\"8i1qo-1-0\"><span data-text=\"true\">#fieldstudy1120e</span></span></span>"
+      }
+    ]
+  },
+  "final_editor_html": "<div data-contents=\"true\"><div class=\"\" data-block=\"true\" data-editor=\"e1gaf\" data-offset-key=\"8i1qo-0-0\"><div data-offset-key=\"8i1qo-0-0\" class=\"public-DraftStyleDefault-block public-DraftStyleDefault-ltr\"><span data-offset-key=\"8i1qo-0-0\"><span data-text=\"true\">Field notes </span></span><span class=\"mention\" spellcheck=\"false\" data-testid=\"mentionText\"><span data-offset-key=\"8i1qo-1-0\"><span data-text=\"true\">#fieldstudy1120e</span></span></span><span data-offset-key=\"8i1qo-2-0\"><span data-text=\"true\">, after rain.</span></span></div></div></div>",
+  "matches_requested_caption": true,
+  "matches_requested_topic": true,
+  "result": "verified",
+  "popup_paths": [],
+  "stop_point": "caption read after leaving editor, before publish"
+}

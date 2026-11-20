@@ -1,0 +1,118 @@
+{
+  "post_type": "reel",
+  "mode": "local Chrome, headed",
+  "no_publish": true,
+  "request": {
+    "title": "Color study",
+    "body": "Two tones #color #study",
+    "location": "Shanghai",
+    "ai_generated": true
+  },
+  "composer_html_lang": "zh-cn",
+  "account_settings_labels": [
+    "创作者工具和控制选项"
+  ],
+  "composer_heading": [
+    "新 Reels"
+  ],
+  "editor_text": "Color study\n\nTwo tones #color #study",
+  "location_candidates": [
+    {
+      "index": 0,
+      "label": "Shanghai,china",
+      "visible_text": "Shanghai,china"
+    },
+    {
+      "index": 1,
+      "label": "Shanghai",
+      "visible_text": "Shanghai"
+    },
+    {
+      "index": 2,
+      "label": "上海 外灘",
+      "visible_text": "上海 外灘"
+    },
+    {
+      "index": 3,
+      "label": "Shanghai",
+      "visible_text": "Shanghai"
+    },
+    {
+      "index": 4,
+      "label": "Shanghai. China",
+      "visible_text": "Shanghai. China"
+    },
+    {
+      "index": 5,
+      "label": "上海市",
+      "visible_text": "上海市"
+    },
+    {
+      "index": 6,
+      "label": "Shanghai City",
+      "visible_text": "Shanghai City"
+    },
+    {
+      "index": 7,
+      "label": "Shanghai, China",
+      "visible_text": "Shanghai, China"
+    },
+    {
+      "index": 8,
+      "label": "上海浦东国际机场",
+      "visible_text": "上海浦东国际机场"
+    },
+    {
+      "index": 9,
+      "label": "Shanghai Wild Animal Park",
+      "visible_text": "Shanghai Wild Animal Park"
+    }
+  ],
+  "clicked_location_row": {
+    "index": 1,
+    "label": "Shanghai"
+  },
+  "clicked_row_detached": true,
+  "ai_control": {
+    "reads": [
+      false,
+      false,
+      true,
+      true
+    ],
+    "presence": "present",
+    "set_requested": true
+  },
+  "at_stop": {
+    "editor_text": "Color study\n\nTwo tones #color #study",
+    "location_display": "Shanghai",
+    "share_button": "分享",
+    "share_ready": true
+  },
+  "cli_exit": 0,
+  "cli_result": {
+    "status": "prepared",
+    "options": {
+      "location": {
+        "requested": "Shanghai",
+        "applied": "Shanghai",
+        "status": "set"
+      },
+      "alt_text": {
+        "requested": null,
+        "applied": null,
+        "status": "not_requested"
+      },
+      "comments": {
+        "requested": null,
+        "applied": null,
+        "status": "not_requested"
+      },
+      "ai_generated": {
+        "requested": true,
+        "applied": true,
+        "status": "set"
+      }
+    }
+  }
+}

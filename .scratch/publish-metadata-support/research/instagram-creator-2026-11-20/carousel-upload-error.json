@@ -1,0 +1,53 @@
+{
+  "post_type": "carousel",
+  "mode": "local Chrome, headed",
+  "no_publish": true,
+  "request": {
+    "title": "Color study",
+    "body": "Two tones #color #study",
+    "location": "Shanghai",
+    "ai_generated": false
+  },
+  "composer_html_lang": "zh-cn",
+  "account_settings_labels": [
+    "创作者工具和控制选项"
+  ],
+  "cli_exit": 1,
+  "cli_result": {
+    "status": "not_submitted",
+    "stage": "upload",
+    "options": {
+      "location": {
+        "requested": "Shanghai",
+        "applied": null,
+        "status": "not_requested"
+      },
+      "alt_text": {
+        "requested": null,
+        "applied": null,
+        "status": "not_requested"
+      },
+      "comments": {
+        "requested": null,
+        "applied": null,
+        "status": "not_requested"
+      },
+      "ai_generated": {
+        "requested": false,
+        "applied": null,
+        "status": "not_requested"
+      }
+    }
+  },
+  "upload_error_dialog_excerpts": [
+    "无法上传文件",
+    "文件不能小于 1KB",
+    "one.png",
+    "选择其他文件"
+  ],
+  "media_bytes": {
+    "one.png": 2592,
+    "two.png": 2592
+  },
+  "cli_error": "Instagram 发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
+}

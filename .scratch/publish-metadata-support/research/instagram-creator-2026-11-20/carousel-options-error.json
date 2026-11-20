@@ -1,0 +1,130 @@
+{
+  "post_type": "carousel",
+  "mode": "local Chrome, headed",
+  "no_publish": true,
+  "request": {
+    "title": "Color study",
+    "body": "Two tones #color #study",
+    "location": "Shanghai",
+    "ai_generated": false
+  },
+  "composer_html_lang": "zh-cn",
+  "account_settings_labels": [
+    "创作者工具和控制选项"
+  ],
+  "upload_headings": [
+    [
+      "创建新帖子",
+      "把照片和视频拖放到这里"
+    ]
+  ],
+  "composer_heading": [
+    "创建新帖子"
+  ],
+  "editor_text": "Color study\n\nTwo tones #color #study",
+  "location_candidates": [
+    {
+      "index": 0,
+      "label": "Shanghai,china",
+      "visible_text": "Shanghai,china"
+    },
+    {
+      "index": 1,
+      "label": "Shanghai",
+      "visible_text": "Shanghai"
+    },
+    {
+      "index": 2,
+      "label": "上海 外灘",
+      "visible_text": "上海 外灘"
+    },
+    {
+      "index": 3,
+      "label": "Shanghai",
+      "visible_text": "Shanghai"
+    },
+    {
+      "index": 4,
+      "label": "Shanghai. China",
+      "visible_text": "Shanghai. China"
+    },
+    {
+      "index": 5,
+      "label": "上海市",
+      "visible_text": "上海市"
+    },
+    {
+      "index": 6,
+      "label": "Shanghai City",
+      "visible_text": "Shanghai City"
+    },
+    {
+      "index": 7,
+      "label": "Shanghai, China",
+      "visible_text": "Shanghai, China"
+    },
+    {
+      "index": 8,
+      "label": "上海浦东国际机场",
+      "visible_text": "上海浦东国际机场"
+    },
+    {
+      "index": 9,
+      "label": "Shanghai Wild Animal Park",
+      "visible_text": "Shanghai Wild Animal Park"
+    }
+  ],
+  "clicked_location_row": {
+    "index": 1,
+    "label": "Shanghai"
+  },
+  "clicked_row_detached": true,
+  "ai_control": {
+    "reads": [],
+    "presence": "missing"
+  },
+  "cli_exit": 1,
+  "cli_result": {
+    "status": "not_submitted",
+    "stage": "options",
+    "options": {
+      "location": {
+        "requested": "Shanghai",
+        "applied": null,
+        "status": "mismatch"
+      },
+      "alt_text": {
+        "requested": null,
+        "applied": null,
+        "status": "not_requested"
+      },
+      "comments": {
+        "requested": null,
+        "applied": null,
+        "status": "not_requested"
+      },
+      "ai_generated": {
+        "requested": false,
+        "applied": null,
+        "status": "default_off",
+        "reason": "entry_missing"
+      }
+    }
+  },
+  "cli_error": "Instagram 发布选项未生效: location=mismatch; location: Instagram 地点回读与被选候选不一致：被选「Shanghai」，回读「」",
+  "saved_page_html": {
+    "dialog_text_excerpts": [
+      "创建新帖子",
+      "分享",
+      "添加 AI 标签",
+      "放弃帖子？",
+      "如果退出，你所做的编辑不会保存。",
+      "放弃",
+      "取消"
+    ],
+    "location_input": {
+      "placeholder": "添加地点",
+      "value_attribute": "Shanghai"
+    }
+  }
+}

@@ -1,0 +1,662 @@
+{
+  "date": "2026-11-20",
+  "platform": "tiktok",
+  "post_type": "video",
+  "profile_alias": "lukechen",
+  "account_type": "not verified",
+  "browser": "local Chrome",
+  "page": "/tiktokstudio/upload",
+  "media": [
+    "check-video-12s.mp4"
+  ],
+  "language": {
+    "document": "en",
+    "browser": "en"
+  },
+  "ui_labels": [
+    "Description",
+    "Hashtags",
+    "Cover",
+    "Followers"
+  ],
+  "publish_attempted": false,
+  "requested_caption": "Today #coffee, then #qzx974631sau.",
+  "caption_editor": "[data-e2e=\"caption_container\"] div.public-DraftEditor-content[contenteditable=true]",
+  "account_context": "The privacy field showed Followers in this editor. Account type was not independently verified during this observation.",
+  "exact_candidate": {
+    "query": "#coffee",
+    "selected_row": "#coffee\n24.5M posts",
+    "gesture": "Enter on the exact highlighted option",
+    "visible_rows": [
+      {
+        "name": "#coffee",
+        "new": null,
+        "label": "#coffee\n24.5M posts"
+      },
+      {
+        "name": "#coffeetiktok",
+        "new": null,
+        "label": "#coffeetiktok\n5.2M posts"
+      },
+      {
+        "name": "#coffeetok",
+        "new": null,
+        "label": "#coffeetok\n1.7M posts"
+      },
+      {
+        "name": "#coffeeshop",
+        "new": null,
+        "label": "#coffeeshop\n2.1M posts"
+      },
+      {
+        "name": "#coffeetime",
+        "new": null,
+        "label": "#coffeetime\n3.4M posts"
+      },
+      {
+        "name": "#coffeetalk",
+        "new": null,
+        "label": "#coffeetalk\n190.6K posts"
+      },
+      {
+        "name": "#coffeeathome",
+        "new": null,
+        "label": "#coffeeathome\n404.3K posts"
+      },
+      {
+        "name": "#coffeemate",
+        "new": null,
+        "label": "#coffeemate\n35.2K posts"
+      },
+      {
+        "name": "#coffeerecipe",
+        "new": null,
+        "label": "#coffeerecipe\n190.7K posts"
+      },
+      {
+        "name": "#coffeecreamer",
+        "new": null,
+        "label": "#coffeecreamer\n49.5K posts"
+      }
+    ]
+  },
+  "after_selection": {
+    "innerText": "Today #coffee ",
+    "textContent": "Today #coffee ",
+    "tree": {
+      "tag": "div",
+      "class": "notranslate public-DraftEditor-content",
+      "contenteditable": "true",
+      "spellcheck": "false",
+      "children": [
+        {
+          "tag": "div",
+          "data-contents": "true",
+          "children": [
+            {
+              "tag": "div",
+              "class": "",
+              "data-block": "true",
+              "children": [
+                {
+                  "tag": "div",
+                  "class": "public-DraftStyleDefault-block public-DraftStyleDefault-ltr",
+                  "children": [
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            "Today "
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "class": "mention",
+                      "spellcheck": "false",
+                      "data-testid": "mentionText",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "children": [
+                            {
+                              "tag": "span",
+                              "data-text": "true",
+                              "children": [
+                                "#coffee"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            " "
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "after_one_backspace": {
+    "innerText": "Today #coffee",
+    "textContent": "Today #coffee",
+    "tree": {
+      "tag": "div",
+      "class": "notranslate public-DraftEditor-content",
+      "contenteditable": "true",
+      "spellcheck": "false",
+      "children": [
+        {
+          "tag": "div",
+          "data-contents": "true",
+          "children": [
+            {
+              "tag": "div",
+              "class": "",
+              "data-block": "true",
+              "children": [
+                {
+                  "tag": "div",
+                  "class": "public-DraftStyleDefault-block public-DraftStyleDefault-ltr",
+                  "children": [
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            "Today "
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "class": "mention",
+                      "spellcheck": "false",
+                      "data-testid": "mentionText",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "children": [
+                            {
+                              "tag": "span",
+                              "data-text": "true",
+                              "children": [
+                                "#coffee"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "separate_positive_query_with_no_exact_row": {
+    "editor_text": "Today #coffee",
+    "observation": {
+      "query": "#coffee",
+      "changes": [
+        {
+          "seconds": 0.2,
+          "rows": [
+            {
+              "name": "#coffeecreamer",
+              "new": null,
+              "label": "#coffeecreamer\n49.5K posts"
+            }
+          ]
+        }
+      ],
+      "observed_seconds": 14.3
+    },
+    "selected": false
+  },
+  "second_candidate_search": {
+    "query": "#qzx974631sau",
+    "changes": [
+      {
+        "seconds": 0.0,
+        "rows": [
+          {
+            "name": "#qzx974631sau",
+            "new": null,
+            "label": "#qzx974631sau\nAdd"
+          },
+          {
+            "name": "#qzx_",
+            "new": null,
+            "label": "#qzx_\n2.1K posts"
+          },
+          {
+            "name": "#qzx",
+            "new": null,
+            "label": "#qzx\n592 posts"
+          },
+          {
+            "name": "#tomeditsqzx",
+            "new": null,
+            "label": "#tomeditsqzx\n124 posts"
+          },
+          {
+            "name": "#qzxmafe",
+            "new": null,
+            "label": "#qzxmafe\n40 posts"
+          },
+          {
+            "name": "#qzxotccc",
+            "new": null,
+            "label": "#qzxotccc\nAdd"
+          },
+          {
+            "name": "#0qzx",
+            "new": null,
+            "label": "#0qzx\nAdd"
+          },
+          {
+            "name": "#mssqzx",
+            "new": null,
+            "label": "#mssqzx\nAdd"
+          },
+          {
+            "name": "#qzxotcj",
+            "new": null,
+            "label": "#qzxotcj\nAdd"
+          },
+          {
+            "name": "#qzx44",
+            "new": null,
+            "label": "#qzx44\nAdd"
+          },
+          {
+            "name": "#xd0qzx",
+            "new": null,
+            "label": "#xd0qzx\nAdd"
+          }
+        ]
+      }
+    ],
+    "observed_seconds": 5.6
+  },
+  "second_candidate_gesture": "No selection. Pressed Escape, then typed the final period.",
+  "parenthesized_control": {
+    "requested_caption": "Today #coffee, then (#qzx974631sau).",
+    "after_query": "Today #coffee, then (#qzx974631sau",
+    "menu": {
+      "query": "#qzx974631sau",
+      "changes": [
+        {
+          "seconds": 1.2,
+          "rows": []
+        },
+        {
+          "seconds": 1.6,
+          "rows": [
+            {
+              "name": "#qzx974631sau",
+              "new": null,
+              "label": "#qzx974631sau\nAdd"
+            },
+            {
+              "name": "#qzx_",
+              "new": null,
+              "label": "#qzx_\n2.1K posts"
+            },
+            {
+              "name": "#qzx",
+              "new": null,
+              "label": "#qzx\n592 posts"
+            },
+            {
+              "name": "#tomeditsqzx",
+              "new": null,
+              "label": "#tomeditsqzx\n124 posts"
+            },
+            {
+              "name": "#qzxmafe",
+              "new": null,
+              "label": "#qzxmafe\n40 posts"
+            },
+            {
+              "name": "#qzxotccc",
+              "new": null,
+              "label": "#qzxotccc\nAdd"
+            },
+            {
+              "name": "#0qzx",
+              "new": null,
+              "label": "#0qzx\nAdd"
+            },
+            {
+              "name": "#mssqzx",
+              "new": null,
+              "label": "#mssqzx\nAdd"
+            },
+            {
+              "name": "#qzxotcj",
+              "new": null,
+              "label": "#qzxotcj\nAdd"
+            },
+            {
+              "name": "#qzx44",
+              "new": null,
+              "label": "#qzx44\nAdd"
+            },
+            {
+              "name": "#xd0qzx",
+              "new": null,
+              "label": "#xd0qzx\nAdd"
+            }
+          ]
+        }
+      ],
+      "observed_seconds": 5.4
+    },
+    "final": {
+      "innerText": "Today #coffee, then (#qzx974631sau).",
+      "textContent": "Today #coffee, then (#qzx974631sau).",
+      "tree": {
+        "tag": "div",
+        "class": "notranslate public-DraftEditor-content",
+        "contenteditable": "true",
+        "spellcheck": "false",
+        "children": [
+          {
+            "tag": "div",
+            "data-contents": "true",
+            "children": [
+              {
+                "tag": "div",
+                "class": "",
+                "data-block": "true",
+                "children": [
+                  {
+                    "tag": "div",
+                    "class": "public-DraftStyleDefault-block public-DraftStyleDefault-ltr",
+                    "children": [
+                      {
+                        "tag": "span",
+                        "children": [
+                          {
+                            "tag": "span",
+                            "data-text": "true",
+                            "children": [
+                              "Today "
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tag": "span",
+                        "class": "mention",
+                        "spellcheck": "false",
+                        "data-testid": "mentionText",
+                        "children": [
+                          {
+                            "tag": "span",
+                            "children": [
+                              {
+                                "tag": "span",
+                                "data-text": "true",
+                                "children": [
+                                  "#coffee"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tag": "span",
+                        "children": [
+                          {
+                            "tag": "span",
+                            "data-text": "true",
+                            "children": [
+                              ", then ("
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "tag": "span",
+                        "children": [
+                          {
+                            "tag": "span",
+                            "children": [
+                              {
+                                "tag": "span",
+                                "data-text": "true",
+                                "children": [
+                                  "#qzx974631sau)."
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "matches_requested_caption": true
+  },
+  "final_editor": {
+    "innerText": "Today #coffee, then #qzx974631sau.",
+    "textContent": "Today #coffee, then #qzx974631sau.",
+    "tree": {
+      "tag": "div",
+      "class": "notranslate public-DraftEditor-content",
+      "contenteditable": "true",
+      "spellcheck": "false",
+      "children": [
+        {
+          "tag": "div",
+          "data-contents": "true",
+          "children": [
+            {
+              "tag": "div",
+              "class": "",
+              "data-block": "true",
+              "children": [
+                {
+                  "tag": "div",
+                  "class": "public-DraftStyleDefault-block public-DraftStyleDefault-ltr",
+                  "children": [
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            "Today "
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "class": "mention",
+                      "spellcheck": "false",
+                      "data-testid": "mentionText",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "children": [
+                            {
+                              "tag": "span",
+                              "data-text": "true",
+                              "children": [
+                                "#coffee"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            ", then "
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "children": [
+                            {
+                              "tag": "span",
+                              "data-text": "true",
+                              "children": [
+                                "#qzx974631sau."
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "after_leaving_editor": {
+    "innerText": "Today #coffee, then #qzx974631sau.",
+    "textContent": "Today #coffee, then #qzx974631sau.",
+    "tree": {
+      "tag": "div",
+      "class": "notranslate public-DraftEditor-content",
+      "contenteditable": "true",
+      "spellcheck": "false",
+      "children": [
+        {
+          "tag": "div",
+          "data-contents": "true",
+          "children": [
+            {
+              "tag": "div",
+              "class": "",
+              "data-block": "true",
+              "children": [
+                {
+                  "tag": "div",
+                  "class": "public-DraftStyleDefault-block public-DraftStyleDefault-ltr",
+                  "children": [
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            "Today "
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "class": "mention",
+                      "spellcheck": "false",
+                      "data-testid": "mentionText",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "children": [
+                            {
+                              "tag": "span",
+                              "data-text": "true",
+                              "children": [
+                                "#coffee"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "data-text": "true",
+                          "children": [
+                            ", then "
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "tag": "span",
+                      "children": [
+                        {
+                          "tag": "span",
+                          "children": [
+                            {
+                              "tag": "span",
+                              "data-text": "true",
+                              "children": [
+                                "#qzx974631sau."
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "caption_readback": "Today #coffee, then #qzx974631sau.",
+  "caption_readback_method": "Editor textContent",
+  "matches_requested_caption": true
+}
