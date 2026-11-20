@@ -173,6 +173,21 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
   [`.scratch/humanize-rollout/spec.md`](../.scratch/humanize-rollout/spec.md) §2 与 §6.4；
   本节只是对外投影，不存规格副本。
 
+## 发布元数据支持表（八个入口）
+
+下表按命令记录 AI 声明、帖子地点与配文话题三项元数据。每格分别写**网页证据**、**当前 CLI 行为**与**样本**（账号类型、界面语言、观察阶段）。缺样本写「未实测」；网页有控件而命令未接入写「CLI 未接入」；只有页面明确提示资格限制才写「账号不可用」。
+
+| 命令 | AI 声明 | 帖子地点 | 配文话题 |
+| --- | --- | --- | --- |
+| `xiaohongshu upload-video` | 网页：显式选择 AI 后的终值未实测；CLI：`--content-type ai` 设置失败可告警继续；样本：未实测 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`180`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`180`，账号类型未核验 |
+| `xiaohongshu upload-note` | 网页：下拉可见「笔记含AI合成内容」，选中终值未实测；CLI：`--content-type ai` 设置失败可告警继续；样本：未实测 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`180`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`180`，账号类型未核验 |
+| `rednote upload-video` | 网页：已有回读匹配并到达发布前；CLI：要求回读；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
+| `rednote upload-note` | 网页：已有带 AI 声明的双图验收，到达发布前；CLI：要求回读；样本：中文，`rednote`，账号类型未核验 | 网页：候选行显示地址，收起后只显示名称；CLI：未接入；样本：中文，`rednote`，账号类型未核验 | 网页：正文锚点读到 `#coffee`；CLI：`--tags` 追加到正文末尾；样本：中文，`rednote`，账号类型未核验 |
+| `instagram upload-video` | 网页：简体中文 Creator Reel 关切到开，分享前读到 `true`；CLI：已接入 `--ai-generated` / `--no-ai-generated`；样本：Creator，简体中文 | 网页：首个同名 `Shanghai`，候选只显示名称；CLI：按候选整行匹配，已接入；样本：Creator，简体中文 | 网页：分享前正文含 `#color #study`；CLI：`--tags` 合并进配文；样本：Creator，简体中文 |
+| `instagram upload-note` | 网页：Creator 两图轮播开关原本已关；另有一次确认框遮挡导致回读失败；CLI：已接入 `--ai-generated` / `--no-ai-generated`；样本：Creator，简体中文 | 网页：首个同名 `Shanghai`，选中后名称一致；CLI：按候选整行匹配，已接入；样本：Creator，简体中文 | 网页：分享前正文含 `#color #study`；CLI：`--tags` 合并进配文；样本：Creator，简体中文 |
+| `tiktok upload-video` | 网页：视频发布后读到创作者 AI 标识；CLI：已接入 `--aigc` / `--no-aigc`；样本：英文 Studio，`lukechen`，账号类型未核验 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：视频配文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--title` 配文；样本：英文 Studio，`lukechen` |
+| `tiktok upload-note` | 网页：公开账号图片帖发布后读到创作者 AI 标识；CLI：已接入 `--aigc` / `--no-aigc`；样本：英文 Studio，`lukechen`，账号类型未核验 | 网页：候选行有英国地址，收起显示 `London Eye`；CLI：未接入；样本：英文 Studio，`lukechen` | 网页：图片帖正文读到 `#coffee` 关联标记；CLI：`--tags` 追加到 `--note` 正文；样本：英文 Studio，`lukechen` |
+
 ## 日志
 
 日志默认只输出到控制台。需要落盘时设置环境变量 `SAU_LOG_TO_FILES=1`（也接受 `true` /
