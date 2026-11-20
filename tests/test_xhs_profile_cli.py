@@ -179,6 +179,56 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 self.assertTrue(self.context.closed)
                 self.assertFalse(self.context.storage_state_calls)
 
+    def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):
+        from tests.fakes_clock import FakeClock
+        from tests.test_xhs_ai_declaration import _declaration_selectors
+        from tests.test_xhs_submit import _note_page
+        self.profile()
+        image = self.root / 'image.png'
+        image.write_bytes(b'image')
+        media = self.root / 'media.mp4'
+        media.write_bytes(b'media')
+        for action, flags in [
+            ('upload-video', ['--file', str(media)]),
+            ('upload-note', ['--images', str(image)]),
+        ]:
+            for final_text, expected_code in [
+                ('笔记含AI合成内容', 0),
+                ('内容包含营销广告', 1),
+            ]:
+                with self.subTest(action=action, final_text=final_text):
+                    page = _note_page()
+                    selectors, _trigger, _option = _declaration_selectors(
+                        final_text=final_text
+                    )
+                    page._selectors.update(selectors)
+                    self.context.page_factory = lambda: page
+                    with FakeClock().patch(xhs):
+                        code, out, err = self.cli(
+                            action,
+                            '--account',
+                            'creator',
+                            '--title',
+                            'Title',
+                            '--content-type',
+                            'ai',
+                            '--no-publish',
+                            *flags,
+                        )
+                    self.assertEqual(code, expected_code, err)
+                    self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+                    self.assertEqual(page.mouse.down_count, 0)
+                    if expected_code == 0:
+                        self.assertIn('AI 声明：请求=ai（笔记含AI合成内容）', out)
+                        self.assertIn('终值=笔记含AI合成内容', out)
+                        self.assertIn('素材已上传，发布前检查已通过', out)
+                    else:
+                        self.assertEqual(out, '')
+                        self.assertIn('请求=ai', err)
+                        self.assertIn('终值=内容包含营销广告', err)
+                        self.assertIn('尚未点击发布', err)
+                        self.assertNotIn('素材已上传', out)
+
     def test_no_publish_failures_never_print_success_or_submit(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser
         from tests.fakes_clock import FakeClock
@@ -307,7 +357,11 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 code, out, err = self.cli('upload-note', '--account', 'creator', '--title', 'Title', '--images', str(image))
             self.assertEqual(code, expected, err)
             if expected == 0:
-                self.assertEqual(out, 'Xiaohongshu note upload submitted: 1 images\n')
+                self.assertEqual(
+                    out,
+                    "AI 声明：未请求（保留页面当前值）\n"
+                    "Xiaohongshu note upload submitted: 1 images\n",
+                )
             self.assertEqual(button.click_count, 1)
             if expected == 10: self.assertIn('publish_attempted=true', err)
 

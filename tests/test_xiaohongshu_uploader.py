@@ -290,8 +290,9 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
     def test_apply_declarations_repost_fills_media_name(self):
         class FakeTrigger:
-            def __init__(self):
+            def __init__(self, text="来源转载"):
                 self.clicks = 0
+                self.text = text
 
             @property
             def first(self):
@@ -312,6 +313,16 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             async def focus(self, **kwargs):
                 return None
 
+            async def element_handle(self):
+                return self
+
+            async def inner_text(self):
+                return self.text
+
+        class FakeMenu(FakeTrigger):
+            async def wait_for(self, **kwargs):
+                return None
+
         class FakeOption(FakeTrigger):
             def __init__(self, name):
                 super().__init__()
@@ -323,6 +334,10 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
             def filter(self, **kwargs):
                 return self
+
+            def locator(self, selector):
+                # 菜单收起断言只要求一个可等待的菜单节点。
+                return FakeMenu()
 
         class FakeInput(FakeTrigger):
             def __init__(self):

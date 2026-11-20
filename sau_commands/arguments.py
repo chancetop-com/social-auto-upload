@@ -30,6 +30,26 @@ def parse_image_files(raw_files: Iterable[Path]) -> list[Path]:
     return [Path(file) for file in raw_files]
 
 
+class ContentTypeAction(argparse.Action):
+    """Store one declaration type and reject conflicting repeats at parse time.
+
+    ``argparse``'s default ``store`` silently overwrites a repeated
+    ``--content-type``.  A conflicting pair must be a usage error before any
+    browser or media work (spec §AI: exit 2).  Passing the same value twice is
+    harmless and therefore accepted.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        current = getattr(namespace, self.dest, None)
+        if current is not None and current != values:
+            raise argparse.ArgumentError(
+                self,
+                f"--content-type 同一命令只能指定一个值："
+                f"已收到 {current!r}，又收到 {values!r}",
+            )
+        setattr(namespace, self.dest, values)
+
+
 def parse_utc_instant(
     value: str, *, label: str, require_minute: bool
 ) -> datetime:
