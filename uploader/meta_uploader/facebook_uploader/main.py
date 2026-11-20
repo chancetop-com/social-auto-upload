@@ -15,6 +15,7 @@ from patchright.async_api import BrowserContext, Page, Playwright, async_playwri
 from patchright.async_api import TimeoutError as BrowserTimeoutError
 
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.caption_topics import parse_caption_topics, text_results
 from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
@@ -42,6 +43,8 @@ FACEBOOK_PUBLISH_FORM = '[role="dialog"][aria-modal="true"] form'
 
 FACEBOOK_LOGIN_CHECK_TIMEOUT_MS = 20_000
 FACEBOOK_LOGIN_CHECK_SETTLE_MS = 2_500
+#: 单条 Facebook 帖子正文的平台文档上限（字符）。
+FACEBOOK_CAPTION_MAX_LENGTH = 63_206
 
 # Retain the managed ignored-option log contract. Local Profiles use the
 # selected browser configuration instead of these historical options.
@@ -235,6 +238,27 @@ def _composer_text(caption: str) -> str:
     return caption.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _first_difference(expected: str, actual: str) -> int:
+    """Return the first differing code-point offset (or the shorter length)."""
+    for offset, (want, got) in enumerate(zip(expected, actual)):
+        if want != got:
+            return offset
+    return min(len(expected), len(actual))
+
+
+def _context(text: str, offset: int, radius: int = 12) -> str:
+    return text[max(0, offset - radius):offset + radius]
+
+
+def _readback_error(label: str, expected: str, actual: str) -> RuntimeError:
+    offset = _first_difference(expected, actual)
+    return RuntimeError(
+        f"Facebook {label}读回不一致：首处差异偏移 {offset}；"
+        f"期望 {_context(expected, offset)!r}，实际 {_context(actual, offset)!r}"
+        f"（期望长度 {len(expected)}，实际长度 {len(actual)}）；未点击发布"
+    )
+
+
 class FacebookPost:
     """通过个人主页 composer 发布一个视频或一组图片。"""
 
@@ -259,6 +283,8 @@ class FacebookPost:
         self.headless = headless
         self.account_name = account_name
         self.local_browser = local_browser
+        #: 发布前逐字回读通过的公开配文；CLI 只从这里报告话题。
+        self.public_caption: str | None = None
 
     def _caption(self) -> str:
         """Facebook 首页没有独立视频标题字段，按项目统一约定合并为正文。"""
@@ -407,6 +433,11 @@ class FacebookPost:
         editor = await self._find_caption_editor(page)
         # 正文 = 标题 + 正文 + 标签（``\n\n`` 连接）；多行字段只允许 LF。
         caption = _composer_text(self._caption())
+        if len(caption) > FACEBOOK_CAPTION_MAX_LENGTH:
+            raise RuntimeError(
+                f"Facebook 配文超出整帖硬限制（{len(caption)} > "
+                f"{FACEBOOK_CAPTION_MAX_LENGTH} 字符）；未点击发布"
+            )
         humanizer = self._humanizer(page)
         # sel 形态：坐标点击聚焦 → 全选 → 删除 → 逐字（>1000 码点由
         # ``type_text`` 整段 insert_text），``type_text`` 自带恰一次 after_type。
@@ -414,8 +445,10 @@ class FacebookPost:
         await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
         await humanizer.type_text(caption)
-        if (await editor.inner_text()).strip() != caption:
-            raise RuntimeError("Facebook 正文输入框未读回预期内容")
+        actual = await editor.inner_text()
+        if actual != caption:
+            raise _readback_error("正文", caption, actual)
+        self.public_caption = caption
 
         await self._wait_until_publishable(page, budget)
         await self._publish_and_verify(page, budget)
