@@ -717,7 +717,7 @@ class InstagramAiControlledCliTests(unittest.TestCase):
                     html = _composer_html(
                         _AI_SWITCH_HTML[case], obscured=case == "obscured"
                     )
-                    code, saved, holder, _, stderr = self._run(
+                    code, saved, holder, stdout, stderr = self._run(
                         action=action, html=html
                     )
                     self.assertEqual(code, expected_code, stderr)
@@ -726,6 +726,22 @@ class InstagramAiControlledCliTests(unittest.TestCase):
                         saved["status"],
                         "prepared" if expected_code == 0 else "not_submitted",
                     )
+                    if expected_code == 0:
+                        # 成功时 CLI 仍把同一份结果 JSON 打到 stdout。
+                        printed = json.loads(stdout)
+                        self.assertEqual(printed["status"], "prepared")
+                        self.assertEqual(
+                            {
+                                key: value
+                                for key, value in printed["options"][
+                                    "ai_generated"
+                                ].items()
+                                if key != "detail"
+                            },
+                            expected_ai,
+                        )
+                    else:
+                        self.assertEqual(stdout, "")
                     record = saved["options"]["ai_generated"]
                     if case == "obscured":
                         detail = record.pop("detail", "")
@@ -772,6 +788,16 @@ class InstagramAiControlledCliTests(unittest.TestCase):
                 self.assertEqual(code, 0, stderr)
                 self.assertEqual(holder["share_clicks"], 0)
                 self.assertEqual(saved["status"], "prepared")
+                printed = json.loads(stdout)
+                self.assertEqual(printed["status"], "prepared")
+                self.assertEqual(
+                    printed["options"]["ai_generated"],
+                    {
+                        "requested": None,
+                        "applied": None,
+                        "status": NOT_REQUESTED,
+                    },
+                )
                 self.assertEqual(
                     saved["options"]["ai_generated"],
                     {
