@@ -112,10 +112,17 @@ def location_restriction_message(body: str | None) -> str | None:
     for pattern in _LOCATION_RESTRICTION_PATTERNS:
         match = pattern.search(text)
         if match:
-            # 保留匹配句的完整可见文案（含句号），便于失败结果说明现场。
-            end = text.find('.', match.end())
-            if end == -1:
-                end = len(text)
+            # 保留匹配句的完整可见文案（含句号），并限制无标点页面的长度。
+            endings = [
+                index for index in (
+                    text.find('.', match.end()),
+                    text.find('。', match.end()),
+                )
+                if index != -1
+            ]
+            end = min(endings) if endings else min(
+                len(text), match.end() + 120
+            )
             return text[match.start():end + 1].strip()
     return None
 
