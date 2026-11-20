@@ -62,12 +62,12 @@ class RednoteCliTests(unittest.TestCase):
             for action, flags, upload_name in (
                 (
                     "upload-video",
-                    ["--file", media.name, "--desc", "English body"],
+                    ["--file", media.name, "--desc", "English body #travel #life"],
                     "upload_rednote_video",
                 ),
                 (
                     "upload-note",
-                    ["--images", media.name, "--note", "English body"],
+                    ["--images", media.name, "--note", "English body #travel #life"],
                     "upload_rednote_note",
                 ),
             ):
@@ -84,8 +84,6 @@ class RednoteCliTests(unittest.TestCase):
                             "a",
                             "--title",
                             "Hello",
-                            "--tags",
-                            "travel,life",
                             "--no-publish",
                             *flags,
                         ]
@@ -93,7 +91,7 @@ class RednoteCliTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 request = upload.call_args.args[0]
                 self.assertEqual(request.account_name, "a")
-                self.assertEqual(request.tags, ["travel", "life"])
+                self.assertEqual(request.tags, [])
                 self.assertTrue(request.no_publish)
                 self.assertIn("素材已上传，发布前检查已通过；已停止，未点击发布按钮。", stdout.getvalue())
                 self.assertNotIn("submitted", stdout.getvalue())

@@ -164,14 +164,12 @@ def studio_profile(request, tmp_path, installations):
         assert profile.stops == ["shared"]
 
 
-def start_video(profile, *, title="YouTube marker", desc=None, tags=None):
+def start_video(profile, *, title="YouTube marker", desc=None):
     video = profile.root / "synthetic.mp4"
     video.write_bytes(b"offline fixture")
     args = ["--title", title]
     if desc is not None:
         args += ["--desc", desc]
-    if tags is not None:
-        args += ["--tags", tags]
     return profile.command(1, "youtube", "--file", str(video), *args,
                            action="upload-video", env={"HUMANIZE": "0"})
 
@@ -194,18 +192,6 @@ def test_description_topics_are_reported_and_prefilled_keywords_survive(studio_p
     assert "#标题话题" not in output
     assert "#frag" not in output
     assert studio.submissions == [("#标题话题 独立标题", "synthetic.mp4")]
-
-
-@pytest.mark.parametrize("studio_profile", ["success"], indirect=True)
-def test_old_tags_still_write_studio_keywords_without_copying_topics(studio_profile):
-    studio, profile = studio_profile
-    description = "简介 #公开话题"
-    child = start_video(profile, desc=description, tags="a,b")
-    output = child.communicate(timeout=40)[0]
-    assert child.returncode == 0, output
-    assert studio.records[0]["description"] == description
-    assert studio.records[0]["keywords"] == "a,b,"
-    assert "公开话题" not in studio.records[0]["keywords"]
 
 
 @pytest.mark.parametrize("studio_profile", ["description-limit"], indirect=True)

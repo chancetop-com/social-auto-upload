@@ -28,7 +28,6 @@ from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
     parse_image_files,
-    parse_tags,
 )
 from sau_commands.browser import (
     add_browser_flags,
@@ -68,8 +67,9 @@ def register(platform_parsers):
         "--thumbnail", type=media_source, help="Reel 自定义封面（JPG/JPEG/PNG），支持本地路径或 HTTP(S) URL"
     )
     instagram_video.add_argument("--title", required=True)
-    instagram_video.add_argument("--desc", default="")
-    instagram_video.add_argument("--tags", default="")
+    instagram_video.add_argument(
+        "--desc", default="", help="正文；公开话题写为 #话题"
+    )
     instagram_video.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_video.add_argument("--result", type=Path)
     add_not_before_flag(instagram_video)
@@ -84,8 +84,9 @@ def register(platform_parsers):
         "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
     )
     instagram_note.add_argument("--title", required=True)
-    instagram_note.add_argument("--note", default="")
-    instagram_note.add_argument("--tags", default="")
+    instagram_note.add_argument(
+        "--note", default="", help="正文；公开话题写为 #话题"
+    )
     instagram_note.add_argument("--proxy", default=INSTAGRAM_PROXY, help="代理地址；不传时直连")
     instagram_note.add_argument("--result", type=Path)
     add_not_before_flag(instagram_note)
@@ -350,7 +351,7 @@ async def run(args):
             account_name=account_label,
             title=args.title,
             description=args.desc if args.action == "upload-video" else args.note,
-            tags=parse_tags(args.tags),
+            tags=[],
             video_file=args.file if args.action == "upload-video" else None,
             image_files=parse_image_files(args.images) if args.action == "upload-note" else None,
             thumbnail=args.thumbnail if args.action == "upload-video" else None,

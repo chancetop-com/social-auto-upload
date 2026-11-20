@@ -261,8 +261,8 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 
 ```bash
 sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau facebook upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags Facebook,测试
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #tag1 #tag2" --playlist "我的系列" --visibility public
+sau facebook upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #Facebook #测试"
 sau facebook-page upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --page "我的 Page"
 ```
 

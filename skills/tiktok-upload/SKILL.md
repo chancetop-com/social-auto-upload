@@ -58,7 +58,7 @@ sau tiktok check --folder-id <folder_id> --profile-id <profile_id>
 # 视频：新选项都可选，不传即保持页面默认
 sau tiktok upload-video \
   --folder-id <folder_id> --profile-id <profile_id> \
-  --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
+  --file videos/demo.mp4 --title "标题 #tag1 #tag2" \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
   --schedule "2026-10-21T02:30:00Z" --thumbnail videos/demo.png
 
@@ -66,7 +66,7 @@ sau tiktok upload-video \
 sau tiktok upload-note \
   --folder-id <folder_id> --profile-id <profile_id> \
   --images videos/demo1.png videos/demo2.png \
-  --title "图文标题" --note "图文正文" --tags 图文,测试 \
+  --title "图文标题" --note "图文正文 #图文 #测试" \
   --privacy friends --no-comments --aigc
 
 # AdsPower 模式（--folder-id 可省略）
@@ -77,7 +77,7 @@ sau tiktok check --profile-id <profile_id>
 
 sau tiktok upload-video \
   --profile-id <profile_id> \
-  --file videos/demo.mp4 --title "标题" --tags tag1,tag2 \
+  --file videos/demo.mp4 --title "标题 #tag1 #tag2" \
   --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
 ```
 
@@ -101,14 +101,13 @@ sau tiktok upload-video \
 - `--aigc` / `--no-aigc`：开启/关闭 AI 生成内容标识；两者互斥，不传则保持页面默认。
 - `--your-brand` / `--branded-content`：品牌内容声明；可同时使用。`--branded-content` 不能与 `--privacy only-me` 同时使用（退出 `2`）。
 - `--thumbnail`：自定义视频封面。
-- 视频标题仍为必填，没有独立简介参数；标题与 tags 写入同一个 caption 编辑器。
+- 视频标题仍为必填，没有独立简介参数；标题与公开 `#话题` 写入同一个 caption 编辑器。旧 `--tags` 已移除，传入会退出 `2`。
 
 ## 图文参数
 
 - `--images`：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；传入顺序即展示顺序，第 1 张为封面。
 - `--title`：页面 Title，≤90 字符，可选；不传则不改动页面输入。
-- `--note` / `--notef`：Description，≤4000 字符（含 tags 展开后的文本）；`--notef` 从本地 txt/md 读取；两者互斥；都不传且无 tags 时不改动页面输入。
-- `--tags`：逗号分隔，最多 50 个。
+- `--note` / `--notef`：Description，≤4000 字符（含正文中的 `#话题`）；`--notef` 从本地 txt/md 读取；两者互斥；都不传时不改动页面输入。
 - `--schedule`：`YYYY-MM-DDTHH:MM:00Z`（UTC 绝对时刻，填写前换算到浏览器时区；精确到 5 分钟）。
 - 发布选项：`--privacy`、`--no-comments`、`--aigc`/`--no-aigc`、`--your-brand`、`--branded-content` 与视频相同。
 - `upload-note` 没有 `--disable-reuse`、`--thumbnail` 或 `--cover-index`。
@@ -116,11 +115,11 @@ sau tiktok upload-video \
 ## 退出码与失败处理
 
 - `0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录或验证、`130` 中断。
-- 图片数量/格式/大小、Title/Description/hashtag 超限、`--note`/`--notef` 冲突等本地校验失败在启动浏览器前退出 `2`。
+- 图片数量/格式/大小、Title/Description 超限、`--note`/`--notef` 冲突等本地校验失败在启动浏览器前退出 `2`；正文内联话题不触发静态数量拒绝，第 51 处起原位保留为文字。
 - 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
 - 收到 `9` 时**禁止自动重发**：发布点击已发出但未确认成功，先到 TikTok Studio → Content/Posts 按标题与发布时间核对；已存在不要重发，不存在才可人工重试。
 - 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关。
 
 定时发布使用 `--schedule "YYYY-MM-DDTHH:MM:00Z"`；只有用户明确给出时间才传。托管 Profile 即身份，本地别名选择独立 Profile。关闭故障不覆盖主结果；重新登录、崩溃或重建都不代表可以重新提交旧任务。
 
-每次发布前让用户确认账号、单条视频或一组图片、标题、正文/标签及立即/定时方式。页面布局或登录状态不符合预期时停止并报告；只有平台页面确认提交后才报告成功，未知结果先核查 TikTok Studio，不能直接重发。
+每次发布前让用户确认账号、单条视频或一组图片、标题、正文/公开话题及立即/定时方式。页面布局或登录状态不符合预期时停止并报告；只有平台页面确认提交后才报告成功，未知结果先核查 TikTok Studio，不能直接重发。

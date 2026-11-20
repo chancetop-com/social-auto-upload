@@ -14,8 +14,7 @@ sau xiaohongshu upload-video `
   --account $account `
   --file $video `
   --title "Xiaohongshu video from PowerShell" `
-  --desc "Xiaohongshu video description from PowerShell" `
-  --tags "cli,video" `
+  --desc "Xiaohongshu video description from PowerShell #cli #video" `
   --thumbnail $thumbnail `
   --headless
 
@@ -23,6 +22,5 @@ sau xiaohongshu upload-note `
   --account $account `
   --images $noteImages `
   --title "Xiaohongshu note title from PowerShell" `
-  --note "Xiaohongshu note from PowerShell" `
-  --tags "cli,note" `
+  --note "Xiaohongshu note from PowerShell #cli #note" `
   --headless

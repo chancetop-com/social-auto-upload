@@ -916,7 +916,6 @@ class RednoteInlineTopicCliTests(unittest.TestCase):
     def _args(self, action: str = "upload-video"):
         return SimpleNamespace(
             action=action,
-            tags="",
             file="demo.mp4",
             images=["a.png"],
             title="标题",

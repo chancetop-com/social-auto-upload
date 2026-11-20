@@ -1,6 +1,5 @@
 """rednote 的命令参数与执行逻辑。"""
 from __future__ import annotations
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,13 +9,11 @@ from uploader.rednote_uploader.main import (
     REDNOTE_CONTEXT_KWARGS,
     REDNOTE_INIT_SCRIPT,
     REDNOTE_LAUNCH_KWARGS,
-    REDNOTE_MAX_TAGS,
     REDNOTE_PUBLISH_STRATEGY_IMMEDIATE,
     REDNOTE_PUBLISH_STRATEGY_SCHEDULED,
     RednoteNote,
     RednoteVideo,
     _blocked_message,
-    format_tag_cap_warning,
     probe_session,
     rednote_setup,
 )
@@ -34,7 +31,6 @@ from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
     parse_image_files,
-    parse_tags,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -195,8 +191,9 @@ def register(platform_parsers):
         "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
     )
     rednote_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
-    rednote_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
-    rednote_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    rednote_upload_video_parser.add_argument(
+        "--desc", default="", help="正文；公开话题写为 #话题"
+    )
     rednote_upload_video_parser.add_argument(
         "--location",
         default=None,
@@ -218,8 +215,9 @@ def register(platform_parsers):
         "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
     )
     rednote_upload_note_parser.add_argument("--title", type=single_line_value, required=True, help="Note title")
-    rednote_upload_note_parser.add_argument("--note", default="", help="Optional note content")
-    rednote_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    rednote_upload_note_parser.add_argument(
+        "--note", default="", help="正文；公开话题写为 #话题"
+    )
     rednote_upload_note_parser.add_argument(
         "--location",
         default=None,
@@ -515,15 +513,12 @@ async def run(args):
     )
 
     if args.action == "upload-video":
-        parsed_tags = parse_tags(args.tags)
-        if len(parsed_tags) > REDNOTE_MAX_TAGS:
-            print(f"警告：{format_tag_cap_warning(parsed_tags)}", file=sys.stderr)
         request = RednoteVideoUploadRequest(
             account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
-            tags=parsed_tags,
+            tags=[],
             publish_date=args.schedule or 0,
             thumbnail_file=args.thumbnail,
             publish_strategy=publish_strategy,
@@ -549,15 +544,12 @@ async def run(args):
         return 0
 
     if args.action == "upload-note":
-        parsed_tags = parse_tags(args.tags)
-        if len(parsed_tags) > REDNOTE_MAX_TAGS:
-            print(f"警告：{format_tag_cap_warning(parsed_tags)}", file=sys.stderr)
         request = RednoteNoteUploadRequest(
             account_name=account_label,
             image_files=parse_image_files(args.images),
             title=args.title,
             note=args.note,
-            tags=parsed_tags,
+            tags=[],
             publish_date=args.schedule or 0,
             publish_strategy=publish_strategy,
             debug=args.debug,

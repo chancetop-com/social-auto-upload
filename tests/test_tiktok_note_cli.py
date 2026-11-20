@@ -546,7 +546,7 @@ class UploadNoteValidationTests(unittest.TestCase):
             self._assert_exit_2_without_browser(self._argv([str(huge)]))
 
     def test_title_over_90_characters_exits_2_without_browser(self):
-        tiktok_command._validate_note_metadata("x" * 90, None, [])
+        tiktok_command._validate_note_metadata("x" * 90, None)
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
@@ -554,7 +554,7 @@ class UploadNoteValidationTests(unittest.TestCase):
             )
 
     def test_description_over_4000_characters_exits_2_without_browser(self):
-        tiktok_command._validate_note_metadata(None, "x" * 4000, [])
+        tiktok_command._validate_note_metadata(None, "x" * 4000)
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
@@ -572,47 +572,18 @@ class UploadNoteValidationTests(unittest.TestCase):
                 )
             )
 
-    def test_scheduled_note_with_only_tags_exits_2_without_browser(self):
+    def test_description_length_counts_inline_topics(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
-                self._argv(
-                    images,
-                    "--tags",
-                    "fyp",
-                    "--schedule",
-                    "2026-11-06T10:15:00Z",
-                )
-            )
-
-    def test_description_length_includes_expanded_tags(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            images = self._images(tmp_dir, 1)
-            self._assert_exit_2_without_browser(
-                self._argv(
-                    images,
-                    "--note",
-                    "x" * 3990,
-                    "--tags",
-                    "0123456789",
-                )
-            )
-
-    def test_more_than_50_hashtags_exits_2_without_browser(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            images = self._images(tmp_dir, 1)
-            tags = [f"tag{index}" for index in range(51)]
-            tiktok_command._validate_note_metadata(None, None, tags[:50])
-            self._assert_exit_2_without_browser(
-                self._argv(images, "--tags", ",".join(tags))
+                self._argv(images, "--note", "x" * 3996 + " #tag")
             )
 
     def test_inline_topics_over_50_are_not_statically_rejected(self):
         # Inline occurrences are associations, not camera-ready text: the
-        # uploader keeps the 51st word and reports the per-post limit.  Only
-        # the legacy --tags list keeps its preflight rejection until ticket 26.
+        # uploader keeps the 51st word and reports the per-post limit.
         caption = " ".join(f"#tag{index}" for index in range(51))
-        tiktok_command._validate_note_metadata(None, caption, [])
+        tiktok_command._validate_note_metadata(None, caption)
 
     def test_missing_notef_file_exits_2_without_browser(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -834,9 +805,7 @@ class UploadNoteCliTests(unittest.TestCase):
                         "--title",
                         "Photo title",
                         "--note",
-                        "Photo body",
-                        "--tags",
-                        "one, two",
+                        "Photo body #one #two",
                         "--privacy",
                         "friends",
                         "--no-comments",
@@ -850,8 +819,8 @@ class UploadNoteCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         request = builder.call_args.args[0]
         self.assertEqual(request.title, "Photo title")
-        self.assertEqual(request.note, "Photo body")
-        self.assertEqual(request.tags, ["one", "two"])
+        self.assertEqual(request.note, "Photo body #one #two")
+        self.assertEqual(request.tags, [])
         self.assertTrue(request.debug)
         self.assertTrue(request.headless)
         self.assertEqual(
@@ -872,7 +841,7 @@ class UploadNoteCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir)
             note_file = Path(tmp_dir) / "note.md"
-            note_file.write_text("from a markdown file", encoding="utf-8")
+            note_file.write_text("from a markdown file #fromfile", encoding="utf-8")
             _, _, factory = _fake_session(object())
             app = MagicMock()
             app.upload = AsyncMock()
@@ -908,7 +877,8 @@ class UploadNoteCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0, err)
         request = builder.call_args.args[0]
-        self.assertEqual(request.note, "from a markdown file")
+        self.assertEqual(request.note, "from a markdown file #fromfile")
+        self.assertEqual(request.tags, [])
 
     def test_cli_without_metadata_keeps_none_and_empty_tags(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1193,9 +1163,9 @@ class UploadNoteMetadataTests(unittest.TestCase):
 
         self.assertIn(("press", "ControlOrMeta+A"), page.events)
 
-    def test_description_and_tags_follow_the_note_text(self):
+    def test_inline_topics_follow_the_note_text(self):
         page = self._page()
-        note = self._note(note="hello world", tags=("one", "two"))
+        note = self._note(note="hello world #one #two")
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))
@@ -1207,16 +1177,19 @@ class UploadNoteMetadataTests(unittest.TestCase):
             page.caption_text.index("#one"), page.caption_text.index("#two")
         )
 
-    def test_tags_only_still_reach_the_editor(self):
+    def test_legacy_tags_alone_no_longer_write_a_caption(self):
         page = self._page()
         note = self._note(tags=("only",))
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))
 
-        self.assertIn("#only", page.caption_text)
+        self.assertEqual(page.caption_text, "")
+        self.assertFalse(
+            any(event[0] in ("insert_text", "press") for event in page.events)
+        )
 
-    def test_no_note_and_no_tags_makes_zero_editor_interactions(self):
+    def test_no_note_makes_zero_editor_interactions(self):
         page = self._page()
         note = self._note()
         note.locator_base = page.locator("body")
@@ -1234,7 +1207,7 @@ class UploadNoteMetadataTests(unittest.TestCase):
 
     def test_metadata_fill_does_not_touch_images(self):
         page = self._page()
-        note = self._note(title="T", note="hello", tags=("one",))
+        note = self._note(title="T", note="hello #one")
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))

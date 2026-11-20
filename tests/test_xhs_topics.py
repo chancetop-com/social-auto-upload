@@ -1099,7 +1099,6 @@ class InlineCaptionCliTests(unittest.TestCase):
     def _args(self, action: str = "upload-video"):
         return SimpleNamespace(
             action=action,
-            tags="",
             file="demo.mp4",
             images=["a.png"],
             title="标题",
@@ -1185,55 +1184,6 @@ class InlineCaptionCliTests(unittest.TestCase):
                     f"{'demo.mp4' if action == 'upload-video' else '1 images'}",
                     lines,
                 )
-
-
-class Decision08TopicTagCapCliTests(unittest.TestCase):
-    def _args(self, count: int = 12):
-        return SimpleNamespace(
-            action="upload-video",
-            tags=",".join(f"tag{i}" for i in range(count)),
-            file="demo.mp4",
-            title="标题",
-            desc="",
-            schedule=None,
-            thumbnail=None,
-            debug=False,
-            headless=True,
-            not_before=None,
-            account="acct",
-        )
-
-    def test_more_than_ten_tags_warns_and_continues(self):
-        args = self._args()
-        upload = AsyncMock()
-
-        with patch.object(
-            xhs_command,
-            "_validate_declarations",
-            return_value=(None, None, None, None, None),
-        ), patch.object(
-            xhs_command, "resolve_managed_provider", return_value=None
-        ), patch.object(
-            xhs_command, "require_local_account"
-        ), patch.object(
-            xhs_command, "resolve_account_label", return_value="acct"
-        ), patch.object(
-            xhs_command, "managed_ignored_keys", return_value=()
-        ), patch.object(
-            xhs_command, "upload_xiaohongshu_video", new=upload
-        ), redirect_stdout(
-            io.StringIO()
-        ), redirect_stderr(
-            io.StringIO()
-        ) as err:
-            code = asyncio.run(xhs_command.run(args))
-
-        self.assertEqual(code, 0)
-        upload.assert_awaited_once()
-        request = upload.await_args.args[0]
-        self.assertEqual(len(request.tags), 12)
-        self.assertIn("警告", err.getvalue())
-        self.assertIn("tag11", err.getvalue())
 
 
 class _LogRecorder:

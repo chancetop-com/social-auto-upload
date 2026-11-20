@@ -16,7 +16,6 @@ from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    parse_tags,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -54,8 +53,11 @@ def register(platform_parsers):
         "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
     )
     youtube_upload_video_parser.add_argument("--title", required=True, help="Video title (<=100 chars)")
-    youtube_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
-    youtube_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    youtube_upload_video_parser.add_argument(
+        "--desc",
+        default="",
+        help="Optional video description; write public topics as #hashtags here",
+    )
     youtube_upload_video_parser.add_argument(
         "--thumbnail", type=media_source, help="Local thumbnail path or HTTP(S) URL"
     )
@@ -204,7 +206,7 @@ async def run(args):
             video_file=args.file,
             title=args.title,
             description=args.desc,
-            tags=parse_tags(args.tags),
+            tags=[],
             thumbnail_file=args.thumbnail,
             playlist=args.playlist,
             visibility=args.visibility,
