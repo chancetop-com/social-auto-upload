@@ -656,6 +656,58 @@ def _install(video, controls):
     return resolver
 
 
+def _apply_with_output(video, controls, page=None):
+    """Run ``apply_options`` and capture the terminal field diagnostic."""
+    _install(video, controls)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        asyncio.run(video.apply_options(page or _OptionPage()))
+    return out.getvalue()
+
+
+class _PublishButton:
+    """Enabled publish-button double; records every click."""
+
+    def __init__(self) -> None:
+        self._count = 1
+        self.click_calls = 0
+
+    @property
+    def first(self):
+        return self
+
+    def nth(self, _index: int):
+        return self
+
+    async def count(self) -> int:
+        return self._count
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def is_enabled(self, *, timeout=None) -> bool:
+        return True
+
+    async def get_attribute(self, name: str, *, timeout=None):
+        return None
+
+    async def click(self) -> None:
+        self.click_calls += 1
+
+
+class _PublishBase:
+    """Locator base for the real ``wait_publish_ready`` gate."""
+
+    def __init__(self) -> None:
+        self.button = _PublishButton()
+
+    def locator(self, _selector: str) -> _PublishButton:
+        return self.button
+
+    def get_by_role(self, _role: str, name=None) -> _PublishButton:
+        return self.button
+
+
 class TiktokOptionStepTests(unittest.TestCase):
     def test_no_request_performs_zero_control_interactions(self):
         for options in (None, TiktokPublishOptions()):
@@ -1225,6 +1277,186 @@ class TiktokOptionStepTests(unittest.TestCase):
 
 
 class TiktokAigcOptionTests(unittest.TestCase):
+    def test_aigc_omitted_preserves_preset_and_reports_not_requested(self):
+        aigc = FakeToggleControl(True)
+        video = _uploader(TiktokPublishOptions(allow_comments=True))
+
+        out = _apply_with_output(
+            video,
+            _controls(comments=FakeToggleControl(True), aigc=aigc),
+        )
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.checked_reads, 0)
+        self.assertEqual(aigc.disabled_reads, 0)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(video.ai_outcome.requested)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "not_requested")
+        self.assertEqual(out, "")
+
+    def test_aigc_on_missing_reports_entry_missing_and_fails(self):
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("option=aigc", message)
+        self.assertIn("control-not-found", message)
+        self.assertEqual(video.ai_outcome.requested, True)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "unsupported")
+        self.assertEqual(video.ai_outcome.reason, "entry_missing")
+        line = out.getvalue()
+        self.assertIn("requested=true", line)
+        self.assertIn("applied=null", line)
+        self.assertIn("status=unsupported", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=no", line)
+
+    def test_no_aigc_missing_entry_continues_as_default_off(self):
+        video = _uploader(TiktokPublishOptions(aigc=False))
+
+        out = _apply_with_output(video, _controls(aigc=None))
+
+        self.assertEqual(video.ai_outcome.requested, False)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "default_off")
+        self.assertEqual(video.ai_outcome.reason, "entry_missing")
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=default_off", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=yes", out)
+
+    def test_no_aigc_missing_entry_survives_the_real_resolver(self):
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertEqual(video.ai_outcome.status, "default_off")
+        self.assertEqual(video.ai_outcome.reason, "entry_missing")
+        self.assertIn("status=default_off", out.getvalue())
+
+    def test_aigc_missing_entry_survives_the_real_resolver_and_fails(self):
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("control-not-found", str(ctx.exception))
+        self.assertEqual(video.ai_outcome.status, "unsupported")
+
+    def test_no_aigc_already_off_reports_default_off_without_click(self):
+        aigc = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(aigc=False))
+
+        out = _apply_with_output(video, _controls(aigc=aigc))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(video.ai_outcome.applied, False)
+        self.assertEqual(video.ai_outcome.status, "default_off")
+        self.assertIsNone(video.ai_outcome.reason)
+        self.assertIn("applied=false", out)
+        self.assertIn("status=default_off", out)
+        self.assertIn("reason=-", out)
+        self.assertIn("continue=yes", out)
+
+    def test_no_aigc_on_to_off_reports_set(self):
+        aigc = FakeToggleControl(True)
+        video = _uploader(TiktokPublishOptions(aigc=False))
+
+        out = _apply_with_output(video, _controls(aigc=aigc))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(video.ai_outcome.applied, False)
+        self.assertEqual(video.ai_outcome.status, "set")
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=false", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+
+    def test_no_aigc_disabled_and_still_on_fails_mismatch(self):
+        aigc = FakeToggleControl(True, disabled=True)
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        _install(video, _controls(aigc=aigc))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("stage=disabled", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(video.ai_outcome.applied, True)
+        self.assertEqual(video.ai_outcome.status, "mismatch")
+        line = out.getvalue()
+        self.assertIn("applied=true", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("continue=no", line)
+
+    def test_no_aigc_visible_but_unreadable_fails_mismatch(self):
+        aigc = _FailingReadControl()
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        _install(video, _controls(aigc=aigc))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("stage=read", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "mismatch")
+        self.assertEqual(video.ai_outcome.reason, "read_error")
+        line = out.getvalue()
+        self.assertIn("applied=null", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=read_error", line)
+        self.assertIn("continue=no", line)
+
+    def test_aigc_on_readback_false_reports_mismatch(self):
+        aigc = FakeToggleControl(False, click_toggles=False)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(video.ai_outcome.applied, False)
+        self.assertEqual(video.ai_outcome.status, "mismatch")
+        self.assertIn("applied=false", out.getvalue())
+        self.assertIn("continue=no", out.getvalue())
+
+    def test_aigc_on_from_off_reports_set(self):
+        aigc = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+
+        out = _apply_with_output(video, _controls(aigc=aigc))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(video.ai_outcome.applied, True)
+        self.assertEqual(video.ai_outcome.status, "set")
+        self.assertIn("requested=true", out)
+        self.assertIn("applied=true", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+
     def test_aigc_on_clicks_switch_confirms_turn_on_and_reads_back(self):
         aigc = FakeToggleControl(False)
 
@@ -1470,6 +1702,99 @@ class TiktokAigcOptionTests(unittest.TestCase):
         self.assertIn("stage=read", message)
         self.assertIn("read-error", message)
         self.assertIn("not a checkbox", message)
+
+
+class TiktokAigcFlowTests(unittest.TestCase):
+    """Controlled video flow: AI outcome decides whether publishing proceeds."""
+
+    _FORM_STEPS = (
+        "open_upload_page",
+        "attach_media",
+        "fill_metadata",
+        "wait_media_ready",
+        "apply_cover",
+        "apply_schedule",
+    )
+
+    def _dry_run_video(self, controls):
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        video.no_publish = True
+        base = _PublishBase()
+        video.locator_base = base
+        for name in self._FORM_STEPS:
+            setattr(video, name, AsyncMock())
+        _install(video, controls)
+        return video, base
+
+    def test_no_aigc_missing_entry_reaches_no_publish_stop(self):
+        video, base = self._dry_run_video(_controls(aigc=None))
+        out = io.StringIO()
+
+        with (
+            redirect_stdout(out),
+            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
+            patch.object(tk_main.tiktok_logger, "success") as success,
+        ):
+            asyncio.run(
+                video._upload_on_page(
+                    _OptionPage(), managed=False, budget=None
+                )
+            )
+
+        line = out.getvalue()
+        self.assertIn("status=default_off", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=yes", line)
+        success.assert_called_once_with(tk_main.TIKTOK_DRY_RUN_READY_MESSAGE)
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_no_aigc_disabled_and_still_on_fails_before_publish(self):
+        video, base = self._dry_run_video(
+            _controls(aigc=FakeToggleControl(True, disabled=True))
+        )
+        video.click_publish = AsyncMock()
+        out = io.StringIO()
+
+        with (
+            redirect_stdout(out),
+            patch.object(tk_main.tiktok_logger, "success") as success,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(
+                    video._upload_on_page(
+                        _OptionPage(), managed=False, budget=None
+                    )
+                )
+
+        self.assertIn("stage=disabled", str(ctx.exception))
+        self.assertIn("status=mismatch", out.getvalue())
+        self.assertIn("continue=no", out.getvalue())
+        success.assert_not_called()
+        video.click_publish.assert_not_awaited()
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_no_aigc_visible_but_unreadable_fails_before_publish(self):
+        video, base = self._dry_run_video(_controls(aigc=_FailingReadControl()))
+        video.click_publish = AsyncMock()
+        out = io.StringIO()
+
+        with (
+            redirect_stdout(out),
+            patch.object(tk_main.tiktok_logger, "success") as success,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(
+                    video._upload_on_page(
+                        _OptionPage(), managed=False, budget=None
+                    )
+                )
+
+        self.assertIn("stage=read", str(ctx.exception))
+        self.assertIn("reason=read_error", out.getvalue())
+        self.assertIn("continue=no", out.getvalue())
+        success.assert_not_called()
+        video.click_publish.assert_not_awaited()
+        self.assertEqual(base.button.click_calls, 0)
 
 
 class TiktokBrandDisclosureTests(unittest.TestCase):
@@ -1813,6 +2138,68 @@ class TiktokOptionCliFlowTests(unittest.TestCase):
         self.assertIs(request.options.aigc, False)
         self.assertIsNone(request.options.your_brand)
         self.assertIsNone(request.options.branded_content)
+
+    def test_cli_aigc_missing_control_exits_1_without_publish_click(self):
+        base = _PublishBase()
+        app = _uploader(TiktokPublishOptions(aigc=True))
+        app.no_publish = True
+        app.locator_base = base
+        for name in TiktokAigcFlowTests._FORM_STEPS:
+            setattr(app, name, AsyncMock())
+        app.resolve_option_controls = AsyncMock(
+            return_value=_controls(aigc=None)
+        )
+
+        async def upload(_playwright=None, session=None):
+            await app._upload_on_page(_OptionPage(), managed=False, budget=None)
+
+        app.upload = upload
+        builder = MagicMock(return_value=app)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = Path(tmp_dir) / "demo.mp4"
+            video.write_bytes(b"video")
+            session_cm = _AsyncCM(Namespace(context=object()))
+            factory = MagicMock(return_value=session_cm)
+            with (
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_video_uploader", new=builder
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-video",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--file",
+                        str(video),
+                        "--title",
+                        "标题",
+                        "--aigc",
+                        "--no-publish",
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertIn("control-not-found", err)
+        self.assertIn("status=unsupported", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=no", out)
+        self.assertEqual(base.button.click_calls, 0)
 
 
 class TiktokScheduleMinuteTests(unittest.TestCase):
