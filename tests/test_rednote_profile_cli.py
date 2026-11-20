@@ -420,6 +420,7 @@ class RednoteProfileCliTests(unittest.TestCase):
                     self.assertEqual(
                         out,
                         "AI 声明：未请求（保留页面当前值）\n"
+                        "帖子地点：未请求（保留页面当前值）\n"
                         "Rednote note upload submitted: 1 images\n",
                     )
                 self.assertEqual(code, expected, err)

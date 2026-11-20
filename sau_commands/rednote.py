@@ -20,7 +20,7 @@ from uploader.rednote_uploader.main import (
     probe_session,
     rednote_setup,
 )
-from sau_commands.output import report_ai_declaration, report_upload_success
+from sau_commands.output import report_ai_declaration, report_location, report_upload_success
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
@@ -158,6 +158,18 @@ def _validate_declarations(
     )
 
 
+def _validate_location(args) -> str | None:
+    """Reject an explicit empty/whitespace location before any browser work."""
+    location = getattr(args, "location", None)
+    if location is None:
+        return None
+    if not str(location).strip():
+        raise UsageError(
+            "--location 不能为空或纯空白；省略该参数可保留页面当前值。"
+        )
+    return str(location).strip()
+
+
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     rednote_parser = platform_parsers.add_parser("rednote", help="Rednote operations")
@@ -180,6 +192,11 @@ def register(platform_parsers):
     rednote_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
     rednote_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
     rednote_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    rednote_upload_video_parser.add_argument(
+        "--location",
+        default=None,
+        help="帖子地点名称；省略则保留页面当前值（不同于 --shoot-location）",
+    )
     rednote_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(rednote_upload_video_parser)
     rednote_upload_video_parser.add_argument(
@@ -198,6 +215,11 @@ def register(platform_parsers):
     rednote_upload_note_parser.add_argument("--title", type=single_line_value, required=True, help="Note title")
     rednote_upload_note_parser.add_argument("--note", default="", help="Optional note content")
     rednote_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    rednote_upload_note_parser.add_argument(
+        "--location",
+        default=None,
+        help="帖子地点名称；省略则保留页面当前值（不同于 --shoot-location）",
+    )
     rednote_upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(rednote_upload_note_parser)
     _add_declaration_flags(rednote_upload_note_parser)
@@ -222,10 +244,12 @@ class RednoteVideoUploadRequest:
     repost_source: str | None = None
     shoot_location: str | None = None
     shoot_date: str | None = None
+    location: str | None = None
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
     declaration_report: dict[str, str | None] | None = None
+    location_report: dict[str, str | None] | None = None
 
 
 @dataclass(slots=True)
@@ -244,10 +268,12 @@ class RednoteNoteUploadRequest:
     repost_source: str | None = None
     shoot_location: str | None = None
     shoot_date: str | None = None
+    location: str | None = None
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
     declaration_report: dict[str, str | None] | None = None
+    location_report: dict[str, str | None] | None = None
 
 
 async def login_rednote_account(
@@ -291,6 +317,7 @@ def _build_video_uploader(request: RednoteVideoUploadRequest) -> RednoteVideo:
         repost_source=request.repost_source,
         shoot_location=request.shoot_location,
         shoot_date=request.shoot_date,
+        location=request.location,
         no_publish=request.no_publish,
         account_name=request.account_name, local_browser=request.local_browser,
     )
@@ -315,6 +342,7 @@ def _build_note_uploader(request: RednoteNoteUploadRequest) -> RednoteNote:
         repost_source=request.repost_source,
         shoot_location=request.shoot_location,
         shoot_date=request.shoot_date,
+        location=request.location,
         no_publish=request.no_publish,
         account_name=request.account_name, local_browser=request.local_browser,
     )
@@ -369,11 +397,13 @@ async def upload_rednote_video(
             ) as session:
                 await app.rednote_upload_video(session=session)
         request.declaration_report = getattr(app, "declaration_report", None)
+        request.location_report = getattr(app, "location_report", None)
         return None
 
     app = _build_video_uploader(request)
     await app.main()
     request.declaration_report = getattr(app, "declaration_report", None)
+    request.location_report = getattr(app, "location_report", None)
     return None
 
 
@@ -399,11 +429,13 @@ async def upload_rednote_note(
             ) as session:
                 await app.rednote_upload_note(session=session)
         request.declaration_report = getattr(app, "declaration_report", None)
+        request.location_report = getattr(app, "location_report", None)
         return None
 
     app = _build_note_uploader(request)
     await app.main()
     request.declaration_report = getattr(app, "declaration_report", None)
+    request.location_report = getattr(app, "location_report", None)
     return None
 
 
@@ -426,7 +458,9 @@ async def run(args):
 
     original_declaration = content_type = repost_source = None
     shoot_location = shoot_date = None
+    location = None
     if args.action in {"upload-video", "upload-note"}:
+        location = _validate_location(args)
         (
             original_declaration,
             content_type,
@@ -492,6 +526,7 @@ async def run(args):
             repost_source=repost_source,
             shoot_location=shoot_location,
             shoot_date=shoot_date,
+            location=location,
             no_publish=getattr(args, "no_publish", False),
             publish_not_before=args.not_before,
         )
@@ -499,6 +534,7 @@ async def run(args):
             request, target=target, ignored_keys=ignored_keys
         )
         report_ai_declaration(request)
+        report_location(request)
         args.post_published = report_upload_success(request, "Rednote video", request.video_file)
         return 0
 
@@ -522,6 +558,7 @@ async def run(args):
             repost_source=repost_source,
             shoot_location=shoot_location,
             shoot_date=shoot_date,
+            location=location,
             no_publish=getattr(args, "no_publish", False),
             publish_not_before=args.not_before,
         )
@@ -529,6 +566,7 @@ async def run(args):
             request, target=target, ignored_keys=ignored_keys
         )
         report_ai_declaration(request)
+        report_location(request)
         args.post_published = report_upload_success(request, "Rednote note", f"{len(request.image_files)} images")
         return 0
 

@@ -13,7 +13,7 @@
   <input id="file" type="file" hidden>
   <button onclick="file.click()">Upload</button>
 </div>
-<div role="textbox" contenteditable="true">Initial caption</div>
+<div role="textbox" contenteditable="true"></div>
 <footer data-surface="lib:bizweb_create_post:footer" id="footer">
   <button role="button">Cancel</button><button role="button">Draft</button>
   <button role="button" onclick="publish()">Publish</button>
@@ -21,6 +21,8 @@
 <section id="reel" data-surface="lib:bizweb_create_reel" hidden>
   <div data-surface="bizweb_create_reel:left_panel">
     <span id="filename"></span><span>100%</span><img alt="Facebook">
+    <input id="reel-title" type="text" placeholder="Title">
+    <button id="reel-keyword" type="button" role="combobox" aria-haspopup="listbox">Prefilled keyword</button>
     <input type="checkbox" role="switch">
   </div>
   <div role="button" aria-labelledby="upload" aria-current="step">Upload</div>
@@ -32,6 +34,22 @@
   </footer>
 </section>
 <script>
+// Controlled composer: store literal line breaks so innerText is the public text.
+const composer = document.querySelector('[contenteditable]');
+composer.style.whiteSpace = 'pre-wrap';
+let composerText = '';
+composer.addEventListener('beforeinput', event => {
+  event.preventDefault();
+  if (event.inputType.startsWith('delete')) composerText = '';
+  else if (event.inputType.startsWith('insert')) composerText += (event.data ?? '\n');
+  composer.textContent = composerText;
+  const range = document.createRange();
+  range.selectNodeContents(composer);
+  range.collapse(false);
+  const selection = getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+});
 let step = 0;
 function advanceReel(button) {
   if (step === 2) { publish(); return; }
@@ -61,7 +79,9 @@ async function publish() {
   const post = new URLSearchParams({
     fb_api_req_friendly_name: 'BusinessComposerStoryCreationMutation',
     actor: actor.textContent, id: new URL(location).searchParams.get('asset_id'),
-    caption: document.querySelector('[contenteditable]').innerText, file: file.files[0].name
+    caption: document.querySelector('[contenteditable]').innerText, file: file.files[0].name,
+    title: document.querySelector('#reel-title').value,
+    keyword: document.querySelector('#reel-keyword').innerText
   });
   await fetch('/api/graphql', {method:'POST', body:post});
   if (!reel.hidden) {
@@ -70,7 +90,7 @@ async function publish() {
     completion.setAttribute('aria-labelledby', 'completion-title');
     completion.tabIndex = -1;
     completion.innerHTML = '<h2 id="completion-title"></h2><button>Close</button><button>Done</button>';
-    completion.querySelector('h2').textContent = post.get('caption');
+    completion.querySelector('h2').textContent = post.get('title') || post.get('caption');
     completion.querySelectorAll('button').forEach(b => b.onclick = () => completion.remove());
     document.body.append(completion);
   }
