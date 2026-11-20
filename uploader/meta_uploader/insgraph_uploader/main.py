@@ -44,6 +44,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     OptionMismatchError,
     empty_option_record,
     instagram_caption,
+    caption_topic_records,
     option_failures,
     option_kind,
     option_status,
@@ -355,20 +356,36 @@ def _normalise_caption_text(text: str) -> str:
     return str(text).replace('\r\n', '\n').replace('\r', '\n').rstrip()
 
 
+def _caption_difference(expected: str, actual: str) -> str:
+    """指出首个不同字符，覆盖吞字、错位与多余追加三类改写。"""
+    limit = min(len(expected), len(actual))
+    index = next((i for i in range(limit) if expected[i] != actual[i]), limit)
+    if index == limit and len(expected) == len(actual):
+        return '内容一致'
+    window = 16
+    return (
+        f'第 {index + 1} 个字符起不同：'
+        f'期望 {expected[index:index + window]!r}，'
+        f'实际 {actual[index:index + window]!r}'
+    )
+
+
 async def _read_back_caption(
     editor: Locator,
     caption: str,
     *,
     page: Page,
     budget: PublishTimeoutBudget,
-) -> None:
+) -> str:
     """轮询编辑器的渲染文本，直到与键入的配文**全等**（逐字哨兵）。
 
     真机 2026-11-13（ticket 05，``--no-publish`` 视频干跑）：键入本身正确，
     旧的 ``to_have_text`` 读 ``textContent`` 丢了 ``<br><br>`` 的换行而误报。
     只换读取形态，不放松比较：丢字、追加、换行丢失都照常失败
     （``AssertionError``；stage ``publish``，退出 1，未发布任何内容）。
-    探测异常照常向上抛，绝不因探测失败而放行。
+    失败文案给出首个不同字符，便于指出吞字、错位或多余追加。
+    探测异常照常向上抛，绝不因探测失败而放行。成功时返回回读到的全文，
+    话题证据只从这段已验证文本生成。
     """
     expected = _normalise_caption_text(caption)
     timeout_ms = budget.clamp_ms(CAPTION_READBACK_TIMEOUT_MS)
@@ -376,10 +393,11 @@ async def _read_back_caption(
     while True:
         actual = _normalise_caption_text(await editor.inner_text())
         if actual == expected:
-            return
+            return actual
         if time.monotonic() >= deadline:
             raise AssertionError(
                 'Instagram 配文回读不一致：'
+                f'{_caption_difference(expected, actual)}；'
                 f'期望 {expected!r}，实际 {actual!r}'
             )
         await page.wait_for_timeout(CAPTION_READBACK_POLL_MS)
@@ -1216,7 +1234,12 @@ class InstagramUploader:
         caption = self._caption()
         # 清空后逐字写入（>1000 码点整段 insert_text），随后按渲染文本回读。
         await _type_caption(editor, caption, humanizer)
-        await _read_back_caption(editor, caption, page=page, budget=budget)
+        verified_caption = await _read_back_caption(
+            editor, caption, page=page, budget=budget
+        )
+        # 话题只从回读通过的最终公开配文识别；在选项与 Share 之前先落盘证据。
+        self.result['topics'] = caption_topic_records(verified_caption)
+        self._write_result()
         # 真机 2026-11-13：逐字输入 #标签 弹出的 hashtag 联想浮层会盖住右侧
         # 选项面板（后续点击报 covered-by）。点标题栏关闭浮层，不改写正文；
         # 标题栏缺席时该 helper 静默跳过，不因此让发布失败。

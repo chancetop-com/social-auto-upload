@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from utils.errors import UsageError
+from utils.caption_topics import parse_caption_topics, text_results
 
 if TYPE_CHECKING:  # 只用于类型标注：本模块保持零浏览器依赖。
     from uploader.publish_timeout import PublishTimeoutBudget
@@ -240,6 +241,28 @@ def instagram_caption(
     if cleaned:
         parts.append(' '.join(f'#{tag}' for tag in cleaned))
     return '\n\n'.join(parts)
+
+
+def caption_topic_records(caption: str) -> list[dict]:
+    """从**回读通过**的最终公开配文生成逐词文字证据，保留顺序与重复。
+
+    Instagram 不点选话题候选，界面只能证明 ``#话题`` 作为文字存在；因此每处
+    都记 ``status=text``，不伪造成已关联。URL 片段由共享解析器排除，原文偏移
+    指向回读的配文。该数组作为 ``topics`` 顶层键兼容追加到既有结果。
+    """
+    reason = "配文全文逐字回读一致"
+    return [
+        {
+            "index": result.occurrence.index,
+            "text": result.occurrence.text,
+            "name": result.occurrence.name,
+            "start": result.occurrence.start,
+            "end": result.occurrence.end,
+            "status": result.status,
+            "reason": result.reason,
+        }
+        for result in text_results(parse_caption_topics(caption), reason=reason)
+    ]
 
 
 def validate_publish_options(
