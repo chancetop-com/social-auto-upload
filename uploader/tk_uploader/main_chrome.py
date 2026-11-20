@@ -1115,7 +1115,7 @@ class _LocatorLocationControl(TiktokLocationControl):
         target = await self._input()
         if self._humanizer is None:
             # Direct construction (offline seam) has no page-backed Humanizer.
-            await target.fill(text)
+            await target.fill(text)  # native-fill: offline seam 无 page-backed Humanizer
         else:
             humanizer = self._humanizer
             await _humanized_click(humanizer, target)
@@ -2145,7 +2145,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             else None
         )
         try:
-            await candidate.click()
+            await candidate.click()  # native-click: manage；控件底座内部走 Humanizer
         except Exception as exc:
             outcome = TiktokLocationOutcome(
                 requested=query,
