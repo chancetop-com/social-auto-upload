@@ -71,7 +71,7 @@ from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import rednote_logger
 from utils.post_location import LocationReport
-from utils.post_location import LocationRow
+from utils.post_location import LocationRow, candidate_text_pattern
 from utils.post_location import match_eligibility_notice
 from utils.post_location import no_match_reason
 from utils.post_location import normalise_location_name
@@ -140,16 +140,16 @@ REDNOTE_LOCATION_COLLAPSE_TIMEOUT_MS = 3_000
 REDNOTE_LOCATION_CONTAINER_SELECTOR = ".address-card-wrapper"
 REDNOTE_LOCATION_ENTRY_SELECTOR = ".address-card-wrapper .address-card-select"
 REDNOTE_LOCATION_ENTRY_CANDIDATES = (Candidate(REDNOTE_LOCATION_ENTRY_SELECTOR),)
-REDNOTE_LOCATION_ROW_SELECTOR = ".option-item"
+REDNOTE_LOCATION_ROW_SELECTOR = ".option-item:visible:has(.option-name)"
 REDNOTE_LOCATION_DISPLAY_SELECTOR = ".address-card-select .d-select-description"
 # 一次浏览器往返读取全部候选的名称与地址；地址只用于记录，不参与匹配。
 REDNOTE_LOCATION_ROWS_JS = """
-() => Array.from(document.querySelectorAll('.option-item')).map((row) => {
+rows => rows.map((row) => {
   const name = row.querySelector('.option-name');
   const address = row.querySelector('.option-subname');
   return {
     name: name ? name.textContent : '',
-    address: address ? address.textContent : '',
+    address: address && address.getClientRects().length ? address.innerText : '',
   };
 })
 """
@@ -313,8 +313,16 @@ REDNOTE_CAPTION_READBACK_JS = """
   ]);
   let out = '';
   const walk = (node) => {
+    let hasSibling = false;
     for (const child of node.childNodes) {
+      if (child.nodeType === Node.ELEMENT_NODE && blocks.has(child.tagName)) {
+        if (hasSibling) out += '\\n';
+        walk(child);
+        hasSibling = true;
+        continue;
+      }
       if (child.nodeType === Node.TEXT_NODE) {
+        hasSibling = true;
         out += child.nodeValue;
         continue;
       }
@@ -326,6 +334,7 @@ REDNOTE_CAPTION_READBACK_JS = """
         } catch (error) {
           name = '';
         }
+        hasSibling = true;
         out += '#' + name;
         continue;
       }
@@ -333,21 +342,15 @@ REDNOTE_CAPTION_READBACK_JS = """
       if (child.tagName === 'BR') {
         const trailing = child.classList
           && child.classList.contains('ProseMirror-trailingBreak');
-        if (!trailing) out += '\\n';
+        if (!trailing && child.nextSibling) out += '\\n';
         continue;
       }
-      if (blocks.has(child.tagName)) {
-        if (out.length && !out.endsWith('\\n')) out += '\\n';
-        const before = out.length;
-        walk(child);
-        if (out.length === before) out += '\\n';
-        continue;
-      }
+      hasSibling = true;
       walk(child);
     }
   };
   walk(root);
-  return out.endsWith('\\n') ? out.slice(0, -1) : out;
+  return out;
 }
 """
 
@@ -1607,11 +1610,11 @@ class RednoteBaseUploader(BaseVideoUploader):
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
-        location: str | None = None,
         no_publish: bool = False,
         *,
         account_name=None,
         local_browser=None,
+        location: str | None = None,
     ):
         self.publish_date = publish_date
         self.account_file = None if account_file is None else str(account_file)
@@ -1857,20 +1860,28 @@ class RednoteBaseUploader(BaseVideoUploader):
                 # 空态与只有近似候选都可能没有可点行；统一读列表后区分原因。
                 pass
 
+            options = page.locator(REDNOTE_LOCATION_ROW_SELECTOR)
             rows = [
                 LocationRow.from_mapping(row)
-                for row in await page.evaluate(REDNOTE_LOCATION_ROWS_JS)
+                for row in await options.evaluate_all(REDNOTE_LOCATION_ROWS_JS)
             ]
             picked = pick_location_row(rows, requested)
             if picked is None:
                 fail(no_match_reason(rows, requested))
-            index, clicked = picked
+            _, clicked = picked
             clicked_name = clicked.name
             address = clicked.address or None
 
-            await humanizer.click(
-                page.locator(REDNOTE_LOCATION_ROW_SELECTOR).nth(index)
-            )
+            # Re-resolve by name AND address if the dropdown reorders its rows.
+            matched = options.filter(has=page.locator(
+                ".option-name", has_text=candidate_text_pattern(clicked.name)
+            ))
+            address_node = page.locator(".option-subname:visible")
+            if address:
+                matched = matched.filter(has=address_node.filter(has_text=candidate_text_pattern(address)))
+            else:
+                matched = matched.filter(has_not=address_node.filter(has_text=re.compile(r"\S")))
+            await humanizer.click(matched.first)
             try:
                 await page.locator(REDNOTE_LOCATION_ROW_SELECTOR).first.wait_for(
                     state="hidden",
@@ -2021,12 +2032,10 @@ class RednoteBaseUploader(BaseVideoUploader):
         await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
         topics = parse_caption_topics(self.desc)
-        if topics.occurrences:
-            # 有 #话题 时按原稿逐段输入，并在每个词的原位置点选同名候选。
-            await self._type_caption_with_topics(page, topics, humanizer)
-        else:
-            await humanizer.type_text(self.desc)
-        await humanizer.press("Enter")
+        await self._type_caption_with_topics(page, desc.locator, topics, humanizer)
+        if self.tags:
+            # Direct Python callers can still append a separate tag block.
+            await humanizer.press("Enter")
 
     @staticmethod
     def _topic_report(
@@ -2061,10 +2070,9 @@ class RednoteBaseUploader(BaseVideoUploader):
             error.occurrence_index = occurrence.index
         return error
 
-    async def _read_caption_body(self, page: Page) -> str | None:
+    async def _read_caption_body(self, body) -> str | None:
         """按文档顺序回读正文：话题锚点读作 ``#`` + ``name``，其余逐字保留。"""
         try:
-            body = REDNOTE_BODY_CANDIDATES[0].build(page)
             value = await body.evaluate(REDNOTE_CAPTION_READBACK_JS)
         except Exception:
             return None
@@ -2072,7 +2080,7 @@ class RednoteBaseUploader(BaseVideoUploader):
 
     async def _read_caption_until(
         self,
-        page: Page,
+        body,
         accepted: set[str],
         *,
         window_ms: int = REDNOTE_TOPIC_READBACK_WINDOW_MS,
@@ -2083,7 +2091,7 @@ class RednoteBaseUploader(BaseVideoUploader):
         )
         actual: str | None = None
         while True:
-            actual = await self._read_caption_body(page)
+            actual = await self._read_caption_body(body)
             if actual is not None and actual in accepted:
                 return actual
             remaining = deadline - time.monotonic()
@@ -2134,6 +2142,7 @@ class RednoteBaseUploader(BaseVideoUploader):
     async def _type_caption_with_topics(
         self,
         page: Page,
+        body,
         topics,
         humanizer: Humanizer,
     ) -> None:
@@ -2169,7 +2178,7 @@ class RednoteBaseUploader(BaseVideoUploader):
 
             linked_names.append(occurrence.name)
             cursor = await self._settle_inline_topic(
-                page, occurrence, caption, humanizer, linked_names
+                page, body, occurrence, caption, humanizer, linked_names
             )
             results.append(self._topic_report(occurrence, STATUS_LINKED))
 
@@ -2177,15 +2186,16 @@ class RednoteBaseUploader(BaseVideoUploader):
         if tail:
             await self._type_caption_segment(humanizer, tail)
 
-        actual = await self._read_caption_until(page, {caption})
+        actual = await self._read_caption_until(body, {caption})
         if actual != caption:
             raise self._caption_failure(
                 "配文回读与预期不一致："
                 f"{describe_caption_difference(caption, actual)}"
             )
-        await self._assert_caption_associations(page, linked_names)
+        if topics.occurrences:
+            await self._assert_caption_associations(page, linked_names)
         self.caption_readback = actual
-        self.topic_results = results
+        self.topic_results = results or None
 
     async def _associate_inline_topic(
         self,
@@ -2279,6 +2289,7 @@ class RednoteBaseUploader(BaseVideoUploader):
     async def _settle_inline_topic(
         self,
         page: Page,
+        body,
         occurrence: TopicOccurrence,
         caption: str,
         humanizer: Humanizer,
@@ -2287,7 +2298,7 @@ class RednoteBaseUploader(BaseVideoUploader):
         """处理编辑器自动追加的 U+00A0，并复验关联仍在原位置。"""
         expected = caption[: occurrence.end]
         with_space = expected + "\u00a0"
-        actual = await self._read_caption_until(page, {expected, with_space})
+        actual = await self._read_caption_until(body, {expected, with_space})
         if actual not in {expected, with_space}:
             raise self._caption_failure(
                 "配文话题落点与预期不一致："
@@ -2305,7 +2316,7 @@ class RednoteBaseUploader(BaseVideoUploader):
             return occurrence.end + 1
 
         await humanizer.press("Backspace")
-        after = await self._read_caption_until(page, {expected})
+        after = await self._read_caption_until(body, {expected})
         if after != expected:
             raise self._caption_failure(
                 "移除自动空格后配文与预期不一致："
@@ -3086,11 +3097,11 @@ class RednoteVideo(RednoteBaseUploader):
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
-        location: str | None = None,
         no_publish: bool = False,
         *,
         account_name=None,
         local_browser=None,
+        location: str | None = None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -3435,11 +3446,11 @@ class RednoteNote(RednoteBaseUploader):
         repost_source: str | None = None,
         shoot_location: str | None = None,
         shoot_date: str | None = None,
-        location: str | None = None,
         no_publish: bool = False,
         *,
         account_name=None,
         local_browser=None,
+        location: str | None = None,
     ):
         super().__init__(
             publish_date=publish_date,

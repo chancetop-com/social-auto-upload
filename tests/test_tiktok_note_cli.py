@@ -1177,17 +1177,14 @@ class UploadNoteMetadataTests(unittest.TestCase):
             page.caption_text.index("#one"), page.caption_text.index("#two")
         )
 
-    def test_legacy_tags_alone_no_longer_write_a_caption(self):
+    def test_python_tags_alone_fill_the_caption(self):
         page = self._page()
         note = self._note(tags=("only",))
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))
 
-        self.assertEqual(page.caption_text, "")
-        self.assertFalse(
-            any(event[0] in ("insert_text", "press") for event in page.events)
-        )
+        self.assertEqual(page.caption_text, "#only")
 
     def test_no_note_makes_zero_editor_interactions(self):
         page = self._page()

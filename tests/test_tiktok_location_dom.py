@@ -75,6 +75,27 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
             "Riverside Building, County Hall, London SE1 7PB, United Kingdom",
         )
 
+    async def test_empty_location_list_cannot_click_a_privacy_option(self):
+        probe = self._probe()
+        with patch.object(tk, "TIKTOK_LOCATION_SUGGESTION_TIMEOUT_MS", 100):
+            with self.assertRaises(RuntimeError):
+                await probe._apply_location_option(self.control, "Public", page=self.page, url="about:blank")
+        self.assertEqual(probe.location_outcome.status, "no_match")
+
+    async def test_candidate_keeps_its_address_after_the_list_reorders(self):
+        await self.page.locator('#loc-list').evaluate("""list => {
+            const second = document.createElement('div');
+            second.setAttribute('role', 'option');
+            second.innerHTML = '<div>London Eye</div><div>Second address</div>';
+            list.append(second);
+            list.addEventListener('click', event => list.dataset.clicked =
+                event.target.closest('[role="option"]').lastElementChild.textContent);
+        }""")
+        rows = await self.control.candidate_rows()
+        await self.page.locator('#loc-list').evaluate('list => list.prepend(list.lastElementChild)')
+        await rows[0].click()
+        self.assertEqual(await self.page.locator('#loc-list').get_attribute('data-clicked'), rows[0].address)
+
     async def test_expanded_reads_the_combobox_button(self):
         self.assertTrue(await self.control._expanded())
         await self._expanded("false")

@@ -240,10 +240,19 @@ class LocationControl:
         if self._page is None:
             return None
         try:
-            body = await self._page.locator('body').inner_text()
+            dialog = self._dialog()
+            notices = await dialog.locator(
+                '#location-restriction:visible, [role="alert"]:visible, '
+                '[aria-live="assertive"]:visible, [aria-live="polite"]:visible'
+            ).all_inner_texts()
         except Exception:
             return None
-        return location_restriction_message(body)
+        for notice in notices:
+            if re.search(r"location|地点", notice, re.IGNORECASE):
+                reason = location_restriction_message(notice)
+                if reason:
+                    return reason
+        return None
 
     async def resolve(self) -> str:
         """``present`` / ``missing`` / ``ineligible`` / ``unavailable``。"""
@@ -359,7 +368,7 @@ class LocationControl:
         humanizer = self._behavior()
         await entry.focus()
         for attempt in range(2):
-            if attempt:
+            if attempt or await entry.input_value():
                 await humanizer.press('ControlOrMeta+A')
                 await humanizer.press('Backspace')
             started = time.monotonic()

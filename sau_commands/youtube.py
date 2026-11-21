@@ -55,7 +55,7 @@ def register(platform_parsers):
     youtube_upload_video_parser.add_argument("--title", required=True, help="Video title (<=100 chars)")
     youtube_upload_video_parser.add_argument(
         "--desc",
-        default="",
+        default=None,
         help="Optional video description; write public topics as #hashtags here",
     )
     youtube_upload_video_parser.add_argument(
@@ -79,7 +79,7 @@ class YouTubeVideoUploadRequest:
     account_name: str
     video_file: Path
     title: str
-    description: str
+    description: str | None
     tags: list[str]
     thumbnail_file: Path | None = None
     playlist: str | None = None
@@ -135,7 +135,7 @@ def _raise_login_required(target) -> None:
     raise login_required_error("YouTube", target.profile_id, mode=target.mode)
 
 
-async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> None:
+async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> str | None:
     if target is not None:
         app = _build_youtube_uploader(request)
         async with async_playwright() as playwright:
@@ -152,12 +152,12 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=Non
                     _raise_login_required(target)
                 app.set_publish_date(request.schedule)
                 await app.main(session=session)
-        return None
+        return app.public_description
 
     app = _build_youtube_uploader(request)
     app.set_publish_date(request.schedule)
     await app.main()
-    return None
+    return app.public_description
 
 
 async def run(args):
@@ -216,8 +216,9 @@ async def run(args):
             publish_not_before=args.not_before,
             local_browser=local_browser,
         )
-        await upload_youtube_video(request, target=target)
-        _report_description_topics(request.description)
+        description = await upload_youtube_video(request, target=target)
+        if description:
+            _report_description_topics(description)
         print(f"YouTube video upload submitted: {request.video_file}")
         args.post_published = True
         return 0

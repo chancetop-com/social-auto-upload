@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import re
 import sys
+from uuid import uuid4
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -688,12 +689,20 @@ def _location_restriction_message(body: str | None) -> str | None:
 
 
 async def _read_location_restriction(page) -> str | None:
-    """Read the page body and look for an explicit location restriction."""
+    """Look for a location-specific notice from Studio."""
     try:
-        body = await page.locator("body").inner_text()
+        notices = await page.locator(
+            '[data-e2e="poi_container"] [class*="error" i]:visible, '
+            '[role="alert"]:visible, [aria-live="assertive"]:visible, [aria-live="polite"]:visible'
+        ).all_inner_texts()
     except Exception:
         return None
-    return _location_restriction_message(body)
+    for notice in notices:
+        if re.search(r"location|地点", notice, re.IGNORECASE):
+            reason = _location_restriction_message(notice)
+            if reason:
+                return reason
+    return None
 
 
 # Page copy -> CLI/API semantic value.  ``Only you`` and ``Private`` are the
@@ -995,6 +1004,8 @@ class TiktokLocationCandidate:
     async def click(self) -> None:
         if self._locator is None:
             raise NotImplementedError
+        if parse_location_row(await self._locator.inner_text()) != (self.name, self.address):
+            raise RuntimeError("地点候选在点选前已变更")
         await _humanized_click(self._humanizer, self._locator)
 
 
@@ -1050,14 +1061,12 @@ class _LocatorLocationControl(TiktokLocationControl):
         container,
         *,
         page,
-        row_scope=None,
         candidates: tuple[str, ...] = (),
         humanizer: Humanizer | None = None,
     ) -> None:
         self._input_locator = input_locator
         self._container = container
         self._page = page
-        self._row_scope = row_scope
         self.candidates = candidates
         self._humanizer = humanizer
 
@@ -1136,36 +1145,26 @@ class _LocatorLocationControl(TiktokLocationControl):
             await self._page.wait_for_timeout(TIKTOK_LOCATION_POLL_MS)
 
     async def _rows_in_scope(self, scope) -> list[TiktokLocationCandidate]:
-        # Prefer the semantic listbox; fall back to any visible option row.
-        for selector in ('[role="listbox"] [role="option"]', '[role="option"]'):
-            try:
-                options = scope.locator(selector)
-                total = await options.count()
-            except Exception:
-                continue
-            rows: list[TiktokLocationCandidate] = []
-            for index in range(total):
-                node = options.nth(index)
-                try:
-                    if not await node.is_visible():
-                        continue
-                    text = await node.inner_text()
-                except Exception:
-                    continue
-                name, address = parse_location_row(text)
-                if not name:
-                    continue
-                rows.append(
-                    TiktokLocationCandidate(
-                        name,
-                        address,
-                        locator=node,
-                        humanizer=self._humanizer,
-                    )
-                )
-            if rows:
-                return rows
-        return []
+        # Stamp the nodes in the same DOM snapshot as their visible labels.
+        # A locator based on nth() could target another address after a rerender.
+        token = uuid4().hex
+        rows = await scope.locator('[role="option"]:visible').evaluate_all(
+            """(nodes, token) => nodes.map((node, index) => {
+                const id = token + "-" + index;
+                node.setAttribute("data-sau-location-option", id);
+                return {id, text: node.innerText};
+            })""", token,
+        )
+        candidates = []
+        for row in rows:
+            name, address = parse_location_row(row["text"])
+            if name:
+                candidates.append(TiktokLocationCandidate(
+                    name, address,
+                    locator=scope.locator(f'[data-sau-location-option="{row["id"]}"]'),
+                    humanizer=self._humanizer,
+                ))
+        return candidates
 
     def _combobox(self):
         """The visible trigger button that owns the listbox.
@@ -1195,23 +1194,8 @@ class _LocatorLocationControl(TiktokLocationControl):
             return None
 
     async def candidate_rows(self) -> list[TiktokLocationCandidate]:
-        # Prefer the exact listbox named by the combobox.  Current Studio
-        # portals the listbox to the page root; the container/page fallbacks
-        # keep older layouts working.
         listbox = await self._listbox_scope()
-        if listbox is not None:
-            rows = await self._rows_in_scope(listbox)
-            if rows:
-                return rows
-        seen: set[int] = set()
-        for scope in (self._row_scope, self._page):
-            if scope is None or id(scope) in seen:
-                continue
-            seen.add(id(scope))
-            rows = await self._rows_in_scope(scope)
-            if rows:
-                return rows
-        return []
+        return await self._rows_in_scope(listbox if listbox is not None else self._container)
 
     async def _expanded(self) -> bool | None:
         try:
@@ -1238,13 +1222,12 @@ class _LocatorLocationControl(TiktokLocationControl):
         )
         while True:
             expanded = await self._expanded()
-            rows = await self.candidate_rows()
             # ``aria-expanded=false`` on the combobox is the authoritative
             # collapsed signal.  Only when the page exposes no such attribute
             # do we infer collapse from the absence of visible rows.
             if expanded is False:
                 return True
-            if expanded is None and not rows:
+            if expanded is None and not await self.candidate_rows():
                 return True
             if time.monotonic() >= deadline:
                 return False
@@ -1327,9 +1310,13 @@ async def _read_toggle_state(control: TiktokOptionControl) -> bool:
 async def _read_switch_state(control: TiktokOptionControl) -> bool:
     """Read an ARIA switch state (``aria-checked``) with a native fallback."""
     aria = await control.get_attribute("aria-checked")
-    if aria is not None:
-        return str(aria).lower() == "true"
-    return bool(await control.is_checked())
+    if aria is None:
+        state = await control.is_checked()
+        if isinstance(state, bool):
+            return state
+    elif str(aria).strip().lower() in ("true", "false"):
+        return str(aria).strip().lower() == "true"
+    raise ValueError(f"无法读取开关的布尔状态: aria-checked={aria!r}")
 
 
 async def _guarded_state(
@@ -2014,10 +2001,14 @@ class TiktokBaseUploader(BaseVideoUploader):
         ):
             return
 
-        # AIGC/brand switches live in the collapsed advanced-settings section.
-        # Expand it before resolving controls so they are visible and clickable.
-        await self._expand_advanced_settings(page)
-        controls = await self.resolve_option_controls(page)
+        try:
+            controls = await self.resolve_option_controls(page)
+        except Exception:
+            if options.aigc is not None:
+                self._record_ai_outcome(TiktokAiOutcome(
+                    requested=options.aigc, applied=None, status=AI_MISMATCH, reason=AI_READ_ERROR
+                ))
+            raise
         url = _page_url(page)
         if options.location is not None:
             await self._apply_location_option(
@@ -2636,7 +2627,6 @@ class TiktokBaseUploader(BaseVideoUploader):
             input_locator,
             container,
             page=self._option_page,
-            row_scope=self.locator_base,
             humanizer=self._option_humanizer(),
         )
 
@@ -2869,104 +2859,40 @@ class TiktokBaseUploader(BaseVideoUploader):
         factories = self._option_candidate_factories(name)
         labels = tuple(label for label, _ in factories)
         for index, (label, factory) in enumerate(factories):
-            try:
-                control = factory()
-                if await control.count() > 0 and await control.is_visible():
-                    control.candidates = labels
-                    control.candidate_index = index
-                    tiktok_logger.info(
-                        f"[+] TikTok options: {name} resolved by "
-                        f"candidate #{index} ({label})"
-                    )
-                    return control
-            except Exception:
-                continue
+            control = factory()
+            if await control.count() > 0 and await control.is_visible():
+                control.candidates = labels
+                control.candidate_index = index
+                tiktok_logger.info(
+                    f"[+] TikTok options: {name} resolved by candidate #{index} ({label})"
+                )
+                return control
         return None
-
-    async def _wait_for_settings_surface(
-        self, page, *, timeout_ms: int = 3000
-    ) -> None:
-        """Wait for a collapsed option surface to become visible after expand."""
-        if self.locator_base is None:
-            return
-        selectors = (
-            '[data-e2e="user_perm_container"]',
-            '[data-e2e="aigc_container"]',
-            '[data-e2e="disclose_content_container"]',
-        )
-        deadline = time.monotonic() + timeout_ms / 1000
-        while time.monotonic() < deadline:
-            for selector in selectors:
-                try:
-                    locator = self.locator_base.locator(selector)
-                    if (
-                        await locator.count()
-                        and await locator.first.is_visible()
-                    ):
-                        return
-                except Exception:
-                    continue
-            await page.wait_for_timeout(150)
 
     async def _expand_advanced_settings(self, page) -> None:
         if self.locator_base is None:
             return
-        humanizer = self._humanizer(page)
-        # Idempotent: a second call must not toggle "Show more" back closed.
-        for selector in (
-            '[data-e2e="user_perm_container"]',
-            '[data-e2e="aigc_container"]',
-            '[data-e2e="disclose_content_container"]',
-        ):
-            try:
-                surface = self.locator_base.locator(selector)
-                if (
-                    await surface.count()
-                    and await surface.first.is_visible()
-                ):
-                    return
-            except Exception:
-                continue
-        container = self.locator_base.locator(
-            '[data-e2e="advanced_settings_container"]'
-        )
-        try:
-            if await container.count() == 0:
-                # The photo composer has no advanced_settings_container; its
-                # comment/AIGC/brand controls live behind a global Show more.
-                show_more = self.locator_base.get_by_text(
-                    "Show more", exact=True
-                )
-                if await show_more.count():
-                    await _humanized_click(humanizer, show_more.first)
-                    await self._wait_for_settings_surface(page)
-                    tiktok_logger.info(
-                        "[+] expanded photo settings via Show more"
-                    )
-                return
-            classes = ((await container.get_attribute("class")) or "").casefold()
-        except Exception:
+        scope = self.locator_base
+        container = scope.locator('[data-e2e="advanced_settings_container"]')
+        if await container.count():
+            scope = container
+        button = scope.get_by_text("Show more", exact=True)
+        if await container.count():
+            classes = (await container.get_attribute("class") or "").casefold().split()
+            if "collapsed" in classes:
+                button = container.locator(".more-btn")
+                await button.wait_for(state="visible", timeout=3000)
+        if not await button.count() or not await button.first.is_visible():
             return
-        collapsed = "collapsed" in classes.split()
-
-        more_btn = container.locator(".more-btn")
-        try:
-            if await more_btn.count():
-                text = (await more_btn.first.inner_text()).strip().casefold()
-                if collapsed or "show more" in text:
-                    await _humanized_click(humanizer, more_btn.first)
-                    await self._wait_for_settings_surface(page)
-                    return
-        except Exception:
-            pass
-
-        show_more = container.get_by_text("Show more", exact=True)
-        try:
-            if await show_more.count():
-                await _humanized_click(humanizer, show_more.first)
-                await self._wait_for_settings_surface(page)
-        except Exception:
-            pass
+        await _humanized_click(self._humanizer(page), button.first)
+        # Show more changes into Show less in the same node on Studio. Wait for
+        # the collapsed state to disappear before deciding an option is absent.
+        collapsed_button = scope.get_by_text("Show more", exact=True)
+        await collapsed_button.first.wait_for(state="hidden", timeout=3000)
+        if await container.count():
+            await scope.locator("xpath=self::*[contains(concat(' ', normalize-space(@class), ' '), ' collapsed ')]").wait_for(
+                state="hidden", timeout=3000
+            )
 
     async def resolve_option_controls(self, page) -> TiktokSettingsControls:
         """Resolve only the requested controls; expand advanced settings once.
@@ -3532,30 +3458,24 @@ class TiktokBaseUploader(BaseVideoUploader):
     async def _topic_hard_limit_visible(self, page) -> bool:
         """True when the page shows a whole-post hashtag hard-limit error."""
 
-        try:
-            body = await page.locator("body").inner_text()
-        except Exception:
-            return False
-        return bool(
-            re.search(
-                r"(?:maximum number of hashtags|too many hashtags|"
-                r"hashtag(?:s)? limit|can(?:'|no)t add more hashtags|"
-                r"最多.{0,8}(?:话题|标签)|(?:话题|标签).{0,8}上限)",
-                str(body or ""),
-                re.IGNORECASE,
-            )
+        notices = await page.locator(
+            '[role="alert"]:visible, [aria-live="assertive"]:visible, '
+            '[aria-live="polite"]:visible, [data-e2e*="caption"] [class*="error" i]:visible'
+        ).all_inner_texts()
+        pattern = (
+            r"(?:maximum number of hashtags|too many hashtags|"
+            r"hashtag(?:s)? limit|can(?:'|no)t add more hashtags|"
+            r"最多.{0,8}(?:话题|标签)|(?:话题|标签).{0,8}上限)"
         )
+        return any(re.search(pattern, text, re.IGNORECASE) for text in notices)
 
     @staticmethod
-    def _compose_caption(text: str | None, _tags=None) -> str:
-        """Final public caption: the caption text itself.
-
-        ``tags`` remains accepted for direct Python API compatibility, but the
-        CLI no longer supplies it: inline ``#topic`` text is the only topic
-        source and is linked in place by ``fill_caption``.
-        """
-
-        return str(text or "")
+    def _compose_caption(text: str | None, tags=None) -> str:
+        caption = text or ""
+        if tags:
+            tag_line = " ".join(f"#{tag}" for tag in tags)
+            return f"{caption}\\n{tag_line}" if caption else tag_line
+        return caption
 
     def _record_topic_outcome(self, outcome: TiktokTopicOutcome) -> None:
         self.topic_outcomes.append(outcome)
@@ -3756,8 +3676,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         return False
 
     async def fill_caption(self, page, text, tags=None, *, editor=None) -> None:
-        # ``tags`` is a legacy direct-API argument; only inline caption text is
-        # used so duplicate/appended tag blocks can never enter the public post.
+        # Python callers can still supply tags. CLI callers supply only the caption.
         editor_locator = (
             editor
             if editor is not None
@@ -3778,7 +3697,7 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         await page.wait_for_timeout(1000)  # 等待1秒
 
-        caption = self._compose_caption(text)
+        caption = self._compose_caption(text, tags)
         self.topic_outcomes: list[TiktokTopicOutcome] = []
         if not caption:
             # Nothing public to verify; the clear sequence above is unchanged.
@@ -3797,23 +3716,6 @@ class TiktokBaseUploader(BaseVideoUploader):
                     # occurrence.
                     await humanizer.press("Escape")
                     await page.wait_for_timeout(100)
-
-            if (
-                len(linked) >= TIKTOK_MAX_HASHTAG_COUNT
-                and await self._topic_hard_limit_visible(page)
-            ):
-                outcome = TiktokTopicOutcome(
-                    occurrence=occurrence,
-                    status=TOPIC_TEXT,
-                    reason=TOPIC_HARD_LIMIT,
-                    can_continue=False,
-                )
-                self._record_topic_outcome(outcome)
-                raise RuntimeError(
-                    "TikTok 配文话题: 整帖话题数量触及页面硬限制，"
-                    f"停止在 index={occurrence.index} text={occurrence.text!r}；"
-                    "配文原稿保留，未点击发布。"
-                )
 
             allow = len(linked) < TIKTOK_MAX_HASHTAG_COUNT
             try:
@@ -3843,20 +3745,6 @@ class TiktokBaseUploader(BaseVideoUploader):
                         occurrence=occurrence, status=TOPIC_LINKED
                     )
                 )
-                if (
-                    len(linked) >= TIKTOK_MAX_HASHTAG_COUNT
-                    and occurrence.index == len(parsed.occurrences)
-                    and await self._topic_hard_limit_visible(page)
-                ):
-                    print(
-                        "TikTok 配文话题: status=text "
-                        "reason=hard_limit continue=no "
-                        "result=保留文字，整帖硬限制"
-                    )
-                    raise RuntimeError(
-                        "TikTok 配文话题: 整帖话题数量触及页面硬限制；"
-                        "配文原稿保留，未点击发布。"
-                    )
             else:
                 self._record_topic_outcome(
                     TiktokTopicOutcome(
@@ -3869,6 +3757,10 @@ class TiktokBaseUploader(BaseVideoUploader):
         tail = caption[cursor:]
         if tail:
             await humanizer.type_text(tail)
+
+        if parsed.occurrences and await self._topic_hard_limit_visible(page):
+            print("TikTok 配文话题: reason=hard_limit continue=no result=保留文字，整帖硬限制")
+            raise RuntimeError("TikTok 配文话题触及页面整帖硬限制；未点击发布。")
 
         # Whole-caption gate: every character, every mention, in order.
         observed_text, observed_mentions = await self._read_topic_state(
@@ -4306,7 +4198,7 @@ class TiktokVideo(TiktokBaseUploader):
         )
 
     async def fill_metadata(self, page) -> None:
-        await self.fill_caption(page, self.title)
+        await self.fill_caption(page, self.title, self.tags)
 
     async def apply_cover(self, page) -> None:
         if not self.thumbnail_path:
@@ -4836,11 +4728,11 @@ class TiktokNote(TiktokBaseUploader):
             await self._fill_title(page)
 
         note_text = self.note or ""
-        if not note_text:
+        if not note_text and not self.tags:
             return
 
         editor = await self._resolve_caption_editor(page)
-        await self.fill_caption(page, note_text, editor=editor)
+        await self.fill_caption(page, note_text, self.tags, editor=editor)
 
     async def apply_options(self, page) -> None:
         """Reuse the shared option steps, minus the content-reuse control.

@@ -712,7 +712,7 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(plain.topic_results)
         self.assertEqual(
             await self.page.locator(".tiptap").inner_text(),
-            caption + "\n\n",
+            caption,
         )
 
     async def test_whole_post_hard_limit_stops_before_publish(self):

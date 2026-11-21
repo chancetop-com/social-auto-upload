@@ -353,8 +353,8 @@ CAPTION_READBACK_POLL_MS = 200
 
 
 def _normalise_caption_text(text: str) -> str:
-    """比较前统一换行并去掉尾部空白；两侧走同一规则。"""
-    return str(text).replace('\r\n', '\n').replace('\r', '\n').rstrip()
+    """只统一换行编码，保留所有空白。"""
+    return str(text).replace('\r\n', '\n').replace('\r', '\n')
 
 
 async def _read_back_caption(
@@ -1044,10 +1044,8 @@ class InstagramUploader:
             applied = None
             # AI 声明（ticket 17）显式关闭时，可见但禁用的开关仍可能读到开启；
             # 必须按实际回读判定，不能因为“不可用”就一律记 default_off 放行。
-            # 评论关闭沿用旧契约：入口缺失/禁用即视为已满足，不读取开关。
             if (
-                key == 'ai_generated'
-                and presence == INELIGIBLE
+                presence == INELIGIBLE
                 and kind == 'toggle'
                 and requested is False
             ):
@@ -1085,19 +1083,14 @@ class InstagramUploader:
             )
             return
         current = await control.read()
-        if kind == 'toggle' and current is None:
-            if key == 'comments' and requested is False:
-                # 评论关闭不把“读不到”升级成失败：沿用旧行为记 default_off，
-                # 且不盲点开关（ticket 17 的严格规则只针对 AI 声明）。
-                self._record_option(key, requested, None, DEFAULT_OFF)
-                return
+        if key == 'ai_generated' and current is None:
             # 可见但读不到状态：不盲点开关，直接按 mismatch 停在 Share 前。
             raise OptionMismatchError(
                 f'Instagram {key} 开关可见，但无法回读当前值',
                 applied=None,
             )
         status, reason = option_status(requested, current, kind=kind)
-        if status in (SET, DEFAULT_OFF):
+        if key != "location" and status in (SET, DEFAULT_OFF):
             # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
             self._record_option(
                 key,

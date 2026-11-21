@@ -247,10 +247,10 @@ class XiaohongshuVideoUploadRequest:
     repost_source: str | None = None
     shoot_location: str | None = None
     shoot_date: str | None = None
-    location: str | None = None
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
+    location: str | None = None
     declaration_report: dict[str, str | None] | None = None
     location_report: dict[str, str | None] | None = None
     topic_results: list[dict[str, str | int | None]] | None = None
@@ -272,10 +272,10 @@ class XiaohongshuNoteUploadRequest:
     repost_source: str | None = None
     shoot_location: str | None = None
     shoot_date: str | None = None
-    location: str | None = None
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
+    location: str | None = None
     declaration_report: dict[str, str | None] | None = None
     location_report: dict[str, str | None] | None = None
     topic_results: list[dict[str, str | int | None]] | None = None

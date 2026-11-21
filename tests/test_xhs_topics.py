@@ -382,7 +382,7 @@ class InlineTopicTestBase(TopicTestBase):
 
     def assert_linked(self, app, env, caption: str, names: list[str]) -> None:
         self.assertEqual(env.body.readbacks[-1], caption)
-        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.text, caption)
         self.assertEqual(env.body.anchor_names, names)
         self.assertEqual(
             [item["status"] for item in app.topic_results or []],
@@ -537,7 +537,6 @@ class InlineCaptionSelectionTests(InlineTopicTestBase):
                 ("press", "Delete"),
                 ("press", "Backspace"),
                 ("press", "Backspace"),
-                ("press", "Enter"),
             ],
         )
         self.assertEqual(env.body.readback_calls >= 1, True)
@@ -566,7 +565,7 @@ class InlineCaptionPreservationTests(InlineTopicTestBase):
         self.run_fill_desc(env, app)
 
         self.assertEqual(env.body.readbacks[-1], caption)
-        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.text, caption)
         self.assertEqual(env.body.anchor_names, ["咖啡", "咖啡", "Coffee_2"])
         self.assertEqual(
             [(item["index"], item["text"]) for item in app.topic_results],
@@ -588,7 +587,7 @@ class InlineCaptionPreservationTests(InlineTopicTestBase):
             for action in env.page.keyboard.actions
             if action[0] == "press"
         ]
-        self.assertEqual(presses.count("Enter"), 3)  # two authored newlines + final
+        self.assertEqual(presses.count("Enter"), 2)  # two authored newlines
 
     def test_author_authored_nbsp_survives_the_auto_space_handling(self):
         caption = "#coffee\u00a0next"
@@ -599,7 +598,7 @@ class InlineCaptionPreservationTests(InlineTopicTestBase):
         self.run_fill_desc(env, app)
 
         self.assertEqual(env.body.readbacks[-1], caption)
-        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.text, caption)
         self.assertEqual(env.body.text.count("\u00a0"), 1)
         self.assertEqual(env.body.anchor_names, ["coffee"])
         self.assertEqual(
@@ -617,7 +616,7 @@ class InlineCaptionFallbackTests(InlineTopicTestBase):
         self.run_fill_desc(env, app)
 
         self.assertEqual(env.body.readbacks[-1], caption)
-        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.text, caption)
         self.assertEqual(env.body.anchor_names, [])
         self.assertEqual(
             app.topic_results,
@@ -646,7 +645,7 @@ class InlineCaptionFallbackTests(InlineTopicTestBase):
         self.run_fill_desc(env, app)
 
         self.assertEqual(env.body.readbacks[-1], caption)
-        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(env.body.text, caption)
         self.assertEqual(env.body.anchor_names, [f"tag{i}" for i in range(10)])
         self.assertEqual(env.events.count("click"), 10)
         statuses = [item["status"] for item in app.topic_results]
@@ -797,9 +796,8 @@ class InlineCaptionEmptyTests(InlineTopicTestBase):
             [action for action in env.page.keyboard.actions if action[0] == "insert_text"],
             [("insert_text", caption)],
         )
-        self.assertEqual(env.body.readbacks, [])
-        self.assertIsNone(app.topic_results)
-        self.assertEqual(env.body.text, caption + "\n")
+        self.assertEqual(app.caption_readback, caption)
+        self.assertEqual(env.body.text, caption)
 
 
 class InlineCaptionNoPublishTests(InlineTopicTestBase):

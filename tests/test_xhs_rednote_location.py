@@ -57,6 +57,19 @@ def _apps() -> dict[str, object]:
 
 
 class LocationNormalisationTests(unittest.TestCase):
+    def test_old_positional_no_publish_still_stops_all_four_uploaders(self):
+        for cls, first, rest in (
+            (xhs.XiaoHongShuVideo, ("title", "v.mp4"), (None, None)),
+            (rednote.RednoteVideo, ("title", "v.mp4"), (None, None)),
+            (xhs.XiaoHongShuNote, (["i.png"], "note"), ("title", None)),
+            (rednote.RednoteNote, (["i.png"], "note"), ("title", None)),
+        ):
+            with self.subTest(uploader=cls.__name__):
+                app = cls(*first, [], 0, None, *rest, "immediate", False, None,
+                          None, None, None, None, None, True)
+                self.assertIs(app.no_publish, True)
+                self.assertIsNone(app.location)
+
     def test_names_are_trimmed_collapsed_and_casefolded(self):
         for raw, expected in (
             ("  人民公园  ", "人民公园"),
@@ -200,6 +213,20 @@ class LocationDomTests(unittest.IsolatedAsyncioTestCase):
         return await app.set_location(
             self.page, requested, humanizer=self.humanizer
         )
+
+    async def test_same_name_rows_keep_their_identity_across_reordering(self):
+        for name, app in self.apps.items():
+            with self.subTest(uploader=name):
+                await self.render([{"name": "Park", "address": "A"}, {"name": "Park", "address": "B"}])
+                click = self.humanizer.click
+                async def reorder_before_click(target):
+                    if await self.page.locator('#location-list').is_visible():
+                        await self.page.locator('.option-item').first.evaluate('row => row.parentNode.append(row)')
+                    await click(target)
+                with patch.object(self.humanizer, "click", reorder_before_click):
+                    report = await self.select(app, "Park")
+                self.assertEqual(report.address, "A")
+                self.assertEqual(await self.page.locator("body").get_attribute("data-clicked"), "Park|A")
 
     async def test_first_same_name_wins_and_address_is_reported(self):
         rows = [

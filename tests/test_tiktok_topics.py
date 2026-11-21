@@ -44,6 +44,9 @@ class _Empty:
     def filter(self, has_text=None):
         return self
 
+    async def all_inner_texts(self):
+        return []
+
     async def count(self):
         return 0
 
@@ -64,6 +67,9 @@ class _Body:
 
     async def inner_text(self):
         return self.env.body_text
+
+    async def all_inner_texts(self):
+        return [self.env.body_text] if self.env.body_text else []
 
 
 class _MentionNode:
@@ -225,6 +231,8 @@ class _Page:
 
     def locator(self, selector):
         if selector == "body":
+            return self.env.editor
+        if '[role="alert"]' in selector:
             return _Body(self.env)
         if selector == '[role="option"]':
             return _Options(self.env)
@@ -609,6 +617,37 @@ class TiktokInlineTopicTests(unittest.TestCase):
 
         self.assertIn("stage=caption-readback", str(ctx.exception))
         self.assertIn("status=mismatch", out.getvalue())
+
+    def test_author_limit_words_are_not_platform_errors(self):
+        env = TopicEnv()
+        caption = "Too many hashtags " + " ".join(f"#t{i}" for i in range(50))
+        for i in range(50):
+            env.add_suggestion(f"t{i}")
+        _fill_video(env, caption)
+        self.assertEqual(env.buffer, caption)
+
+    def test_final_text_only_topic_can_trigger_the_post_limit(self):
+        env = TopicEnv()
+        for i in range(50):
+            env.add_suggestion(f"t{i}")
+        caption = " ".join(f"#t{i}" for i in range(51))
+        original = env.keyboard.insert_text
+        async def insert(text):
+            await original(text)
+            if env.buffer == caption:
+                env.body_text = "Too many hashtags"
+        env.keyboard.insert_text = insert
+        with self.assertRaisesRegex(RuntimeError, "硬限制"):
+            _fill_video(env, caption)
+
+    def test_python_photo_tags_are_appended_even_without_a_note(self):
+        env = TopicEnv(photo_mode=True)
+        env.add_suggestion("coffee")
+        app = _note(env, "", tags=["coffee"])
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.fill_metadata(env.page))
+        self.assertEqual(env.buffer, "#coffee")
+        self.assertEqual(env.mentions, ["#coffee"])
 
     def test_hard_limit_stops_without_publishing(self):
         env = TopicEnv(photo_mode=True)

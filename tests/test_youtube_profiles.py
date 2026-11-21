@@ -283,6 +283,19 @@ class YouTubeProfilesTests(unittest.TestCase):
         self.assertEqual(page.selectors['#done-button'].click_count, 0)
         self.assertEqual(page.description_input._text, '')
 
+    def test_default_description_and_explicit_clear_use_the_observed_caption(self):
+        self.profile()
+        for flags, expected in (([], "preset #default"), (["--desc", ""], ""), (["--desc", "  "], "  ")):
+            with self.subTest(flags=flags):
+                page = UploadPage()
+                page.description_input._text = "preset #default"
+                self.context.next_page = page
+                code, stdout, _ = self.cli("upload-video", "--account", "Creator", "--file",
+                                           str(self.video), "--title", "Title", *flags)
+                self.assertEqual(code, 0)
+                self.assertEqual(page.description_input._text, expected)
+                self.assertEqual("#default" in stdout, not flags)
+
     def test_without_tags_prefilled_studio_keywords_keep_the_page_value(self):
         self.profile()
         page = UploadPage()

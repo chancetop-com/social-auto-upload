@@ -438,6 +438,22 @@ class InstagramLocationControlledCliTests(unittest.TestCase):
         saved = json.loads(result_file.read_text(encoding='utf-8'))
         return code, saved, holder, stdout.getvalue(), stderr.getvalue()
 
+    def test_prefilled_search_text_still_requires_a_candidate_click(self):
+        html = _location_page_html([("Shanghai", "First"), ("Shanghai", "Second")])
+        html = html.replace('name="creation-location-input"', 'name="creation-location-input" value="Shanghai"')
+        code, saved, holder, _, _ = self._run(action="upload-note", html=html)
+        self.assertEqual(code, 0)
+        self.assertEqual(holder["clicked_index"], "0")
+        self.assertEqual(saved["options"]["location"]["candidate_address"], "First")
+
+    def test_caption_text_cannot_supply_a_location_restriction(self):
+        html = _location_page_html(entry=False).replace(
+            '<div data-share-clicks', '<div class="preview">Cannot add location for this account.</div><div data-share-clicks'
+        )
+        code, saved, _, _, _ = self._run(action="upload-note", html=html, entry_timeout_ms=100)
+        self.assertEqual(code, 1)
+        self.assertEqual(saved["options"]["location"]["reason"], ENTRY_MISSING)
+
     def test_split_name_and_address_first_same_name_is_clicked(self):
         candidates = [
             ('Shanghai, China', 'Pudong, Shanghai'),

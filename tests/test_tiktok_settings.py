@@ -808,17 +808,15 @@ class TiktokOptionStepTests(unittest.TestCase):
                 self.assertEqual(controls.branded_content.checked_reads, 0)
                 self.assertEqual(controls.branded_content.click_calls, 0)
 
-    def test_apply_options_expands_advanced_settings_first(self):
-        video = _uploader(TiktokPublishOptions(privacy="only-me"))
-        privacy = FakePrivacyControl(
-            "Followers", ["Followers", "Friends", "Only you"]
-        )
-        _install(video, _controls(privacy=privacy))
-        video._expand_advanced_settings = AsyncMock()
-
-        asyncio.run(video.apply_options(_OptionPage()))
-
-        video._expand_advanced_settings.assert_awaited_once()
+    def test_advanced_settings_failure_cannot_confirm_ai_entry_missing(self):
+        app = _uploader(TiktokPublishOptions(aigc=False))
+        app._resolve_single_control = AsyncMock(return_value=None)
+        app._expand_advanced_settings = AsyncMock(side_effect=RuntimeError("Show more blocked"))
+        with self.assertRaisesRegex(RuntimeError, "Show more blocked"):
+            asyncio.run(app.apply_options(_OptionPage()))
+        self.assertEqual(app.ai_outcome.status, "mismatch")
+        self.assertEqual(app.ai_outcome.reason, "read_error")
+        self.assertIsNone(app.ai_outcome.applied)
 
     def test_privacy_explicit_set_then_readback(self):
         privacy = FakePrivacyControl(
@@ -1471,6 +1469,15 @@ class TiktokAigcOptionTests(unittest.TestCase):
         self.assertIn("status=mismatch", line)
         self.assertIn("continue=no", line)
 
+    def test_mixed_ai_switch_blocks_an_explicit_off(self):
+        control = FakeToggleControl(False)
+        control.get_attribute = AsyncMock(return_value="mixed")
+        app = _uploader(TiktokPublishOptions(aigc=False))
+        with self.assertRaises(RuntimeError):
+            _apply_with_output(app, _controls(aigc=control))
+        self.assertIsNone(app.ai_outcome.applied)
+        self.assertEqual(app.ai_outcome.reason, "read_error")
+
     def test_no_aigc_visible_but_unreadable_fails_mismatch(self):
         aigc = _FailingReadControl()
         video = _uploader(TiktokPublishOptions(aigc=False))
@@ -1857,6 +1864,10 @@ class _BodyText:
         return self.text
 
 
+    async def all_inner_texts(self):
+        return [self.text]
+
+
 class _LocationPromptPage(_OptionPage):
     """Page whose body explicitly states a location restriction."""
 
@@ -1864,7 +1875,7 @@ class _LocationPromptPage(_OptionPage):
         self.body = body
 
     def locator(self, selector: str):
-        if selector == "body":
+        if '[role="alert"]' in selector:
             return _BodyText(self.body)
         return _MissingLocator()
 

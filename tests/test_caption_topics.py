@@ -200,3 +200,9 @@ def test_caption_difference_makes_newlines_and_endings_visible():
     )
     assert describe_caption_difference("逐字一致", "逐字一致") == "全文一致"
     assert describe_caption_difference("正文", None) == "实际正文未读到"
+
+
+def test_url_closed_by_prose_punctuation_does_not_hide_the_next_topic():
+    for caption in ("详情（https://example.com/path），#咖啡。", "(https://example.com/x)#咖啡", "https://example.com，#咖啡"):
+        assert [item.name for item in parse_caption_topics(caption).occurrences] == ["咖啡"]
+    assert parse_caption_topics("https://example.com/a_(b)#fragment").occurrences == ()

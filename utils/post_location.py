@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -86,6 +87,12 @@ def pick_location_row(
         if normalise_location_name(row.name) == wanted:
             return index, row
     return None
+
+
+def candidate_text_pattern(text: str) -> re.Pattern[str]:
+    """Exact visible label, tolerating different runs of whitespace."""
+    words = (re.escape(word) for word in text.split())
+    return re.compile(r"^\s*" + r"\s+".join(words) + r"\s*$")
 
 
 def format_clicked_row(name: str, address: str | None = None) -> str:

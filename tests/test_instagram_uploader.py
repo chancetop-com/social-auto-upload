@@ -1088,6 +1088,11 @@ _TOPIC_COMPOSER_HTML = '''
       restoreCaret();
       return;
     }
+    if (captionMode() === 'trailing' && length >= Number(document.body.dataset.captionLimit)) {
+      editor.append('\u00a0');
+      restoreCaret();
+      return;
+    }
     if (captionMode() === 'append' && length > 0
         && !document.body.dataset.mutated) {
       document.body.dataset.mutated = '1';
@@ -1348,6 +1353,11 @@ class InstagramCaptionTopicsDomTests(unittest.TestCase):
                     self.assertIn(marker, saved["error"])
                     self.assertNotIn("topics", saved)
                     self.assertEqual(clicks, 0)
+
+    def test_trailing_editor_whitespace_stops_before_share(self):
+        app, error, clicks, _ = self._run_readback_failure(title="tag", mode="trailing", limit=3)
+        self.assertIn("配文回读不一致", str(error))
+        self.assertEqual((app.result["status"], clicks), ("not_submitted", 0))
 
     def test_editor_hard_limit_stops_before_share(self):
         for media in ("video", "note"):

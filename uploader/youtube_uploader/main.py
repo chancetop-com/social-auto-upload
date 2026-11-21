@@ -488,14 +488,15 @@ class YouTubeVideo(BaseVideoUploader):
     publish_platform_label = "YouTube"
 
     def __init__(self, title, file_path, tags, account_file, *,
-                 description="", thumbnail_path=None, playlist=None,
+                 description=None, thumbnail_path=None, playlist=None,
                  visibility="public", debug=False, headless=None,
                  account_name=None, local_browser=None):
         self.title = title
         self.file_path = str(file_path)
         self.tags = tags or []
         self.account_file = str(account_file) if account_file is not None else None
-        self.description = description or ""
+        self.description = description
+        self.public_description: str | None = None
         self.thumbnail_path = str(thumbnail_path) if thumbnail_path else None
         self.playlist = playlist
         self.visibility = visibility if visibility in VISIBILITY else "public"
@@ -619,28 +620,33 @@ class YouTubeVideo(BaseVideoUploader):
         )
 
         # 4) 简介：公开配文；话题只从这里识别，标题中的 # 不计入。
-        description_value = _normalise_text(self.description, multiline=True)
+        description_selector = "#description-textarea #textbox"
+        if self.description is None:
+            description_value = await _read_editable(page, description_selector, multiline=True)
+        else:
+            description_value = _normalise_text(self.description, multiline=True)
         if len(description_value) > YOUTUBE_DESCRIPTION_MAX_LENGTH:
             raise RuntimeError(
                 f"YouTube 简介超出整帖硬限制（{len(description_value)} > "
                 f"{YOUTUBE_DESCRIPTION_MAX_LENGTH} 字符）；未点击发布"
             )
-        if description_value.strip():
+        if self.description is not None:
             youtube_logger.info(_msg("✍️", "填写简介"))
             await _fill_editable(
                 page,
-                "#description-textarea #textbox",
+                description_selector,
                 description_value,
                 humanizer,
                 multiline=True,
             )
             await _verify_editable(
                 page,
-                "#description-textarea #textbox",
+                description_selector,
                 description_value,
                 label="简介",
                 multiline=True,
             )
+        self.public_description = description_value
         limit_message = await _description_limit_message(page)
         if limit_message:
             raise RuntimeError(

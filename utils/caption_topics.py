@@ -23,7 +23,7 @@ STATUS_LINKED = "linked"
 #: Schemes and host prefixes whose first ``#fragment`` is part of a URL.
 #: A second ``#`` ends the URL so a topic immediately after a link
 #: (``详情https://x/#frag，#咖啡``) is still recognised.
-_URL_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s#]*(?:#[^\s#]*)?")
+_URL_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s#，。！？；：、（）【】《》“”‘’<>\"`]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +71,19 @@ def _is_topic_char(char: str) -> bool:
 
 
 def _url_spans(caption: str) -> list[tuple[int, int]]:
-    return [(match.start(), match.end()) for match in _URL_RE.finditer(caption)]
+    # Only the first hash touching a URL can start its fragment. An unmatched
+    # closing bracket belongs to the surrounding prose (a balanced one can
+    # legitimately end a URL path, e.g. a Wikipedia article).
+    spans = []
+    for match in _URL_RE.finditer(caption):
+        end = match.end()
+        if end == len(caption) or caption[end] != "#":
+            continue
+        url = match.group()
+        if any(url.count(close) > url.count(opening) for opening, close in (("(", ")"), ("[", "]"))):
+            continue
+        spans.append((end, end + 1))
+    return spans
 
 
 def parse_caption_topics(caption: str) -> CaptionTopics:
