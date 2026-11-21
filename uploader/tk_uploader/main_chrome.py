@@ -72,7 +72,8 @@ TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS = 3_000
 TIKTOK_HASHTAG_SETTLE_MS = 600
 TIKTOK_TOPIC_ERROR_SELECTOR = (
     ':is([data-e2e*="caption"], .caption-textarea) '
-    ':is([role="alert"],[class*="error" i],[aria-live="assertive"]):visible, '
+    ':is([role="alert"],[class*="error" i],[aria-live="assertive"],[aria-live="polite"]):visible'
+    ':not([contenteditable],[contenteditable] *,[data-e2e*="preview" i],[data-e2e*="preview" i] *,[class*="preview" i],[class*="preview" i] *), '
     '[data-e2e*="hashtag_error"]:visible, [data-e2e*="caption_error"]:visible, '
     '[data-e2e*="toast"][role="alert"]:visible'
 )
@@ -2661,7 +2662,11 @@ class TiktokBaseUploader(BaseVideoUploader):
             poi = base.locator('[data-e2e="poi_container"]')
             def legacy_location(selector):
                 field = base.locator(selector)
-                return self._location_control(field, field.locator('xpath=..'))
+                widget = field.locator(
+                    "xpath=ancestor::*[@role='combobox' or "
+                    "contains(concat(' ', normalize-space(@class), ' '), ' Select ')][1]"
+                )
+                return self._location_control(field, widget)
 
             return (
                 (
@@ -2906,7 +2911,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 state="hidden", timeout=3000
             )
 
-    async def _settled_ai_control(self):
+    async def _settled_ai_control(self, page):
         # Expansion can finish before the framework mounts the switch.
         deadline = time.monotonic() + 3
         while True:
@@ -2919,6 +2924,13 @@ class TiktokBaseUploader(BaseVideoUploader):
         editor = self.locator_base.locator(
             '.public-DraftEditor-content[contenteditable="true"]:visible'
         ).first
+        modal = 'dialog[open]:visible, [role="dialog"][aria-modal="true"]:visible'
+        busy_settings = self.locator_base.locator(
+            '[data-e2e="advanced_settings_container"][aria-busy="true"]:visible, '
+            '[data-e2e="advanced_settings_container"] :is([aria-busy="true"],[role="progressbar"]):visible'
+        )
+        if await page.locator(modal).count() or await busy_settings.count():
+            raise RuntimeError("TikTok 高级设置仍在加载或被弹窗遮挡")
         if not await editor.count() or not await editor.evaluate(
             """el => !el.closest('[inert],[aria-hidden="true"],[aria-busy="true"]') &&
             !el.ownerDocument.querySelector('dialog[open], [role=dialog][aria-modal=true]:not([aria-hidden=true])')"""
@@ -2946,7 +2958,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             await self._expand_advanced_settings(page)
             still_missing: list[str] = []
             for name in missing:
-                control = (await self._settled_ai_control() if name == "aigc"
+                control = (await self._settled_ai_control(page) if name == "aigc"
                            else await self._resolve_single_control(name))
                 if control is None:
                     still_missing.append(name)

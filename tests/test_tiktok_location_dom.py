@@ -127,7 +127,7 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
         app.locator_base = self.page.frame_locator("#upload")
         self.assertFalse(await app._topic_hard_limit_visible(self.page))
         await frame.locator('.caption-textarea').evaluate("""el => {
-            el.innerHTML = '<div role="alert">Too many hashtags</div>';
+            el.innerHTML = '<div aria-live="polite">Too many hashtags</div>';
         }""")
         app.topic_outcomes = [object()]
         with patch.object(app, "_publish_button_ready", return_value=object()):
@@ -167,6 +167,34 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
             await app.apply_options(self.page)
         self.assertEqual(app.ai_outcome.status, "mismatch")
         self.assertIs(app.ai_outcome.applied, True)
+
+    async def test_unowned_legacy_search_cannot_select_privacy(self):
+        await self.page.set_content("""<form>
+            <input placeholder="Search locations">
+            <button role="combobox" aria-controls="privacy" aria-expanded="true">Privacy</button>
+            <div id="privacy"><span role="option">Public</span></div>
+        </form>""")
+        app = self._probe()
+        app.locator_base = self.page.locator('body')
+        app._option_page = self.page
+        control = await app._resolve_single_control('location')
+        self.assertEqual(await control.candidate_rows(), [])
+
+    async def test_unavailable_settings_cannot_confirm_missing_ai_entry(self):
+        for overlay in (False, True):
+            with self.subTest(overlay=overlay):
+                await self.page.set_content('<iframe id="upload"></iframe><dialog>Confirm</dialog>')
+                frame = self.page.frames[1]
+                await frame.set_content('<div class="public-DraftEditor-content" contenteditable="true">Caption</div>'
+                                        '<div data-e2e="advanced_settings_container" aria-busy="true">Loading</div>')
+                if overlay:
+                    await frame.locator('[aria-busy]').evaluate("el => el.remove()")
+                    await self.page.locator('dialog').evaluate("el => el.showModal()")
+                app = tk.TiktokVideo("Caption", "v.mp4", [], 0, None, options=tk.TiktokPublishOptions(aigc=False))
+                app.locator_base = self.page.frame_locator("#upload")
+                with self.assertRaises(RuntimeError):
+                    await app.apply_options(self.page)
+                self.assertEqual(app.ai_outcome.reason, "read_error")
 
     async def test_expanded_reads_the_combobox_button(self):
         self.assertTrue(await self.control._expanded())

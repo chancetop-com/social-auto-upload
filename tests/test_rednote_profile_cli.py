@@ -140,6 +140,8 @@ class RednoteProfileCliTests(unittest.TestCase):
         page = _video_page()
         page._selectors['div.tiptap[role="textbox"][contenteditable="true"]'] = FakeLocator('body', computed_style=dict(INPUT_FACTS))
         self.prepare_editor(page)
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         media = self.root / 'video.mp4'
         media.write_bytes(b'video fixture')
         code, out, err = self.cli('upload-video', '--account', 'creator', '--file', str(media), '--title', 'Profile video', '--desc', 'Video body', '--no-publish', '--headed')
@@ -197,6 +199,8 @@ class RednoteProfileCliTests(unittest.TestCase):
         from tests.test_xhs_submit import _note_page
         page = _note_page()
         self.prepare_editor(page)
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         media = self.root / 'image.png'
         media.write_bytes(b'image fixture')
         code, out, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Profile note', '--note', 'Note body', '--no-publish')
@@ -248,7 +252,7 @@ class RednoteProfileCliTests(unittest.TestCase):
                     '素材已上传，发布前检查已通过；已停止，未点击发布按钮。',
                     lines,
                 )
-                self.assertEqual(env.body.text, caption + '\n')
+                self.assertEqual(env.body.text, caption)
                 self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
 
     def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):

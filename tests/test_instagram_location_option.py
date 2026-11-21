@@ -276,7 +276,9 @@ def _location_page_html(
             [...list.children].indexOf(row));
           document.body.dataset.clickedName = candidate.name;
           if (outcome === 'rerender') {{
-            list.replaceChildren(...[...list.children].map(child => child.cloneNode(true)));
+            const replacement = list.cloneNode(true);
+            replacement.firstElementChild.textContent = 'Shanghai Airport';
+            list.replaceWith(replacement);
             return;
           }}
           if (outcome === 'stale') {{

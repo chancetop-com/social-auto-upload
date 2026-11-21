@@ -955,15 +955,8 @@ class Decision06ReadinessWiringTests(unittest.TestCase):
     def test_body_typing_only_uses_the_guide_overlay_rule(self):
         page = _note_page()
         app = _note_app(desc="正文", tags=[])
-        editor = page.locator('div.tiptap[role="textbox"][contenteditable="true"]')
-        original = editor.evaluate
-
-        async def evaluate(script, *args):
-            if 'ProseMirror-trailingBreak' in script:
-                return ''.join(value for action, value in page.keyboard.actions if action == 'insert_text')
-            return await original(script, *args)
-
-        editor.evaluate = evaluate
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         clear = AsyncMock(return_value=None)
 
         with (

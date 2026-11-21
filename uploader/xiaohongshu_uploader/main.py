@@ -1947,9 +1947,8 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             address = clicked.address or None
 
             # Re-resolve by name AND address if the dropdown reorders its rows.
-            matched = options.filter(has=page.locator(
-                ".option-name", has_text=candidate_text_pattern(clicked.name)
-            ))
+            name_node = page.locator(".option-name").filter(has_text=candidate_text_pattern(clicked.name))
+            matched = options.filter(has=name_node)
             address_node = page.locator(".option-subname:visible")
             if address:
                 matched = matched.filter(has=address_node.filter(has_text=candidate_text_pattern(address)))

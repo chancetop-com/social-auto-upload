@@ -422,7 +422,7 @@ class TiktokLocationValidationTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-class FakeToggleControl:
+class FakeToggleControl(tk_main.TiktokOptionControl):
     """Checkbox-shaped control: tracks reads, clicks and the current state."""
 
     def __init__(
@@ -1360,6 +1360,7 @@ class TiktokAigcOptionTests(unittest.TestCase):
 
     def test_aigc_on_missing_reports_entry_missing_and_fails(self):
         video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=None))
         out = io.StringIO()
 
         with redirect_stdout(out):
@@ -2665,7 +2666,7 @@ class TiktokLocationCliFlowTests(unittest.TestCase):
         base = _PublishBase()
         app = _uploader(TiktokPublishOptions(location=location))
         app.no_publish = True
-        app.locator_base = base
+        app.locator_base = page or base
         for name in TiktokAigcFlowTests._FORM_STEPS:
             setattr(app, name, AsyncMock())
         app.resolve_option_controls = AsyncMock(return_value=controls)

@@ -328,7 +328,7 @@ class LocationControl:
         }
         if chosen.address:
             self.last_evidence['candidate_address'] = chosen.address
-        if not await self._wait_list_collapsed(entry, candidate_list, chosen):
+        if not await self._wait_list_collapsed(entry, candidate_list):
             # 被点节点仍在 DOM 里说明选择没生效：不把输入框里的输入当成已选地点。
             raise OptionMismatchError(
                 'Instagram 地点候选在点击后仍未收起：'
@@ -468,15 +468,13 @@ class LocationControl:
         await humanizer.click(node)
         return self._page.locator(f'[data-instagram-location-list="{token}"]')
 
-    async def _wait_list_collapsed(self, entry, candidate_list, chosen: LocationCandidate) -> bool:
+    async def _wait_list_collapsed(self, entry, candidate_list) -> bool:
         """Wait out row replacement as well as the original list's collapse."""
         deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
         while True:
             if not await candidate_list.locator(":scope > :visible").count():
-                # The portal can replace its entire list after a click. An exact
-                # candidate still present under the input means search is open.
-                rows = await entry.evaluate(_SUGGESTION_JS)
-                if not any(location_matches(chosen.name, row['name']) for row in rows):
+                # The portal can replace its entire list, including every row.
+                if not await entry.evaluate(_SUGGESTION_JS):
                     return True
             if time.monotonic() >= deadline:
                 return False

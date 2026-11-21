@@ -224,7 +224,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                     '素材已上传，发布前检查已通过；已停止，未点击发布按钮。',
                     lines,
                 )
-                self.assertEqual(env.body.text, caption + '\n')
+                self.assertEqual(env.body.text, caption)
                 self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
 
     def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):
