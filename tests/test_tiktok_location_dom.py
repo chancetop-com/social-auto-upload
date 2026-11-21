@@ -80,7 +80,7 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
         await self._expanded("false")
         self.assertFalse(await self.control._expanded())
 
-    async def test_collapsed_uses_the_combobox_and_ignores_other_option_rows(self):
+    async def test_collapsed_uses_the_combobox_even_when_other_options_are_visible(self):
         await self._expanded("false")
 
         self.assertTrue(await self.control.wait_collapsed())
