@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from utils.errors import UsageError
+from utils.caption_topics import parse_caption_topics, text_results
+from utils.text_compare import normalize_text as _normalize_text
 
 if TYPE_CHECKING:  # 只用于类型标注：本模块保持零浏览器依赖。
     from uploader.publish_timeout import PublishTimeoutBudget
@@ -24,11 +26,23 @@ MISMATCH = "mismatch"
 # 无法应用时的归因，仅在需要时写入 reason。
 ENTRY_MISSING = "entry_missing"
 ACCOUNT_INELIGIBLE = "account_ineligible"
+# 创建页被前台确认框遮挡或处于 aria-hidden：不能把读不到当成“入口缺失”。
+EDITOR_OBSCURED = "editor_obscured"
+# 地点控件的失败分支；与 TikTok 的地点词汇保持一致。
+CONTROL_DISABLED = "control_disabled"
+NO_CANDIDATES = "no_candidates"
+NO_SAME_NAME = "no_same_name_candidate"
+SELECTION_FAILED = "selection_failed"
+LIST_NOT_COLLAPSED = "list_not_collapsed"
+FINAL_EMPTY = "final_empty"
+FINAL_MISMATCH = "final_mismatch"
 
-# 控件 resolve() 的三态结果。
+# 控件 resolve() 的结果。
 PRESENT = "present"
 MISSING = "missing"
 INELIGIBLE = "ineligible"
+# 入口存在但被禁用，且页面没有明确说明资格限制：不能归因为账号不可用。
+UNAVAILABLE = "unavailable"
 
 # 结果文件字段顺序。
 OPTION_KEYS = ("location", "alt_text", "comments", "ai_generated")
@@ -80,14 +94,17 @@ class OptionMismatchError(RuntimeError):
     后续选项，并把错误文案并入最终的聚合错误（例如地点无精确匹配时的候选列表）。
     """
 
-    def __init__(self, message: str, *, applied: object = None) -> None:
+    def __init__(
+        self, message: str, *, applied: object = None, reason: str | None = None
+    ) -> None:
         super().__init__(message)
         self.applied = applied
+        self.reason = reason
 
 
 def normalize_text(text: str) -> str:
     """空白折叠 + casefold，供地点与替代文字比较。"""
-    return " ".join(text.split()).casefold()
+    return _normalize_text(text)
 
 
 def clamp_wait(budget: 'PublishTimeoutBudget | None', default_ms: int) -> int:
@@ -185,6 +202,8 @@ def option_status(
         return _unavailable_status(requested, kind, ENTRY_MISSING)
     if presence == INELIGIBLE:
         return _unavailable_status(requested, kind, ACCOUNT_INELIGIBLE)
+    if presence == UNAVAILABLE:
+        return _unavailable_status(requested, kind, CONTROL_DISABLED)
     if presence != PRESENT:
         raise ValueError(f"未知的控件 presence: {presence!r}")
     if kind == "toggle":
@@ -207,7 +226,9 @@ def option_failures(record: dict) -> list[str]:
         if status not in (UNSUPPORTED, MISMATCH):
             continue
         reason = entry.get("reason")
-        failures.append(f"{key}={status}({reason})" if reason else f"{key}={status}")
+        detail = entry.get("detail")
+        label = f"{key}={status}({reason})" if reason else f"{key}={status}"
+        failures.append(f"{label}: {detail}" if detail else label)
     return failures
 
 
@@ -221,6 +242,20 @@ def instagram_caption(
     if cleaned:
         parts.append(' '.join(f'#{tag}' for tag in cleaned))
     return '\n\n'.join(parts)
+
+
+def caption_topic_records(caption: str) -> list[dict]:
+    """从**回读通过**的最终公开配文生成逐词文字证据，保留顺序与重复。
+
+    Instagram 不点选话题候选，界面只能证明 ``#话题`` 作为文字存在；因此每处
+    都记 ``status=text``，不伪造成已关联。URL 片段由共享解析器排除，原文偏移
+    指向回读的配文。该数组作为 ``topics`` 顶层键兼容追加到既有结果。
+    """
+    reason = '配文全文逐字回读一致'
+    return [
+        result.as_dict()
+        for result in text_results(parse_caption_topics(caption), reason=reason)
+    ]
 
 
 def validate_publish_options(

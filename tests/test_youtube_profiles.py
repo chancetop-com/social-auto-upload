@@ -41,18 +41,86 @@ class StudioPage(FakePage):
         raise AssertionError('Local operation pages belong to the persistent context')
 
 
+class FieldLocator(RecordingLocator):
+    """contenteditable/input double that owns its value and supports a fault."""
+
+    def __init__(self, selector, keyboard, text=''):
+        super().__init__(selector, text=text)
+        self.keyboard = keyboard
+        self.fault = None
+
+    async def click(self, **kwargs):
+        await super().click(**kwargs)
+        self.keyboard.focused = self
+
+    async def inner_text(self, *, timeout=None):
+        text = await super().inner_text(timeout=timeout)
+        return self.fault(text) if self.fault else text
+
+
+class FieldKeyboard(RecordingKeyboard):
+    """Keyboard double that writes into the last clicked field."""
+
+    def __init__(self):
+        super().__init__()
+        self.focused = None
+        self.selected = False
+
+    def _insert(self, text):
+        if self.focused is None:
+            return
+        if self.selected:
+            self.focused._text = ''
+            self.selected = False
+        self.focused._text += text
+
+    async def press(self, key, **kwargs):
+        await super().press(key, **kwargs)
+        if key in ('ControlOrMeta+A', 'Control+A'):
+            self.selected = True
+        elif key == 'Delete':
+            if self.focused is not None:
+                self.focused._text = ''
+            self.selected = False
+        elif key == 'Enter':
+            self._insert('\n')
+        elif len(key) == 1:
+            self._insert(key)
+
+    async def insert_text(self, text, **kwargs):
+        await super().insert_text(text, **kwargs)
+        self._insert(text)
+
+    async def type(self, text, delay=None, **kwargs):
+        await super().type(text, delay, **kwargs)
+        self._insert(text)
+
+
 class UploadPage(StudioPage):
     def __init__(self):
         super().__init__()
-        self.keyboard = RecordingKeyboard()
+        self.keyboard = FieldKeyboard()
         self.selectors = {}
-        for selector in ['input[type="file"]', '#title-textarea', '#title-textarea #textbox',
-                         '#description-textarea #textbox',
+        for selector in ['input[type="file"]', '#title-textarea',
                          "tp-yt-paper-radio-button[name='VIDEO_MADE_FOR_KIDS_NOT_MFK']",
                          "tp-yt-paper-radio-button[name='PUBLIC']",
                          "tp-yt-paper-radio-button[name='UNLISTED']", '#done-button']:
             self.selectors[selector] = RecordingLocator(selector)
+        self.title_input = FieldLocator('#title-textarea #textbox', self.keyboard)
+        self.description_input = FieldLocator('#description-textarea #textbox', self.keyboard)
+        self.tag_input = FieldLocator(
+            '#tags-container #text-input, ytcp-form-input-container#tags-container input',
+            self.keyboard,
+            text='page-keyword',
+        )
+        self.selectors['#title-textarea #textbox'] = self.title_input
+        self.selectors['#description-textarea #textbox'] = self.description_input
+        self.selectors['#tags-container #text-input, ytcp-form-input-container#tags-container input'] = self.tag_input
+        self.selectors['#toggle-button'] = RecordingLocator('toggle')
+        self.selectors[uploader.HASHTAG_AUTOCOMPLETE] = RecordingLocator(
+            'autocomplete', wait_error=TimeoutError('no suggestions'))
         self.selectors[uploader.AUTOCOMPLETE_VISIBLE] = RecordingLocator('dropdown', count=0)
+        self.selectors[uploader.YOUTUBE_DESCRIPTION_ERROR] = RecordingLocator('description-error', count=0)
         self.selectors['.progress-label'] = RecordingLocator('progress', text='Checks complete')
         self.selectors["a[href*='youtu.be'], a[href*='watch?v=']"] = RecordingLocator('link', attributes={'href': 'https://youtu.be/example'})
         self.selectors["ytcp-button:has-text('Close'), ytcp-button:has-text('关闭'), #close-button"] = RecordingLocator('close')
@@ -149,6 +217,103 @@ class YouTubeProfilesTests(unittest.TestCase):
         self.assertEqual(self.playwright.chromium.persistent_calls[0]['channel'], 'chromium')
         self.assertFalse(self.context.storage_state_calls)
         self.assertFalse(self.context.add_init_script_calls)
+
+    def test_upload_reports_description_topics_and_keeps_title_independent(self):
+        self.profile()
+        page = UploadPage()
+        self.context.next_page = page
+        description = "第一行 #咖啡，配上 #咖啡。\n链接 https://example.com/#frag"
+        result = self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
+                          '--title', '#标题话题 Title', '--desc', description)
+        self.assertEqual(result[0], 0, result)
+        self.assertEqual(page.selectors['#done-button'].click_count, 1)
+        self.assertEqual(page.title_input._text, '#标题话题 Title')
+        self.assertEqual(page.description_input._text, description)
+        self.assertIn('YouTube 简介话题 1/2：#咖啡 保留文字', result[1])
+        self.assertIn('YouTube 简介话题 2/2：#咖啡 保留文字', result[1])
+        self.assertNotIn('#标题话题', result[1])
+        self.assertNotIn('#frag', result[1])
+
+    def test_description_readback_mismatch_blocks_before_submit(self):
+        self.profile()
+        description = "正文 #a 与 #b"
+        faults = {
+            'swallow': lambda text: text[:-1],
+            'misplace': lambda text: text[1:] + text[:1],
+            'append': lambda text: text + ' 多余',
+        }
+        for name, fault in faults.items():
+            with self.subTest(fault=name):
+                page = UploadPage()
+                page.description_input.fault = fault
+                self.context.next_page = page
+                result = self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
+                                  '--title', 'Title', '--desc', description)
+                self.assertEqual(result[0], 1, result)
+                self.assertIn('简介读回不一致', result[2])
+                self.assertIn('偏移', result[2])
+                self.assertIn('期望', result[2])
+                self.assertIn('实际', result[2])
+                self.assertIn('未点击发布', result[2])
+                self.assertEqual(page.selectors['#done-button'].click_count, 0)
+
+    def test_description_over_the_hard_limit_stops_before_any_submit(self):
+        self.profile()
+        page = UploadPage()
+        self.context.next_page = page
+        result = self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
+                          '--title', 'Title', '--desc', '长' * 5001)
+        self.assertEqual(result[0], 1, result)
+        self.assertIn('5000', result[2])
+        self.assertIn('硬限制', result[2])
+        self.assertIn('未点击发布', result[2])
+        self.assertEqual(page.selectors['#done-button'].click_count, 0)
+        self.assertEqual(page.description_input._text, '')
+
+    def test_title_readback_mismatch_blocks_before_description_and_submit(self):
+        self.profile()
+        page = UploadPage()
+        page.title_input.fault = lambda text: text + ' 多余'
+        self.context.next_page = page
+        result = self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
+                          '--title', 'Title', '--desc', 'Description')
+        self.assertEqual(result[0], 1, result)
+        self.assertIn('标题读回不一致', result[2])
+        self.assertIn('未点击发布', result[2])
+        self.assertEqual(page.selectors['#done-button'].click_count, 0)
+        self.assertEqual(page.description_input._text, '')
+
+    def test_default_description_and_explicit_clear_use_the_observed_caption(self):
+        self.profile()
+        for flags, expected in (([], "preset #default"), (["--desc", ""], ""), (["--desc", "  "], "  ")):
+            with self.subTest(flags=flags):
+                page = UploadPage()
+                page.description_input._text = "preset #default"
+                self.context.next_page = page
+                code, stdout, _ = self.cli("upload-video", "--account", "Creator", "--file",
+                                           str(self.video), "--title", "Title", *flags)
+                self.assertEqual(code, 0)
+                self.assertEqual(page.description_input._text, expected)
+                self.assertEqual("#default" in stdout, not flags)
+
+    def test_without_tags_prefilled_studio_keywords_keep_the_page_value(self):
+        self.profile()
+        page = UploadPage()
+        self.context.next_page = page
+        result = self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
+                          '--title', 'Title', '--desc', '简介 #公开话题')
+        self.assertEqual(result[0], 0, result)
+        self.assertEqual(page.tag_input._text, 'page-keyword')
+        self.assertEqual(page.tag_input.click_count, 0)
+        self.assertEqual(page.selectors['#toggle-button'].click_count, 0)
+        self.assertNotIn('公开话题', page.tag_input._text)
+
+    def test_removed_tags_flag_exits_2_before_opening_the_browser(self):
+        with self.assertRaises(SystemExit) as ctx:
+            self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
+                     '--title', 'Title', '--desc', '简介 #公开话题', '--tags', 'a,b')
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertFalse(self.playwright.chromium.persistent_calls)
 
     def test_checks_distinguish_missing_login_verification_and_probe_faults(self):
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 10)

@@ -37,6 +37,13 @@ from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.browser_session import provider_label
 from utils.browser_time import page_wall_clock
+from utils.caption_topics import (
+    STATUS_LINKED,
+    STATUS_TEXT,
+    TopicOccurrence,
+    describe_caption_difference,
+    parse_caption_topics,
+)
 from utils.controls import read_switch_state
 from utils.dom import Candidate
 from utils.dom import ElementMissingError
@@ -49,7 +56,7 @@ from utils.dom import ensure_in_viewport
 from utils.dom import resolve
 from utils.dom import wait_dom_quiet
 from utils.dom import wait_resolved
-from utils.errors import LoginRequiredError
+from utils.errors import LocationVerificationError, LoginRequiredError
 from utils.local_browser import resolve_headless
 from utils.local_browser_session import local_browser_session
 from utils.humanize import MAYBE_DISPATCHED
@@ -63,6 +70,12 @@ from utils.login_qrcode import print_terminal_qrcode
 from utils.login_qrcode import remove_qrcode_file
 from utils.login_qrcode import save_data_url_image
 from utils.log import rednote_logger
+from utils.post_location import LocationReport
+from utils.post_location import LocationRow, candidate_text_pattern
+from utils.post_location import match_eligibility_notice
+from utils.post_location import no_match_reason
+from utils.post_location import normalise_location_name
+from utils.post_location import pick_location_row
 from utils.time_utils import require_aware_now, require_schedule_window
 
 REDNOTE_DEFAULT_CREATOR_BASE_URL = "https://creator.rednote.com"
@@ -121,9 +134,25 @@ REDNOTE_PROBE_POLL_MS = 500
 REDNOTE_NAVIGATION_TIMEOUT_MS = 30_000
 REDNOTE_URL_GUARD_TIMEOUT_MS = 30_000
 REDNOTE_LOCATION_INPUT_TIMEOUT_MS = 30_000
-REDNOTE_LOCATION_DROPDOWN_TIMEOUT_MS = 3_000
 REDNOTE_LOCATION_OPTION_TIMEOUT_MS = 3_000
-REDNOTE_LOCATION_FALLBACK_TIMEOUT_MS = 2_000
+REDNOTE_LOCATION_COLLAPSE_TIMEOUT_MS = 3_000
+# 帖子地点（ticket 18）：入口、候选行与收起后的可见控件。
+REDNOTE_LOCATION_CONTAINER_SELECTOR = ".address-card-wrapper"
+REDNOTE_LOCATION_ENTRY_SELECTOR = ".address-card-wrapper .address-card-select"
+REDNOTE_LOCATION_ENTRY_CANDIDATES = (Candidate(REDNOTE_LOCATION_ENTRY_SELECTOR),)
+REDNOTE_LOCATION_ROW_SELECTOR = ".option-item:visible:has(.option-name)"
+REDNOTE_LOCATION_DISPLAY_SELECTOR = ".address-card-select .d-select-description"
+# 一次浏览器往返读取全部候选的名称与地址；地址只用于记录，不参与匹配。
+REDNOTE_LOCATION_ROWS_JS = """
+rows => rows.map((row) => {
+  const name = row.querySelector('.option-name');
+  const address = row.querySelector('.option-subname');
+  return {
+    name: name ? name.textContent : '',
+    address: address && address.getClientRects().length ? address.innerText : '',
+  };
+})
+"""
 # 话题：候选就绪窗口与回读窗口（spec §3 U7）。两者都再经剩余预算收紧。
 REDNOTE_TOPIC_READY_WINDOW_MS = 5_000
 REDNOTE_TOPIC_READBACK_WINDOW_MS = 1_000
@@ -179,7 +208,6 @@ REDNOTE_VIDEO_FAIL_SELECTOR = "div[class='fail']"
 REDNOTE_SCHEDULE_SETTLE_MS = 1_000
 REDNOTE_LOCATION_INPUT_SETTLE_MS = 1_000
 REDNOTE_LOCATION_SUGGEST_SETTLE_MS = 2_000
-REDNOTE_LOCATION_OPTIONS_SETTLE_MS = 3_000
 REDNOTE_DECLARATION_SETTLE_MS = 800
 REDNOTE_DECLARATION_DATE_SETTLE_MS = 300
 REDNOTE_DECLARATION_FILL_SETTLE_MS = 500
@@ -275,9 +303,61 @@ REDNOTE_TOPIC_MAX_CLICKS = 3
 REDNOTE_TOPIC_READBACK_CANDIDATES = (
     Candidate('div.tiptap[role="textbox"] a[data-topic]'),
 )
+# 配文原位话题：整段正文按锚点渲染回读（每个 a[data-topic] = '#' + name）。
+# 块级节点之间补换行；ProseMirror 的尾随 <br> 和分隔 img 不进入正文。
+REDNOTE_CAPTION_READBACK_JS = """
+(root) => {
+  const blocks = new Set([
+    'P', 'DIV', 'LI', 'UL', 'OL', 'BLOCKQUOTE',
+    'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE'
+  ]);
+  let out = '';
+  const walk = (node) => {
+    let hasSibling = false;
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.ELEMENT_NODE && blocks.has(child.tagName)) {
+        if (hasSibling) out += '\\n';
+        walk(child);
+        hasSibling = true;
+        continue;
+      }
+      if (child.nodeType === Node.TEXT_NODE) {
+        hasSibling = true;
+        out += child.nodeValue;
+        continue;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+      if (child.tagName === 'A' && child.hasAttribute('data-topic')) {
+        let name = '';
+        try {
+          name = (JSON.parse(child.getAttribute('data-topic') || '{}') || {}).name || '';
+        } catch (error) {
+          name = '';
+        }
+        hasSibling = true;
+        out += '#' + name;
+        continue;
+      }
+      if (child.tagName === 'IMG') continue;
+      if (child.tagName === 'BR') {
+        const trailing = child.classList
+          && child.classList.contains('ProseMirror-trailingBreak');
+        if (!trailing && (child.previousSibling || child.nextSibling || !blocks.has(node.tagName))) out += '\\n';
+        continue;
+      }
+      hasSibling = true;
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
+}
+"""
 
 # 标签上限的唯一口径：只在校验期截断（spec §3 U7）。
 REDNOTE_MAX_TAGS = 10
+# 原位话题的关联上限：超出后第 11 个及以后只保留文字，绝不截断正文。
+REDNOTE_TOPIC_ASSOCIATION_LIMIT = REDNOTE_MAX_TAGS
 
 # ---------------------------------------------------------------------------
 # 元数据长度与回读（spec §3 U8）。
@@ -331,6 +411,11 @@ REDNOTE_DECLARATION_TRIGGER_CANDIDATES = (
     Candidate(REDNOTE_DECLARATION_CONTAINER_SELECTOR),
 )
 REDNOTE_DECLARATION_OPTION_SELECTOR = ".declaration-drop-down .d-option"
+# 菜单收起断言：从刚点的选项向上找声明弹层（一级/二级菜单共用）。
+REDNOTE_DECLARATION_MENU_XPATH = (
+    "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '),"
+    " ' d-popover ')][1]"
+)
 REDNOTE_DECLARATION_CONFIRM_CANDIDATES = (Candidate(".dialog-footer button.bg-red"),)
 REDNOTE_SOURCE_MODAL_CANDIDATES = (Candidate(".d-modal.self-shooting-contain"),)
 REDNOTE_SHOOT_LOCATION_CANDIDATES = (Candidate(".address-input input"),)
@@ -928,6 +1013,21 @@ def _msg(emoji: str, text: str) -> str:
     return f"{emoji} {text}"
 
 
+def _declaration_failure_message(
+    *,
+    content_type: str,
+    requested_label: str,
+    observed: str | None,
+    reason: str,
+) -> str:
+    """发布前声明失败的唯一终端口径：请求 / 终值 / 原因。"""
+    shown = "未读到" if observed is None else (observed or "（空）")
+    return (
+        f"内容类型声明失败：请求={content_type}（{requested_label}），"
+        f"终值={shown}，原因={reason}；尚未点击发布。"
+    )
+
+
 async def _run_dom_quiet_gate(page: Page, *, budget: PublishTimeoutBudget) -> None:
     """首次交互前的一次性 DOM 静默门（spec §3 U3 A.2/A.3）。
 
@@ -954,7 +1054,7 @@ async def _clear_known_overlays(
 
 
 def format_tag_cap_warning(tags) -> str:
-    """标签超限的唯一文案：CLI 与上传器校验期共用（spec §3 U7）。"""
+    """标签超限的唯一文案：仅直接 Python API 调用（CLI 已不传 tags）。"""
     items = list(tags or [])
     dropped = items[REDNOTE_MAX_TAGS:]
     return (
@@ -1514,6 +1614,7 @@ class RednoteBaseUploader(BaseVideoUploader):
         *,
         account_name=None,
         local_browser=None,
+        location: str | None = None,
     ):
         self.publish_date = publish_date
         self.account_file = None if account_file is None else str(account_file)
@@ -1528,7 +1629,17 @@ class RednoteBaseUploader(BaseVideoUploader):
         self.repost_source = (repost_source or "").strip()
         self.shoot_location = (shoot_location or "").strip()
         self.shoot_date = (shoot_date or "").strip()
+        # 帖子地点与自主拍摄地点完全独立：None 表示不操作页面。
+        self.location = None if location is None else str(location).strip()
         self.no_publish = no_publish
+        # 显式内容类型声明成功后的回读结果；None 表示未请求或未验证。
+        self.declaration_report: dict[str, str | None] | None = None
+        # 帖子地点成功后的结果；None 表示未请求或未验证。
+        self.location_report: dict[str, str | None] | None = None
+        # 配文原位话题的逐项结果；None/[] 表示正文里没有可识别的话题。
+        self.topic_results: list[dict[str, str | int | None]] | None = None
+        # 输入完成、追加换行前的整段正文回读（逐字一致才放行）。
+        self.caption_readback: str | None = None
 
     async def validate_base_args(self):
         if self.publish_strategy not in {
@@ -1680,86 +1791,161 @@ class RednoteBaseUploader(BaseVideoUploader):
                 publish_clicked=False,
             )
 
-    async def set_location(
-        self,
-        page: Page,
-        location: str = "青岛市",
-        *,
-        humanizer: Humanizer | None = None,
-    ):
-        if not location:
-            return True
+    async def apply_location(
+        self, page: Page, *, humanizer: Humanizer | None = None
+    ) -> LocationReport | None:
+        """Apply ``--location`` when requested; omitted leaves the control alone."""
+        if self.location is None:
+            return None
+        return await self.set_location(page, self.location, humanizer=humanizer)
 
+    async def set_location(
+        self, page: Page, location: str, *, humanizer: Humanizer | None = None
+    ) -> LocationReport:
+        """Select the first same-name post location and verify the readback.
+
+        Matching compares the candidate **name** (trim, collapse whitespace,
+        casefold) in page order; a leading approximate name such as
+        ``房山人民公园`` is skipped.  Success requires both the candidate list to
+        collapse and the control to display the requested name.  Any other
+        outcome raises :class:`LocationVerificationError` before publishing.
+        """
+        requested = str(location or "").strip()
         humanizer = humanizer or self._humanizer(page)
-        rednote_logger.info(_msg("📍", f"小人准备设置位置: {location}"))
-        loc_ele = await page.wait_for_selector(
-            "div.d-text.d-select-placeholder.d-text-ellipsis.d-text-nowrap",
-            timeout=self._wait_ms(REDNOTE_LOCATION_INPUT_TIMEOUT_MS),
-        )
-        await humanizer.click(loc_ele)
-        await self._settle(page, REDNOTE_LOCATION_INPUT_SETTLE_MS)
-        await humanizer.type_text(location)
-        dropdown_selector = (
-            "div.d-popover.d-popover-default.d-dropdown.--size-min-width-large"
-        )
-        await self._settle(page, REDNOTE_LOCATION_SUGGEST_SETTLE_MS)
+        rednote_logger.info(_msg("📍", f"小人准备设置帖子地点: {requested}"))
+        clicked_name: str | None = None
+        address: str | None = None
+        final_name: str | None = None
+
+        def fail(reason: str) -> None:
+            raise LocationVerificationError(
+                requested=requested,
+                reason=reason,
+                clicked_name=clicked_name,
+                address=address,
+                final_name=final_name,
+            )
+
+        if not requested:
+            fail("地点请求为空")
+
         try:
-            await page.wait_for_selector(
-                dropdown_selector,
-                timeout=self._wait_ms(REDNOTE_LOCATION_DROPDOWN_TIMEOUT_MS),
+            notice = await self._read_location_notice(page)
+            if notice is not None:
+                fail(f"账号不可用：页面提示「{notice}」")
+
+            entry = (
+                await _resolve_anchor(
+                    page,
+                    "帖子地点入口",
+                    REDNOTE_LOCATION_ENTRY_CANDIDATES,
+                    role="visible",
+                    budget=self.publish_budget,
+                    timeout_ms=REDNOTE_LOCATION_INPUT_TIMEOUT_MS,
+                )
+            ).locator
+            await humanizer.click(entry)
+            await self._settle(page, REDNOTE_LOCATION_INPUT_SETTLE_MS)
+            # 搜索框由组件聚焦；先全选再输入，避免旧输入被追加。
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.type_text(requested)
+            await self._settle(page, REDNOTE_LOCATION_SUGGEST_SETTLE_MS)
+            try:
+                await page.wait_for_selector(
+                    REDNOTE_LOCATION_ROW_SELECTOR,
+                    state="visible",
+                    timeout=self._wait_ms(REDNOTE_LOCATION_OPTION_TIMEOUT_MS),
+                )
+            except Exception:
+                # 空态与只有近似候选都可能没有可点行；统一读列表后区分原因。
+                pass
+
+            options = page.locator(REDNOTE_LOCATION_ROW_SELECTOR)
+            rows = [
+                LocationRow.from_mapping(row)
+                for row in await options.evaluate_all(REDNOTE_LOCATION_ROWS_JS)
+            ]
+            picked = pick_location_row(rows, requested)
+            if picked is None:
+                fail(no_match_reason(rows, requested))
+            _, clicked = picked
+            clicked_name = clicked.name
+            address = clicked.address or None
+
+            # Re-resolve by name AND address if the dropdown reorders its rows.
+            name_node = page.locator(".option-name").filter(has_text=candidate_text_pattern(clicked.name))
+            matched = options.filter(has=name_node)
+            address_node = page.locator(".option-subname:visible")
+            if address:
+                matched = matched.filter(has=address_node.filter(has_text=candidate_text_pattern(address)))
+            else:
+                matched = matched.filter(has_not=address_node.filter(has_text=re.compile(r"\S")))
+            await humanizer.click(matched.first)
+            try:
+                await page.locator(REDNOTE_LOCATION_ROW_SELECTOR).first.wait_for(
+                    state="hidden",
+                    timeout=self._wait_ms(REDNOTE_LOCATION_COLLAPSE_TIMEOUT_MS),
+                )
+            except Exception:
+                fail("候选列表未收起")
+            await self._settle(page, REDNOTE_LOCATION_INPUT_SETTLE_MS)
+
+            final_name = await self._read_location_display(page)
+            if final_name is None:
+                fail("终值缺失（读取失败）")
+            if not final_name:
+                fail("终值为空")
+            if normalise_location_name(final_name) != normalise_location_name(
+                requested
+            ):
+                fail(
+                    f"终值与请求不符：期望「{requested}」，"
+                    f"实际「{final_name}」"
+                )
+        except LocationVerificationError:
+            raise
+        except ElementMissingError:
+            fail("未找到地点入口")
+        except ElementUnusableError as exc:
+            fail(f"地点入口不可用：{getattr(exc, 'reason', '') or exc}")
+        except Exception as exc:
+            fail(f"地点设置失败：{exc}")
+
+        report = LocationReport(
+            requested=requested,
+            clicked_name=clicked_name or requested,
+            address=address,
+            final_name=final_name or "",
+        )
+        self.location_report = report.as_dict()
+        rednote_logger.success(
+            _msg("🥳", f"帖子地点已设置并回读：{report.final_name}")
+        )
+        return report
+
+    async def _read_location_notice(self, page: Page) -> str | None:
+        """Only an explicit prompt next to the control counts as unavailable."""
+        try:
+            container = page.locator(REDNOTE_LOCATION_CONTAINER_SELECTOR)
+            if not await container.count():
+                return None
+            text = await container.first.inner_text(
+                timeout=self._wait_ms(REDNOTE_LOCATION_OPTION_TIMEOUT_MS)
             )
         except Exception:
-            rednote_logger.warning(
-                _msg("😵", "位置下拉列表没按预期出现，小人继续按旧逻辑查找")
-            )
-        await self._settle(page, REDNOTE_LOCATION_INPUT_SETTLE_MS)
-        flexible_xpath = (
-            f'//div[contains(@class, "d-popover") and contains(@class, "d-dropdown")]'
-            f'//div[contains(@class, "d-options-wrapper")]'
-            f'//div[contains(@class, "d-grid") and contains(@class, "d-options")]'
-            f'//div[contains(@class, "name") and text()="{location}"]'
-        )
-        await self._settle(page, REDNOTE_LOCATION_OPTIONS_SETTLE_MS)
+            return None
+        return match_eligibility_notice(text)
+
+    async def _read_location_display(self, page: Page) -> str | None:
+        """Read the collapsed control; ``None`` means it could not be read."""
         try:
-            location_option = await page.wait_for_selector(
-                flexible_xpath,
-                timeout=self._wait_ms(REDNOTE_LOCATION_OPTION_TIMEOUT_MS),
-            )
-
-            if not location_option:
-                location_option = await page.wait_for_selector(
-                    f'//div[contains(@class, "d-popover") and contains(@class, "d-dropdown")]'
-                    f'//div[contains(@class, "d-options-wrapper")]'
-                    f'//div[contains(@class, "d-grid") and contains(@class, "d-options")]'
-                    f'/div[1]//div[contains(@class, "name") and text()="{location}"]',
-                    timeout=self._wait_ms(REDNOTE_LOCATION_FALLBACK_TIMEOUT_MS),
+            return (
+                await page.locator(REDNOTE_LOCATION_DISPLAY_SELECTOR).first.inner_text(
+                    timeout=self._wait_ms(REDNOTE_LOCATION_OPTION_TIMEOUT_MS)
                 )
-
-            await location_option.scroll_into_view_if_needed()
-            await humanizer.between_scroll()
-            await humanizer.click(location_option)
-            rednote_logger.success(_msg("🥳", f"位置已经设置成 {location}"))
-            return True
-        except Exception as e:
-            rednote_logger.error(_msg("😢", f"设置位置失败: {e}"))
-            try:
-                all_options = await page.query_selector_all(
-                    '//div[contains(@class, "d-popover") and contains(@class, "d-dropdown")]'
-                    '//div[contains(@class, "d-options-wrapper")]'
-                    '//div[contains(@class, "d-grid") and contains(@class, "d-options")]'
-                    "/div"
-                )
-                rednote_logger.debug(
-                    _msg("🧍", f"位置下拉里一共找到 {len(all_options)} 个选项")
-                )
-                for i, option in enumerate(all_options[:3]):
-                    option_text = await option.inner_text()
-                    rednote_logger.debug(
-                        _msg("🧾", f"候选位置 {i + 1}: {option_text.strip()[:50]}")
-                    )
-            except Exception as inner_e:
-                rednote_logger.debug(_msg("😵", f"读取位置候选列表失败: {inner_e}"))
-            return False
+            ).strip()
+        except Exception:
+            return None
 
     async def fill_title(
         self, page: Page, *, humanizer: Humanizer | None = None
@@ -1818,9 +2004,10 @@ class RednoteBaseUploader(BaseVideoUploader):
             publish_clicked=False,
         )
 
-    async def fill_desc(
-        self, page: Page, *, humanizer: Humanizer | None = None
-    ) -> None:
+    async def fill_desc(self, page: Page, *, humanizer: Humanizer | None = None) -> None:
+        # 每次正文输入只报告本次结果；重复调用不保留上一次的回读。
+        self.topic_results = None
+        self.caption_readback = None
         if not getattr(self, "desc", ""):
             return
 
@@ -1843,8 +2030,300 @@ class RednoteBaseUploader(BaseVideoUploader):
         await humanizer.press("Backspace")
         await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
-        await humanizer.type_text(self.desc)
-        await humanizer.press("Enter")
+        topics = parse_caption_topics(self.desc)
+        await self._type_caption_with_topics(page, desc.locator, topics, humanizer)
+        if self.tags:
+            # Direct Python callers can still append a separate tag block.
+            await humanizer.press("Enter")
+
+    @staticmethod
+    def _topic_report(
+        occurrence: TopicOccurrence,
+        status: str,
+        reason: str | None = None,
+    ) -> dict[str, str | int | None]:
+        return {
+            "index": occurrence.index,
+            "name": occurrence.name,
+            "text": occurrence.text,
+            "status": status,
+            "reason": reason,
+        }
+
+    def _caption_failure(
+        self,
+        reason: str,
+        *,
+        occurrence: TopicOccurrence | None = None,
+    ) -> ElementUnusableError:
+        what = "配文正文" if occurrence is None else f"配文话题『{occurrence.text}』"
+        error = ElementUnusableError(
+            what=what,
+            role="attached",
+            selector=REDNOTE_BODY_CANDIDATES[0].selector,
+            reason=reason,
+            publish_clicked=False,
+        )
+        if occurrence is not None:
+            error.topic = occurrence.text
+            error.occurrence_index = occurrence.index
+        return error
+
+    async def _read_caption_body(self, body) -> str | None:
+        """按文档顺序回读正文：话题锚点读作 ``#`` + ``name``，其余逐字保留。"""
+        try:
+            value = await body.evaluate(REDNOTE_CAPTION_READBACK_JS)
+        except Exception:
+            return None
+        return value if isinstance(value, str) else None
+
+    async def _read_caption_until(
+        self,
+        body,
+        accepted: set[str],
+        *,
+        window_ms: int = REDNOTE_TOPIC_READBACK_WINDOW_MS,
+    ) -> str | None:
+        """短轮询正文，直到读到 ``accepted`` 之一或窗口结束；返回最后一次读值。"""
+        deadline = (
+            time.monotonic() + self._topic_window_ms(window_ms) / 1000
+        )
+        actual: str | None = None
+        while True:
+            actual = await self._read_caption_body(body)
+            if actual is not None and actual in accepted:
+                return actual
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return actual
+            await asyncio.sleep(
+                min(REDNOTE_TOPIC_READBACK_POLL_SECONDS, remaining)
+            )
+
+    async def _assert_caption_associations(
+        self, page: Page, expected_names: list[str]
+    ) -> None:
+        raw = await self._read_topic_nodes(page)
+        if raw is None:
+            raise self._caption_failure(
+                "配文话题回读不可用：读不到正文编辑器的话题锚点"
+            )
+        observed = [_parse_topic_name(item) for item in raw]
+        expected_norm = [_normalise_topic(name) for name in expected_names]
+        observed_norm = [_normalise_topic(name) for name in observed]
+        if observed_norm != expected_norm:
+            raise self._caption_failure(
+                "配文话题关联回读不一致："
+                f"期望 {expected_names}，实际 {observed}"
+            )
+
+    async def _close_topic_suggestions(
+        self, page: Page, humanizer: Humanizer
+    ) -> None:
+        """收起候选列表但不输入空格：降级/超限时正文必须逐字保留。"""
+        try:
+            if await page.locator(REDNOTE_TOPIC_ITEM_SELECTOR).count():
+                await humanizer.press("Escape")
+        except Exception:
+            pass
+
+    async def _type_caption_segment(
+        self, humanizer: Humanizer, text: str
+    ) -> None:
+        """逐段输入；换行走 Enter，保持编辑器块结构与真实键盘一致。"""
+        parts = text.split("\n")
+        for index, part in enumerate(parts):
+            if index:
+                await humanizer.press("Enter")
+            if part:
+                await humanizer.type_text(part)
+
+    async def _type_caption_with_topics(
+        self,
+        page: Page,
+        body,
+        topics,
+        humanizer: Humanizer,
+    ) -> None:
+        caption = topics.text
+        results: list[dict[str, str | int | None]] = []
+        linked_names: list[str] = []
+        cursor = 0
+        for occurrence in topics.occurrences:
+            segment = caption[cursor:occurrence.start]
+            if segment:
+                await self._type_caption_segment(humanizer, segment)
+            await humanizer.type_text(occurrence.text)
+
+            if len(linked_names) >= REDNOTE_TOPIC_ASSOCIATION_LIMIT:
+                await self._close_topic_suggestions(page, humanizer)
+                results.append(
+                    self._topic_report(
+                        occurrence,
+                        STATUS_TEXT,
+                        f"已达可关联上限 {REDNOTE_TOPIC_ASSOCIATION_LIMIT}",
+                    )
+                )
+                cursor = occurrence.end
+                continue
+
+            linked, reason = await self._associate_inline_topic(
+                page, occurrence, humanizer
+            )
+            if not linked:
+                results.append(self._topic_report(occurrence, STATUS_TEXT, reason))
+                cursor = occurrence.end
+                continue
+
+            linked_names.append(occurrence.name)
+            cursor = await self._settle_inline_topic(
+                page, body, occurrence, caption, humanizer, linked_names
+            )
+            results.append(self._topic_report(occurrence, STATUS_LINKED))
+
+        tail = caption[cursor:]
+        if tail:
+            await self._type_caption_segment(humanizer, tail)
+
+        actual = await self._read_caption_until(body, {caption})
+        if actual != caption:
+            raise self._caption_failure(
+                "配文回读与预期不一致："
+                f"{describe_caption_difference(caption, actual)}"
+            )
+        if topics.occurrences:
+            await self._assert_caption_associations(page, linked_names)
+        self.caption_readback = actual
+        self.topic_results = results or None
+
+    async def _associate_inline_topic(
+        self,
+        page: Page,
+        occurrence: TopicOccurrence,
+        humanizer: Humanizer,
+    ) -> tuple[bool, str | None]:
+        """点选同名候选（含「新建话题」）；无同名行时保留文字。"""
+        started = time.monotonic()
+        deadline = (
+            started + self._topic_window_ms(REDNOTE_TOPIC_READY_WINDOW_MS) / 1000
+        )
+        attempts = 0
+        baseline = await self._read_topic_nodes(page)
+        if baseline is None:
+            raise self._caption_failure(
+                "配文话题回读不可用：读不到正文编辑器的话题锚点",
+                occurrence=occurrence,
+            )
+
+        while attempts < REDNOTE_TOPIC_MAX_CLICKS and time.monotonic() < deadline:
+            self.publish_budget.check_pre_click()
+            candidate, item_count = await self._scan_topic_candidate(
+                page, occurrence.name
+            )
+            if candidate is None:
+                if attempts > 0 or item_count > 0:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(REDNOTE_TOPIC_POLL_SECONDS, remaining))
+                continue
+
+            try:
+                clicked = await click_topic_candidate(candidate, humanizer)
+            finally:
+                await asyncio.gather(
+                    candidate.dispose(), return_exceptions=True
+                )
+            if not clicked:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(REDNOTE_TOPIC_POLL_SECONDS, remaining))
+                continue
+
+            attempts += 1
+            new_nodes = await self._readback_new_topics(page, baseline)
+            if new_nodes is None:
+                raise self._caption_failure(
+                    "配文话题回读不可用：读不到正文编辑器的话题锚点",
+                    occurrence=occurrence,
+                )
+            if new_nodes:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(REDNOTE_TOPIC_POLL_SECONDS, remaining))
+
+        new_nodes = await self._readback_new_topics(page, baseline)
+        if new_nodes is None:
+            raise self._caption_failure(
+                "配文话题回读不可用：读不到正文编辑器的话题锚点",
+                occurrence=occurrence,
+            )
+        if len(new_nodes) > 1:
+            raise self._caption_failure(
+                "点选后正文出现多个话题锚点："
+                f"期望 1 个「{occurrence.text}」，实际 {len(new_nodes)} 个",
+                occurrence=occurrence,
+            )
+        if not new_nodes:
+            if attempts == 0:
+                await self._close_topic_suggestions(page, humanizer)
+                return False, "无同名候选"
+            raise self._caption_failure(
+                "已点选同名候选，但正文没有出现话题锚点",
+                occurrence=occurrence,
+            )
+        observed = _parse_topic_name(new_nodes[0])
+        if _normalise_topic(observed) != _normalise_topic(occurrence.name):
+            raise self._caption_failure(
+                "选中的话题与原词不符："
+                f"期望「{occurrence.text}」，实际「#{observed or ''}」",
+                occurrence=occurrence,
+            )
+        return True, None
+
+    async def _settle_inline_topic(
+        self,
+        page: Page,
+        body,
+        occurrence: TopicOccurrence,
+        caption: str,
+        humanizer: Humanizer,
+        linked_names: list[str],
+    ) -> int:
+        """处理编辑器自动追加的 U+00A0，并复验关联仍在原位置。"""
+        expected = caption[: occurrence.end]
+        with_space = expected + "\u00a0"
+        actual = await self._read_caption_until(body, {expected, with_space})
+        if actual not in {expected, with_space}:
+            raise self._caption_failure(
+                "配文话题落点与预期不一致："
+                f"{describe_caption_difference(expected, actual)}",
+                occurrence=occurrence,
+            )
+
+        if actual == expected:
+            await self._assert_caption_associations(page, linked_names)
+            return occurrence.end
+
+        if caption[occurrence.end : occurrence.end + 1] == "\u00a0":
+            # 作者原本就在这个话题后写了不换行空格：保留编辑器追加的一个。
+            await self._assert_caption_associations(page, linked_names)
+            return occurrence.end + 1
+
+        await humanizer.press("Backspace")
+        after = await self._read_caption_until(body, {expected})
+        if after != expected:
+            raise self._caption_failure(
+                "移除自动空格后配文与预期不一致："
+                f"{describe_caption_difference(expected, after)}",
+                occurrence=occurrence,
+            )
+        await self._assert_caption_associations(page, linked_names)
+        return occurrence.end
 
     async def fill_tags(
         self, page: Page, *, humanizer: Humanizer | None = None
@@ -1906,17 +2385,16 @@ class RednoteBaseUploader(BaseVideoUploader):
             details = await page.evaluate(
                 """({items, nameSelector}) => items.map(item => ({
                     name: item.querySelector(nameSelector)?.textContent,
-                    isNew: !!item.querySelector('.newTopic'),
                     attached: item.isConnected
                 }))""",
                 {"items": items, "nameSelector": REDNOTE_TOPIC_ITEM_NAME_CHILD_SELECTOR},
             )
             target = _normalise_topic(tag)
+            # 同名「新建话题」和普通同名行一样可点选（issue 13/24）。
             matches = [
                 item
                 for item, detail in zip(items, details)
                 if detail["attached"]
-                and not detail["isNew"]
                 and _normalise_topic(detail.get("name")) == target
             ]
             if not matches:
@@ -2262,60 +2740,107 @@ class RednoteBaseUploader(BaseVideoUploader):
     async def _add_content_declaration(
         self, page: Page, *, humanizer: Humanizer
     ) -> None:
+        """显式内容类型：设置 → 等菜单收起 → 回读 ``.d-select-description``。
+
+        与小红书一样，任何缺失、空值或其他标签都在发布前退出 1。来源声明
+        还要核对确认后的 ``.notation`` 明细。
+        """
         content_type = self.content_type
         label = REDNOTE_CONTENT_TYPE_LABELS.get(content_type)
         source_label = REDNOTE_SOURCE_DECLARATION_LABELS.get(content_type)
         if label is None and source_label is None:
             raise ValueError(f"未知的内容类型声明: {content_type}")
+        expected = source_label or label
+        observed: str | None = None
+        reason: str | None = None
+        phase = "entry"
 
         try:
-            await self._open_content_declaration_menu(page, humanizer=humanizer)
+            trigger = await self._open_content_declaration_menu(
+                page, humanizer=humanizer
+            )
+            phase = "option"
             if source_label:
                 await self._click_declaration_option(
                     page, "内容来源声明", humanizer=humanizer
                 )
                 await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
-                await self._click_declaration_option(
+                option = await self._click_declaration_option(
                     page, source_label, humanizer=humanizer
                 )
             else:
-                await self._click_declaration_option(page, label, humanizer=humanizer)
+                option = await self._click_declaration_option(
+                    page, label, humanizer=humanizer
+                )
             await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
+            await self._assert_declaration_menu_collapsed(option)
 
             if content_type == "self-shot":
                 await self._fill_self_shot(page, humanizer=humanizer)
             elif content_type == "repost":
                 await self._fill_repost_source(page, humanizer=humanizer)
 
-            selected_label = source_label or label
-            selected = await _resolve_anchor(
-                page,
-                "内容类型声明回读",
-                (
-                    Candidate(
-                        "declaration wrapper .d-select-description",
-                        factory=lambda scope: scope.locator(
-                            REDNOTE_DECLARATION_CONTAINER_SELECTOR
-                        ).locator(".d-select-description"),
-                    ),
-                ),
-                role="visible",
-                budget=self.publish_budget,
-            )
-            actual = (await selected.locator.inner_text()).strip().casefold()
-            expected = {selected_label.casefold()}
-            if actual not in expected:
-                raise RuntimeError(
-                    f"声明回读不符：期望 {self.content_type}，实际 {actual!r}"
-                )
+            observed = await self._read_selected_declaration(trigger)
+            if observed is None:
+                reason = "未读到选中的内容类型"
+            elif not observed:
+                reason = "选中的内容类型为空"
+            elif observed.casefold() != expected.casefold():
+                reason = "回读不符（选中的内容类型与请求不符）"
             await self._verify_source_details(page)
-            rednote_logger.success(
-                _msg("🧾", f"内容类型声明已设置：{source_label or label}")
+        except ElementMissingError as exc:
+            if phase == "entry":
+                reason = "未找到内容类型声明入口"
+            else:
+                reason = f"未找到声明选项：{exc.what}"
+        except ElementUnusableError as exc:
+            target = "内容类型声明入口" if phase == "entry" else "声明选项"
+            reason = f"{target}不可用：{getattr(exc, 'reason', '') or exc}"
+        except Exception as exc:
+            reason = f"声明设置失败：{exc}"
+
+        if reason is not None:
+            raise RuntimeError(
+                _declaration_failure_message(
+                    content_type=content_type,
+                    requested_label=expected,
+                    observed=observed,
+                    reason=reason,
+                )
+            )
+
+        self.declaration_report = {
+            "requested": content_type,
+            "requested_label": expected,
+            "observed": observed,
+            "status": "set",
+        }
+        rednote_logger.success(
+            _msg("🧾", f"内容类型声明已设置并回读：{observed}")
+        )
+
+    @staticmethod
+    async def _read_selected_declaration(trigger) -> str | None:
+        """读收起后显示的选中值；读不到返回 ``None``（区别于读到空串）。"""
+        description = trigger.locator(".d-select-description")
+        try:
+            if not await description.count():
+                return None
+            text = await description.first.inner_text()
+        except Exception:
+            return None
+        return text.strip()
+
+    async def _assert_declaration_menu_collapsed(self, option) -> None:
+        """选项点击后，所属声明弹层必须已隐藏（菜单收起后才能回读）。"""
+        menu = option.locator(REDNOTE_DECLARATION_MENU_XPATH)
+        try:
+            await menu.wait_for(
+                state="hidden",
+                timeout=self._wait_ms(REDNOTE_DECLARATION_CONFIRM_TIMEOUT_MS),
             )
         except Exception as exc:
-            raise RuntimeError(
-                f"Rednote 内容类型声明设置或回读失败，尚未点击发布：{exc}"
-            ) from exc
+            raise RuntimeError("内容类型声明菜单未收起") from exc
 
     async def _verify_source_details(self, page: Page) -> None:
         """类型在打开弹窗前就会更新，只有确认后的 notation 能证明来源已保存。"""
@@ -2338,7 +2863,7 @@ class RednoteBaseUploader(BaseVideoUploader):
 
     async def _open_content_declaration_menu(
         self, page: Page, *, humanizer: Humanizer
-    ) -> None:
+    ):
         trigger = await _resolve_anchor(
             page,
             "内容类型声明入口",
@@ -2361,10 +2886,11 @@ class RednoteBaseUploader(BaseVideoUploader):
         await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
         await humanizer.click(trigger.locator)
         await self._settle(page, REDNOTE_DECLARATION_SETTLE_MS)
+        return trigger.locator
 
     async def _click_declaration_option(
         self, page: Page, label: str, *, humanizer: Humanizer
-    ) -> None:
+    ):
         option = await _resolve_anchor(
             page,
             f"声明选项:{label}",
@@ -2373,6 +2899,7 @@ class RednoteBaseUploader(BaseVideoUploader):
             budget=self.publish_budget,
         )
         await humanizer.click(option.locator)
+        return option.locator
 
     async def _fill_self_shot(self, page: Page, *, humanizer: Humanizer) -> None:
         """填写「自主拍摄」弹窗的拍摄地点和拍摄日期并确认。"""
@@ -2573,6 +3100,7 @@ class RednoteVideo(RednoteBaseUploader):
         *,
         account_name=None,
         local_browser=None,
+        location: str | None = None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -2585,6 +3113,7 @@ class RednoteVideo(RednoteBaseUploader):
             repost_source=repost_source,
             shoot_location=shoot_location,
             shoot_date=shoot_date,
+            location=location,
             no_publish=no_publish,
             account_name=account_name, local_browser=local_browser,
         )
@@ -2808,7 +3337,7 @@ class RednoteVideo(RednoteBaseUploader):
 
         await self.set_thumbnail(page, self.thumbnail_path, humanizer=humanizer)
 
-        # await self.set_location(page, "青岛市")
+        await self.apply_location(page, humanizer=humanizer)
 
         await self.apply_declarations(page, humanizer=humanizer)
 
@@ -2920,6 +3449,7 @@ class RednoteNote(RednoteBaseUploader):
         *,
         account_name=None,
         local_browser=None,
+        location: str | None = None,
     ):
         super().__init__(
             publish_date=publish_date,
@@ -2932,6 +3462,7 @@ class RednoteNote(RednoteBaseUploader):
             repost_source=repost_source,
             shoot_location=shoot_location,
             shoot_date=shoot_date,
+            location=location,
             no_publish=no_publish,
             account_name=account_name, local_browser=local_browser,
         )
@@ -3019,6 +3550,8 @@ class RednoteNote(RednoteBaseUploader):
 
         rednote_logger.info(_msg("✍️", "小人开始填标题、描述和话题"))
         await self.fill_meta(page, humanizer=humanizer)
+
+        await self.apply_location(page, humanizer=humanizer)
 
         await self.apply_declarations(page, humanizer=humanizer)
 

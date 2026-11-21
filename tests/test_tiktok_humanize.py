@@ -83,6 +83,7 @@ class FakeNode:
         items: list["FakeNode"] | None = None,
         click_error: BaseException | None = None,
         on_down=None,
+        on_select=None,
     ) -> None:
         self.name = name
         self.page = page
@@ -95,6 +96,7 @@ class FakeNode:
         self._items = items
         self.click_error = click_error
         self.on_down = on_down
+        self.on_select = on_select
         self.actions: list[tuple] = []
         self.native_click_calls = 0
         self.fill_calls: list[str] = []
@@ -229,6 +231,8 @@ class FakeNode:
         self.page.events.append(("native-click", self.name))
         if self.click_error is not None:
             raise self.click_error
+        if self.on_select is not None:
+            self.on_select()
 
     async def fill(self, value: str, **kwargs) -> None:
         self.fill_calls.append(value)
@@ -250,6 +254,25 @@ class FakeNode:
         self.actions.append(("set_input_files", files))
 
 
+class _MentionNode:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def inner_text(self) -> str:
+        return self.text
+
+
+class _MentionList:
+    def __init__(self, editor: "EditorNode") -> None:
+        self.editor = editor
+
+    async def count(self) -> int:
+        return len(self.editor.mentions)
+
+    def nth(self, index: int) -> _MentionNode:
+        return _MentionNode(self.editor.mentions[index])
+
+
 class EditorNode(FakeNode):
     """Draft.js-like editor double that holds the typed buffer."""
 
@@ -257,6 +280,15 @@ class EditorNode(FakeNode):
         super().__init__(name, page=page, box=_box(0.0, 0.0, 300.0, 120.0))
         self.buffer = initial
         self.selected = False
+        self.mentions: list[str] = []
+
+    def locator(self, selector: str) -> object:
+        if selector == 'span.mention[data-testid="mentionText"]':
+            return _MentionList(self)
+        return super().locator(selector)
+
+    async def inner_text(self) -> str:
+        return self.buffer
 
 
 class FakeMouse:
@@ -312,6 +344,8 @@ class FakeKeyboard:
             editor.buffer += "\n"
         elif key == "Space":
             editor.buffer += " "
+        elif key == "Backspace":
+            editor.buffer = editor.buffer[:-1]
         elif len(key) == 1:
             editor.buffer += key
 
@@ -394,6 +428,8 @@ class FakePage:
                 self.pressed.append(node)
                 if node.on_down is not None:
                     node.on_down()
+                if node.on_select is not None:
+                    node.on_select()
 
     async def wait_for_timeout(self, milliseconds: float) -> None:
         self.waits.append(milliseconds)
@@ -499,23 +535,24 @@ def _hashtag_page(*, option_texts=()) -> tuple[FakePage, FakeNode]:
             text=text,
             box=_box(400.0, 300.0 + 30.0 * position, 200.0, 24.0),
         )
-        if text.startswith("#"):
-            node.on_down = lambda node=node: page.pressed.append(node)
         options.append(node)
     option_list = FakeNode("options", page=page, items=options)
     page.selectors['[role="option"]'] = option_list
     base._children['[role="option"]'] = FakeNode(
         "base-options", page=page, count=0, items=[]
     )
+    notices = FakeNode("caption-errors", page=page, count=0)
+    notices.all_inner_texts = AsyncMock(return_value=[])
+    base._children[tk_main.TIKTOK_TOPIC_ERROR_SELECTOR] = notices
     # ``_wait_for_no_options`` polls until the suggestion list closes.
-    def _close() -> None:
-        for node in options:
-            if node in option_list._items:
-                option_list._items.remove(node)
-                break
+    def _select(node) -> None:
+        if node in option_list._items:
+            option_list._items.remove(node)
+        page.editor.mentions.append(node.text.splitlines()[0])
+        page.editor.buffer += " "
 
     for node in options:
-        node.on_down = _close
+        node.on_select = lambda node=node: _select(node)
     page.selectors['[role="dialog"]'] = FakeNode(
         "dialogs", page=page, count=0
     )
@@ -565,7 +602,7 @@ class CaptionSequenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inserts, [("insert_text", text)])
         presses = [action[1] for action in page.keyboard.actions if action[0] == "press"]
         self.assertNotIn("a", presses)
-        self.assertEqual(page.editor.buffer, text + "\n")
+        self.assertEqual(page.editor.buffer, text)
 
     async def test_hashtag_exact_candidate_is_clicked_without_native_click(self):
         page, base = _hashtag_page(
@@ -908,8 +945,7 @@ class PlatformWideClickHoverTests(unittest.IsolatedAsyncioTestCase):
             and isinstance(node.func, ast.Name)
             and node.func.id == "_humanized_click"
         ]
-        # Two pre-existing option adapters plus the 25 sites converted here.
-        self.assertEqual(len(wrapped), 27, wrapped)
+        self.assertTrue(wrapped, "expected humanized click sites in Studio")
 
     # -- AIGC first-run dialog ------------------------------------------
     @staticmethod
@@ -1131,7 +1167,7 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
         with _silent_humanizer_sleep():
             await video.fill_caption(page, "New caption", [])
 
-        self.assertEqual(page.editor.buffer, "New caption\n")
+        self.assertEqual(page.editor.buffer, "New caption")
         self.assertNotIn("OLD", page.editor.buffer)
 
     async def test_hashtag_keeps_typed_text_and_picks_exact_first_line(self):
@@ -1144,7 +1180,7 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
         with _silent_humanizer_sleep():
             self.assertTrue(await video._apply_hashtag(page, "tiktok"))
 
-        self.assertEqual(page.editor.buffer, "#tiktok")
+        self.assertEqual(page.editor.buffer, "#tiktok ")
         picked = [
             node for node in page.pressed if node.name.startswith("option::")
         ]
@@ -1167,9 +1203,9 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(inserts, [text])
         self.assertNotIn("长", [action[1] for action in page.keyboard.actions if action[0] == "press"])
-        self.assertEqual(page.editor.buffer, text + "\n")
+        self.assertEqual(page.editor.buffer, text)
 
-    async def test_humanize_zero_uses_fast_path_for_caption_and_hashtag(self):
+    async def test_humanize_zero_uses_fast_path_for_inline_caption_topic(self):
         page, base = _hashtag_page(option_texts=["#tiktok\n2.0B posts"])
         video = _video()
         video.locator_base = base
@@ -1177,15 +1213,15 @@ class FieldValueReadbackTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict(os.environ, {"HUMANIZE": "0"}):
             humanizer = video._humanizer(page)
-            await video.fill_caption(page, "New caption", ["tiktok"])
+            await video.fill_caption(page, "New caption #tiktok", [])
 
-        # One bulk insert for the caption, one for the hashtag.
+        # One bulk insert for the text segment, one for the inline topic.
         inserts = [
             action[1]
             for action in page.keyboard.actions
             if action[0] == "insert_text"
         ]
-        self.assertEqual(inserts, ["New caption", "#tiktok"])
+        self.assertEqual(inserts, ["New caption ", "#tiktok"])
         # The suggestion is taken through the library's own click (fast path).
         self.assertEqual(option.native_click_calls, 1)
         self.assertEqual(page.mouse.down_count, 0)

@@ -135,7 +135,7 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 （`uploader/publish_timeout.py` 的 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）。TikTok、
 小红书与 Instagram 也使用同一 `PublishTimeoutBudget`，仅保留各自更具体的错误文案。
 
-- 预算覆盖打开发布页、上传素材、填写标题/正文/标签、封面、声明、合集、定时设置、点击发布，以及等待平台确认；
+- 预算覆盖打开发布页、上传素材、填写标题/正文/正文中的 `#话题`、封面、声明、合集、定时设置、点击发布，以及等待平台确认；
 - **尚未点击发布**时超时：普通失败，CLI 退出 `1`，确定没有发布任何内容；
 - **已经点击发布**后超时：结果未知，CLI 退出 `9`，禁止自动重发；先到平台后台按标题与发布时间核对；
 - `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；**禁止用 `--not-before` 做发布间隔/节流**（等待期间本地 Profile 或托管 Profile 中的本平台被占用，节流属于调用方 App）；
@@ -172,6 +172,53 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 - 完整契约（公开面、三种清空形态、长期限制、未验证清单）见
   [`.scratch/humanize-rollout/spec.md`](../.scratch/humanize-rollout/spec.md) §2 与 §6.4；
   本节只是对外投影，不存规格副本。
+
+## 发布元数据支持表（八个入口）
+
+下表按命令记录 AI 声明、帖子地点与配文话题三项元数据。每格分别写**网页证据**、**当前 CLI 行为**与**样本**（账号类型、界面语言、观察阶段）。缺样本写「未实测」；网页有控件而命令未接入写「CLI 未接入」；只有页面明确提示资格限制才写「账号不可用」。
+
+| 命令 | AI 声明 | 帖子地点 | 配文话题 |
+| --- | --- | --- | --- |
+| `xiaohongshu upload-video` | 网页：zh-CN 实机下拉含「笔记含AI合成内容」，声明包装层 `.d-select-description` 在选择后显示所选标签（入口占位节点清空）；2026-11-21 实机 `--no-publish` 读到「笔记含AI合成内容」（观察阶段：发布前，未点击发布）；CLI：`--content-type ai` 等菜单收起后回读包装层 `.d-select-description`，缺失、空值或其他标签退出 `1` 且零发布点击；样本：中文，`180`，账号类型未核验，2026-11-21 实机 | 网页：中文 zh-CN 实测（`180`）候选行 `.option-item` 分别显示名称与地址，收起后 `.d-select-description` 只显示名称；点选「人民公园 · 上海市黄浦区南京西路231号」，回读「人民公园」（观察阶段：发布前，未点击发布）；CLI：`--location` 按候选完整名称匹配（忽略大小写、首尾空白并合并连续空白），取页面顺序第一个同名行并跳过「房山人民公园」等近似名；须列表收起且控件回读同名，成功报告请求、所点行及地址、终值，失败按原因退出 `1` 且零发布点击；省略不操作控件，空白值上传前退出 `2`；样本：中文，`180`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 | 网页：中文 zh-CN（`180`）正文锚点读到 `#coffee`，同名「新建话题」点选后也读到同名关联，自动追加 U+00A0，退格一次后可复原标点（观察阶段：发布前，未点击发布）；CLI：从最终配文（视频 `--desc` / 图文 `--note`）按出现顺序原位输入，逐个点选同名候选（含「新建话题」）；无同名候选或第 11 个起保留文字并逐项报告；整段正文按 `a[data-topic]` 读作 `#`+`name` 逐字回读，全文不一致、错词、吞字、错位或意外追加退出 `1` 且零发布点击；样本：中文，账号别名 `180`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 |
+| `xiaohongshu upload-note` | 网页：zh-CN 实机图文下拉可见「笔记含AI合成内容」；2026-11-21 实机 `--no-publish` 读到「笔记含AI合成内容」（观察阶段：发布前，未点击发布）；CLI：`--content-type ai` 等菜单收起后回读包装层 `.d-select-description`，缺失、空值或其他标签退出 `1` 且零发布点击；样本：中文，`180`，账号类型未核验，2026-11-21 实机 | 网页：中文 zh-CN 实测（`180`）候选行名称与地址分行显示，收起后只显示名称；点选「房山人民公园 · 北京市房山区良乡政通路2号院区政府」，回读「房山人民公园」（观察阶段：发布前，未点击发布）；CLI：同视频入口，按完整名称匹配并取首个同名行，要求列表收起且控件回读同名；成功报告请求、所点行及地址、终值，失败退出 `1` 且零发布点击；省略不操作控件，空白值上传前退出 `2`；样本：中文，`180`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 | 网页：中文 zh-CN（`180`）正文锚点读到 `#coffee`，同名「新建话题」点选后也读到同名关联，自动追加 U+00A0，退格一次后可复原标点（观察阶段：发布前，未点击发布）；CLI：从最终配文（视频 `--desc` / 图文 `--note`）按出现顺序原位输入，逐个点选同名候选（含「新建话题」）；无同名候选或第 11 个起保留文字并逐项报告；整段正文按 `a[data-topic]` 读作 `#`+`name` 逐字回读，全文不一致、错词、吞字、错位或意外追加退出 `1` 且零发布点击；样本：中文，账号别名 `180`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 |
+| `rednote upload-video` | 网页：中文界面已有 AI 声明 `.d-select-description` 回读匹配并到达发布前（观察阶段：发布前）；CLI：回读 `.d-select-description` 并断言菜单收起，缺失、空值或其他标签退出 `1`；样本：中文，`rednote`，账号类型未核验 | 网页：中文界面实测（`rednote`）候选行 `.option-item` 显示名称与地址，收起后 `.d-select-description` 只显示名称；点选「人民公园 · 上海市黄浦区南京西路231号」，回读「人民公园」（观察阶段：发布前，未点击发布）；CLI：`--location` 按完整名称匹配（忽略大小写、首尾与连续空白），取页面顺序第一个同名行；须列表收起且控件回读同名，成功报告请求、所点行及地址、终值，失败按原因退出 `1` 且零发布点击；省略不操作控件，空白值上传前退出 `2`；样本：中文，`rednote`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 | 网页：中文界面（`rednote`）正文锚点读到 `#coffee`，同名「新建话题」点选后也读到同名关联，自动追加 U+00A0，退格一次后可复原标点（观察阶段：发布前，未点击发布）；CLI：从最终配文（视频 `--desc` / 图文 `--note`）按出现顺序原位输入，逐个点选同名候选（含「新建话题」）；无同名候选或第 11 个起保留文字并逐项报告；整段正文按 `a[data-topic]` 读作 `#`+`name` 逐字回读，全文不一致、错词、吞字、错位或意外追加退出 `1` 且零发布点击；样本：中文，账号别名 `rednote`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 |
+| `rednote upload-note` | 网页：中文界面已有带 AI 声明的双图验收，到达发布前（观察阶段：发布前）；CLI：回读 `.d-select-description` 并断言菜单收起，缺失、空值或其他标签退出 `1`；样本：中文，`rednote`，账号类型未核验 | 网页：中文界面实测（`rednote`）候选行名称与地址分行显示，收起后只显示名称；点选「人民公园 · 成都市青羊区小南街8号(人民公园地铁站B口步行250米)」，回读「人民公园」（观察阶段：发布前，未点击发布）；CLI：同视频入口，按完整名称匹配并取首个同名行，要求列表收起且控件回读同名；成功报告请求、所点行及地址、终值，失败退出 `1` 且零发布点击；省略不操作控件，空白值上传前退出 `2`；样本：中文，`rednote`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 | 网页：中文界面（`rednote`）正文锚点读到 `#coffee`，同名「新建话题」点选后也读到同名关联，自动追加 U+00A0，退格一次后可复原标点（观察阶段：发布前，未点击发布）；CLI：从最终配文（视频 `--desc` / 图文 `--note`）按出现顺序原位输入，逐个点选同名候选（含「新建话题」）；无同名候选或第 11 个起保留文字并逐项报告；整段正文按 `a[data-topic]` 读作 `#`+`name` 逐字回读，全文不一致、错词、吞字、错位或意外追加退出 `1` 且零发布点击；样本：中文，账号别名 `rednote`，账号类型未核验，2026-11-21 实机 `--no-publish` 通过 |
+| `instagram upload-video` | 网页：简体中文 Creator Reel，开关由关切到开，分享前读到 `true`；历史英文 Personal 发布后读到 `AI content`。受控页另覆盖已关、入口缺失、禁用、不可读与「放弃帖子？」遮挡。CLI：省略保持页面原值；`--ai-generated` 须回读开启；`--no-ai-generated` 已关记 `default_off`、从开切到关并回读记 `set`、确认入口缺失记 `default_off`/`entry_missing`、遮挡记 `mismatch`/`editor_obscured`（退出 1，Share 零点击）。样本：Creator，简体中文，`--no-publish` 分享前；Personal 英文为历史发布后对照 | 网页：简体中文 Creator Reel 搜索 `Shanghai`，候选只显示名称，点首个同名行，分享前读到 `Shanghai`（2026-11-20，`--no-publish`）；名称/地址分行仅为受控页证据。CLI：按候选名称精确匹配（忽略大小写与连续空白），点页面顺序首个同名行并记录所点名称/地址/序号；要求列表收起且地点框回读名称一致，否则退出 1、Share 零点击；样本：Creator，简体中文，`--no-publish` 分享前网页证据；2026-11-21 实机 `--no-publish` 通过 | 网页：简体中文 Creator Reel 分享前正文含 `#color #study`（2026-11-20，`--no-publish`，未逐词回读）；CLI：逐字回读最终配文后，按出现顺序报告每处 `#话题`（重复保留、URL `#片段` 排除），每处写 `status=text` 与 `reason=配文全文逐字回读一致`，JSON 兼容追加 `topics` 数组且保留 `platform/title/status/options`；吞字、错位、多余追加退出 1 且 Share 零点击，标题+正文（含内联 `#话题`）超 2200 字符上传前退出 2；旧 `--tags` 已移除，传入解析阶段退出 `2`，公开话题只来自标题/正文；2026-11-21 实机 `--no-publish` 复跑通过；样本：Creator，简体中文，`--no-publish` 分享前网页证据 + 受控真实 Chrome 离线验收 |
+| `instagram upload-note` | 网页：简体中文 Creator 两图轮播，开关原本已关，分享前读到 `false`；另一次「放弃帖子？」遮挡导致读值为空，旧记录误记为入口缺失；历史英文 Personal 发布后读到 `AI content`。CLI：省略保持页面原值；`--ai-generated` 须回读开启；`--no-ai-generated` 已关记 `default_off`、从开切到关并回读记 `set`、确认入口缺失记 `default_off`/`entry_missing`、遮挡记 `mismatch`/`editor_obscured`（退出 1，Share 零点击）。样本：Creator，简体中文，`--no-publish` 分享前；Personal 英文为历史发布后对照 | 网页：简体中文 Creator 两图轮播搜索 `Shanghai`，候选只显示名称，点首个同名行，选中后读到 `Shanghai`；另一次「放弃帖子？」遮挡导致地点回读失败；名称/地址分行仅为受控页证据。CLI：按候选名称精确匹配（忽略大小写与连续空白），点页面顺序首个同名行并记录所点名称/地址/序号；要求列表收起且地点框回读名称一致，否则退出 1、Share 零点击；样本：Creator，简体中文，`--no-publish` 分享前网页证据；2026-11-21 实机 `--no-publish` 通过 | 网页：简体中文 Creator 两图轮播分享前正文含 `#color #study`（2026-11-20，`--no-publish`，未逐词回读）；CLI：逐字回读最终配文后，按出现顺序报告每处 `#话题`（重复保留、URL `#片段` 排除），每处写 `status=text` 与 `reason=配文全文逐字回读一致`，JSON 兼容追加 `topics` 数组且保留 `platform/title/status/options`；吞字、错位、多余追加退出 1 且 Share 零点击，标题+正文（含内联 `#话题`）超 2200 字符上传前退出 2；旧 `--tags` 已移除，传入解析阶段退出 `2`，公开话题只来自标题/正文；2026-11-21 实机 `--no-publish` 复跑通过；样本：Creator，简体中文，`--no-publish` 分享前网页证据 + 受控真实 Chrome 离线验收 |
+| `tiktok upload-video` | 网页：仅发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行分行显示名称与英国地址，收起后只显示 `London Eye`；CLI：已接入 `--location`，按名称忽略大小写与空白取首个同名行，收起后回读；样本：英文 Studio，`lukechen`，账号类型未核验，发布前候选 + 受控页面离线验收；2026-11-21 实机 `--no-publish` 通过 | 网页：视频配文原位读到 `#coffee` 关联标记与同名 `Add` 行，退格移除自动追加的 U+0020 后关联仍在，全文逐字一致；CLI：从 `--title` 原位逐词选同名行（含 `Add`），从 `span.mention` 读回名称并逐字核对全文，无同名候选或第 51 个起保留文字并逐词报告，差异退出 `1` 且零发布点击；旧 `--tags` 已移除，传入解析阶段退出 `2`，话题只来自 `--title`；样本：英文 Studio，`lukechen`，账号类型未核验，发布前网页证据 + 受控页面离线验收；2026-11-21 实机 `--no-publish` 通过 |
+| `tiktok upload-note` | 网页：仅公开账号图片帖发布后读到创作者 AI 标识，开关三态未实测；CLI：已接入 `--aigc` / `--no-aigc`，发布前读回，入口缺失且显式关闭按 `default_off`/`entry_missing` 继续；样本：英文 Studio，`lukechen`，账号类型未核验，发布后阶段 + 受控页面离线验收 | 网页：候选行分行显示名称与英国地址，收起后只显示 `London Eye`；CLI：已接入 `--location`，与视频相同的同名匹配与回读；样本：英文 Studio，`lukechen`，账号类型未核验，发布前候选 + 受控页面离线验收；2026-11-21 实机 `--no-publish` 通过 | 网页：图片帖正文原位读到 `#coffee` 关联标记与同名 `Add` 行，退格移除自动空格后关联仍在，全文逐字一致；CLI：从 `--note` / `--notef` 原位逐词选同名行（含 `Add`），Photos Title 独立保留其 `#词` 且不计入话题结果，正文按 `span.mention` 回读并逐字核对全文，无同名候选或第 51 个起保留文字并逐词报告，差异退出 `1` 且零发布点击；旧 `--tags` 已移除，传入解析阶段退出 `2`，话题只来自 `--note` / `--notef`；样本：英文 Studio，`lukechen`，账号类型未核验，发布前网页证据 + 受控页面离线验收；2026-11-21 实机 `--no-publish` 通过 |
+
+### 2026-11-21 真实账号 `--no-publish` 回归
+
+以下八条命令均使用现有本地 Profile 跑到发布就绪点，**没有点击发布 / Share**。
+
+| 入口 | 账号与界面 | 本次请求 | 实机终值 |
+| --- | --- | --- | --- |
+| `xiaohongshu upload-video` | `180`，中文 | `--content-type ai --location 人民公园`，配文 `今天喝了 #咖啡，配上 #栗子蛋糕。` | 声明回读「笔记含AI合成内容」；地点所点行 `人民公园`（唐山市遵化市西二环北路西），收起后 `人民公园`；`#咖啡`、`#栗子蛋糕` 均原位关联 |
+| `xiaohongshu upload-note` | `180`，中文 | 同上 | AI、地点与两个话题均通过；停在发布按钮前 |
+| `rednote upload-video` | `rednote`，中文 | 同上 | 声明回读「笔记含AI合成内容」；地点所点行 `人民公园`（成都市青羊区小南街8号），收起后 `人民公园`；两个话题均原位关联 |
+| `rednote upload-note` | `rednote`，中文 | 同上 | AI、地点与两个话题均通过；停在发布按钮前 |
+| `instagram upload-video` | `luke`，简体中文 Creator | `--ai-generated --location Shanghai`，配文含 `#color #study` | `status=prepared`；`ai_generated=set`；`location=set`，`candidate_name=Shanghai`、`candidate_index=1`；两个话题为文本证据 |
+| `instagram upload-note` | `luke`，简体中文 Creator | `--no-ai-generated --location Shanghai`，配文含 `#color #study` | `status=prepared`；`ai_generated=default_off`；`location=set`（同上）；两个话题为文本证据 |
+| `tiktok upload-video` | `lukechen`，英文 Studio | `--no-aigc --location "London Eye"`，配文 `Field notes #coffee, after rain.` | 地点所点行 `London Eye`（英国地址），收起后 `London Eye`；AI `default_off`；`#coffee` 原位关联 |
+| `tiktok upload-note` | `lukechen`，英文 Studio | 同上（Photos） | 地点、AI 与 `#coffee` 关联均通过；停在 Post 按钮前 |
+
+所有运行的退出码为 `0`（`--no-publish` 就绪），失败即停且发布/Share 点击为零。话题输出中的 `#咖啡` / `#栗子蛋糕` / `#coffee` 均不含结尾逗号或句号；标点保留在配文原位。原始终端记录与 Instagram 结果 JSON 见 [live-no-publish-2026-11-21](../.scratch/publish-metadata-support/research/live-no-publish-2026-11-21/run.md)。
+
+### 旧 `--tags` 迁移（13 条命令）
+
+`xiaohongshu`、`rednote`、`instagram`、`tiktok`、`facebook`、`facebook-page` 各自的 `upload-video` / `upload-note`，以及 `youtube upload-video`，都不再接受 `--tags`。继续传该参数会在参数解析阶段退出 `2`，不会启动浏览器或上传素材。公开话题只从最终公开配文识别。
+
+```bash
+# 旧调用片段
+--note '今天喝了咖啡，配上栗子蛋糕。' --tags 咖啡,栗子蛋糕
+# 迁移后
+--note '今天喝了 #咖啡，配上 #栗子蛋糕。'
+```
+
+逐词结果按原稿顺序报告：`#咖啡` 若有同名候选并点选成功，记「已关联」；`#栗子蛋糕` 若只有近似候选，原位保留文字并记「保留文字，无同名候选」。整段配文逐字一致才放行。
+
+YouTube 的旧 `--tags` 写的是 **Studio 后台关键词，不是公开配文**。CLI 不再写入关键词栏，页面预填值保留；调用方须自行决定哪些词写进公开的 `--desc`。Facebook Page Reel 的独立关键词栏同样保留页面原值，CLI 不写入。
 
 ## 日志
 
@@ -328,7 +375,7 @@ sau xiaohongshu check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID"
 # 上传：--account 被忽略；身份由 --profile-id 决定
 sau xiaohongshu upload-video \
   --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
-  --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #示例话题"
 
 # 显式有头（等同默认；保留给调度侧既有传参）
 sau xiaohongshu check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" --headed
@@ -380,7 +427,7 @@ sau xiaohongshu check --profile-id "PROFILE_ID"
 # 上传：--account 被忽略；身份由 --profile-id 决定
 sau xiaohongshu upload-video \
   --profile-id "PROFILE_ID" \
-  --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #示例话题"
 
 # 有头运行，便于人工处理验证码
 sau xiaohongshu upload-video --headed \
@@ -451,8 +498,8 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 ```bash
 sau xiaohongshu login --account creator
 sau xiaohongshu check --account creator
-sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags 小红书,视频
-sau xiaohongshu upload-note --account creator --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文示例" --tags 图文,测试
+sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #小红书 #视频"
+sau xiaohongshu upload-note --account creator --images videos/demo1.png videos/demo2.png videos/demo.png --title "图文标题" --note "图文示例 #图文 #测试"
 ```
 
 Rednote 使用独立命令 `sau rednote`，持久化 Profile 与小红书隔离，详见 [Rednote 使用说明](./rednote.md)。旧的 `SAU_XHS_CREATOR_BASE_URL` 仍仅覆盖小红书命令的创作中心地址；Rednote 的配置名为 `SAU_REDNOTE_CREATOR_BASE_URL`。
@@ -505,15 +552,62 @@ sau xiaohongshu upload-video --account creator \
 
 约束：
 
-- 不传 `--original` / `--no-original` / `--content-type` 时，页面完全保持默认；
+- 不传 `--original` / `--no-original` / `--content-type` 时，页面完全保持默认；即使页面原本已开启 AI 声明或原创，也不读取、不切换；终端把 AI 声明记为「未请求」；
+- 同一命令重复传入不同的 `--content-type` 值（例如 `ai` 与 `marketing`）在参数解析阶段退出 `2`，不会启动浏览器或上传素材；重复传入同一个值允许；
 - `--original` 与 `--content-type repost` 互斥；
 - `--no-original` 不能与 `self-shot` / `repost` 组合；
 - `--repost-source` 只能与 `--content-type repost` 一起使用，且不能为空；
 - `--shoot-location` / `--shoot-date` 只能与 `--content-type self-shot` 一起使用，两者都必填，日期格式为 `YYYY-MM-DD`；
 - 以上组合错误会在启动浏览器前退出 `2`；
 - **原创 `--original` 是硬闸**：点前读状态，未开则点击并确认须知；任一步失败退出 `1`（确定未发布）；
-- `--no-original` 与内容类型声明失败只记 warning 并继续，不阻断发布；封面设置失败同样 warning 并回退到视频首帧；
+- **显式内容类型也是硬闸**：点选后先确认声明菜单已收起，再回读包装层 `.d-select-description`。找不到入口、回读为空或显示其他内容类型时退出 `1`（确定未发布），不会 warning 继续；终端同时报告请求值、页面终值与原因；
+- `--no-original` 失败仍只记 warning 并继续；封面设置失败同样 warning 并回退到视频首帧；
 - 加 `--no-publish` 时，内容、声明与定时设置完成后继续跑到 ARM 就绪（含 C1/C2/C3 与定时回读），不点击「发布」，也不等待 `--not-before`。
+
+### 小红书帖子地点
+
+`upload-video` / `upload-note` 支持 `--location <地点>` 设置帖子地点；它与自主拍摄声明里的 `--shoot-location` 是两个独立控件，互不影响。
+
+```bash
+# 图片或视频发布时选择帖子地点
+sau xiaohongshu upload-note --account creator \
+  --images videos/demo1.png --title "图文标题" --location "人民公园"
+```
+
+- 省略 `--location` 时不读取、不点击地点控件，页面原有地点保持不动，终端记「未请求」；
+- 显式空串或纯空白在上传前退出 `2`，不启动浏览器；
+- 匹配比较候选行的完整名称：去掉首尾空白、合并连续空白、忽略大小写；按页面顺序点选第一个同名候选，排在更前面的近似名（如「房山人民公园」）会被跳过；
+- 有多个同名候选时，终端记录所点行的可见地址，例如 `所点行=人民公园 · 上海市黄浦区南京西路231号`；收起后的控件只显示名称；
+- 成功须同时满足候选列表已收起、控件回读所选名称；终端报告请求、所点行（含地址）和终值，并保留原成功摘要；
+- 无同名候选（含空列表与只有近似建议）、入口缺失、页面明确提示资格限制、列表未收起、终值为空或与请求不符时，均停在发布前并退出 `1`，发布点击为零次；只有页面明确提示资格限制时才使用「账号不可用」措辞。
+
+### 小红书与 Rednote 配文话题
+
+`xiaohongshu` / `rednote` 的 `upload-video` 与 `upload-note` 从**最终公开配文**识别 `#话题`：视频取 `--desc`，图文取 `--note`。正文文件输入（若该入口提供）与直接传值走同一套规则。旧的 `--tags` 已从所有发布命令移除；旧脚本继续传该参数会在参数解析阶段退出 `2`，不会启动浏览器或上传素材。迁移示例：旧 `--note '今天喝了咖啡，配上栗子蛋糕。' --tags 咖啡,栗子蛋糕` 改为 `--note '今天喝了 #咖啡，配上 #栗子蛋糕。'`。若「咖啡」有同名候选并读到同名锚点，结果记「已关联」；若「栗子蛋糕」只有近似候选，原位保留文字并记「保留文字，无同名候选」。配文中的话题不受旧的 10 个标签截断路径影响。
+
+```bash
+# 话题写在句中；逗号、换行和链接保持原位
+sau xiaohongshu upload-note --account creator \
+  --images videos/demo1.png --title "图文标题" \
+  --note "今天喝了 #咖啡，配上 #栗子蛋糕。链接 https://example.com/#片段 保留"
+
+sau rednote upload-video --account creator \
+  --file videos/demo.mp4 --title "视频标题" \
+  --desc "第一行 #coffee，第二行 #coffee 与 #新建话题"
+```
+
+- 按出现顺序逐处输入；重复词、换行、紧邻标点、作者自己的空格和链接逐字保留。`https://…/#片段`、`http://…`、`www.…` 中的 `#片段` 不触发话题，链接原样留在正文。
+- 每个词输入后点选**同名**候选行，包括标为「新建话题」的行；名称比较沿用平台既有规则（去前导 `#`、首尾空白、合并连续空白、忽略大小写）。点选后从正文 `a[data-topic]` 读取名称，名称与原词一致才记「已关联」。
+- 平台在成功的关联后追加一个不换行空格（U+00A0）。原稿那里没有字符、或是别的字符（标点、半角空格、换行等）时，退格移除自动空格并再次确认话题锚点仍在原位；原稿本身就写了 U+00A0 时保留一个，不重复追加。
+- 正文输入完成并追加换行后，按文档顺序回读整段配文：每个 `a[data-topic]` 读作 `#` + `name`，其余文本节点逐字保留。只有回读全文与预期逐字一致才继续发布。错选其他话题、吞字、错位、重复追加或全文不一致均退出 `1`，指出首处差异或限制，发布点击零次。
+- 无同名候选时在原位置保留 `#原词` 文字并继续；结果逐项记「保留文字，无同名候选」。可关联数量上限为 **10**；第 11 个及以后原位保留文字并逐项记「保留文字，已达可关联上限 10」，正文仍完整可读。全文一致时允许部分话题只保留文字。
+- 正文触发平台整帖长度硬限制（`div.edit-container div.length-error` 出现）时停止并退出 `1`，发布点击零次；作者改短后重跑。
+- 每个出现位置在终端各输出一行，保留顺序和重复；它与原成功摘要可分别识别：
+  - `Xiaohongshu 配文话题 1/2：#咖啡 已关联`
+  - `Rednote 配文话题 2/2：#咖啡 保留文字，无同名候选`
+- 省略配文或配文没有 `#话题` 时，不进入原位话题流程，也不增加终端行；原正文输入行为保持不变。
+- `--no-publish` 在配文话题回读完成后继续到 ARM 就绪，不点击发布。
+- 证据：四个编辑器的普通同名行与同名「新建话题」均在真实网页的发布前阶段取证（中文界面，账号 `180` / `rednote`，账号类型未核验），记录在 `.scratch/publish-metadata-support/research/inline-topics-2026-11-20/` 与 `created-topic-2026-11-20/`；CLI 的完整链路只有离线/受控页面验收，**2026-11-21 实机 `--no-publish` 通过**。
 
 ### 小红书元数据与定时校验
 
@@ -527,7 +621,7 @@ sau xiaohongshu upload-video --account creator \
 
 小红书的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
 
-- 预算覆盖打开发布页、上传素材、填写标题/正文/标签、设置声明和封面、定时设置、ARM 就绪等待以及点击发布；
+- 预算覆盖打开发布页、上传素材、填写标题/正文/正文中的 `#话题`、设置声明和封面、定时设置、ARM 就绪等待以及点击发布；
 - **尚未点击发布**时超时（含 ARM 就绪窗/预算耗尽）：退出 `1`，确定没有发布任何内容；
 - **已经点击发布**后超时：退出 `9`，发布结果未知，禁止自动重发；先到创作服务平台 → 笔记管理按标题和发布时间核对；
 - 视频/图文的素材上传等待循环也使用同一个 deadline，不会无限挂起；
@@ -540,11 +634,23 @@ sau xiaohongshu upload-video --account creator \
 ```bash
 sau youtube login --account creator --headed
 sau youtube check --account creator
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介" --tags tag1,tag2 --playlist "我的系列" --visibility public
-sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频"
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例标题" --desc "示例简介 #示例话题" --playlist "我的系列" --visibility public
+sau youtube upload-video --account creator --file videos/demo.mp4 --title "示例视频" --desc "第一行 #咖啡，配上 #咖啡。链接 https://example.com/#片段 原样保留"
 ```
 
 YouTube 登录需要在浏览器中完成 Google 账号登录，不使用二维码。`--visibility` 可选 `public`、`unlisted` 或 `private`，`--playlist` 可选。当前只支持立即发布；`--schedule` 尚未实现，传入会退出 `2`。
+
+简介 `--desc` 是公开配文，也是 YouTube 唯一的话题来源：
+
+- 每个 `#话题` 按出现顺序逐处输出，重复词保留；`#咖啡，配上` 只把 `咖啡` 计为话题，逗号留在原文；`https://…/#片段`、`http://…` 和 `www.…` 中的 `#片段` 不计，链接原样保留。
+- 省略 `--desc` 时保留并读取频道的预填简介。显式传 `--desc ""` 会清空简介并回读确认。
+- 标题独立填写并回读，标题里的 `#话题` 不计入简介结果。标题不再触发 `#` 补全，避免候选点选改写标题。
+- 简介与标题写入后按写入时的归一化（`\r\n`→`\n`、制表符→空格）逐字回读。吞字、错位或意外追加会指出首处差异偏移、期望/实际文本与长度，退出 `1`，发布点击零次。
+- 简介超过 5000 字符的本地预检，或简介附近出现可见的整帖错误提示时，退出 `1`，发布点击零次。
+- Studio 后台关键词：**网页有能力、CLI 未接入（保留页面原值）**。旧的 `--tags` 已移除，CLI 不再写入关键词栏，简介话题也不会自动复制过去；页面预填的关键词保持原值。
+- 迁移提醒：旧 `--tags` 写的是 **Studio 后台关键词，不是公开配文**。需要观众看到的话题必须由调用方自行决定后写进 `--desc`；不写就不会公开。
+- 终端逐处输出形如 `YouTube 简介话题 1/2：#咖啡 保留文字（简介全文逐字回读一致）` 的结果。YouTube 只以简介全文回读为证据，不声称话题已关联。
+- 以上为受控/离线 Studio（本地 Chromium）验证，**真实 YouTube 账号未实测**。旧 `--tags` 已移除；传入时在参数解析阶段退出 `2`。
 
 YouTube 本地模式默认系统 Chrome、有头，已有 `LOCAL_CHROME_HEADLESS=True` 保留；显式 `--headed`/`--headless` 优先。`LOCAL_CHROME_PATH` 非空时优先使用并识别实际种类；否则 `--local-browser chrome|chromium` > `LOCAL_BROWSER` > `chrome`。只要求所选浏览器可用，失败不回退；完整 Chromium 可用 `uv run patchright install --no-shell chromium` 准备。
 
@@ -564,11 +670,11 @@ sau youtube reset-profile --account creator --browser-kind chrome
 ```powershell
 sau facebook login --account creator
 sau facebook check --account creator
-sau facebook upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文"
-sau facebook upload-note --account creator --images videos/demo1.png --title "图文标题" --note "正文"
+sau facebook upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "第一行 #咖啡，配上 #咖啡。链接 https://example.com/#片段 原样保留"
+sau facebook upload-note --account creator --images videos/demo1.png --title "图文标题" --note "图文正文 #图文 #测试"
 sau facebook-page login --account creator
-sau facebook-page upload-note --account creator --page "我的 Page" --images videos/demo1.png --title "图文标题" --note "正文" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
-sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "视频标题" --desc "正文" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
+sau facebook-page upload-note --account creator --page "我的 Page" --images videos/demo1.png --title "图文标题" --note "图文正文 #图文 #测试" --schedule "2026-10-21T02:30:00Z" --result .local/page-result.json
+sau facebook-page upload-video --account creator --page "我的 Page" --file videos/demo.mp4 --title "Reel 标题" --desc "Reel 正文 #话题 #测试" --schedule "2026-10-21T02:30:00Z" --result .local/reel-result.json
 ```
 
 Facebook 全部本地动作复用 `browser_profiles/<chrome|chromium>/facebook/<原始别名>`，与 `facebook-page` 隔离。默认系统 Chrome、有头；显式 `--local-browser chromium` 使用配套完整 Chromium，`LOCAL_CHROME_PATH` 优先于种类选择。显式 headed/headless > `LOCAL_CHROME_HEADLESS` > False，保留已有配置。启动失败不回退，不固定 viewport、不修改语言；只需安装所选来源。先 `sau facebook login --account creator --headed`，正常关闭后同配置 check；旧 JSON 不读取、导入或导出。别名可重新登录其他账号，两类浏览器可登录不同账号。缺少 Profile 或明确未登录退出 10，验证挑战保留 verification 提示；页面/权限/网络异常退出 1。重建用 `sau facebook reset-profile --account creator --browser-kind chrome`，无需浏览器 binary，只清空指定资料；重建不是重发旧任务的许可。
@@ -576,6 +682,16 @@ Facebook 全部本地动作复用 `browser_profiles/<chrome|chromium>/facebook/<
 个人主页支持视频、图片及正文立即发布，目前未接入个人主页定时。Page 视频和图文支持 `--schedule "YYYY-MM-DDTHH:MM:00Z"`：UTC 绝对时刻，填写前按浏览器时区换算，要求至少提前 2 小时；不传即立即提交。当前实现核对页面日期/时间及原作品列表安排。`--page` 应填写准确 Page 名称。
 
 Page 发布结果默认保存在 `.local/meta-results/`，也可用 `--result` 指定 JSON 文件。结果包含 `page_id`、`page_name`、`content_id`（视频处理中可能暂时没有）和状态。`scheduled` 表示平台已确认排期并核对原记录；`published` 表示图文已发布并核对原记录；立即发布视频在创建响应无错误且完成弹窗出现后返回 `processing`，表示平台已受理并正在处理，不能当成已经公开播放，后续作品编号由平台生成时再查询。`submission_unknown` 仅表示提交响应或完成证据没有确认，必须先查原记录，禁止直接重发。
+
+配文话题只从最终公开配文识别，按出现顺序逐处报告，重复词保留：
+
+- 个人主页没有独立标题字段：公开配文为 `--title`、空行和 `--desc`（图文入口为 `--note`）的组合，标题里的 `#话题` 也计入配文结果。写入后逐字回读；吞字、错位或意外追加会指出首处差异偏移、期望/实际文本与长度，退出 `1`，发布点击零次。
+- Page 图文与个人主页相同：公开配文为标题、空行和正文。Page Reel 若页面提供独立标题输入，标题写入独立字段并逐字回读，公开配文只取 `--desc`；独立标题里的 `#话题` 不计入正文话题。
+- Page Reel 的独立关键词栏：**网页有能力、CLI 未接入（保留页面原值）**；CLI 不定位、不写入，也不把正文话题复制进去。
+- 配文超过 63206 字符的本地硬限制时，在上传发布或排期前退出 `1`，发布与排期点击零次。
+- 个人主页逐处输出 `Facebook 配文话题 1/2：#咖啡 保留文字（配文全文逐字回读一致）`。Page 在 `--result` JSON 追加 `topics` 数组（`index`、`text`、`name`、`start`、`end`、`status`、`reason`），保留原有 `platform`、`title`、`status`、`page_id`、`page_name`、`content_id`、`schedule` 键。
+- 旧 `--tags` 已从个人主页和 Page 的四个发布命令移除；传入时在参数解析阶段退出 `2`。需要公开的话题写进 `--desc` / `--note`，旧参数里的词不会自动追加或公开。Page Reel 的独立关键词栏保留页面原值，CLI 不写入。
+- 以上为受控/离线的本地 Chromium 页面验证；真实 Facebook 账号和网页界面**未实测**。
 
 ### 查询与删除
 
@@ -608,14 +724,14 @@ Instagram 使用 Patchright 与项目专用持久化 Profile，不依赖 Faceboo
 ```powershell
 sau instagram login --account creator
 sau instagram check --account creator
-sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail videos/demo.png --title "视频标题" --desc "正文" --tags 生活,分享 --result .local/instagram-video.json
+sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail videos/demo.png --title "视频标题" --desc "正文 #生活 #分享" --result .local/instagram-video.json
 sau instagram upload-note --account creator --images videos/demo1.png --title "单图标题" --note "正文"
 sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --result .local/instagram-carousel.json
 ```
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
 
-`--no-publish`：素材上传、配文/话题、全部发布选项完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，只记录平台/标题/选项，不写 `content_id`/`post_id`/`post_url`。
+`--no-publish`：素材上传、配文/话题、全部发布选项完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，记录平台、标题、选项与配文话题，不写 `content_id`/`post_id`/`post_url`。
 
 `login` 在同一个持久化 context 中等待人工登录和必要验证，资料由浏览器保存在 `browser_profiles/<chrome|chromium>/instagram/<原始别名>/`；`check`、视频/图文和作品操作复用同目录。当前会话须有正向登录证据和有效 `ds_user_id`，别名不绑定真实账号，两种浏览器可以登录不同账号。正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 login 引导登录；其他动作缺少 Profile、明确未登录/验证退出 `10`，探测、网络、页面和必需字段故障退出 `1`。`check` 不代替发布权限检查。
 
@@ -623,7 +739,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 视频和图文回归都显式传 `--no-publish`：完成素材上传、编辑及 Share 就绪检查后停止，结果 `prepared`，不等待 not-before 或提交。它可能留下临时素材/草稿；本轮离线验证不代表真实账号验收。
 
-视频输入为 MP4/MOV；照片为 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际解码与处理受平台限制。多个图片路径按传入顺序创建轮播；当前已实测单张照片及两张不同照片。标题、正文、标签合并为配文，合计最多 2200 字符。`--headless` 可切换无头运行，人工登录使用默认可见模式。
+视频输入为 MP4/MOV；照片为 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际解码与处理受平台限制。多个图片路径按传入顺序创建轮播；当前已实测单张照片及两张不同照片。标题与正文按空行合并为配文，合计最多 2200 字符；公开话题直接写在正文里。写入后逐字回读编辑器全文，只有与最终配文完全一致才继续。`--headless` 可切换无头运行，人工登录使用默认可见模式。
 
 配文超过 2200 字符、视频与图片同时传入或都未传入、`--thumbnail` 与图片同传、替代文字条数或长度不合法、`--location` 为空等静态错误，都在启动浏览器或托管 Profile **之前**校验并退出 `2`。**注意**：配文超长此前退出 `1`（`ValueError`），现在改为退出 `2`（用法错误），与 TikTok、小红书对齐；调度层若按 `1` 判断需同步调整。
 
@@ -637,10 +753,10 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 | 参数 | 命令 | 行为 |
 |---|---|---|
-| `--location TEXT` | `upload-video`、`upload-note` | 在 Instagram 的联想列表里按**忽略大小写与多余空白的精确匹配**选择；无精确匹配则退出 `1`、不发布，错误信息列出观察到的候选 |
-| `--no-comments` | `upload-video`、`upload-note` | 请求关闭评论；入口不存在或不可用视为已满足（`default_off`，退出 `0`） |
-| `--ai-generated` | `upload-video`、`upload-note` | 请求打开 AI 生成标识；入口不存在或不可用时退出 `1` |
-| `--no-ai-generated` | `upload-video`、`upload-note` | 请求关闭 AI 生成标识；已是关闭或入口缺失时退出 `0` |
+| `--location TEXT` | `upload-video`、`upload-note` | 在 Instagram 的联想列表里按候选**名称**选择：去掉首尾空白、合并连续空白、忽略大小写；候选行若名称/地址分行，只比较第一行名称，点页面顺序第一个同名行并记录该行可见地址。要求列表/行收起且地点框回读所选名称；无候选、只有近似候选、入口缺失、页面明确资格限制、列表未收起或回读为空/不符均退出 `1`、不点击 Share，结果记录原因 |
+| `--no-comments` | `upload-video`、`upload-note` | 请求关闭评论。确认入口缺失或读到已关闭可继续。可操作的开关须在设置后确认关闭。禁用的评论开关记录可读终值和 `default_off/account_ineligible`，继续执行 |
+| `--ai-generated` | `upload-video`、`upload-note` | 请求打开 AI 生成标识；入口缺失、不可用或回读仍为关闭时退出 `1`，不点击 Share |
+| `--no-ai-generated` | `upload-video`、`upload-note` | 请求关闭 AI 生成标识；可见开关已关、从开切到关并回读、或确认入口缺失时可继续；可见但禁用且仍为开启、或无法回读时退出 `1` |
 | `--alt-text TEXT` | 仅 `upload-note` | 每张图片一条替代文字，可重复；条数必须为 0 或正好等于 `--images` 张数，每条 1–1000 字符，不会截断 |
 
 - `--ai-generated` 与 `--no-ai-generated` 互斥，同时传入由 argparse 退出 `2`；没有 `--aigc` 别名。
@@ -648,22 +764,45 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 - `--alt-text` 按 `--images` 顺序逐张填写；`upload-video --alt-text` 由 argparse 拒绝，退出 `2`。
 - 选项动作与回读（set-then-readback）在点击 Share **之前**完成。任何一项未生效都退出 `1`、不点击发布，也不会用到 `9`；结果文件仍会记录每项状态和失败证据。
 
+单独传 `--no-ai-generated`（不请求地点）时，分享前的 AI 记录按下表判定：
+
+| 分享前现场 | AI 记录 | 本次是否可继续 |
+|---|---|---|
+| 创建页可操作，开关可见且已关 | `requested=false`、`applied=false`、`status=default_off` | 其他字段通过后可继续 |
+| 创建页可操作，开关原为开；点击一次并回读为关 | `requested=false`、`applied=false`、`status=set` | 其他字段通过后可继续 |
+| 创建页可操作，确认没有 AI 入口 | `requested=false`、`applied=null`、`status=default_off`、`reason=entry_missing` | 其他字段通过后可继续 |
+| 前台「放弃帖子？」确认框遮挡创建页，或创建页祖先变为 `aria-hidden=true` | `requested=false`、`applied=null`、`status=mismatch`、`reason=editor_obscured`，`detail` 说明遮挡 | 停止：顶层 `not_submitted`，退出 `1`，Share 点击零次 |
+
+- 遮挡检查在解析任何选项入口之前执行：先确认当前创建页是唯一可操作、且不被额外可见对话框覆盖的编辑器。只有确认创建页可操作，找不到 AI 入口才能归因为 `entry_missing`；遮挡时不会误记 `entry_missing`，也不会自动点击「放弃」或「取消」。
+- 可见开关被禁用但回读仍为开启，或可见开关无法回读时，同样按 `mismatch` 停止；禁用且回读已为关闭则记 `default_off`。
+- 省略 AI 参数时不读取、不点击开关，结果记 `not_requested`，页面原值保持不变（原本开启也保持开启）。
+
 ```powershell
 sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-carousel.json
 sau instagram upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文" --no-comments --result .local/instagram-video.json
 ```
 
-示例中的 `--location` 必须与 Instagram 当时给出的候选完全一致（忽略大小写与多余空白）；候选名称随账号和地区变化，建议先用 `--headed` 观察一次再固定。
+示例中的 `--location` 必须与 Instagram 候选的**名称**完全一致（忽略大小写与多余空白）；候选行若同时显示地址，地址不参与匹配或传参，只作为所点行证据记录。候选名称随账号和地区变化，建议先用 `--headed` 观察一次再固定。
 
 其余网页选填能力仍保留页面默认，CLI 不读取也不修改：协作者、Stories、定时发布、配乐/曲库、选帧封面、用户标签、滤镜、隐藏点赞/播放数。上述四项之外的元数据仍不做发布后回读对账；已知平台会在个别情况下降级元数据（等同官方 API 的 `config_issue`），本轮不检测。
 
-结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible`（无归因时省略）。`options` 是新增字段，旧消费方可直接忽略。
+结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason][, detail]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible` / `editor_obscured` / `control_disabled` / `no_candidates` / `no_same_name_candidate` / `selection_failed` / `list_not_collapsed` / `final_empty` / `final_mismatch`（无归因时省略）；`detail` 说明遮挡或页面明确写出的资格限制文案。`location` 成功时兼容追加 `candidate_name`、`candidate_index`，候选行显示地址时再追加 `candidate_address`；既有 `requested` / `applied` / `status` 不删除、不改名。`options` 是新增字段，旧消费方可直接忽略，原有字段与取值保持兼容。配文回读通过后另行追加顶层 `topics` 数组，详见下一节。
+
+### Instagram 配文话题
+
+- 公开配文由标题与正文按空行合并；旧 `--tags` 已移除，传入时在参数解析阶段退出 `2`。CLI 不向配文追加任何标签，公开话题只来自标题或正文中的 `#话题`。
+- 写入后按编辑器渲染文本逐字回读全文，只有与最终配文完全一致才继续。吞字、错位或多余追加会指出首个不同字符并退出 `1`，Share 点击零次；标题+正文（含内联 `#话题`）合计超过 2200 字符在上传前退出 `2`，同样不会启动浏览器或点击 Share。受控编辑器截断等整帖硬限制按回读失败处理。
+- 回读通过后，从这段已验证配文按出现顺序识别每处 `#话题`：保留重复词、空行、空格与标点，URL 的 `#片段` 排除且链接原样保留。Instagram 不点选话题候选，界面只能证明文字存在，因此每处记 `status=text`（`reason=配文全文逐字回读一致`），不伪报已关联。
+- 结果 JSON 顶层兼容追加 `topics` 数组，每项 `{index, text, name, start, end, status, reason}`；`platform`、`title`、`status`、`options` 不删除、不改名。stdout、默认 `.local/instagram-results/<uuid>.json` 与 `--result PATH` 三处内容一致。`--no-publish` 成功仍为 `prepared`，正常发布仍为 `published`。
+- 证据阶段：2026-11-20 简体中文 Creator Reel 与两图轮播在 `--no-publish` 分享前正文含 `#color #study`，该批记录未逐词回读话题；2026-11-21 使用简体中文 Creator 实机 `--no-publish` 复跑通过（`status=prepared`，地点与 AI 开关均回读）。重复词、URL `#片段`、空行、紧邻标点、中英混排、吞字/错位/多余追加与整帖硬限制由受控真实 Chrome 页离线验收。
 
 本地模式保持浏览器/Profile/站点原有语言，不设置 locale、请求头、固定 viewport 或最大化；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
 
-> 选择器证据只来自 **English 界面 + Personal 账号**；中文标签与专业账号均未验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。
+> 选择器证据主要来自 **English 界面 + Personal 账号**；中文标签与专业账号的其余选项尚未全部验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。AI 开关另有 2026-11-20 简体中文 Creator 分享前证据。
 >
-> 四项能力已在真实账号真发验收通过（2026-11-10，English UI、Personal 账号、本地 cookie 模式）：单条两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致（地点显示、`img[alt]` 逐张对应、无评论输入框、`AI content` 标签）；同日另以 `upload-video` 发布 Reel，验证 `--file` / `--thumbnail`（字节校验）/ `--desc` / `--tags` 与关闭评论、AI 标识，发布后 `#话题` 与 `AI content` 均正确。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。中文界面、专业账号与托管模式（MLX / AdsPower）仍未验收。
+> 四项能力已在真实账号真发验收通过（2026-11-10，English UI、Personal 账号、本地 cookie 模式）：单条两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致（地点显示、`img[alt]` 逐张对应、无评论输入框、`AI content` 标签）；同日另以 `upload-video` 发布 Reel，验证 `--file` / `--thumbnail`（字节校验）/ `--desc` / `--tags`（旧版 `--tags` 行为，现已移除）与关闭评论、AI 标识，发布后 `#话题` 与 `AI content` 均正确。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。中文界面、专业账号与托管模式（MLX / AdsPower）仍未全面验收。
+>
+> 2026-11-20 另以简体中文 Creator 账号、本地 Chrome、`--no-publish` 在分享前复验 AI 开关：Reel 由关切到开并读到 `true`，两图轮播原本已关并读到 `false`。同日一次「放弃帖子？」确认框遮挡创建页，旧结果把 AI 误记为 `default_off`/`entry_missing`；现在遮挡会在分享前记 `mismatch`/`editor_obscured` 并停止，受控页面已回归，真实现场见 `.scratch/publish-metadata-support/research/instagram-creator-2026-11-20/carousel-options-error.json`。地点沿用同批 Creator 网页记录：Reel 与两图轮播均搜索 `Shanghai`，候选只显示名称，点首个同名行后分享前读到 `Shanghai`（`.scratch/publish-metadata-support/research/instagram-creator-2026-11-20/reel.json`、`carousel.json`）；该批运行使用代码版本 `ebdeb43`，本工单未新增真实账号运行，实机 CLI 样本未实测。名称/地址分行、同名异址、空列表、仅近似、入口缺失、明确资格限制、列表未收起与回读不符由受控页回归覆盖，不代表真实账号已观察到这些页面变体。替代文字与关闭评论的中文 Creator 验收范围不变。
 
 成功返回 `published`、`content_id`、`post_id`、`post_url` 和 `media_count`。Reels 可能先处于 `processing`，程序会等待本次提交的最终创建结果；超时后保留已观察状态。`submission_unknown` 表示已进入提交但未确认平台结果，`processing` 表示平台已受理且尚未取得最终作品，均不可直接重复上传。默认结果保存在 `.local/instagram-results/`；建议用 `--result` 指定路径。
 
@@ -712,7 +851,8 @@ sau tiktok check --folder-id "FOLDER_ID" --profile-id "PROFILE_ID"
 # 视频：发布选项均可选，不传时保持页面默认
 sau tiktok upload-video \
   --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
-  --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
+  --file videos/demo.mp4 --title "示例标题 #示例话题" \
+  --location "London Eye" \
   --privacy public --no-comments --disable-reuse --aigc --your-brand \
   --schedule "2026-10-21T02:30:00Z" --thumbnail videos/demo.png
 
@@ -720,7 +860,8 @@ sau tiktok upload-video \
 sau tiktok upload-note \
   --folder-id "FOLDER_ID" --profile-id "PROFILE_ID" \
   --images videos/demo1.png videos/demo2.png \
-  --title "图文标题" --note "图文正文" --tags 图文,测试 \
+  --title "图文标题" --note "图文正文 #图文 #测试" \
+  --location "London Eye" \
   --privacy friends --no-comments --aigc
 
 # AdsPower 模式（--folder-id 可省略）
@@ -731,8 +872,19 @@ sau tiktok check --profile-id "PROFILE_ID"
 
 sau tiktok upload-video \
   --profile-id "PROFILE_ID" \
-  --file videos/demo.mp4 --title "示例标题" --tags tag1,tag2 \
+  --file videos/demo.mp4 --title "示例标题 #示例话题" \
   --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
+```
+
+配文话题直接写在视频标题或图片帖正文里，CLI 按出现顺序原位关联；旧 `--tags` 已移除，传入时在参数解析阶段退出 `2`，不会追加到配文：
+
+```bash
+sau tiktok upload-video --account creator \
+  --file videos/demo.mp4 --title "Today #coffee, then #tea"
+
+sau tiktok upload-note --account creator \
+  --images videos/demo1.png videos/demo2.png \
+  --title "图文标题" --note "今天喝了 #咖啡，配上 #栗子蛋糕"
 ```
 
 - 支持 `login`、`check`、`upload-video`、`upload-note`、`reset-profile`；login/reset-profile 仅本地模式，托管登录仍在对应桌面应用完成。
@@ -754,34 +906,40 @@ sau tiktok upload-video \
 | 参数 | 取值 | 含义 |
 | --- | --- | --- |
 | `--privacy` | `public` / `friends` / `followers` / `only-me` | 设置隐私级别；账号类型不匹配时回读失败并退出 `1` |
+| `--location TEXT` | 文本 | 按完整地点名称选择：忽略大小写、去首尾空白并合并连续空白，按页面顺序点击第一个同名候选。成功须候选列表收起且控件读回所点名称；终端报告请求值、所点行名称与可见地址、最终值。无同名候选、入口缺失、列表未收起、读值为空或不符均退出 `1`；空白值退出 `2` |
 | `--no-comments` | 开关 | 关闭评论 |
 | `--disable-reuse` | 开关 | 关闭内容复用；同时影响 Duet、Stitch、Stickers 和 Story |
-| `--aigc` / `--no-aigc` | 互斥 | 开启/关闭 AI 生成内容标识；不传则保持页面默认 |
+| `--aigc` / `--no-aigc` | 互斥 | 三态 AI 生成内容标识：省略时完全不读取、不点击、不展开 AI 入口，保留页面当前值；`--aigc` 须读到开：入口缺失、仍为关且可见禁用、或回读失败退出 `1`；`--no-aigc` 已关记 `default_off`，从开切关并读回记 `set`，入口确实缺失记 `default_off`/`entry_missing`（终值未知）并继续，可见但禁用且仍为开或无法读值退出 `1` |
 | `--your-brand` | 开关 | 声明为自家品牌推广，会自动打开品牌声明总开关 |
 | `--branded-content` | 开关 | 声明为付费品牌内容；不能与 `--privacy only-me` 同时使用（本地退出 `2`） |
 | `--thumbnail` | 文件路径 | 自定义视频封面，语义不变 |
 
 视频标题仍为必填；视频 caption 不新增长度校验。`--your-brand` 与 `--branded-content` 可同时使用；只请求其中一项时，另一项会被显式取消勾选。`--branded-content` 与 `--privacy friends` 允许组合，但仍以页面回读为准。
 
+`--title` 就是最终公开配文。其中的 `#话题` 按出现顺序在编辑器中原位处理：输入 `#话题` 后点击同名候选行（包括标为 `Add` 的行），从 `span.mention[data-testid="mentionText"]` 读回名称才报告「已关联」。TikTok 选中后会自动追加一个 U+0020；若原稿该位置没有空格，CLI 退格移除并再次确认关联仍在，然后继续输入原稿的下一个字符。无同名候选时原位保留文字并报告 `status=text reason=no_same_name_candidate`；每条帖子最多关联 50 处，第 51 处起原位保留并逐条报告 `reason=association_limit`。发布前按正文顺序把话题标记读作 `#名称`、其余文字逐字保留，整段配文必须逐字一致；吞字、错位、意外追加、选成其他话题或页面显示整帖硬限制时退出 `1`，发布按钮零点击。旧 `--tags` 已移除；最终全文只来自 `--title`（视频）或 `--note` / `--notef`（图片帖正文）。
+
 ### 图文发布参数
 
 | 参数 | 必填 | 含义 |
 | --- | --- | --- |
 | `--images` | 是 | 1–35 张本地图片，按传入顺序展示，第 1 张即封面 |
-| `--title` | 否 | 页面 Title，≤90 字符；不传则不改动页面输入 |
-| `--note` | 否 | Description，≤4000 字符（含 tags 展开后的文本）；不传且无 tags 时不改动页面输入 |
-| `--notef` | 否 | 从本地 txt/md 读取 Description；与 `--note` 互斥 |
-| `--tags` | 否 | 逗号分隔，规范化后追加到 Description；最多 50 个 |
+| `--title` | 否 | 页面 Title，≤90 字符；不传则不改动页面输入。Title 独立于正文，其中的 `#词` 不按配文话题处理、不点选候选 |
+| `--note` | 否 | Description，≤4000 字符（含正文中的 `#话题`）；不传时不改动页面输入。正文中的 `#话题` 原位逐词处理 |
+| `--notef` | 否 | 从本地 txt/md 读取 Description；与 `--note` 互斥，话题处理方式相同 |
+| `--location` | 否 | 与视频相同：按完整名称选择地点，忽略大小写与空白，取首个同名行；省略时保留页面原值 |
 | `--schedule` | 否 | 与视频相同的 `YYYY-MM-DDTHH:MM:00Z` |
-| `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义 |
+| `--privacy` / `--no-comments` / `--aigc` / `--no-aigc` / `--your-brand` / `--branded-content` | 否 | 与视频相同语义；AI 三态与终端 `requested` / `applied` / `status` / `reason` / `continue` 诊断相同 |
 
 `upload-note` 没有 `--disable-reuse`、`--thumbnail` 或 `--cover-index`：图片帖没有内容复用设置，第 1 张即封面。
 
 ### TikTok 限制与错误语义
 
 - 图片仅支持 JPG / JPEG / PNG / WEBP（扩展名大小写不敏感），单张 ≤50 MB。
-- 图片数量、格式、大小，以及 Title/Description/hashtag 超限、`--note`/`--notef` 冲突、`--branded-content --privacy only-me` 都在启动浏览器前校验失败并退出 `2`，不会截断后继续。
+- 图片数量、格式、大小，以及 Title/Description 超限、`--note`/`--notef` 冲突、`--branded-content --privacy only-me` 都在启动浏览器前校验失败并退出 `2`，不会截断后继续。内联 `#话题` 不触发静态数量拒绝；第 51 处起由上传器原位保留为文字并逐项报告。
 - 显式设置的发布选项会写入页面后回读；回读不一致退出 `1`，且不会点击发布。
+- 帖子地点按三态处理：省略 `--location` 时不读取、不搜索、不点击地点控件，保留页面原值；显式请求时终端打印一行 `TikTok 帖子地点: option=location requested=... candidate=... address=... final=... status=... reason=... continue=...`。成功须候选列表收起且控件读回所点行的名称。无同名候选（含空列表或仅近似名称）记 `no_match`/`no_same_name_candidate`；入口缺失记 `unsupported`/`entry_missing`；只有页面明确提示资格限制才记 `account_ineligible`；列表未收起、读值为空或不符分别记 `list_not_collapsed`、`final_empty`、`final_mismatch`。以上失败均退出 `1`，发布按钮零点击。空白 `--location` 在启动浏览器前退出 `2`。
+- AI 声明按三态报告：省略 `--aigc` / `--no-aigc` 时不读取、不点击 AI 开关，保留页面原值，结果记 `not_requested` 且不打印 AI 行；显式请求时终端打印一行 `TikTok AI 声明: option=aigc requested=... applied=... status=... reason=... continue=...`。`status=set` 和 `default_off` 可继续；`default_off` + `reason=entry_missing` 表示入口缺失、终值未知；`unsupported`、`mismatch` 或 `continue=no` 退出 `1`，发布按钮零点击。开关可见但禁用且仍为开、可见但无法读值（`reason=read_error`）或首次运行的 `Turn on` 对话框失败（`reason=dialog_error`）都按 `mismatch` 停止。
+- 配文话题逐处打印一行 `TikTok 配文话题: index=... text='#话题' status=... reason=... continue=... result=...`，保留出现顺序和重复次数。`status=linked` / `result=已关联` 表示从 `span.mention` 读回同名标记；`status=text` 表示原位保留文字，原因可能是 `no_same_name_candidate`（只有近似行，`result=保留文字，无同名候选`）或 `association_limit`（第 51 处起，`result=保留文字，已达可关联上限`）。两种情况都以整段配文逐字一致为继续条件。自动追加的 U+0020 若与原稿不符会退格移除并再次核对关联。整帖硬限制、错选、吞字、错位或意外追加退出 `1`，发布按钮零点击。网页证据记录了普通候选、同名 `Add`、自动空格与整句回读；整帖硬限制的具体页面文案和文字回退按键未逐字记录，当前按 max / too many / 上限 等提示与受控页面验收。
 - 账号没有 Photos tab（未在图文灰度内）时，`upload-note` 在选文件前退出 `1`，不会把图片送进视频 input。
 - 退出码 `9` 表示发布结果未知：发布点击已发出但未确认成功；**禁止自动重发**，先到 TikTok Studio → Content/Posts 按标题与发布时间核对。
 - 不提供 `--cover-ms`、`--cover-index`、`--bgm`、`--json`，也不提供独立的 Duet / Stitch 开关；机器信号只有退出码与 stderr。
@@ -834,8 +992,7 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 ```bash
 --file videos/demo.mp4
 --title "示例标题"
---desc "示例简介"
---tags 运动,训练
+--desc "示例简介 #运动 #训练"
 ```
 
 封面与其他可选参数见目标平台的 `upload-video --help`。
@@ -845,11 +1002,10 @@ CLI 将 `debug` 和 `headless` 拆成了两个独立维度：
 ```bash
 --images videos/demo1.png videos/demo2.png videos/demo.png
 --title "图文标题"
---note "图文内容"
---tags 图文,测试
+--note "图文内容 #图文 #测试"
 ```
 
 图片笔记上传当前限制：
 
 - 小红书：支持多张图片，正文 `--note` 可选，但 `--title` 建议始终显式传入
-- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含 tags），最多 50 个 hashtag；第 1 张即封面；本地与托管浏览器模式均支持
+- TikTok：1–35 张，仅 JPG/JPEG/PNG/WEBP，单张 ≤50 MB；Title ≤90 字符，Description ≤4000 字符（含正文中的 `#话题`）；每条帖子最多关联 50 个内联话题，第 51 个起原位保留为文字并逐条报告；第 1 张即封面；本地与托管浏览器模式均支持

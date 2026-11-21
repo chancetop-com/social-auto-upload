@@ -64,9 +64,11 @@ async def _switch_checked(switch: 'Locator') -> bool | None:
     """读取开关状态：``aria-checked`` 优先，原生 checkbox 回退 ``is_checked()``。"""
     aria = await switch.get_attribute("aria-checked")
     if aria is not None:
-        return str(aria).strip().lower() == "true"
+        return {"true": True, "false": False}.get(str(aria).strip().lower())
     try:
-        return bool(await switch.is_checked())
+        return await switch.evaluate("""el =>
+            el.matches('input[type=checkbox]') && !el.indeterminate ? el.checked : null
+        """)
     except Exception:
         return None
 

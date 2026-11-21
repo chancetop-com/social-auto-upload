@@ -520,6 +520,8 @@ class Decision11ReadbackBodyLengthTests(unittest.TestCase):
     def test_length_error_checked_exactly_once_after_topics(self):
         app = _note_app(desc="正文", tags=["旅行pov"])
         page = RecordingPage(url=NOTE_URL, selectors=_meta_selectors())
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         counting = _CountingLocator("length-error", count=0)
         page._selectors[xhs_main.XHS_BODY_LENGTH_ERROR_SELECTOR] = counting
         with (

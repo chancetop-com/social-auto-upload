@@ -1,6 +1,7 @@
 # 15: 小红书与 Rednote 回读 AI 内容类型
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build

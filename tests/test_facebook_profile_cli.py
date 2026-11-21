@@ -95,7 +95,8 @@ class ComposerLocator(Locator):
                 self.page.url = 'https://www.facebook.com/' + ('checkpoint/' if outcome == 'verification' else 'login/')
                 if outcome == 'click-login': raise OSError('response lost after dispatch')
     async def set_input_files(self, files, *, timeout=None): self.page.files = files
-    async def inner_text(self, *, timeout=None): return self.page.caption
+    async def inner_text(self, *, timeout=None):
+        return self.page.readback() if self.kind == 'editor' else self.page.caption
 
 
 class ComposerPage(Page):
@@ -103,6 +104,13 @@ class ComposerPage(Page):
         super().__init__(context)
         self.submit_clicks, self.caption, self.files = 0, '', []
         self.keyboard = self
+    def readback(self):
+        """Controlled page: expose the field value the composer would read back."""
+        mode = getattr(self.context, 'caption_mutation', None)
+        if mode == 'swallow': return self.caption[:-1]
+        if mode == 'misplace': return self.caption[-1:] + self.caption[:-1]
+        if mode == 'extra': return self.caption + ' EXTRA'
+        return self.caption
     def locator(self, selector):
         if self.submit_clicks and getattr(self.context, 'outcome', None) == 'disconnected':
             raise OSError('page disconnected')
@@ -296,6 +304,91 @@ class FacebookProfileCliTests(unittest.TestCase):
                 self.assertFalse(self.context.storage_state_calls)
         self.assertEqual(len(self.pw.chromium.persistent_calls), 2)
         self.assertFalse(self.pw.chromium.launch_calls)
+
+    def test_video_and_note_read_back_caption_and_report_topics_in_order(self):
+        self.profile()
+        self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        body = "第一行 #咖啡，配上 #咖啡。\n链接 https://example.com/#片段 原样保留"
+        expected_caption = f"标题 #重复\n\n{body}"
+        expected_topics = [
+            "Facebook 配文话题 1/3：#重复 保留文字（配文全文逐字回读一致）",
+            "Facebook 配文话题 2/3：#咖啡 保留文字（配文全文逐字回读一致）",
+            "Facebook 配文话题 3/3：#咖啡 保留文字（配文全文逐字回读一致）",
+        ]
+        for action, option, filename in [('upload-video','--file','video.mp4'), ('upload-note','--images','photo.png')]:
+            with self.subTest(action=action):
+                path = self.root / filename; path.touch()
+                text_option = '--desc' if action == 'upload-video' else '--note'
+                code, out, err = self.run_cli(
+                    action, '--account', 'Creator', option, str(path),
+                    '--title', '标题 #重复', text_option, body, '--headed',
+                )
+                self.assertEqual(code, 0, err)
+                page = self.context.pages[-1]
+                self.assertEqual(page.caption, expected_caption)
+                self.assertEqual(
+                    [line for line in out.splitlines() if line.startswith('Facebook 配文话题')],
+                    expected_topics,
+                )
+                self.assertEqual(page.submit_clicks, 1)
+                with acquire_local_profile('facebook', 'Creator', 'chrome'): pass
+
+    def test_caption_rewrite_stops_before_publish_with_first_difference(self):
+        self.profile()
+        self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        for mode in ('swallow', 'misplace', 'extra'):
+            self.context.caption_mutation = mode
+            for action, option, filename in [('upload-video','--file','video.mp4'), ('upload-note','--images','photo.png')]:
+                with self.subTest(mode=mode, action=action):
+                    path = self.root / filename; path.touch()
+                    text_option = '--desc' if action == 'upload-video' else '--note'
+                    code, out, err = self.run_cli(
+                        action, '--account', 'Creator', option, str(path),
+                        '--title', '标题', text_option, '#正文 话题', '--headed',
+                    )
+                    self.assertEqual(code, 1, err)
+                    self.assertIn('首处差异偏移', err)
+                    self.assertIn('期望', err)
+                    self.assertIn('实际', err)
+                    self.assertNotIn('Facebook 配文话题', out)
+                    self.assertEqual(self.context.pages[-1].submit_clicks, 0)
+                    with acquire_local_profile('facebook', 'Creator', 'chrome'): pass
+
+    def test_caption_hard_limit_stops_before_publish(self):
+        self.profile()
+        self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        for action, option, filename in [('upload-video','--file','video.mp4'), ('upload-note','--images','photo.png')]:
+            with self.subTest(action=action):
+                path = self.root / filename; path.touch()
+                text_option = '--desc' if action == 'upload-video' else '--note'
+                code, _, err = self.run_cli(
+                    action, '--account', 'Creator', option, str(path),
+                    '--title', '标题', text_option, '字' * 63206, '--headed',
+                )
+                self.assertEqual(code, 1, err)
+                self.assertIn('硬限制', err)
+                self.assertIn('63206', err)
+                self.assertEqual(self.context.pages[-1].submit_clicks, 0)
+                with acquire_local_profile('facebook', 'Creator', 'chrome'): pass
+
+    def test_inline_caption_topics_are_the_only_public_topic_source(self):
+        self.profile()
+        self.context.page_type = ComposerPage
+        self.stack.enter_context(patch.object(main, 'expect', Expect))
+        path = self.root / 'video.mp4'; path.touch()
+        code, out, err = self.run_cli(
+            'upload-video', '--account', 'Creator', '--file', str(path),
+            '--title', '标题', '--desc', '正文 #正文话题', '--headed',
+        )
+        self.assertEqual(code, 0, err)
+        page = self.context.pages[-1]
+        self.assertEqual(page.caption, '标题\n\n正文 #正文话题')
+        topic_lines = [line for line in out.splitlines() if line.startswith('Facebook 配文话题')]
+        self.assertEqual([line.split('：', 1)[1].split(' ', 1)[0] for line in topic_lines],
+                         ['#正文话题'])
 
     def test_expiry_before_and_after_submit_preserves_phase_through_cleanup_failure(self):
         self.profile()

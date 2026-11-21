@@ -1,6 +1,7 @@
 # 17: Instagram 在编辑器被遮挡时阻止分享
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build

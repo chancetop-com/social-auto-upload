@@ -38,8 +38,7 @@ sau xiaohongshu upload-video \
   --account <account> \
   --file <video-path> \
   --title "<title>" \
-  [--desc "<description>"] \
-  [--tags tag1,tag2] \
+  [--desc "<description; public topics as #topic>"] \
   [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [--thumbnail <image-path>] \
   [--original | --no-original] \
@@ -58,8 +57,7 @@ sau xiaohongshu upload-video \
   - `--file`
   - `--title`
 - 可选参数:
-  - `--desc`
-  - `--tags`
+  - `--desc`（公开话题写成 `#话题`）
   - `--schedule`
   - `--thumbnail`
   - `--original` / `--no-original`
@@ -76,8 +74,7 @@ sau xiaohongshu upload-note \
   --account <account> \
   --images <image-1> [image-2 ...] \
   --title "<title>" \
-  [--note "<content>"] \
-  [--tags tag1,tag2] \
+  [--note "<content; public topics as #topic>"] \
   [--schedule "YYYY-MM-DDTHH:MM:00Z"] \
   [--original | --no-original] \
   [--content-type fiction|ai|marketing|self-shot|repost] \
@@ -95,8 +92,7 @@ sau xiaohongshu upload-note \
   - `--images`
   - `--title`
 - 可选参数:
-  - `--note`
-  - `--tags`
+  - `--note`（公开话题写成 `#话题`）
   - `--schedule`
   - `--original` / `--no-original`
   - `--content-type`（`repost` 时必须同时传 `--repost-source`）

@@ -201,6 +201,9 @@ class FakeLocator:
     async def element_handles(self) -> list["FakeLocator"]:
         return [self.nth(index) for index in range(await self.count())]
 
+    async def element_handle(self) -> "FakeLocator":
+        return self.nth(0)
+
     async def dispose(self) -> None:
         pass
 
@@ -390,6 +393,85 @@ class RecordingKeyboard:
 
     async def up(self, key: str, **kwargs: Any) -> None:
         self.actions.append(("up", key))
+
+
+class CaptionBody(RecordingLocator):
+    """Scripted caption editor: typed text plus rendered ``a[data-topic]`` chips.
+
+    ``text`` is the document-order readback (each chip already rendered as
+    ``#name``); ``anchor_names`` keeps the chips separate so tests can prove
+    the association did not degrade to plain text.
+    """
+
+    _FACTS = {
+        "tag": "div",
+        "display": "block",
+        "visibility": "visible",
+        "opacity": 1.0,
+        "ariaHidden": None,
+        "ancestorAriaHidden": False,
+        "disabled": False,
+        "disabledClass": False,
+        "pointerEvents": "auto",
+        "contentEditable": "true",
+        "readOnly": False,
+        "isConnected": True,
+    }
+
+    def __init__(self) -> None:
+        super().__init__(
+            "caption-body",
+            evaluate_handler=self._evaluate,
+            computed_style=dict(self._FACTS),
+            box={"x": 0.0, "y": 0.0, "width": 320.0, "height": 90.0},
+        )
+        self.text = ""
+        self.anchor_names: list[str] = []
+        self.readback_calls = 0
+        self.readbacks: list[str] = []
+        self.readback_override: str | None = None
+
+    def _evaluate(self, expression, arg=None):
+        if "ProseMirror-trailingBreak" in str(expression):
+            self.readback_calls += 1
+            value = (
+                self.readback_override
+                if self.readback_override is not None
+                else self.text
+            )
+            self.readbacks.append(value)
+            return value
+        if "elementFromPoint" in str(expression):
+            return {"self": True, "tag": "div", "className": "", "id": "", "text": ""}
+        return dict(self._FACTS)
+
+    def insert_text(self, value: str) -> None:
+        self.text += value
+
+    def backspace(self) -> None:
+        if self.text.endswith("\u00a0"):
+            self.text = self.text[:-1]
+
+    def choose(self, query: str, behaviour: dict) -> None:
+        """Replace the just-typed ``#query`` with a rendered chip."""
+        token = "#" + query
+        if not self.text.endswith(token):
+            raise AssertionError(
+                f"topic click without the typed token at the cursor: {self.text!r}"
+            )
+        rest = self.text[: -len(token)]
+        name = behaviour.get("name", query)
+        mode = behaviour.get("mode")
+        rendered = "#" + name
+        if mode == "swallow":
+            rest = rest[:-2]
+        if mode == "misplace":
+            self.text = rendered + "\u00a0" + rest
+        elif mode == "extra":
+            self.text = rest + rendered + "\u00a0" + "EXTRA"
+        else:
+            self.text = rest + rendered + "\u00a0"
+        self.anchor_names.append(name)
 
 
 class RecordingFrame:

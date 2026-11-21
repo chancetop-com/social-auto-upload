@@ -1097,6 +1097,112 @@ class HumanizeFieldReadbackTests(unittest.TestCase):
             self.assertEqual(editor.buffer, "line1\nline2")
             self.assertNotIn("\r", editor.buffer)
 
+    def test_reel_topics_come_from_the_body_after_separate_title_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = "正文 #bodyTopic #bodyTopic https://example.com/#片段"
+            app = _app(
+                tmp,
+                title="#titleTopic 独立标题",
+                description=body,
+                tags=[],
+                video_file=Path(tmp) / "clip.mp4",
+            )
+            log: list = []
+            title = _TypingLocator("reel-title", log=log, initial="Old title")
+            editor = _TypingLocator("caption", log=log, initial="Old body")
+            page = _page({REEL_TITLE: title, CAPTION_EDITOR: editor}, log=log)
+
+            with _humanized():
+                asyncio.run(app._fill_caption(page))
+
+            self.assertEqual(title.buffer, "#titleTopic 独立标题")
+            self.assertEqual(editor.buffer, body)
+            self.assertEqual(app.public_caption, body)
+            self.assertEqual(
+                [topic["text"] for topic in app.result["topics"]],
+                ["#bodyTopic", "#bodyTopic"],
+            )
+            self.assertEqual([topic["index"] for topic in app.result["topics"]], [1, 2])
+
+    def test_reel_title_readback_mismatch_stops_before_body_typing(self):
+        class _AlteredTitle(_TypingLocator):
+            async def input_value(self):
+                return self.buffer + " EXTRA"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _app(
+                tmp,
+                title="#titleTopic 独立标题",
+                description="正文 #bodyTopic",
+                tags=[],
+                video_file=Path(tmp) / "clip.mp4",
+            )
+            log: list = []
+            title = _AlteredTitle("reel-title", log=log)
+            editor = _TypingLocator("caption", log=log, initial="Old body")
+            page = _page({REEL_TITLE: title, CAPTION_EDITOR: editor}, log=log)
+
+            with _humanized(), self.assertRaises(RuntimeError) as caught:
+                asyncio.run(app._fill_caption(page))
+
+            self.assertIn("Reel 独立标题读回不一致", str(caught.exception))
+            self.assertEqual(editor.buffer, "Old body")
+            self.assertIsNone(app.public_caption)
+            self.assertNotIn("topics", app.result)
+
+    def test_body_readback_mismatch_stops_before_publish(self):
+        class _SwallowedBody(_TypingLocator):
+            async def inner_text(self):
+                return self.buffer[:-1]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = _app(
+                tmp,
+                title="Title",
+                description="正文 #bodyTopic",
+                tags=[],
+                video_file=Path(tmp) / "clip.mp4",
+            )
+            log: list = []
+            title = _TypingLocator("reel-title", log=log)
+            editor = _SwallowedBody("caption", log=log)
+            page = _page({REEL_TITLE: title, CAPTION_EDITOR: editor}, log=log)
+
+            with _humanized(), self.assertRaises(RuntimeError) as caught:
+                asyncio.run(app._fill_caption(page))
+
+            self.assertIn("正文读回不一致", str(caught.exception))
+            self.assertIn("首处差异偏移", str(caught.exception))
+            self.assertEqual(app.public_caption, None)
+            self.assertNotIn("topics", app.result)
+
+    def test_caption_over_hard_limit_stops_before_typing_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "photo.png"
+            media.touch()
+            app = _app(
+                tmp,
+                title="Title",
+                description="字" * 63207,
+                tags=[],
+                image_files=[media],
+            )
+            log: list = []
+            editor = _TypingLocator("caption", log=log)
+            page = _page(
+                {REEL_TITLE: FakeLocator("reel-title", count=0), CAPTION_EDITOR: editor},
+                log=log,
+            )
+
+            with _humanized(), self.assertRaises(RuntimeError) as caught:
+                asyncio.run(app._fill_caption(page))
+
+            message = str(caught.exception)
+            self.assertIn("硬限制", message)
+            self.assertIn("63206", message)
+            self.assertEqual(editor.buffer, "")
+            self.assertIsNone(app.public_caption)
+
     def test_ambiguous_reel_next_fails_before_any_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = _app(tmp, video_file=Path(tmp) / "clip.mp4")

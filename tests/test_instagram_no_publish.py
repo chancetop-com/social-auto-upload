@@ -269,6 +269,93 @@ class InstagramNoPublishFlowTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
+class InstagramTopicResultOutputTests(unittest.TestCase):
+    """命令层：新增 topics 证据随既有 JSON/--result 输出，不改变原顶层状态。"""
+
+    def test_prepared_result_prints_topic_evidence_and_respects_result_path(self):
+        payload = {
+            "platform": "instagram",
+            "title": "标题 #咖啡",
+            "status": "prepared",
+            "options": {
+                "location": {"requested": None, "applied": None,
+                             "status": "not_requested"},
+                "alt_text": {"requested": None, "applied": None,
+                             "status": "not_requested"},
+                "comments": {"requested": None, "applied": None,
+                             "status": "not_requested"},
+                "ai_generated": {"requested": None, "applied": None,
+                                 "status": "not_requested"},
+            },
+            "topics": [{
+                "index": 1, "text": "#咖啡", "name": "咖啡",
+                "start": 3, "end": 6, "status": "text",
+                "reason": "配文全文逐字回读一致",
+            }],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            note = Path(folder) / "note.png"
+            note.touch()
+            target = Path(folder) / "custom.json"
+            upload = AsyncMock(return_value=payload)
+            output = io.StringIO()
+            with patch.object(
+                instagram_command, "upload_instagram_content", upload
+            ), contextlib.redirect_stdout(output), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                code = sau_cli.main([
+                    "instagram", "upload-note", "--account", "creator",
+                    "--images", str(note), "--title", "标题 #咖啡",
+                    "--no-publish", "--result", str(target),
+                ])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), payload)
+        request = upload.await_args.args[0]
+        self.assertIs(request.no_publish, True)
+        self.assertEqual(request.result_file, target)
+
+    def test_caption_readback_failure_exits_one(self):
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "video.mp4"
+            video.touch()
+            upload = AsyncMock(side_effect=AssertionError(
+                "Instagram 配文回读不一致：第 9 个字符起不同"
+            ))
+            with patch.object(
+                instagram_command, "upload_instagram_content", upload
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = sau_cli.main([
+                    "instagram", "upload-video", "--account", "creator",
+                    "--file", str(video), "--title", "第一行 #coffee",
+                    "--no-publish",
+                ])
+        self.assertEqual(code, 1)
+        upload.assert_awaited_once()
+
+    def test_no_publish_still_rejects_oversize_caption_before_browser(self):
+        with tempfile.TemporaryDirectory() as folder:
+            note = Path(folder) / "note.png"
+            note.touch()
+            video = Path(folder) / "video.mp4"
+            video.touch()
+            upload = AsyncMock()
+            commands = (
+                ["instagram", "upload-note", "--account", "creator",
+                 "--images", str(note), "--title", "x" * 2201, "--no-publish"],
+                ["instagram", "upload-video", "--account", "creator",
+                 "--file", str(video), "--title", "x" * 2201, "--no-publish"],
+            )
+            for argv in commands:
+                with self.subTest(argv=argv), patch.object(
+                    instagram_command, "upload_instagram_content", upload
+                ), contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(sau_cli.main(argv), 2)
+            upload.assert_not_awaited()
+
+
 class InstagramNoPublishExitTests(unittest.TestCase):
     """命令层：干跑结果打印后退出 0，不走异常映射。"""
 

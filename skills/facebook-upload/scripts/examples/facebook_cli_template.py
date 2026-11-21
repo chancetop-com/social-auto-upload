@@ -6,7 +6,7 @@ commands = [
     [
         'sau', 'facebook', 'upload-video', '--account', 'account_a',
         '--file', 'videos/demo.mp4', '--title', 'Facebook 视频示例',
-        '--desc', '视频简介', '--tags', 'life,share',
+        '--desc', '视频简介 #life #share',
     ],
     [
         'sau', 'facebook', 'upload-note', '--account', 'account_a',

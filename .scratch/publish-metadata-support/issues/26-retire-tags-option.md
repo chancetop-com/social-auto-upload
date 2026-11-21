@@ -1,6 +1,7 @@
 # 26: 十三条命令统一移除 `--tags`
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 22, 23, 24, 25
 
 ## What to build

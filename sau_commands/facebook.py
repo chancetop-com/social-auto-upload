@@ -22,7 +22,6 @@ from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    parse_tags,
 )
 from sau_commands.browser import (
     add_browser_flags,
@@ -34,6 +33,7 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.caption_topics import parse_caption_topics, text_results
 from utils.local_browser import resolve_headless
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 
@@ -82,8 +82,11 @@ def register(platform_parsers):
         "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
     )
     facebook_upload_video_parser.add_argument("--title", required=True, help="Post title, merged into Facebook caption")
-    facebook_upload_video_parser.add_argument("--desc", default="", help="Optional post description")
-    facebook_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    facebook_upload_video_parser.add_argument(
+        "--desc",
+        default="",
+        help="Optional post description; write public topics as #hashtags here",
+    )
     facebook_upload_video_parser.add_argument(
         "--proxy",
         default=FACEBOOK_PROXY,
@@ -100,8 +103,11 @@ def register(platform_parsers):
         "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
     )
     facebook_note.add_argument("--title", required=True)
-    facebook_note.add_argument("--note", default="")
-    facebook_note.add_argument("--tags", default="")
+    facebook_note.add_argument(
+        "--note",
+        default="",
+        help="Optional post body; write public topics as #hashtags here",
+    )
     facebook_note.add_argument("--proxy", default=FACEBOOK_PROXY, help="代理地址；不传时直连")
     add_not_before_flag(facebook_note)
     add_local_runtime_flags(facebook_note)
@@ -147,10 +153,24 @@ def _raise_login_required(target) -> None:
     raise login_required_error("Facebook", target.profile_id, mode=target.mode)
 
 
+def _report_caption_topics(caption: str | None) -> None:
+    """Print one text-level result per public caption topic, in caption order."""
+    if not caption:
+        return
+    reason = "配文全文逐字回读一致"
+    results = text_results(parse_caption_topics(caption), reason=reason)
+    total = len(results)
+    for result in results:
+        print(
+            f"Facebook 配文话题 {result.occurrence.index}/{total}："
+            f"{result.occurrence.text} 保留文字（{result.reason}）"
+        )
+
+
 async def _upload_facebook_mlx(
     target, *, title: str, files, description: str, tags: list[str], headless: bool,
     publish_not_before=None,
-) -> None:
+) -> str | None:
     """Run one Facebook post through the Multilogin Profile session.
 
     ``--proxy``/``SAU_FACEBOOK_PROXY`` are not forwarded: the Profile owns the
@@ -180,13 +200,14 @@ async def _upload_facebook_mlx(
             if not await is_logged_in(session.context):
                 _raise_login_required(target)
             await app.main(session=session)
+    return app.public_caption
 
 
 async def upload_facebook_video(
     request: FacebookVideoUploadRequest, *, target=None
-) -> None:
+) -> str | None:
     if target is not None:
-        await _upload_facebook_mlx(
+        return await _upload_facebook_mlx(
             target,
             title=request.title,
             files=[request.video_file],
@@ -195,7 +216,6 @@ async def upload_facebook_video(
             headless=request.headless,
             publish_not_before=request.publish_not_before,
         )
-        return None
 
     app = FacebookVideo(
         title=request.title,
@@ -209,7 +229,7 @@ async def upload_facebook_video(
     )
     app.publish_not_before = request.publish_not_before
     await app.main()
-    return None
+    return app.public_caption
 
 
 async def run(args):
@@ -273,23 +293,25 @@ async def run(args):
         for image in args.images:
             BaseVideoUploader.validate_image_file(image)
         if target is not None:
-            await _upload_facebook_mlx(
+            caption = await _upload_facebook_mlx(
                 target,
                 title=args.title,
                 files=args.images,
                 description=args.note,
-                tags=parse_tags(args.tags),
+                tags=[],
                 headless=args.headless,
                 publish_not_before=args.not_before,
             )
+            _report_caption_topics(caption)
             print("Facebook image post submitted")
             args.post_published = True
             return 0
 
-        app = FacebookPost(args.title, args.images, args.note, parse_tags(args.tags),
+        app = FacebookPost(args.title, args.images, args.note, [],
                            account_name=args.account, proxy=args.proxy, headless=args.headless, local_browser=args.local_browser)
         app.publish_not_before = args.not_before
         await app.main()
+        _report_caption_topics(app.public_caption)
         print("Facebook image post submitted")
         args.post_published = True
         return 0
@@ -300,14 +322,15 @@ async def run(args):
             video_file=args.file,
             title=args.title,
             description=args.desc,
-            tags=parse_tags(args.tags),
+            tags=[],
             proxy=args.proxy,
             debug=args.debug,
             headless=args.headless,
             local_browser=args.local_browser,
             publish_not_before=args.not_before,
         )
-        await upload_facebook_video(request, target=target)
+        caption = await upload_facebook_video(request, target=target)
+        _report_caption_topics(caption)
         print(f"Facebook video upload submitted: {request.video_file}")
         args.post_published = True
         return 0

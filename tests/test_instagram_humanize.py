@@ -383,7 +383,7 @@ class Field:
                     "clipped": False,
                     "childFrame": False,
                 }
-            if "isConnected" in expression:
+            if expression == "el => !el.isConnected":
                 return self.detached
             if "blur()" in expression:
                 self.blurs += 1
@@ -1795,16 +1795,21 @@ def _location_scene(
     candidate = Field("suggestion", page=page)
     dialog_heading = Field("dialog-heading", page=page, count=heading)
     scans = {"value": 0}
+    selected_token = None
 
     def candidate_ready() -> bool:
         return scans["value"] >= suggestions_after
 
     def on_evaluate(field: Field, expression, arg):
+        nonlocal selected_token
+        if isinstance(arg, dict) and "verifyCollapse" in arg:
+            return arg["verifyCollapse"] == selected_token and candidate.detached
         if isinstance(arg, dict) and "stamp" in arg:
             # JS stamps the exact-match row so the caller can click a Locator.
             if not candidate_ready():
                 return False
-            page.add(f'[data-instagram-suggestion="{arg["stamp"]}"]', candidate)
+            selected_token = arg["stamp"]
+            page.add(f'[data-instagram-suggestion="{selected_token}"]', candidate)
             return True
         if isinstance(arg, dict):
             return False

@@ -30,8 +30,10 @@ from uploader.meta_uploader.insgraph_uploader.controls._rows import (
     dismiss_suggestions,
 )
 from uploader.meta_uploader.insgraph_uploader.options import (
+    ACCOUNT_INELIGIBLE,
     APPLY_ORDER,
     DEFAULT_OFF,
+    EDITOR_OBSCURED,
     INELIGIBLE,
     MISMATCH,
     MISSING,
@@ -42,6 +44,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     OptionMismatchError,
     empty_option_record,
     instagram_caption,
+    caption_topic_records,
     option_failures,
     option_kind,
     option_status,
@@ -55,6 +58,7 @@ from utils.browser_cleanup import close_browser_resources
 from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
 from utils.dom import ElementUnusableError, check, reject_ambiguous, visible_element_snapshot
+from utils.caption_topics import describe_caption_difference
 from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
@@ -81,6 +85,40 @@ INSTAGRAM_CAPTION_EDITOR = (
     '[contenteditable="true"][role="textbox"][data-lexical-editor="true"]'
 )
 INSTAGRAM_CAPTION_EDITOR_FALLBACK = '[contenteditable="true"][role="textbox"]'
+# 创建页可操作性探测：只认 role=dialog / 原生 dialog[open]，一次快照取
+# 可见性、祖先 aria-hidden、是否含配文编辑器与首行文案。前台「放弃帖子？」
+# 覆盖创建页时，编辑器仍在 DOM 且可能仍有盒模型，必须显式看祖先 aria-hidden
+# 与额外可见对话框，不能把“读不到开关”归因为入口缺失。
+_COMPOSER_JS = """(editorSelector) => {
+  const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const hiddenAncestor = (node) => {
+    for (let el = node; el; el = el.parentElement) {
+      if (String(el.getAttribute('aria-hidden') || '').trim().toLowerCase() === 'true') {
+        return true;
+      }
+    }
+    return false;
+  };
+  const nodes = Array.from(new Set(document.querySelectorAll(
+    '[role="dialog"], dialog[open]'
+  )));
+  return nodes.map((node) => {
+    const rect = node.getBoundingClientRect();
+    const style = window.getComputedStyle(node);
+    const visible = node.isConnected
+      && rect.width > 0 && rect.height > 0
+      && style.display !== 'none'
+      && style.visibility !== 'hidden' && style.visibility !== 'collapse'
+      && Number(style.opacity) >= 0.1;
+    return {
+      text: norm(node.innerText || node.textContent).slice(0, 120),
+      visible: visible,
+      ariaHiddenAncestor: hiddenAncestor(node),
+      hasEditor: !!node.querySelector(editorSelector),
+      notification: !!node.querySelector('img[src*="launcher.png"]'),
+    };
+  });
+}"""
 # 视频编辑页的封面入口只接受图片，且 accept 顺序不保证；按“含图片、不含视频”定位，
 # 并保留精确 accept 顺序作为旧版回退。
 INSTAGRAM_COVER_INPUT = (
@@ -212,6 +250,71 @@ async def _caption_editor(dialog: Locator) -> Locator:
     )
 
 
+def _dialog_label(dialog: dict) -> str:
+    """取对话框首段可见文案，用于遮挡失败信息。"""
+    text = str(dialog.get('text') or '').strip()
+    return text[:40] or '未命名对话框'
+
+
+async def _composer_obstruction(page: Page) -> str | None:
+    """返回创建页被遮挡/不可操作的说明；可操作时返回 ``None``。
+
+    必须在任何选项 ``resolve()`` 之前调用：只有确认创建页可操作，AI 入口
+    “找不到”才能归因为 ``entry_missing``。额外可见对话框（例如
+    「放弃帖子？」）或创建页祖先 ``aria-hidden=true`` 都表示当前编辑器
+    不可核对，必须停在 Share 前，不能把读不到开关误记成默认关闭。
+    """
+    editor_selector = (
+        f'{INSTAGRAM_CAPTION_EDITOR}, {INSTAGRAM_CAPTION_EDITOR_FALLBACK}'
+    )
+    try:
+        dialogs = await page.evaluate(_COMPOSER_JS, editor_selector)
+    except Exception:
+        # 纯内存 page double 或探测失败：沿用既有流程，不凭空判定遮挡。
+        # 真实浏览器的遮挡会由下面的正证据（额外可见对话框 / aria-hidden）命中。
+        return None
+    if not isinstance(dialogs, list) or not dialogs:
+        return None
+    composers = [
+        item for item in dialogs
+        if isinstance(item, dict) and item.get('hasEditor')
+    ]
+    if not composers:
+        # 没找到含编辑器的弹窗时无法区分“编辑器还没挂载”和“入口缺失”，
+        # 保持既有行为，让后续配文/控件流程给出原始错误。
+        return None
+    if len(composers) > 1:
+        return (
+            f'页面有 {len(composers)} 个含配文编辑器的创建弹窗，'
+            '无法唯一确认当前编辑器'
+        )
+    composer = composers[0]
+    foreground = [
+        item for item in dialogs
+        if item is not composer and isinstance(item, dict)
+        and item.get('visible') and not item.get('ariaHiddenAncestor')
+        and not item.get('notification')
+        and str(item.get('text') or '').strip()
+    ]
+    if composer.get('ariaHiddenAncestor'):
+        if foreground:
+            return (
+                f'创建页编辑器被前台对话框「{_dialog_label(foreground[0])}」'
+                '遮挡（创建页处于 aria-hidden）'
+            )
+        return (
+            '创建页编辑器处于 aria-hidden，无法核对选项'
+            '（可能被「放弃帖子？」确认框遮挡）'
+        )
+    if not composer.get('visible'):
+        return '创建页编辑器不可见，无法核对选项'
+    if foreground:
+        return (
+            f'创建页编辑器被前台对话框「{_dialog_label(foreground[0])}」遮挡'
+        )
+    return None
+
+
 async def _require_unique(
     locator: Locator, *, what: str, role: str = 'editable'
 ) -> None:
@@ -250,8 +353,8 @@ CAPTION_READBACK_POLL_MS = 200
 
 
 def _normalise_caption_text(text: str) -> str:
-    """比较前统一换行并去掉尾部空白；两侧走同一规则。"""
-    return str(text).replace('\r\n', '\n').replace('\r', '\n').rstrip()
+    """只统一换行编码，保留所有空白。"""
+    return str(text).replace('\r\n', '\n').replace('\r', '\n')
 
 
 async def _read_back_caption(
@@ -260,14 +363,16 @@ async def _read_back_caption(
     *,
     page: Page,
     budget: PublishTimeoutBudget,
-) -> None:
+) -> str:
     """轮询编辑器的渲染文本，直到与键入的配文**全等**（逐字哨兵）。
 
     真机 2026-11-13（ticket 05，``--no-publish`` 视频干跑）：键入本身正确，
     旧的 ``to_have_text`` 读 ``textContent`` 丢了 ``<br><br>`` 的换行而误报。
     只换读取形态，不放松比较：丢字、追加、换行丢失都照常失败
     （``AssertionError``；stage ``publish``，退出 1，未发布任何内容）。
-    探测异常照常向上抛，绝不因探测失败而放行。
+    失败文案给出首个不同字符，便于指出吞字、错位或多余追加。
+    探测异常照常向上抛，绝不因探测失败而放行。成功时返回回读到的全文，
+    话题证据只从这段已验证文本生成。
     """
     expected = _normalise_caption_text(caption)
     timeout_ms = budget.clamp_ms(CAPTION_READBACK_TIMEOUT_MS)
@@ -275,10 +380,11 @@ async def _read_back_caption(
     while True:
         actual = _normalise_caption_text(await editor.inner_text())
         if actual == expected:
-            return
+            return actual
         if time.monotonic() >= deadline:
             raise AssertionError(
                 'Instagram 配文回读不一致：'
+                f'{describe_caption_difference(expected, actual)}；'
                 f'期望 {expected!r}，实际 {actual!r}'
             )
         await page.wait_for_timeout(CAPTION_READBACK_POLL_MS)
@@ -866,13 +972,56 @@ class InstagramUploader:
         )
 
     def _record_option(
-        self, key: str, requested, applied, status: str, reason: str | None = None
+        self,
+        key: str,
+        requested,
+        applied,
+        status: str,
+        reason: str | None = None,
+        detail: str | None = None,
+        extra: dict | None = None,
     ) -> None:
-        """写入单项结果；reason 仅在需要归因时出现。"""
+        """写入单项结果；reason/detail/extra 仅在需要归因或取证时出现。"""
         record = {'requested': requested, 'applied': applied, 'status': status}
         if reason is not None:
             record['reason'] = reason
+        if detail is not None:
+            record['detail'] = detail
+        # 兼容追加：地点所点行证据（candidate_*）不能覆盖既有结果键。
+        for name, value in (extra or {}).items():
+            if value is not None and name not in record:
+                record[name] = value
         self.result['options'][key] = record
+
+    async def _reject_obscured_composer(self, page: Page) -> None:
+        """创建页被遮挡时先记录可核对的结果，再停止；不触碰任何选项控件。
+
+        真实失败现场里创建页的祖先变成 ``aria-hidden=true``，前台只剩
+        「放弃帖子？」确认框；此时读不到 AI 开关并不能证明入口缺失。这里在
+        ``resolve()`` 之前统一拦截，保证结果区分 ``editor_obscured`` 与
+        ``entry_missing``，且 Share 点击次数为零。
+        """
+        obstruction = await _composer_obstruction(page)
+        if obstruction is None:
+            return
+        self.stage = 'options'
+        for key in APPLY_ORDER:
+            requested = requested_option(self.options, key)
+            if requested is None:
+                continue
+            self._record_option(
+                key,
+                requested,
+                None,
+                MISMATCH,
+                reason=EDITOR_OBSCURED,
+                detail=obstruction,
+            )
+        self._write_result()
+        raise RuntimeError(
+            'Instagram 发布选项未生效（尚未点击 Share）: '
+            f'{obstruction}'
+        )
 
     async def _apply_one_option(
         self, key: str, requested, control, *, budget: PublishTimeoutBudget
@@ -892,24 +1041,70 @@ class InstagramUploader:
             return
         presence = await control.resolve()
         if presence != PRESENT:
-            status, reason = option_status(
-                requested, None, kind=kind, presence=presence
-            )
-            # 入口不可用且请求的是“关闭”时，spec §5.2 要求记录实际状态（applied=false）；
-            # 请求值/开启时该行为 null，且读取可能触发控件副作用，故不读。
             applied = None
-            if presence == INELIGIBLE and kind == 'toggle' and requested is False:
+            # AI 声明（ticket 17）显式关闭时，可见但禁用的开关仍可能读到开启；
+            # 必须按实际回读判定，不能因为“不可用”就一律记 default_off 放行。
+            if (
+                presence == INELIGIBLE
+                and key == 'ai_generated'
+                and requested is False
+            ):
+                try:
+                    applied = await control.read()
+                except Exception as error:
+                    raise OptionMismatchError(
+                        f'Instagram {key} 开关可见但已禁用，'
+                        f'且无法回读当前值: {error}',
+                        applied=None,
+                        reason=ACCOUNT_INELIGIBLE,
+                    ) from error
+                if applied is False:
+                    self._record_option(
+                        key, requested, applied, DEFAULT_OFF, ACCOUNT_INELIGIBLE
+                    )
+                    return
+                raise OptionMismatchError(
+                    f'Instagram {key} 开关可见但已禁用，'
+                    f'回读 {"仍为开启" if applied is True else "不是关闭"}，'
+                    '无法满足关闭请求',
+                    applied=applied,
+                    reason=ACCOUNT_INELIGIBLE,
+                )
+            if presence == INELIGIBLE and key == 'comments' and requested is False:
                 try:
                     applied = await control.read()
                 except Exception:
-                    applied = None
-            self._record_option(key, requested, applied, status, reason)
+                    pass
+            status, reason = option_status(
+                requested, applied, kind=kind, presence=presence
+            )
+            self._record_option(
+                key,
+                requested,
+                applied,
+                status,
+                reason,
+                detail=getattr(control, 'last_detail', None),
+            )
             return
         current = await control.read()
+        if key == 'ai_generated' and current is None:
+            # 可见但读不到状态：不盲点开关，直接按 mismatch 停在 Share 前。
+            raise OptionMismatchError(
+                f'Instagram {key} 开关可见，但无法回读当前值',
+                applied=None,
+            )
         status, reason = option_status(requested, current, kind=kind)
-        if status in (SET, DEFAULT_OFF):
+        if key != "location" and status in (SET, DEFAULT_OFF):
             # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
-            self._record_option(key, requested, current, status, reason)
+            self._record_option(
+                key,
+                requested,
+                current,
+                status,
+                reason,
+                extra=getattr(control, 'last_evidence', None),
+            )
             return
         budget.check_pre_click()
         await control.set(requested)
@@ -917,7 +1112,14 @@ class InstagramUploader:
         status, reason = option_status(
             requested, applied, kind=kind, presence=PRESENT, acted=True
         )
-        self._record_option(key, requested, applied, status, reason)
+        self._record_option(
+            key,
+            requested,
+            applied,
+            status,
+            reason,
+            extra=getattr(control, 'last_evidence', None),
+        )
 
     async def _apply_options(
         self, page: Page, *, budget: PublishTimeoutBudget, controls: dict | None = None
@@ -925,6 +1127,11 @@ class InstagramUploader:
         """按 spec §4.2 顺序应用发布选项；未请求时零控件交互。"""
         if self.options is None:
             return
+        if page is not None:
+            # 先确认创建页本身可操作，再让任何 resolve() 判断入口是否存在；
+            # 前台确认框遮挡时不得把读不到开关归类成 entry_missing。
+            budget.check_pre_click()
+            await self._reject_obscured_composer(page)
         if controls is None:
             controls = resolve_instagram_option_controls(
                 page,
@@ -945,7 +1152,16 @@ class InstagramUploader:
                     )
                 except OptionMismatchError as error:
                     budget.check_pre_click()
-                    self._record_option(key, requested, error.applied, MISMATCH)
+                    self._record_option(
+                        key,
+                        requested,
+                        error.applied,
+                        MISMATCH,
+                        reason=error.reason,
+                        extra=getattr(
+                            controls.get(key), 'last_evidence', None
+                        ),
+                    )
                     details.append(f'{key}: {str(error) or type(error).__name__}')
                 await self._log_option_outcome(key, page)
             except LoginRequiredError:
@@ -1004,13 +1220,22 @@ class InstagramUploader:
     ) -> None:
         """先登记最终响应监听再分享，响应不明时记录 unknown 且不重发。"""
         humanizer = self._humanizer(page)
+        if self.options is not None:
+            # 创建页已被前台确认框遮住时，role=dialog 只会命中确认框，
+            # 配文编辑器也无从解析；先记录选项失败再停止，保住 AI 回读证据。
+            await self._reject_obscured_composer(page)
         # 配文页独有 Lexical 编辑器；标题栏唯一主动作此时是分享。
         dialog = page.get_by_role('dialog')
         editor = await _caption_editor(dialog)
         caption = self._caption()
         # 清空后逐字写入（>1000 码点整段 insert_text），随后按渲染文本回读。
         await _type_caption(editor, caption, humanizer)
-        await _read_back_caption(editor, caption, page=page, budget=budget)
+        verified_caption = await _read_back_caption(
+            editor, caption, page=page, budget=budget
+        )
+        # 话题只从回读通过的最终公开配文识别；在选项与 Share 之前先落盘证据。
+        self.result['topics'] = caption_topic_records(verified_caption)
+        self._write_result()
         # 真机 2026-11-13：逐字输入 #标签 弹出的 hashtag 联想浮层会盖住右侧
         # 选项面板（后续点击报 covered-by）。点标题栏关闭浮层，不改写正文；
         # 标题栏缺席时该 helper 静默跳过，不因此让发布失败。

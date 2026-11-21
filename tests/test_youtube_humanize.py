@@ -311,6 +311,30 @@ class YouTubeEventSequenceTests(unittest.TestCase):
         self.assertLess(kinds.index("hit-test"), first_down)
         self.assertEqual(kinds.count("hit-test"), 2)
 
+    def test_title_hashtags_are_typed_literally_without_autocomplete(self):
+        timeline = Timeline()
+        keyboard = BufferKeyboard(timeline)
+        title_box = ClickableLocator("title", timeline=timeline)
+        page = _hashtag_page(
+            timeline,
+            keyboard,
+            text_locator=title_box,
+            candidates={},
+            dropdown_open=False,
+        )
+        humanizer = NamedHumanizer(page, timeline)
+
+        asyncio.run(
+            youtube_main._fill_editable(
+                page, TITLE_INPUT, "#Shorts 标题", humanizer, allow_hashtags=False
+            )
+        )
+
+        # The `#` reaches the title as plain text, never through candidate code.
+        self.assertEqual(keyboard.finish(), ["#Shorts 标题"])
+        self.assertEqual(page.mouse.down_count, 1)  # focus click only
+        self.assertNotIn(("press", "Escape"), keyboard.actions)
+
     def test_hashtag_miss_keeps_plain_text_and_dismisses_the_dropdown(self):
         timeline = Timeline()
         keyboard = BufferKeyboard(timeline)
@@ -361,6 +385,37 @@ class YouTubeEventSequenceTests(unittest.TestCase):
         # One candidate click for #hit; #miss stays plain text.
         self.assertEqual(page.mouse.down_count, 2)
         self.assertEqual(timeline.count("after_type"), 5)
+
+    def test_description_topic_candidate_excludes_trailing_punctuation_and_url_fragment(self):
+        timeline = Timeline()
+        keyboard = BufferKeyboard(timeline)
+        desc_box = ClickableLocator("description", timeline=timeline)
+        hit = ClickableLocator("candidate", timeline=timeline)
+        frag = ClickableLocator("fragment", timeline=timeline)
+        page = _hashtag_page(
+            timeline,
+            keyboard,
+            text_locator=desc_box,
+            candidates={
+                "text:#hit:exact": hit,
+                "text:#frag:exact": frag,
+            },
+        )
+        humanizer = NamedHumanizer(page, timeline)
+        text = "开头 #hit, 中间 https://example.com/#frag 结尾"
+
+        asyncio.run(
+            youtube_main._fill_editable(
+                page, DESC_INPUT, text, humanizer, multiline=True
+            )
+        )
+
+        # The comma stays outside the topic and the URL fragment is not a
+        # topic at all: only ``#hit`` gets an autocomplete lookup/click.
+        self.assertEqual(keyboard.finish(), [text])
+        self.assertEqual(page.mouse.down_count, 2)
+        self.assertTrue(hit.evaluate_calls)
+        self.assertEqual(frag.evaluate_calls, [])
 
     def test_over_the_horizon_goes_through_exactly_one_bulk_insert(self):
         timeline = Timeline()
@@ -627,6 +682,11 @@ class YouTubePublishDispatchGuardTests(unittest.TestCase):
         with (
             patch.object(youtube_main, "_click_if_present", _click_if_present),
             patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(youtube_main, "_read_editable", AsyncMock(return_value="")),
+            patch.object(youtube_main, "_verify_editable", AsyncMock()),
+            patch.object(
+                youtube_main, "_description_limit_message", AsyncMock(return_value=None)
+            ),
             patch.object(
                 youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
             ),
@@ -695,6 +755,11 @@ class YouTubePostPublishCloseTests(unittest.TestCase):
         with (
             patch.object(youtube_main, "_click_if_present", _click_if_present),
             patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(youtube_main, "_read_editable", AsyncMock(return_value="")),
+            patch.object(youtube_main, "_verify_editable", AsyncMock()),
+            patch.object(
+                youtube_main, "_description_limit_message", AsyncMock(return_value=None)
+            ),
             patch.object(
                 youtube_main, "_wait_upload_complete", AsyncMock(return_value=True)
             ),

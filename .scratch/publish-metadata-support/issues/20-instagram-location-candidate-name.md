@@ -1,6 +1,7 @@
 # 20: Instagram 按候选名称选点并写入结果
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build

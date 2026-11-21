@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
+import json
 import os
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from patchright.async_api import Locator, async_playwright
 
+from sau_commands import rednote as rednote_command
 from uploader.rednote_uploader import main as rednote
 
 
@@ -40,9 +45,21 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         self.humanizer = self.app._humanizer(self.page)
 
     async def declaration_page(
-        self, labels, *, wrapper='lass="declaration-wrapper"', persist=True
+        self,
+        labels,
+        *,
+        wrapper='lass="declaration-wrapper"',
+        persist=True,
+        close=True,
+        selected=None,
     ):
         options = "".join(f'<div class="d-option">{label}</div>' for label in labels)
+        selected_js = (
+            "document.querySelector('.d-select-description').textContent = "
+            f"{json.dumps(selected)};"
+            if selected is not None
+            else "document.querySelector('.d-select-description').textContent = option.textContent;"
+        )
         await self.page.set_content(f"""
           <div {wrapper} onclick="document.querySelector('.d-popover').style.display='block'">
             <div class="d-select-content"><div class="d-select-description">unset</div></div>
@@ -51,8 +68,8 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
           <script>
           document.querySelectorAll('.d-option').forEach(option => option.onclick = () => {{
             document.body.dataset.selected = option.textContent;
-            if ({str(persist).lower()}) document.querySelector('.d-select-description').textContent = option.textContent;
-            document.querySelector('.d-popover').style.display = 'none';
+            if ({str(persist).lower()}) {selected_js}
+            if ({str(close).lower()}) document.querySelector('.d-popover').style.display = 'none';
           }});
           </script>
         """)
@@ -64,6 +81,65 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await self.page.get_attribute("body", "data-selected"), "笔记含AI合成内容"
         )
+        self.assertEqual(
+            self.app.declaration_report,
+            {
+                "requested": "ai",
+                "requested_label": "笔记含AI合成内容",
+                "observed": "笔记含AI合成内容",
+                "status": "set",
+            },
+        )
+
+    async def test_declaration_menu_must_collapse_before_readback(self):
+        await self.declaration_page(["笔记含AI合成内容"], close=False)
+        self.app.content_type = "ai"
+        with self.assertRaisesRegex(RuntimeError, "菜单未收起.*尚未点击发布"):
+            await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+
+    async def test_empty_selected_value_is_a_pre_publish_failure(self):
+        await self.declaration_page(["笔记含AI合成内容"], selected="")
+        self.app.content_type = "ai"
+        with self.assertRaises(RuntimeError) as ctx:
+            await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        message = str(ctx.exception)
+        self.assertIn("请求=ai", message)
+        self.assertIn("终值=（空）", message)
+        self.assertIn("选中的内容类型为空", message)
+        self.assertIn("尚未点击发布", message)
+
+    async def test_other_selected_value_is_a_pre_publish_failure(self):
+        await self.declaration_page(
+            ["笔记含AI合成内容"], selected="内容包含营销广告"
+        )
+        self.app.content_type = "ai"
+        with self.assertRaises(RuntimeError) as ctx:
+            await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        message = str(ctx.exception)
+        self.assertIn("请求=ai", message)
+        self.assertIn("终值=内容包含营销广告", message)
+        self.assertIn("回读不符", message)
+        self.assertIn("尚未点击发布", message)
+
+    async def test_missing_declaration_entry_reports_request_and_reason(self):
+        await self.declaration_page(["笔记含AI合成内容"], wrapper='class="other"')
+        self.app.content_type = "ai"
+        original = rednote.wait_resolved
+
+        async def fast(*args, **kwargs):
+            kwargs["timeout_ms"] = 0
+            return await original(*args, **kwargs)
+
+        with patch.object(rednote, "wait_resolved", fast):
+            with self.assertRaises(RuntimeError) as ctx:
+                await self.app.apply_declarations(
+                    self.page, humanizer=self.humanizer
+                )
+        message = str(ctx.exception)
+        self.assertIn("请求=ai", message)
+        self.assertIn("终值=未读到", message)
+        self.assertIn("未找到内容类型声明入口", message)
+        self.assertIn("尚未点击发布", message)
 
     async def test_unverified_english_label_is_not_guessed(self):
         await self.declaration_page(["Contains AI-generated content"])
@@ -84,6 +160,20 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.app.apply_declarations(self.page, humanizer=self.humanizer)
         self.assertIsNone(await self.page.get_attribute("body", "data-selected"))
+
+    async def test_omitted_content_type_keeps_the_page_preset(self):
+        await self.page.set_content("""
+          <div lass="declaration-wrapper">
+            <div class="d-select-description">笔记含AI合成内容</div>
+          </div>
+        """)
+        self.app.content_type = None
+        await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        self.assertEqual(
+            await self.page.locator(".d-select-description").inner_text(),
+            "笔记含AI合成内容",
+        )
+        self.assertIsNone(self.app.declaration_report)
 
     async def cover_page(self, label, *, close=True, update=True):
         await self.page.set_content(f"""
@@ -179,16 +269,29 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
                         )
                 self.assertEqual(humanizer.click.await_count, clicks)
 
-    async def test_new_topic_is_not_an_existing_topic_candidate(self):
+    async def test_original_and_ai_are_combinable(self):
+        await self.declaration_page(["笔记含AI合成内容"])
+        await self.page.evaluate(
+            """() => document.body.insertAdjacentHTML(
+              'afterbegin',
+              '<div class="original-wrapper"><button class="d-switch" role="switch" aria-checked="true">Original</button></div>'
+            )"""
+        )
+        self.app.original_declaration = True
+        self.app.content_type = "ai"
+        await self.app.apply_declarations(self.page, humanizer=self.humanizer)
+        self.assertEqual(
+            self.app.declaration_report["observed"], "笔记含AI合成内容"
+        )
+
+    async def test_same_name_new_topic_is_a_clickable_candidate(self):
         await self.page.set_content("""<div id="creator-editor-topic-container">
-          <div class="item"><span class="name">#travel</span><span class="newTopic">New topic</span></div>
+          <div class="item"><span class="name">#travel</span><span class="newTopic">新建话题</span></div>
         </div>""")
         candidate, count = await self.app._scan_topic_candidate(self.page, "travel")
-        self.assertIsNone(candidate)
-        self.assertEqual(count, 1)
-        await self.page.locator(".newTopic").evaluate("(element) => element.remove()")
-        candidate, count = await self.app._scan_topic_candidate(self.page, "travel")
         self.assertIsNotNone(candidate)
+        self.assertEqual(count, 1)
+        await candidate.dispose()
 
     async def test_topic_list_refresh_does_not_wait_for_a_removed_position(self):
         self.page.set_default_timeout(1500)
@@ -256,6 +359,377 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
                     )
                 finally:
                     await candidate.dispose()
+
+    async def inline_topic_page(self, rows, *, hard_limit=False):
+        data = json.dumps(rows, ensure_ascii=False)
+        limit = (
+            '<div class="edit-container"><div class="length-error">超限</div></div>'
+            if hard_limit
+            else ""
+        )
+        await self.page.set_content(f"""
+          <style>
+            .tiptap {{ min-height: 40px; padding: 8px; border: 1px solid #ccc; white-space: pre-wrap; }}
+            #creator-editor-topic-container {{ position:absolute; top:120px; left:0; z-index:9; }}
+            #creator-editor-topic-container .item {{ display:block; padding:4px 8px; background:#fff; cursor:pointer; }}
+          </style>
+          <div class="tiptap" role="textbox" contenteditable="true"></div>
+          <div id="creator-editor-topic-container"></div>
+          {limit}
+          <button id="publish-btn" style="position:fixed;bottom:0;left:0">发布</button>
+          <script>
+            document.body.dataset.publishDowns = '0';
+            document.addEventListener('mousedown', (event) => {{
+              if (event.target && event.target.id === 'publish-btn') {{
+                const current = Number(document.body.dataset.publishDowns || '0');
+                document.body.dataset.publishDowns = String(current + 1);
+              }}
+            }}, true);
+          </script>
+          <script>
+            (() => {{
+            window.topicMap = {data};
+            const editor = document.querySelector('.tiptap');
+            const container = document.querySelector('#creator-editor-topic-container');
+            let lastQuery = null;
+            function lastTextNode() {{
+              const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+              let node, last = null;
+              while ((node = walker.nextNode())) last = node;
+              return last;
+            }}
+            function trailingQuery() {{
+              const node = lastTextNode();
+              if (!node) return null;
+              const match = node.nodeValue.match(/#([^\\s#]+)$/);
+              return match ? match[1] : null;
+            }}
+            function choose(row) {{
+              const node = lastTextNode();
+              if (!node || !lastQuery) return;
+              const token = '#' + lastQuery;
+              if (!node.nodeValue.endsWith(token)) return;
+              node.nodeValue = node.nodeValue.slice(0, -token.length);
+              const anchor = document.createElement('a');
+              anchor.className = 'tiptap-topic';
+              anchor.contentEditable = 'false';
+              const name = row.name || lastQuery;
+              anchor.dataset.topic = JSON.stringify({{id: 'id-' + name, link: '', name: name}});
+              anchor.textContent = '#' + name;
+              const hidden = document.createElement('span');
+              hidden.className = 'content-hide';
+              hidden.textContent = '[话题]#';
+              anchor.appendChild(hidden);
+              if (row.mode === 'swallow') node.nodeValue = node.nodeValue.slice(0, -2);
+              if (row.mode === 'misplace' && editor.firstChild) {{
+                editor.insertBefore(anchor, editor.firstChild);
+              }} else {{
+                node.parentNode.insertBefore(anchor, node.nextSibling);
+              }}
+              const space = document.createTextNode('\\u00a0');
+              node.parentNode.insertBefore(space, anchor.nextSibling);
+              if (row.mode === 'extra') {{
+                node.parentNode.insertBefore(document.createTextNode('EXTRA'), space.nextSibling);
+              }}
+              editor.focus();
+              const range = document.createRange();
+              range.setStart(space, 1);
+              range.collapse(true);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+              container.innerHTML = '';
+            }}
+            function render() {{
+              const query = trailingQuery();
+              lastQuery = query;
+              container.innerHTML = '';
+              if (!query || !(query in window.topicMap)) return;
+              for (const row of window.topicMap[query]) {{
+                const item = document.createElement('div');
+                item.className = 'item';
+                const label = document.createElement('span');
+                label.className = 'name';
+                label.textContent = row.label;
+                item.appendChild(label);
+                if (row.new) {{
+                  const fresh = document.createElement('span');
+                  fresh.className = 'newTopic';
+                  fresh.textContent = '新建话题';
+                  item.appendChild(fresh);
+                }}
+                item.onclick = () => choose(row);
+                container.appendChild(item);
+              }}
+            }}
+            editor.addEventListener('input', render);
+            document.addEventListener('keydown', (event) => {{
+              if (event.key === 'Escape') container.innerHTML = '';
+            }});
+            }})();
+          </script>
+        """)
+
+    def inline_app(self, action: str, caption: str):
+        if action == "upload-note":
+            app = rednote.RednoteNote(
+                image_paths=["a.png"],
+                note=caption,
+                title="标题",
+                tags=[],
+                publish_date=0,
+                account_file="unused.json",
+                no_publish=True,
+            )
+        else:
+            app = rednote.RednoteVideo(
+                title="标题",
+                file_path="unused.mp4",
+                tags=[],
+                publish_date=0,
+                account_file="unused.json",
+                desc=caption,
+                no_publish=True,
+            )
+        app.start_publish_budget()
+        self.enterContext(patch.object(app, "_settle", AsyncMock()))
+        return app
+
+    async def run_inline_caption(self, app, caption: str):
+        app.desc = caption
+        with (
+            patch.object(rednote, "REDNOTE_TOPIC_READY_WINDOW_MS", 300),
+            patch.object(rednote, "REDNOTE_TOPIC_READBACK_WINDOW_MS", 150),
+        ):
+            await app.fill_desc(self.page, humanizer=self.humanizer)
+        return app
+
+    async def editor_anchor_names(self):
+        nodes = self.page.locator('div.tiptap[role="textbox"] a[data-topic]')
+        raw = await nodes.evaluate_all(
+            "nodes => nodes.map(node => node.getAttribute('data-topic'))"
+        )
+        return [json.loads(item)["name"] for item in raw]
+
+    async def test_inline_topic_links_ordinary_and_new_topic_in_place(self):
+        for action in ("upload-video", "upload-note"):
+            with self.subTest(action=action):
+                caption = "Today #coffee, then #qzx974631sau."
+                await self.inline_topic_page(
+                    {
+                        "coffee": [
+                            {"label": "#coffeecreamer"},
+                            {"label": "#coffee探店"},
+                            {"label": "#coffee"},
+                        ],
+                        "qzx974631sau": [
+                            {"label": "#qzx974631sau-latte"},
+                            {"label": "#qzx974631sau", "new": True},
+                        ],
+                    }
+                )
+                app = self.inline_app(action, caption)
+
+                await self.run_inline_caption(app, caption)
+
+                self.assertEqual(app.caption_readback, caption)
+                self.assertEqual(
+                    [item["status"] for item in app.topic_results],
+                    ["linked", "linked"],
+                )
+                self.assertEqual(
+                    await self.editor_anchor_names(),
+                    ["coffee", "qzx974631sau"],
+                )
+                body = await self.page.locator(".tiptap").inner_text()
+                self.assertNotIn("\u00a0", body)
+
+    async def test_inline_caption_preserves_duplicates_links_punctuation_and_newlines(
+        self,
+    ):
+        caption = (
+            "第一行 #咖啡，紧邻。#咖啡！\n"
+            "链接 https://example.com/#片段 保留\n"
+            "Mixed #Coffee_2 end"
+        )
+        await self.inline_topic_page(
+            {
+                "咖啡": [{"label": "#咖啡"}],
+                "Coffee_2": [{"label": "#Coffee_2"}],
+            }
+        )
+        app = self.inline_app("upload-video", caption)
+
+        await self.run_inline_caption(app, caption)
+
+        self.assertEqual(app.caption_readback, caption)
+        self.assertEqual(
+            [(item["index"], item["text"]) for item in app.topic_results],
+            [(1, "#咖啡"), (2, "#咖啡"), (3, "#Coffee_2")],
+        )
+        self.assertEqual(
+            await self.editor_anchor_names(), ["咖啡", "咖啡", "Coffee_2"]
+        )
+        body = await self.page.locator(".tiptap").inner_text()
+        self.assertNotIn("\u00a0", body)
+        self.assertIn("https://example.com/#片段", body)
+
+    async def test_inline_auto_nbsp_is_removed_and_author_nbsp_is_kept(self):
+        caption = "A #coffee, B #tea\u00a0end"
+        await self.inline_topic_page(
+            {
+                "coffee": [{"label": "#coffee"}],
+                "tea": [{"label": "#tea"}],
+            }
+        )
+        app = self.inline_app("upload-note", caption)
+
+        await self.run_inline_caption(app, caption)
+
+        self.assertEqual(app.caption_readback, caption)
+        self.assertEqual(await self.editor_anchor_names(), ["coffee", "tea"])
+        body = await self.page.locator(".tiptap").inner_text()
+        # 逗号前是作者自己的半角逗号；第二个话题后是作者自己的 U+00A0。
+        self.assertIn(", B", body)
+        self.assertIn("\u00a0end", body)
+        self.assertEqual(body.count("\u00a0"), 1)
+
+    async def test_approximate_only_keeps_the_text(self):
+        caption = "今天 #coffee，结束"
+        await self.inline_topic_page(
+            {"coffee": [{"label": "#coffeecreamer"}]}
+        )
+        app = self.inline_app("upload-video", caption)
+
+        await self.run_inline_caption(app, caption)
+
+        self.assertEqual(app.caption_readback, caption)
+        self.assertEqual(await self.editor_anchor_names(), [])
+        self.assertEqual(
+            app.topic_results,
+            [
+                {
+                    "index": 1,
+                    "name": "coffee",
+                    "text": "#coffee",
+                    "status": "text",
+                    "reason": "无同名候选",
+                }
+            ],
+        )
+
+    async def test_eleventh_topic_stays_text_and_remains_readable(self):
+        caption = " ".join(f"#tag{i}" for i in range(12))
+        await self.inline_topic_page(
+            {f"tag{i}": [{"label": f"#tag{i}"}] for i in range(12)}
+        )
+        app = self.inline_app("upload-note", caption)
+
+        await self.run_inline_caption(app, caption)
+
+        self.assertEqual(app.caption_readback, caption)
+        self.assertEqual(
+            await self.editor_anchor_names(), [f"tag{i}" for i in range(10)]
+        )
+        self.assertEqual(
+            [item["status"] for item in app.topic_results],
+            ["linked"] * 10 + ["text"] * 2,
+        )
+        self.assertEqual(
+            [item["reason"] for item in app.topic_results[-2:]],
+            ["已达可关联上限 10", "已达可关联上限 10"],
+        )
+        body = await self.page.locator(".tiptap").inner_text()
+        self.assertIn("#tag10", body)
+        self.assertIn("#tag11", body)
+
+    async def _assert_inline_failure(self, row: dict, expected: str):
+        caption = "今天 #coffee，结束"
+        await self.inline_topic_page({"coffee": [{"label": "#coffee", **row}]})
+        app = self.inline_app("upload-video", caption)
+        with self.assertRaises(rednote.ElementUnusableError) as ctx:
+            await self.run_inline_caption(app, caption)
+        self.assertFalse(ctx.exception.publish_clicked)
+        self.assertIn("未点击发布", str(ctx.exception))
+        self.assertIn(expected, ctx.exception.reason)
+        return ctx.exception
+
+    async def test_wrong_topic_selection_stops_before_publish(self):
+        error = await self._assert_inline_failure(
+            {"name": "coffeecreamer"}, "选中的话题与原词不符"
+        )
+        self.assertIn("实际「#coffeecreamer」", error.reason)
+
+    async def test_swallowed_text_stops_before_publish(self):
+        await self._assert_inline_failure({"mode": "swallow"}, "个字符不同")
+
+    async def test_misplaced_topic_stops_before_publish(self):
+        await self._assert_inline_failure({"mode": "misplace"}, "个字符不同")
+
+    async def test_extra_append_stops_before_publish(self):
+        error = await self._assert_inline_failure({"mode": "extra"}, "个字符不同")
+        self.assertIn("EXTRA", error.reason)
+
+    async def test_no_publish_stops_after_topic_readback_and_before_any_click(self):
+        caption = "Today #coffee, then done."
+        await self.inline_topic_page(
+            {"coffee": [{"label": "#coffee", "new": True}]}
+        )
+        app = self.inline_app("upload-note", caption)
+        app.no_publish = True
+
+        with (
+            patch.object(self.page, "goto", AsyncMock()),
+            patch.object(self.page, "wait_for_url", AsyncMock()),
+            patch.object(rednote, "_run_dom_quiet_gate", AsyncMock()),
+            patch.object(rednote, "_clear_known_overlays", AsyncMock()),
+            patch.object(rednote, "_note_upload_gate", AsyncMock()),
+            patch.object(rednote, "_check_blocked", AsyncMock()),
+            patch.object(rednote, "_wait_for_arm", AsyncMock()),
+            patch.object(app, "fill_title", AsyncMock()),
+            patch.object(app, "_verify_schedule_before_fire", AsyncMock()),
+        ):
+            await app.upload_note_content(self.page, mode="local")
+
+        self.assertEqual(app.caption_readback, caption)
+        self.assertEqual(
+            [item["status"] for item in app.topic_results], ["linked"]
+        )
+        self.assertEqual(
+            await self.page.evaluate("document.body.dataset.publishDowns"), "0"
+        )
+
+    async def test_omitted_and_topicless_captions_keep_the_existing_path(self):
+        await self.inline_topic_page({"coffee": [{"label": "#coffee"}]})
+        empty = self.inline_app("upload-video", "")
+        await empty.fill_desc(self.page, humanizer=self.humanizer)
+        self.assertEqual(await self.page.locator(".tiptap").inner_text(), "")
+        self.assertIsNone(empty.topic_results)
+
+        caption = "今天喝了咖啡，配上栗子蛋糕。"
+        plain = self.inline_app("upload-video", caption)
+        await plain.fill_desc(self.page, humanizer=self.humanizer)
+        self.assertIsNone(plain.topic_results)
+        self.assertEqual(
+            await self.page.locator(".tiptap").inner_text(),
+            caption,
+        )
+
+    async def test_whole_post_hard_limit_stops_before_publish(self):
+        caption = "今天 #coffee，结束"
+        await self.inline_topic_page(
+            {"coffee": [{"label": "#coffee"}]}, hard_limit=True
+        )
+        app = self.inline_app("upload-note", caption)
+
+        await self.run_inline_caption(app, caption)
+        with self.assertRaises(rednote.ElementUnusableError) as ctx:
+            await app._assert_body_not_over_limit(self.page)
+
+        self.assertEqual(
+            ctx.exception.reason, "正文超出平台长度上限（长度错误节点存在）"
+        )
+        self.assertFalse(ctx.exception.publish_clicked)
 
     async def test_original_disabled_stops_without_accepting_an_agreement(self):
         await self.page.set_content("""<div class="original-wrapper">
@@ -435,6 +909,93 @@ class RednoteOptionDOMTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "候选不唯一"):
             await self.app._fill_self_shot(self.page, humanizer=self.humanizer)
         self.assertIsNone(await self.page.get_attribute("body", "data-location"))
+
+
+
+class RednoteInlineTopicCliTests(unittest.TestCase):
+    def _args(self, action: str = "upload-video"):
+        return SimpleNamespace(
+            action=action,
+            file="demo.mp4",
+            images=["a.png"],
+            title="标题",
+            desc="今天 #咖啡，重复 #咖啡。",
+            note="今天 #咖啡，重复 #咖啡。",
+            schedule=None,
+            thumbnail=None,
+            debug=False,
+            headless=True,
+            not_before=None,
+            account="acct",
+            location=None,
+            original=None,
+            content_type=None,
+            repost_source=None,
+            shoot_location=None,
+            shoot_date=None,
+            no_publish=True,
+        )
+
+    def test_topic_lines_keep_duplicates_and_the_success_summary(self):
+        for action, upload_name in (
+            ("upload-video", "upload_rednote_video"),
+            ("upload-note", "upload_rednote_note"),
+        ):
+            with self.subTest(action=action):
+                args = self._args(action)
+
+                async def fake_upload(request, **_kwargs):
+                    request.topic_results = [
+                        {
+                            "index": 1,
+                            "name": "咖啡",
+                            "text": "#咖啡",
+                            "status": "linked",
+                            "reason": None,
+                        },
+                        {
+                            "index": 2,
+                            "name": "咖啡",
+                            "text": "#咖啡",
+                            "status": "text",
+                            "reason": "无同名候选",
+                        },
+                    ]
+
+                with patch.object(
+                    rednote_command,
+                    "_validate_declarations",
+                    return_value=(None, None, None, None, None),
+                ), patch.object(
+                    rednote_command, "resolve_managed_provider", return_value=None
+                ), patch.object(
+                    rednote_command, "require_local_account"
+                ), patch.object(
+                    rednote_command, "resolve_account_label", return_value="acct"
+                ), patch.object(
+                    rednote_command, "managed_ignored_keys", return_value=()
+                ), patch.object(
+                    rednote_command, upload_name, new=fake_upload
+                ), redirect_stdout(
+                    io.StringIO()
+                ) as out, redirect_stderr(
+                    io.StringIO()
+                ):
+                    code = asyncio.run(rednote_command.run(args))
+
+                self.assertEqual(code, 0)
+                lines = out.getvalue().splitlines()
+                self.assertEqual(
+                    [line for line in lines if "配文话题" in line],
+                    [
+                        "Rednote 配文话题 1/2：#咖啡 已关联",
+                        "Rednote 配文话题 2/2：#咖啡 保留文字，无同名候选",
+                    ],
+                )
+                self.assertIn(
+                    "素材已上传，发布前检查已通过；已停止，未点击发布按钮。",
+                    lines,
+                )
 
 
 if __name__ == "__main__":

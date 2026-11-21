@@ -125,17 +125,23 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
             self.assertEqual(control.calls, ["resolve"])
             self.assertEqual(app.result["options"]["ai_generated"]["status"], NOT_REQUESTED)
 
-    def test_ineligible_but_already_off_is_default_off(self):
+    def test_disabled_comments_report_the_observed_value(self):
         with tempfile.TemporaryDirectory() as folder:
             app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            control = _FakeCommentsControl(presence="ineligible", values=[False])
-            self._apply(app, {"comments": control})
-            # 入口不可用时仍回读实际状态：spec §5.2 该行 applied=false。
-            self.assertEqual(control.calls, ["resolve", "read"])
-            record = app.result["options"]["comments"]
-            self.assertEqual(record["status"], DEFAULT_OFF)
-            self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
-            self.assertIs(record["applied"], False)
+            for enabled in (False, True, None):
+                control = _FakeCommentsControl(presence="ineligible", values=[enabled])
+                self._apply(app, {"comments": control})
+                result = app.result["options"]["comments"]
+                self.assertIs(result["applied"], enabled)
+                self.assertEqual(result["status"], DEFAULT_OFF)
+                self.assertEqual(control.calls, ["resolve", "read"])
+
+    def test_unconfirmed_visible_comments_stop_before_share(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(InstagramPublishOptions(comments=False), folder=folder)
+            with self.assertRaises(RuntimeError):
+                self._apply(app, {"comments": _FakeCommentsControl([], presence="present")})
+            self.assertEqual(app.result["options"]["comments"]["status"], MISMATCH)
 
 
 class _FakeSwitch:

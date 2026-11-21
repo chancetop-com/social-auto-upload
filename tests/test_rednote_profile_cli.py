@@ -140,6 +140,8 @@ class RednoteProfileCliTests(unittest.TestCase):
         page = _video_page()
         page._selectors['div.tiptap[role="textbox"][contenteditable="true"]'] = FakeLocator('body', computed_style=dict(INPUT_FACTS))
         self.prepare_editor(page)
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         media = self.root / 'video.mp4'
         media.write_bytes(b'video fixture')
         code, out, err = self.cli('upload-video', '--account', 'creator', '--file', str(media), '--title', 'Profile video', '--desc', 'Video body', '--no-publish', '--headed')
@@ -157,6 +159,23 @@ class RednoteProfileCliTests(unittest.TestCase):
         page._selectors[rednote.REDNOTE_VIDEO_FAIL_SELECTOR] = FakeLocator('no upload failure', count=0)
         page._evaluate_handler = lambda expression, arg: {'since': 1000}
         self.context.editor = page
+
+    def prepare_declaration(self, page, *, final_text):
+        from tests.fakes_xhs_dom import FakeLocator
+        from tests.test_xhs_submit import INPUT_FACTS
+        description = FakeLocator('description', text=final_text)
+        page._selectors[rednote.REDNOTE_DECLARATION_CONTAINER_SELECTOR] = FakeLocator(
+            'declaration wrapper',
+            computed_style=dict(INPUT_FACTS),
+            children={'.d-select-description': description},
+        )
+        page._selectors['div.d-popover.d-dropdown .d-option'] = FakeLocator(
+            'declaration option',
+            computed_style=dict(INPUT_FACTS),
+            children={
+                rednote.REDNOTE_DECLARATION_MENU_XPATH: FakeLocator('menu')
+            },
+        )
 
     def assert_editor_stopped(self, page, media, title, body, stdout):
         files = page._selectors[rednote.REDNOTE_UPLOAD_INPUT_SELECTOR].files
@@ -180,11 +199,100 @@ class RednoteProfileCliTests(unittest.TestCase):
         from tests.test_xhs_submit import _note_page
         page = _note_page()
         self.prepare_editor(page)
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         media = self.root / 'image.png'
         media.write_bytes(b'image fixture')
         code, out, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Profile note', '--note', 'Note body', '--no-publish')
         self.assertEqual(code, 0, err)
         self.assert_editor_stopped(page, media, 'Profile note', 'Note body', out)
+
+    def test_local_mode_prints_per_topic_lines_before_the_success_summary(self):
+        from tests.fakes_clock import FakeClock
+        from tests.test_xhs_submit import _note_page, _video_page
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        media = self.root / 'media.mp4'
+        image = self.root / 'image.png'
+        media.write_bytes(b'media')
+        image.write_bytes(b'image')
+        caption = '今天 #咖啡，重复 #咖啡。'
+        for action, flags, body_flag in [
+            ('upload-video', ['--file', str(media)], '--desc'),
+            ('upload-note', ['--images', str(image)], '--note'),
+        ]:
+            with self.subTest(action=action):
+                page = (
+                    _video_page() if action == 'upload-video' else _note_page()
+                )
+                self.prepare_editor(page)
+                env = prepare_topic_cli_page(page)
+                self.context.created_pages = []
+                with FakeClock().patch(rednote):
+                    code, out, err = self.cli(
+                        action,
+                        '--account',
+                        'creator',
+                        '--title',
+                        'Title',
+                        '--no-publish',
+                        body_flag,
+                        caption,
+                        *flags,
+                    )
+                self.assertEqual(code, 0, err)
+                lines = out.splitlines()
+                self.assertEqual(
+                    [line for line in lines if '配文话题' in line],
+                    [
+                        'Rednote 配文话题 1/2：#咖啡 已关联',
+                        'Rednote 配文话题 2/2：#咖啡 已关联',
+                    ],
+                )
+                self.assertIn(
+                    '素材已上传，发布前检查已通过；已停止，未点击发布按钮。',
+                    lines,
+                )
+                self.assertEqual(env.body.text, caption)
+                self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+
+    def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):
+        from tests.test_xhs_submit import _note_page
+        media = self.root / 'image.png'
+        media.write_bytes(b'image fixture')
+        for final_text, expected_code in [
+            ('笔记含AI合成内容', 0),
+            ('内容包含营销广告', 1),
+        ]:
+            with self.subTest(final_text=final_text):
+                page = _note_page()
+                self.prepare_editor(page)
+                self.prepare_declaration(page, final_text=final_text)
+                self.context.created_pages = []
+                code, out, err = self.cli(
+                    'upload-note',
+                    '--account',
+                    'creator',
+                    '--images',
+                    str(media),
+                    '--title',
+                    'Title',
+                    '--content-type',
+                    'ai',
+                    '--no-publish',
+                )
+                self.assertEqual(code, expected_code, err)
+                self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+                self.assertEqual(page.mouse.down_count, 0)
+                if expected_code == 0:
+                    self.assertIn('AI 声明：请求=ai（笔记含AI合成内容）', out)
+                    self.assertIn('终值=笔记含AI合成内容', out)
+                    self.assertIn('素材已上传，发布前检查已通过', out)
+                else:
+                    self.assertEqual(out, '')
+                    self.assertIn('请求=ai', err)
+                    self.assertIn('终值=内容包含营销广告', err)
+                    self.assertIn('尚未点击发布', err)
+                    self.assertNotIn('素材已上传', out)
 
     def test_no_publish_failures_never_print_success_or_submit(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser
@@ -361,7 +469,12 @@ class RednoteProfileCliTests(unittest.TestCase):
                 with patch.object(rednote, 'REDNOTE_OBSERVE_WINDOW_SECONDS', 0):
                     code, out, err = self.cli('upload-note', '--account', 'creator', '--images', str(media), '--title', 'Title')
                 if expected == 0:
-                    self.assertEqual(out, 'Rednote note upload submitted: 1 images\n')
+                    self.assertEqual(
+                        out,
+                        "AI 声明：未请求（保留页面当前值）\n"
+                        "帖子地点：未请求（保留页面当前值）\n"
+                        "Rednote note upload submitted: 1 images\n",
+                    )
                 self.assertEqual(code, expected, err)
                 self.assertEqual(page._selectors['xhs-publish-btn'].click_count, 1)
                 self.assertEqual('publish_attempted=true' in err, outcome in ('login', 'verification', 'redirecting'))

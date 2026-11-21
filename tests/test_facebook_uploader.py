@@ -103,9 +103,7 @@ class FacebookCliTests(unittest.TestCase):
                 "--title",
                 "标题",
                 "--desc",
-                "正文",
-                "--tags",
-                "一个,两个",
+                "正文 #一个 #两个",
                 "--proxy",
                 "http://proxy.example:8080",
             ]
@@ -116,8 +114,8 @@ class FacebookCliTests(unittest.TestCase):
         self.assertEqual(result, 0)
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "标题")
-        self.assertEqual(request.description, "正文")
-        self.assertEqual(request.tags, ["一个", "两个"])
+        self.assertEqual(request.description, "正文 #一个 #两个")
+        self.assertEqual(request.tags, [])
         self.assertEqual(request.proxy, "http://proxy.example:8080")
 
 

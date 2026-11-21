@@ -955,6 +955,8 @@ class Decision06ReadinessWiringTests(unittest.TestCase):
     def test_body_typing_only_uses_the_guide_overlay_rule(self):
         page = _note_page()
         app = _note_app(desc="正文", tags=[])
+        from tests.test_xhs_topics import prepare_topic_cli_page
+        prepare_topic_cli_page(page)
         clear = AsyncMock(return_value=None)
 
         with (

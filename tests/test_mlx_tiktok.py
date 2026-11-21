@@ -806,7 +806,7 @@ class TiktokUploadCliTests(unittest.TestCase):
         self.assertEqual(request.publish_date, 0)
         self.assertEqual(session_cm.exit_calls, 1)
 
-    def test_upload_parses_tags_schedule_thumbnail_and_account_label(self):
+    def test_upload_parses_inline_topics_schedule_thumbnail_and_account_label(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video = Path(tmp_dir) / "demo.mp4"
             video.write_bytes(b"video")
@@ -836,9 +836,7 @@ class TiktokUploadCliTests(unittest.TestCase):
                         "--file",
                         str(video),
                         "--title",
-                        "标题",
-                        "--tags",
-                        "#one, two",
+                        "标题 #one #two",
                         "--schedule",
                         "2026-11-05T02:30:00Z",
                         "--thumbnail",
@@ -850,9 +848,9 @@ class TiktokUploadCliTests(unittest.TestCase):
         request = builder.call_args.args[0]
         # Managed runs label with profile_id; --account is ignored (ticket 30).
         self.assertEqual(request.video_file, video)
-        self.assertEqual(request.title, "标题")
+        self.assertEqual(request.title, "标题 #one #two")
         self.assertEqual(request.account_label, "profile")
-        self.assertEqual(request.tags, ["one", "two"])
+        self.assertEqual(request.tags, [])
         self.assertEqual(
             request.publish_date,
             datetime(2026, 11, 5, 2, 30, tzinfo=timezone.utc),

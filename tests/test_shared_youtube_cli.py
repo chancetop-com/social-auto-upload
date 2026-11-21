@@ -18,6 +18,7 @@ class Studio:
         self.outcome = outcome
         self.requests = []
         self.submissions = []
+        self.records = []
         self.uploaded_files = []
         self.submitted = threading.Event()
 
@@ -36,7 +37,14 @@ class Studio:
                     self.respond(studio.editor().encode(), "text/html")
                 elif path == "/record":
                     fields = parse_qs(urlsplit(self.path).query)
-                    studio.submissions.append((fields["title"][0], fields["file"][0]))
+                    record = {
+                        "title": fields["title"][0],
+                        "description": fields.get("description", [""])[0],
+                        "keywords": fields.get("keywords", [""])[0],
+                        "file": fields["file"][0],
+                    }
+                    studio.records.append(record)
+                    studio.submissions.append((record["title"], record["file"]))
                     studio.uploaded_files.append(json.loads(fields["contents"][0]))
                     self.respond(b"OK", "text/plain")
                     studio.submitted.set()
@@ -50,6 +58,10 @@ class Studio:
             <input type=file>
             <ytcp-thumbnail-uploader><input type=file></ytcp-thumbnail-uploader>
             <div id=title-textarea><div id=textbox contenteditable=true>old title</div></div>
+            <div id=description-textarea><div id=textbox contenteditable=true></div></div>
+            <div id=description-error style="display:none">Description is too long</div>
+            <div id=tags-container><input id=text-input value="page-keyword"></div>
+            <button id=toggle-button>Show more</button>
             <tp-yt-paper-radio-button name=VIDEO_MADE_FOR_KIDS_NOT_MFK>Adults</tp-yt-paper-radio-button>
             <tp-yt-paper-radio-button name=PUBLIC>Public</tp-yt-paper-radio-button>
             <span class=progress-label>Checks complete</span>
@@ -57,15 +69,35 @@ class Studio:
             <button id=done-button>Publish</button>
             <script>
             const outcome = """ + json.dumps(self.outcome) + """;
+            const titleBox = document.querySelector('#title-textarea #textbox');
+            const descriptionBox = document.querySelector('#description-textarea #textbox');
+            if (outcome === 'description-limit') {
+                document.querySelector('#description-error').style.display = 'block';
+            }
+            const descriptionFaults = ['desc-swallow', 'desc-misplace', 'desc-append'];
+            let faulted = false;
+            descriptionBox.addEventListener('input', () => {
+                if (faulted || !descriptionFaults.includes(outcome)) return;
+                faulted = true;
+                if (outcome === 'desc-swallow') {
+                    descriptionBox.textContent = descriptionBox.textContent.slice(0, -1);
+                } else if (outcome === 'desc-misplace') {
+                    descriptionBox.textContent = 'MOVED ' + descriptionBox.textContent;
+                } else {
+                    descriptionBox.textContent += ' EXTRA';
+                }
+            });
             if (outcome === 'pre-failure') {
                 document.body.prepend(document.querySelector('#done-button').cloneNode(true));
             }
             document.querySelector('#done-button').onclick = async () => {
-                const title = document.querySelector('#textbox').innerText;
+                const title = titleBox.innerText;
+                const description = descriptionBox.innerText;
+                const keywords = document.querySelector('#tags-container #text-input').value;
                 const file = document.querySelector('input').files[0].name;
                 const files = [...document.querySelectorAll('input[type=file]')].flatMap(i => [...i.files]);
                 const contents = JSON.stringify(await Promise.all(files.map(f => f.text())));
-                await fetch('/record?' + new URLSearchParams({title, file, contents}));
+                await fetch('/record?' + new URLSearchParams({title, description, keywords, file, contents}));
                 if (outcome === 'unconfirmed' || outcome === 'page-lost') return;
                 if (outcome === 'post-login') history.pushState({}, '', '/signin');
                 document.body.innerHTML = '<div role=dialog><a href="https://youtu.be/offline">Video</a>' +
@@ -132,11 +164,58 @@ def studio_profile(request, tmp_path, installations):
         assert profile.stops == ["shared"]
 
 
-def start_video(profile):
+def start_video(profile, *, title="YouTube marker", desc=None):
     video = profile.root / "synthetic.mp4"
     video.write_bytes(b"offline fixture")
-    return profile.command(1, "youtube", "--file", str(video), "--title", "YouTube marker",
+    args = ["--title", title]
+    if desc is not None:
+        args += ["--desc", desc]
+    return profile.command(1, "youtube", "--file", str(video), *args,
                            action="upload-video", env={"HUMANIZE": "0"})
+
+
+@pytest.mark.parametrize("studio_profile", ["success"], indirect=True)
+def test_description_topics_are_reported_and_prefilled_keywords_survive(studio_profile):
+    studio, profile = studio_profile
+    description = "第一行 #咖啡，配上 #咖啡。\n链接 https://example.com/#frag"
+    child = start_video(profile, title="#标题话题 独立标题", desc=description)
+    output = child.communicate(timeout=40)[0]
+    assert child.returncode == 0, output
+    assert studio.records == [{
+        "title": "#标题话题 独立标题",
+        "description": description,
+        "keywords": "page-keyword",
+        "file": "synthetic.mp4",
+    }]
+    assert "YouTube 简介话题 1/2：#咖啡 保留文字（简介全文逐字回读一致）" in output
+    assert "YouTube 简介话题 2/2：#咖啡 保留文字（简介全文逐字回读一致）" in output
+    assert "#标题话题" not in output
+    assert "#frag" not in output
+    assert studio.submissions == [("#标题话题 独立标题", "synthetic.mp4")]
+
+
+@pytest.mark.parametrize("studio_profile", ["description-limit"], indirect=True)
+def test_studio_description_error_blocks_before_submit(studio_profile):
+    studio, profile = studio_profile
+    child = start_video(profile, desc="简介 #话题")
+    output = child.communicate(timeout=40)[0]
+    assert child.returncode == 1, output
+    assert "硬限制" in output and "未点击发布" in output
+    assert studio.submissions == [] and studio.records == []
+
+
+@pytest.mark.parametrize(
+    "studio_profile", ["desc-swallow", "desc-misplace", "desc-append"], indirect=True
+)
+def test_description_readback_mismatch_blocks_before_submit(studio_profile):
+    studio, profile = studio_profile
+    child = start_video(profile, desc="正文 #a 与 #b")
+    output = child.communicate(timeout=40)[0]
+    assert child.returncode == 1, output
+    assert "简介读回不一致" in output
+    assert "偏移" in output and "期望" in output and "实际" in output
+    assert "未点击发布" in output
+    assert studio.submissions == [] and studio.records == []
 
 
 @pytest.mark.parametrize("studio_profile", ["post-login"], indirect=True)

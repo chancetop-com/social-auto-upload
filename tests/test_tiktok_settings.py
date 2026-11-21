@@ -45,6 +45,10 @@ def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | Non
     raise AssertionError(f"parser not found: {platform}/{action}")
 
 
+def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
+    return set(parser._option_string_actions)
+
+
 def _run(argv, token=TOKEN):
     environ = {"MLX_API_TOKEN": token}
     with patch.dict(os.environ, environ):
@@ -133,6 +137,18 @@ class TiktokOptionsParserTests(unittest.TestCase):
             with self.subTest(feature=feature):
                 self.assertIn(feature, help_text)
 
+    def test_location_flag_exists_on_both_commands_without_shoot_location(self):
+        parser = sau_cli.build_parser()
+        for action in ("upload-video", "upload-note"):
+            with self.subTest(action=action):
+                command = _subparser(parser, "tiktok", action)
+                options = _option_strings(command)
+                self.assertIn("--location", options)
+                self.assertNotIn("--shoot-location", options)
+                self.assertIsNone(
+                    command._option_string_actions["--location"].default
+                )
+
 
 # ---------------------------------------------------------------------------
 # CLI -> request -> uploader mapping (strictly tri-state)
@@ -148,6 +164,7 @@ class TiktokOptionsMappingTests(unittest.TestCase):
             "aigc": None,
             "your_brand": None,
             "branded_content": None,
+            "location": None,
         }
         values.update(overrides)
         return Namespace(**values)
@@ -229,6 +246,15 @@ class TiktokOptionsMappingTests(unittest.TestCase):
         self.assertIsNone(options.allow_comments)
         self.assertIs(options.allow_reuse, False)
 
+    def test_location_maps_to_the_tri_state_option(self):
+        options = tiktok_command._build_publish_options(
+            self._args(location="  London   Eye ")
+        )
+        self.assertIsNotNone(options)
+        self.assertEqual(options.location, "  London   Eye ")
+        self.assertIsNone(options.privacy)
+        self.assertIsNone(options.aigc)
+
     def test_request_defaults_to_none_options(self):
         request = tiktok_command.TiktokVideoUploadRequest(
             account_label="profile",
@@ -296,12 +322,49 @@ class TiktokBrandedContentValidationTests(unittest.TestCase):
         session.assert_not_called()
 
 
+class TiktokLocationValidationTests(unittest.TestCase):
+    def _run_video(self, location: str):
+        builder = MagicMock()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = Path(tmp_dir) / "demo.mp4"
+            video.write_bytes(b"video")
+            with patch.object(
+                tiktok_command, "_build_video_uploader", builder
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-video",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--file",
+                        str(video),
+                        "--title",
+                        "标题",
+                        "--location",
+                        location,
+                    ]
+                )
+        return code, out, err, builder
+
+    def test_blank_location_exits_2_before_building_the_uploader(self):
+        for value in ("", "   ", "\t \n"):
+            with self.subTest(value=repr(value)):
+                code, out, err, builder = self._run_video(value)
+                self.assertEqual(code, 2)
+                self.assertIn("--location", err)
+                self.assertNotIn("submitted", out)
+                builder.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # In-memory async controls (the production control seam)
 # ---------------------------------------------------------------------------
 
 
-class FakeToggleControl:
+class FakeToggleControl(tk_main.TiktokOptionControl):
     """Checkbox-shaped control: tracks reads, clicks and the current state."""
 
     def __init__(
@@ -580,6 +643,7 @@ def _controls(
     brand_switch=None,
     your_brand=None,
     branded_content=None,
+    location=None,
 ):
     return tk_main.TiktokSettingsControls(
         privacy=privacy,
@@ -589,6 +653,7 @@ def _controls(
         brand_switch=brand_switch,
         your_brand=your_brand,
         branded_content=branded_content,
+        location=location,
     )
 
 
@@ -596,6 +661,58 @@ def _install(video, controls):
     resolver = AsyncMock(return_value=controls)
     video.resolve_option_controls = resolver
     return resolver
+
+
+def _apply_with_output(video, controls, page=None):
+    """Run ``apply_options`` and capture the terminal field diagnostic."""
+    _install(video, controls)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        asyncio.run(video.apply_options(page or _OptionPage()))
+    return out.getvalue()
+
+
+class _PublishButton:
+    """Enabled publish-button double; records every click."""
+
+    def __init__(self) -> None:
+        self._count = 1
+        self.click_calls = 0
+
+    @property
+    def first(self):
+        return self
+
+    def nth(self, _index: int):
+        return self
+
+    async def count(self) -> int:
+        return self._count
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def is_enabled(self, *, timeout=None) -> bool:
+        return True
+
+    async def get_attribute(self, name: str, *, timeout=None):
+        return None
+
+    async def click(self) -> None:
+        self.click_calls += 1
+
+
+class _PublishBase:
+    """Locator base for the real ``wait_publish_ready`` gate."""
+
+    def __init__(self) -> None:
+        self.button = _PublishButton()
+
+    def locator(self, _selector: str) -> _PublishButton:
+        return self.button
+
+    def get_by_role(self, _role: str, name=None) -> _PublishButton:
+        return self.button
 
 
 class TiktokOptionStepTests(unittest.TestCase):
@@ -633,17 +750,15 @@ class TiktokOptionStepTests(unittest.TestCase):
                 self.assertEqual(controls.branded_content.checked_reads, 0)
                 self.assertEqual(controls.branded_content.click_calls, 0)
 
-    def test_apply_options_expands_advanced_settings_first(self):
-        video = _uploader(TiktokPublishOptions(privacy="only-me"))
-        privacy = FakePrivacyControl(
-            "Followers", ["Followers", "Friends", "Only you"]
-        )
-        _install(video, _controls(privacy=privacy))
-        video._expand_advanced_settings = AsyncMock()
-
-        asyncio.run(video.apply_options(_OptionPage()))
-
-        video._expand_advanced_settings.assert_awaited_once()
+    def test_advanced_settings_failure_cannot_confirm_ai_entry_missing(self):
+        app = _uploader(TiktokPublishOptions(aigc=False))
+        app._resolve_single_control = AsyncMock(return_value=None)
+        app._expand_advanced_settings = AsyncMock(side_effect=RuntimeError("Show more blocked"))
+        with self.assertRaisesRegex(RuntimeError, "Show more blocked"):
+            asyncio.run(app.apply_options(_OptionPage()))
+        self.assertEqual(app.ai_outcome.status, "mismatch")
+        self.assertEqual(app.ai_outcome.reason, "read_error")
+        self.assertIsNone(app.ai_outcome.applied)
 
     def test_privacy_explicit_set_then_readback(self):
         privacy = FakePrivacyControl(
@@ -1140,6 +1255,198 @@ class TiktokOptionStepTests(unittest.TestCase):
 
 
 class TiktokAigcOptionTests(unittest.TestCase):
+    def test_aigc_omitted_preserves_preset_and_reports_not_requested(self):
+        aigc = FakeToggleControl(True)
+        video = _uploader(TiktokPublishOptions(allow_comments=True))
+
+        out = _apply_with_output(
+            video,
+            _controls(comments=FakeToggleControl(True), aigc=aigc),
+        )
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.checked_reads, 0)
+        self.assertEqual(aigc.disabled_reads, 0)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(video.ai_outcome.requested)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "not_requested")
+        self.assertEqual(out, "")
+
+    def test_aigc_on_missing_reports_entry_missing_and_fails(self):
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=None))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("option=aigc", message)
+        self.assertIn("control-not-found", message)
+        self.assertEqual(video.ai_outcome.requested, True)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "unsupported")
+        self.assertEqual(video.ai_outcome.reason, "entry_missing")
+        line = out.getvalue()
+        self.assertIn("requested=true", line)
+        self.assertIn("applied=null", line)
+        self.assertIn("status=unsupported", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=no", line)
+
+    def test_no_aigc_missing_entry_continues_as_default_off(self):
+        video = _uploader(TiktokPublishOptions(aigc=False))
+
+        out = _apply_with_output(video, _controls(aigc=None))
+
+        self.assertEqual(video.ai_outcome.requested, False)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "default_off")
+        self.assertEqual(video.ai_outcome.reason, "entry_missing")
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=default_off", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=yes", out)
+
+    def test_no_aigc_missing_entry_survives_the_real_resolver(self):
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+        video._settled_ai_control = AsyncMock(return_value=None)
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertEqual(video.ai_outcome.status, "default_off")
+        self.assertEqual(video.ai_outcome.reason, "entry_missing")
+        self.assertIn("status=default_off", out.getvalue())
+
+    def test_aigc_missing_entry_survives_the_real_resolver_and_fails(self):
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+        video._settled_ai_control = AsyncMock(return_value=None)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("control-not-found", str(ctx.exception))
+        self.assertEqual(video.ai_outcome.status, "unsupported")
+
+    def test_no_aigc_already_off_reports_default_off_without_click(self):
+        aigc = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(aigc=False))
+
+        out = _apply_with_output(video, _controls(aigc=aigc))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(video.ai_outcome.applied, False)
+        self.assertEqual(video.ai_outcome.status, "default_off")
+        self.assertIsNone(video.ai_outcome.reason)
+        self.assertIn("applied=false", out)
+        self.assertIn("status=default_off", out)
+        self.assertIn("reason=-", out)
+        self.assertIn("continue=yes", out)
+
+    def test_no_aigc_on_to_off_reports_set(self):
+        aigc = FakeToggleControl(True)
+        video = _uploader(TiktokPublishOptions(aigc=False))
+
+        out = _apply_with_output(video, _controls(aigc=aigc))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(video.ai_outcome.applied, False)
+        self.assertEqual(video.ai_outcome.status, "set")
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=false", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+
+    def test_no_aigc_disabled_and_still_on_fails_mismatch(self):
+        aigc = FakeToggleControl(True, disabled=True)
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        _install(video, _controls(aigc=aigc))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("stage=disabled", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(video.ai_outcome.applied, True)
+        self.assertEqual(video.ai_outcome.status, "mismatch")
+        line = out.getvalue()
+        self.assertIn("applied=true", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("continue=no", line)
+
+    def test_mixed_ai_switch_blocks_an_explicit_off(self):
+        control = FakeToggleControl(False)
+        control.get_attribute = AsyncMock(return_value="mixed")
+        app = _uploader(TiktokPublishOptions(aigc=False))
+        with self.assertRaises(RuntimeError):
+            _apply_with_output(app, _controls(aigc=control))
+        self.assertIsNone(app.ai_outcome.applied)
+        self.assertEqual(app.ai_outcome.reason, "read_error")
+
+    def test_no_aigc_visible_but_unreadable_fails_mismatch(self):
+        aigc = _FailingReadControl()
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        _install(video, _controls(aigc=aigc))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("stage=read", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(video.ai_outcome.applied)
+        self.assertEqual(video.ai_outcome.status, "mismatch")
+        self.assertEqual(video.ai_outcome.reason, "read_error")
+        line = out.getvalue()
+        self.assertIn("applied=null", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=read_error", line)
+        self.assertIn("continue=no", line)
+
+    def test_aigc_on_readback_false_reports_mismatch(self):
+        aigc = FakeToggleControl(False, click_toggles=False)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+        _install(video, _controls(aigc=aigc))
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError):
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(video.ai_outcome.applied, False)
+        self.assertEqual(video.ai_outcome.status, "mismatch")
+        self.assertIn("applied=false", out.getvalue())
+        self.assertIn("continue=no", out.getvalue())
+
+    def test_aigc_on_from_off_reports_set(self):
+        aigc = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(aigc=True))
+
+        out = _apply_with_output(video, _controls(aigc=aigc))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(video.ai_outcome.applied, True)
+        self.assertEqual(video.ai_outcome.status, "set")
+        self.assertIn("requested=true", out)
+        self.assertIn("applied=true", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+
     def test_aigc_on_clicks_switch_confirms_turn_on_and_reads_back(self):
         aigc = FakeToggleControl(False)
 
@@ -1385,6 +1692,472 @@ class TiktokAigcOptionTests(unittest.TestCase):
         self.assertIn("stage=read", message)
         self.assertIn("read-error", message)
         self.assertIn("not a checkbox", message)
+
+
+class FakeLocationCandidate:
+    """One visible location row; ``name``/``address`` mirror the parsed DOM."""
+
+    def __init__(self, name: str, address: str | None = None) -> None:
+        self.name = name
+        self.address = address
+        self.click_calls = 0
+        self.on_click = None
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        if self.on_click is not None:
+            self.on_click(self)
+
+
+class FakeLocationControl:
+    """Location combobox double: search, ordered rows, collapse and readback."""
+
+    def __init__(
+        self,
+        rows=(),
+        *,
+        collapsed: bool = True,
+        final_value: str | None = None,
+        disabled: bool = False,
+        candidates: tuple[str, ...] = ("fake-location",),
+    ) -> None:
+        self.rows = []
+        for item in rows:
+            candidate = (
+                item
+                if isinstance(item, FakeLocationCandidate)
+                else FakeLocationCandidate(*item)
+            )
+            candidate.on_click = self._select
+            self.rows.append(candidate)
+        self.collapsed = collapsed
+        self.final_value = final_value
+        self.disabled = disabled
+        self.candidates = candidates
+        self.search_calls = 0
+        self.searches: list[str] = []
+        self.selected: str | None = None
+        self.collapse_reads = 0
+        self.value_reads = 0
+
+    def _select(self, candidate: FakeLocationCandidate) -> None:
+        self.selected = candidate.name
+
+    async def search(self, text: str) -> None:
+        self.search_calls += 1
+        self.searches.append(text)
+
+    async def candidate_rows(self):
+        return list(self.rows)
+
+    async def wait_collapsed(self) -> bool:
+        self.collapse_reads += 1
+        return self.collapsed
+
+    async def read_value(self) -> str:
+        self.value_reads += 1
+        if self.final_value is not None:
+            return self.final_value
+        return self.selected or ""
+
+    async def is_disabled(self) -> bool:
+        return self.disabled
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def count(self) -> int:
+        return 1
+
+
+class _BodyText:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.first = self
+
+    async def count(self) -> int:
+        return 1
+
+    async def inner_text(self) -> str:
+        return self.text
+
+
+    async def all_inner_texts(self):
+        return [self.text]
+
+
+class _LocationPromptPage(_OptionPage):
+    """Page whose body explicitly states a location restriction."""
+
+    def __init__(self, body: str) -> None:
+        self.body = body
+
+    def locator(self, selector: str):
+        if '[role="alert"]' in selector:
+            return _BodyText(self.body)
+        return _MissingLocator()
+
+
+class TiktokLocationOptionTests(unittest.TestCase):
+    def test_location_skips_approximate_and_history_and_records_address(self):
+        rows = [
+            ("London Eye Afternoon Tea", "Riverside building, London"),
+            (
+                "London Eye",
+                "Riverside Building, County Hall, Westminster Bridge Rd, London SE1 7PB, United Kingdom",
+            ),
+            ("London Eye", "Dolgoprudnyy, Moscow, Russia"),
+        ]
+        location = FakeLocationControl(rows)
+        aigc = FakeToggleControl(False)
+        video = _uploader(TiktokPublishOptions(location="  london   EYE "))
+
+        out = _apply_with_output(
+            video, _controls(location=location, aigc=aigc)
+        )
+
+        self.assertEqual(
+            location.searches, ["london EYE"]
+        )
+        self.assertEqual(location.rows[0].click_calls, 0)
+        self.assertEqual(location.rows[1].click_calls, 1)
+        self.assertEqual(location.rows[2].click_calls, 0)
+        self.assertIn("requested='london EYE'", out)
+        self.assertIn("candidate='London Eye'", out)
+        self.assertIn(
+            "address='Riverside Building, County Hall, Westminster Bridge Rd, "
+            "London SE1 7PB, United Kingdom'",
+            out,
+        )
+        self.assertIn("final='London Eye'", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+        self.assertEqual(video.location_outcome.status, "set")
+        self.assertEqual(
+            video.location_outcome.candidate_address,
+            "Riverside Building, County Hall, Westminster Bridge Rd, "
+            "London SE1 7PB, United Kingdom",
+        )
+        # --aigc is not required: omitting it leaves the switch untouched.
+        self.assertEqual(aigc.checked_reads, 0)
+        self.assertEqual(aigc.click_calls, 0)
+
+    def test_location_name_only_row_reports_no_address(self):
+        location = FakeLocationControl([("人民公园", None)])
+        video = _uploader(TiktokPublishOptions(location="人民公园"))
+
+        out = _apply_with_output(video, _controls(location=location))
+
+        self.assertEqual(location.rows[0].click_calls, 1)
+        self.assertIn("candidate='人民公园'", out)
+        self.assertIn("address=null", out)
+        self.assertIn("final='人民公园'", out)
+        self.assertIn("status=set", out)
+        self.assertIsNone(video.location_outcome.candidate_address)
+
+    def test_location_no_same_name_candidate_fails_without_click(self):
+        rows = [
+            ("房山人民公园", "北京市房山区"),
+            ("人民公园东门", "北京市东城区"),
+        ]
+        location = FakeLocationControl(rows)
+        video = _uploader(TiktokPublishOptions(location="人民公园"))
+        _install(video, _controls(location=location))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        for candidate in location.rows:
+            self.assertEqual(candidate.click_calls, 0)
+        self.assertEqual(location.collapse_reads, 0)
+        line = out.getvalue()
+        self.assertIn("status=no_match", line)
+        self.assertIn("reason=no_same_name_candidate", line)
+        self.assertIn("continue=no", line)
+        message = str(ctx.exception)
+        self.assertIn("option=location", message)
+        self.assertIn("stage=match", message)
+        self.assertIn("房山人民公园", message)
+
+    def test_location_empty_candidate_list_reports_no_match(self):
+        location = FakeLocationControl([])
+        video = _uploader(TiktokPublishOptions(location="人民公园"))
+        _install(video, _controls(location=location))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertIn("status=no_match", out.getvalue())
+        self.assertIn("reason=no_same_name_candidate", out.getvalue())
+        self.assertIn("option=location", str(ctx.exception))
+
+    def test_location_entry_missing_is_not_account_ineligible(self):
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        line = out.getvalue()
+        self.assertIn("status=unsupported", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=no", line)
+        self.assertNotIn("account_ineligible", line)
+        message = str(ctx.exception)
+        self.assertIn("option=location", message)
+        self.assertIn("control-not-found", message)
+        self.assertNotIn("account-ineligible", message)
+
+    def test_location_explicit_account_prompt_reports_ineligible(self):
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+        page = _LocationPromptPage(
+            "Location isn't available for this account."
+        )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(page))
+
+        line = out.getvalue()
+        self.assertIn("status=unsupported", line)
+        self.assertIn("reason=account_ineligible", line)
+        self.assertIn("continue=no", line)
+        message = str(ctx.exception)
+        self.assertIn("option=location", message)
+        self.assertIn("account-ineligible", message)
+
+    def test_unrelated_unavailable_hint_is_not_account_ineligible(self):
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+        page = _LocationPromptPage(
+            "Location Search locations Settings Show more "
+            "Duet and Stitch aren’t available on videos from private accounts"
+        )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(page))
+
+        line = out.getvalue()
+        self.assertIn("reason=entry_missing", line)
+        self.assertNotIn("account_ineligible", line)
+        self.assertIn("control-not-found", str(ctx.exception))
+
+    def test_location_list_not_collapsed_fails_before_readback(self):
+        location = FakeLocationControl(
+            [("London Eye", "London, UK")], collapsed=False
+        )
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+        _install(video, _controls(location=location))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        self.assertEqual(location.rows[0].click_calls, 1)
+        self.assertEqual(location.value_reads, 0)
+        line = out.getvalue()
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=list_not_collapsed", line)
+        self.assertIn("continue=no", line)
+        self.assertIn("stage=collapse", str(ctx.exception))
+
+    def test_location_empty_final_value_fails(self):
+        location = FakeLocationControl(
+            [("London Eye", "London, UK")], final_value=""
+        )
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+        _install(video, _controls(location=location))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        line = out.getvalue()
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=final_empty", line)
+        self.assertIn("final=null", line)
+        self.assertIn("stage=readback", str(ctx.exception))
+
+    def test_location_wrong_final_value_fails(self):
+        location = FakeLocationControl(
+            [("London Eye", "London, UK")], final_value="London"
+        )
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+        _install(video, _controls(location=location))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(video.apply_options(_OptionPage()))
+
+        line = out.getvalue()
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=final_mismatch", line)
+        self.assertIn("final='London'", line)
+        message = str(ctx.exception)
+        self.assertIn("stage=readback", message)
+        self.assertIn("'London'", message)
+
+    def test_location_omitted_reads_nothing_and_keeps_the_page_value(self):
+        location = FakeLocationControl(
+            [("London Eye", "London, UK")], final_value="London Eye"
+        )
+        video = _uploader(TiktokPublishOptions(allow_comments=True))
+
+        out = _apply_with_output(
+            video, _controls(comments=FakeToggleControl(True), location=location)
+        )
+
+        self.assertEqual(location.search_calls, 0)
+        self.assertEqual(location.collapse_reads, 0)
+        self.assertEqual(location.value_reads, 0)
+        for candidate in location.rows:
+            self.assertEqual(candidate.click_calls, 0)
+        self.assertNotIn("TikTok 帖子地点", out)
+        self.assertEqual(video.location_outcome.status, "not_requested")
+        self.assertEqual(location.final_value, "London Eye")
+        self.assertEqual(video.location_outcome.candidate_name, None)
+        self.assertEqual(video.location_outcome.final_value, None)
+
+    def test_location_missing_entry_uses_the_real_resolver_once(self):
+        video = _uploader(TiktokPublishOptions(location="London Eye"))
+        video._resolve_single_control = AsyncMock(return_value=None)
+        video._expand_advanced_settings = AsyncMock()
+
+        with self.assertRaises(RuntimeError) as ctx:
+            asyncio.run(video.apply_options(_OptionPage()))
+
+        message = str(ctx.exception)
+        self.assertIn("option=location", message)
+        self.assertIn("control-not-found", message)
+        self.assertNotIn("option=aigc", message)
+        video._expand_advanced_settings.assert_awaited()
+
+
+class TiktokLocationParsingTests(unittest.TestCase):
+    def test_candidate_name_is_the_first_line_and_address_follows(self):
+        name, address = tk_main.parse_location_row(
+            "London Eye\nRiverside Building, County Hall,\nLondon SE1 7PB"
+        )
+        self.assertEqual(name, "London Eye")
+        self.assertEqual(
+            address,
+            "Riverside Building, County Hall, London SE1 7PB",
+        )
+
+    def test_name_only_row_has_no_address(self):
+        self.assertEqual(
+            tk_main.parse_location_row("  人民公园  "),
+            ("人民公园", None),
+        )
+
+    def test_name_normalization_ignores_case_and_whitespace(self):
+        self.assertEqual(
+            tk_main.normalize_location_text("  London   EYE\t"),
+            "london eye",
+        )
+
+
+class TiktokAigcFlowTests(unittest.TestCase):
+    """Controlled video flow: AI outcome decides whether publishing proceeds."""
+
+    _FORM_STEPS = (
+        "open_upload_page",
+        "attach_media",
+        "fill_metadata",
+        "wait_media_ready",
+        "apply_cover",
+        "apply_schedule",
+    )
+
+    def _dry_run_video(self, controls):
+        video = _uploader(TiktokPublishOptions(aigc=False))
+        video.no_publish = True
+        base = _PublishBase()
+        video.locator_base = base
+        for name in self._FORM_STEPS:
+            setattr(video, name, AsyncMock())
+        _install(video, controls)
+        return video, base
+
+    def test_no_aigc_missing_entry_reaches_no_publish_stop(self):
+        video, base = self._dry_run_video(_controls(aigc=None))
+        out = io.StringIO()
+
+        with (
+            redirect_stdout(out),
+            patch.object(tk_main.asyncio, "sleep", AsyncMock()),
+            patch.object(tk_main.tiktok_logger, "success") as success,
+        ):
+            asyncio.run(
+                video._upload_on_page(
+                    _OptionPage(), managed=False, budget=None
+                )
+            )
+
+        line = out.getvalue()
+        self.assertIn("status=default_off", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=yes", line)
+        success.assert_called_once_with(tk_main.TIKTOK_DRY_RUN_READY_MESSAGE)
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_no_aigc_disabled_and_still_on_fails_before_publish(self):
+        video, base = self._dry_run_video(
+            _controls(aigc=FakeToggleControl(True, disabled=True))
+        )
+        video.click_publish = AsyncMock()
+        out = io.StringIO()
+
+        with (
+            redirect_stdout(out),
+            patch.object(tk_main.tiktok_logger, "success") as success,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(
+                    video._upload_on_page(
+                        _OptionPage(), managed=False, budget=None
+                    )
+                )
+
+        self.assertIn("stage=disabled", str(ctx.exception))
+        self.assertIn("status=mismatch", out.getvalue())
+        self.assertIn("continue=no", out.getvalue())
+        success.assert_not_called()
+        video.click_publish.assert_not_awaited()
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_no_aigc_visible_but_unreadable_fails_before_publish(self):
+        video, base = self._dry_run_video(_controls(aigc=_FailingReadControl()))
+        video.click_publish = AsyncMock()
+        out = io.StringIO()
+
+        with (
+            redirect_stdout(out),
+            patch.object(tk_main.tiktok_logger, "success") as success,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(
+                    video._upload_on_page(
+                        _OptionPage(), managed=False, budget=None
+                    )
+                )
+
+        self.assertIn("stage=read", str(ctx.exception))
+        self.assertIn("reason=read_error", out.getvalue())
+        self.assertIn("continue=no", out.getvalue())
+        success.assert_not_called()
+        video.click_publish.assert_not_awaited()
+        self.assertEqual(base.button.click_calls, 0)
 
 
 class TiktokBrandDisclosureTests(unittest.TestCase):
@@ -1729,6 +2502,273 @@ class TiktokOptionCliFlowTests(unittest.TestCase):
         self.assertIsNone(request.options.your_brand)
         self.assertIsNone(request.options.branded_content)
 
+    def test_cli_location_reaches_the_request(self):
+        code, _, _, builder = self._run_upload(
+            ["--location", "  London   Eye "]
+        )
+        self.assertEqual(code, 0)
+        request = builder.call_args.args[0]
+        self.assertEqual(request.options.location, "  London   Eye ")
+        self.assertIsNone(request.options.aigc)
+
+    def test_cli_aigc_missing_control_exits_1_without_publish_click(self):
+        base = _PublishBase()
+        app = _uploader(TiktokPublishOptions(aigc=True))
+        app.no_publish = True
+        app.locator_base = base
+        for name in TiktokAigcFlowTests._FORM_STEPS:
+            setattr(app, name, AsyncMock())
+        app.resolve_option_controls = AsyncMock(
+            return_value=_controls(aigc=None)
+        )
+
+        async def upload(_playwright=None, session=None):
+            await app._upload_on_page(_OptionPage(), managed=False, budget=None)
+
+        app.upload = upload
+        builder = MagicMock(return_value=app)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = Path(tmp_dir) / "demo.mp4"
+            video.write_bytes(b"video")
+            session_cm = _AsyncCM(Namespace(context=object()))
+            factory = MagicMock(return_value=session_cm)
+            with (
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_video_uploader", new=builder
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-video",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--file",
+                        str(video),
+                        "--title",
+                        "标题",
+                        "--aigc",
+                        "--no-publish",
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertIn("control-not-found", err)
+        self.assertIn("status=unsupported", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=no", out)
+        self.assertEqual(base.button.click_calls, 0)
+
+
+class TiktokLocationCliFlowTests(unittest.TestCase):
+    """CLI video path: the location outcome decides exit code and publishing."""
+
+    def _app(self, controls, *, page=None, location="London Eye"):
+        base = _PublishBase()
+        app = _uploader(TiktokPublishOptions(location=location))
+        app.no_publish = True
+        app.locator_base = page or base
+        for name in TiktokAigcFlowTests._FORM_STEPS:
+            setattr(app, name, AsyncMock())
+        app.resolve_option_controls = AsyncMock(return_value=controls)
+
+        target_page = page or _OptionPage()
+
+        async def upload(_playwright=None, session=None):
+            await app._upload_on_page(
+                target_page, managed=False, budget=None
+            )
+
+        app.upload = upload
+        return app, base
+
+    def _run(self, app, extra_args=(), location="London Eye"):
+        builder = MagicMock(return_value=app)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video = Path(tmp_dir) / "demo.mp4"
+            video.write_bytes(b"video")
+            session_cm = _AsyncCM(Namespace(context=object()))
+            factory = MagicMock(return_value=session_cm)
+            with (
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    tiktok_command, "_build_video_uploader", new=builder
+                ),
+            ):
+                argv = [
+                    "tiktok",
+                    "upload-video",
+                    "--folder-id",
+                    "folder",
+                    "--profile-id",
+                    "profile",
+                    "--file",
+                    str(video),
+                    "--title",
+                    "标题",
+                ]
+                if location is not None:
+                    argv += ["--location", location]
+                argv += ["--no-publish", *extra_args]
+                code, out, err = _run(argv)
+        return code, out, err, builder
+
+    def _assert_failure(self, controls, reason, *, page=None):
+        app, base = self._app(controls, page=page)
+        code, out, err, _ = self._run(app)
+        self.assertEqual(code, 1)
+        self.assertIn(f"reason={reason}", out)
+        self.assertIn("continue=no", out)
+        self.assertIn("option=location", err)
+        self.assertNotIn("帖子已发布", out)
+        self.assertNotIn("TikTok video upload:", out)
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_cli_success_reports_clicked_row_and_final_value(self):
+        rows = [
+            ("London Eye Afternoon Tea", "Riverside building, London"),
+            ("London Eye", "Riverside Building, County Hall, London, UK"),
+            ("London Eye", "Dolgoprudnyy, Moscow, Russia"),
+        ]
+        app, base = self._app(
+            _controls(location=FakeLocationControl(rows)),
+            location="  London   EYE ",
+        )
+
+        code, out, err, _ = self._run(app, location="  London   EYE ")
+
+        self.assertEqual(code, 0, err)
+        self.assertIn("requested='London EYE'", out)
+        self.assertIn("candidate='London Eye'", out)
+        self.assertIn("address='Riverside Building, County Hall, London, UK'", out)
+        self.assertIn("final='London Eye'", out)
+        self.assertIn("status=set", out)
+        self.assertIn("TikTok video upload:", out)
+        self.assertIn("已停止，未点击发布按钮。", out)
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_cli_approximate_only_exits_1_without_publish(self):
+        self._assert_failure(
+            _controls(
+                location=FakeLocationControl(
+                    [
+                        ("London Eye Afternoon Tea", "London, UK"),
+                        ("London", "Greater London, United Kingdom"),
+                    ]
+                )
+            ),
+            "no_same_name_candidate",
+        )
+
+    def test_cli_name_only_row_succeeds_without_address(self):
+        location = FakeLocationControl([("人民公园", None)])
+        app, base = self._app(
+            _controls(location=location), location="人民公园"
+        )
+
+        code, out, err, _ = self._run(app, location="人民公园")
+
+        self.assertEqual(code, 0, err)
+        self.assertIn("candidate='人民公园'", out)
+        self.assertIn("address=null", out)
+        self.assertIn("final='人民公园'", out)
+        self.assertIn("status=set", out)
+        self.assertEqual(base.button.click_calls, 0)
+
+    def test_cli_entry_missing_exits_1_without_publish(self):
+        self._assert_failure(
+            _controls(location=None), "entry_missing"
+        )
+
+    def test_cli_explicit_account_prompt_exits_1_without_publish(self):
+        self._assert_failure(
+            _controls(location=None),
+            "account_ineligible",
+            page=_LocationPromptPage(
+                "Location isn't available for this account."
+            ),
+        )
+
+    def test_cli_list_not_collapsed_exits_1_without_publish(self):
+        self._assert_failure(
+            _controls(
+                location=FakeLocationControl(
+                    [("London Eye", "London, UK")], collapsed=False
+                )
+            ),
+            "list_not_collapsed",
+        )
+
+    def test_cli_empty_final_value_exits_1_without_publish(self):
+        self._assert_failure(
+            _controls(
+                location=FakeLocationControl(
+                    [("London Eye", "London, UK")], final_value=""
+                )
+            ),
+            "final_empty",
+        )
+
+    def test_cli_wrong_final_value_exits_1_without_publish(self):
+        self._assert_failure(
+            _controls(
+                location=FakeLocationControl(
+                    [("London Eye", "London, UK")], final_value="London"
+                )
+            ),
+            "final_mismatch",
+        )
+
+    def test_cli_omitted_location_makes_zero_location_calls(self):
+        app = _uploader(TiktokPublishOptions(allow_comments=False))
+        app.no_publish = True
+        app.locator_base = _PublishBase()
+        for name in TiktokAigcFlowTests._FORM_STEPS:
+            setattr(app, name, AsyncMock())
+        resolver = AsyncMock(
+            return_value=_controls(comments=FakeToggleControl(False))
+        )
+        app.resolve_option_controls = resolver
+
+        async def upload(_playwright=None, session=None):
+            await app._upload_on_page(
+                _OptionPage(), managed=False, budget=None
+            )
+
+        app.upload = upload
+        code, out, err, _ = self._run(app, location=None)
+
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("TikTok 帖子地点", out)
+        self.assertEqual(app.location_outcome.status, "not_requested")
+        self.assertEqual(app.location_outcome.requested, None)
+        self.assertEqual(app.location_outcome.candidate_name, None)
+        self.assertEqual(app.location_outcome.final_value, None)
+
 
 class TiktokScheduleMinuteTests(unittest.TestCase):
     def test_accepts_multiples_of_five(self):
@@ -1827,6 +2867,18 @@ class HashtagEntityTests(unittest.TestCase):
         )
         self.assertNotIn(("press", "Space"), page.keyboard.events)
         self.assertNotIn(("press", "Backspace"), page.keyboard.events)
+
+    def test_same_name_add_row_is_clicked_as_an_exact_candidate(self):
+        page = self._Page(
+            ["#fieldstudy1120e\nAdd", "#1120spasfieldst\n1 post"]
+        )
+        video = _uploader(TiktokPublishOptions())
+
+        self.assertTrue(
+            asyncio.run(video._apply_hashtag(page, "fieldstudy1120e"))
+        )
+
+        self.assertEqual(page.clicked, ["#fieldstudy1120e\nAdd"])
 
     def test_selected_suggestion_is_accepted_with_enter(self):
         page = self._Page(["#tiktok\n2.0B posts"])

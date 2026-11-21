@@ -1,6 +1,7 @@
 # 23: Facebook 个人主页与 Page 核对公开配文
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 21
 
 ## What to build

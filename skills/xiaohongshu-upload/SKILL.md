@@ -27,8 +27,8 @@ summary: 使用 sau 登录小红书并发布视频或图文。
 
 元数据约定：
 
-- 视频使用 `title + desc + tags`
-- 图文使用 `title + note + tags`
+- 视频使用 `title + desc`，公开话题写成 `desc` 里的 `#话题`
+- 图文使用 `title + note`，公开话题写成 `note` 里的 `#话题`；旧 `--tags` 已移除，传入会退出 `2`
 
 本地模式按平台、原始账号别名和浏览器种类保存专用持久化 Profile；默认系统 Chrome、有头，已有 `LOCAL_CHROME_HEADLESS` 配置仍生效。只有 `login` 引导登录，其他动作缺少 Profile 或明确未登录时退出 `10`。别名可以重新登录不同真实账号，Chrome 与 Chromium 登录态独立。
 
@@ -96,14 +96,14 @@ sau xiaohongshu upload-note --account <name> \
 export MLX_API_TOKEN="<token>"
 sau xiaohongshu check --folder-id <folder_id> --profile-id <profile_id>
 sau xiaohongshu upload-note --folder-id <folder_id> --profile-id <profile_id> \
-  --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文" --tags 图文,测试
+  --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文 #图文 #测试"
 
 # AdsPower（--folder-id 可省略）
 unset MLX_API_TOKEN
 export ADSPOWER_API_KEY="$KEY"
 sau xiaohongshu check --profile-id <profile_id>
 sau xiaohongshu upload-note --profile-id <profile_id> \
-  --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文" --tags 图文,测试
+  --images videos/demo1.png videos/demo2.png --title "图文标题" --note "正文 #图文 #测试"
 ```
 
 Profile 必须已人工登录且无待处理验证码/2FA；托管模式不授予定位权限，发布若依赖定位请先确认 Profile 配置。

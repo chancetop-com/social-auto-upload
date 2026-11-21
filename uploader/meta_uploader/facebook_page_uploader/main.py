@@ -20,6 +20,7 @@ from patchright.async_api import (
 )
 
 from uploader.base_video import BaseVideoUploader
+from utils.caption_topics import parse_caption_topics, text_results
 from utils.result_file import write_result
 from utils.local_account import local_account_alias
 from utils.browser_cleanup import close_browser_resources
@@ -36,6 +37,8 @@ META_BUSINESS_URL = "https://business.facebook.com/latest/composer/"
 META_PLATFORMS = {"facebook-page"}
 # 未配置环境变量或 --proxy 时使用系统直连。
 FACEBOOK_PAGE_PROXY = os.environ.get("SAU_FACEBOOK_PAGE_PROXY")
+#: 单条 Facebook Page 帖子正文的平台文档上限（字符）。
+FACEBOOK_PAGE_CAPTION_MAX_LENGTH = 63_206
 
 META_BUSINESS_LOGIN_CHECK_TIMEOUT_MS = 25_000
 META_BUSINESS_LOGIN_CHECK_SETTLE_MS = 2_500
@@ -76,6 +79,36 @@ _POST_PUBLISH_NAMES = re.compile(
 _COMPLETION_CLOSE_NAMES = re.compile(
     r"^(Done|完成|完了|確定)$", re.IGNORECASE
 )
+
+
+def _first_difference(expected: str, actual: str) -> int:
+    """Return the first differing code-point offset (or the shorter length)."""
+    for offset, (want, got) in enumerate(zip(expected, actual)):
+        if want != got:
+            return offset
+    return min(len(expected), len(actual))
+
+
+def _context(text: str, offset: int, radius: int = 12) -> str:
+    return text[max(0, offset - radius):offset + radius]
+
+
+def _readback_error(label: str, expected: str, actual: str) -> RuntimeError:
+    offset = _first_difference(expected, actual)
+    return RuntimeError(
+        f"Facebook Page {label}读回不一致：首处差异偏移 {offset}；"
+        f"期望 {_context(expected, offset)!r}，实际 {_context(actual, offset)!r}"
+        f"（期望长度 {len(expected)}，实际长度 {len(actual)}）；未点击发布"
+    )
+
+
+def _caption_topic_records(caption: str) -> list[dict[str, object]]:
+    """One text-level evidence record per public caption topic, in order."""
+    reason = "配文全文逐字回读一致"
+    return [
+        result.as_dict()
+        for result in text_results(parse_caption_topics(caption), reason=reason)
+    ]
 
 
 async def _unique(locator, what: str, *, timeout_ms: int = _UNIQUE_TIMEOUT_MS):
@@ -311,6 +344,8 @@ class MetaBusinessUploader(BaseVideoUploader):
         self.account_name, self.local_browser = account_name, local_browser
         self.result_file = Path(result_file) if result_file else Path('.local/meta-results') / f'{uuid4().hex}.json'
         self.result = {"platform": platform, "title": self.title, "status": "not_submitted"}
+        #: 发布前逐字回读通过的公开正文；Page 的独立标题和关键词栏不参与。
+        self.public_caption: str | None = None
 
     def _caption(self) -> str:
         parts = [self.title, self.description] if self.description else [self.title]
@@ -400,15 +435,21 @@ class MetaBusinessUploader(BaseVideoUploader):
         separate_title = bool(self.video_file) and bool(await reels_title.count()) and await reels_title.is_visible()
         if separate_title:
             title_input = await _unique(reels_title, "Reel 独立标题")
+            title_value = re.sub(r"[\r\n\t]+", " ", self.title).strip()
             await title_input.focus()
             await humanizer.press("ControlOrMeta+A")
             await humanizer.press("Delete")
             # 单行 input 内换行会变成 Enter；标题字段按单行归一化。
-            await humanizer.type_text(re.sub(r"[\r\n\t]+", " ", self.title).strip())
+            await humanizer.type_text(title_value)
+            actual_title = await title_input.input_value()
+            if actual_title != title_value:
+                raise _readback_error("Reel 独立标题", title_value, actual_title)
         # 实测同名隐藏 textbox 与可见 combobox 并存；只匹配当前向导可见正文，防止误填旧布局。
         # 当前可见 contenteditable 是正文；隐藏 textbox 属于旧布局，角色会随图文/Reel 改变。
         editor = await _unique(page.locator('[contenteditable="true"]:visible'), "正文")
         await editor.wait_for(state="visible", timeout=30_000)
+        # Reel 独立关键词栏（combobox）保留页面原值：本方法只写独立标题和正文，
+        # 不定位、不写关键词，也不与 _select_publish_location 的 Page 目标 picker 混用。
         caption = self.description if separate_title else self._caption()
         if self.tags and separate_title:
             caption = f"{caption}\n\n{' '.join(f'#{tag}' for tag in self.tags)}" if caption else " ".join(f"#{tag}" for tag in self.tags)
@@ -416,12 +457,24 @@ class MetaBusinessUploader(BaseVideoUploader):
             caption = self._caption()
         # 单行标题不得含换行；正文保留平台既有 \n 分段，先归一化 CRLF。
         caption = str(caption).replace("\r\n", "\n").replace("\r", "\n")
+        if len(caption) > FACEBOOK_PAGE_CAPTION_MAX_LENGTH:
+            raise RuntimeError(
+                f"Facebook Page 配文超出整帖硬限制（{len(caption)} > "
+                f"{FACEBOOK_PAGE_CAPTION_MAX_LENGTH} 字符）；未点击发布"
+            )
         await editor.focus()
         await humanizer.press("ControlOrMeta+A")
         await humanizer.press("Delete")
         await humanizer.type_text(caption)
-        if (await editor.inner_text()).strip() != caption:
-            raise RuntimeError("Business Suite 正文未读回预期内容")
+        actual_caption = await editor.inner_text()
+        if caption == "" and not actual_caption.strip():
+            # 清空后的 contenteditable 可能只剩占位换行；空正文按空文本读回。
+            actual_caption = ""
+        if actual_caption != caption:
+            raise _readback_error("正文", caption, actual_caption)
+        # 话题只从回读通过的公开正文识别；独立标题和关键词栏不参与。
+        self.public_caption = caption
+        self.result["topics"] = _caption_topic_records(caption)
 
     async def _advance_reels(self, page: Page) -> None:
         if not self.video_file:

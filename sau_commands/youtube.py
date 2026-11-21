@@ -16,7 +16,6 @@ from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     add_not_before_flag,
     add_local_runtime_flags,
-    parse_tags,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -28,6 +27,7 @@ from sau_commands.browser import (
     resolve_managed_provider,
 )
 from utils.browser_session import browser_session
+from utils.caption_topics import parse_caption_topics, text_results
 from utils.errors import UsageError
 from utils.local_browser import resolve_headless
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
@@ -53,8 +53,11 @@ def register(platform_parsers):
         "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
     )
     youtube_upload_video_parser.add_argument("--title", required=True, help="Video title (<=100 chars)")
-    youtube_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
-    youtube_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    youtube_upload_video_parser.add_argument(
+        "--desc",
+        default=None,
+        help="Optional video description; write public topics as #hashtags here",
+    )
     youtube_upload_video_parser.add_argument(
         "--thumbnail", type=media_source, help="Local thumbnail path or HTTP(S) URL"
     )
@@ -76,7 +79,7 @@ class YouTubeVideoUploadRequest:
     account_name: str
     video_file: Path
     title: str
-    description: str
+    description: str | None
     tags: list[str]
     thumbnail_file: Path | None = None
     playlist: str | None = None
@@ -95,6 +98,18 @@ async def login_youtube_account(account_name, headless=None, *, local_browser=No
 
 async def check_youtube_account(account_name, headless=None, *, local_browser=None):
     return await youtube_setup(account_name=account_name, headless=headless, local_browser=local_browser)
+
+
+def _report_description_topics(description: str) -> None:
+    """Print one text-level result per description topic, in caption order."""
+    topics = parse_caption_topics(description)
+    results = text_results(topics, reason="简介全文逐字回读一致")
+    total = len(results)
+    for result in results:
+        print(
+            f"YouTube 简介话题 {result.occurrence.index}/{total}："
+            f"{result.occurrence.text} 保留文字（{result.reason}）"
+        )
 
 
 def _build_youtube_uploader(request: YouTubeVideoUploadRequest) -> YouTubeVideo:
@@ -120,7 +135,7 @@ def _raise_login_required(target) -> None:
     raise login_required_error("YouTube", target.profile_id, mode=target.mode)
 
 
-async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> None:
+async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=None) -> str | None:
     if target is not None:
         app = _build_youtube_uploader(request)
         async with async_playwright() as playwright:
@@ -137,12 +152,12 @@ async def upload_youtube_video(request: YouTubeVideoUploadRequest, *, target=Non
                     _raise_login_required(target)
                 app.set_publish_date(request.schedule)
                 await app.main(session=session)
-        return None
+        return app.public_description
 
     app = _build_youtube_uploader(request)
     app.set_publish_date(request.schedule)
     await app.main()
-    return None
+    return app.public_description
 
 
 async def run(args):
@@ -191,7 +206,7 @@ async def run(args):
             video_file=args.file,
             title=args.title,
             description=args.desc,
-            tags=parse_tags(args.tags),
+            tags=[],
             thumbnail_file=args.thumbnail,
             playlist=args.playlist,
             visibility=args.visibility,
@@ -201,7 +216,9 @@ async def run(args):
             publish_not_before=args.not_before,
             local_browser=local_browser,
         )
-        await upload_youtube_video(request, target=target)
+        description = await upload_youtube_video(request, target=target)
+        if description:
+            _report_description_topics(description)
         print(f"YouTube video upload submitted: {request.video_file}")
         args.post_published = True
         return 0

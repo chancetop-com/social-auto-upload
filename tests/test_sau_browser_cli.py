@@ -1,8 +1,10 @@
 import sau_commands.xiaohongshu
 import asyncio
+import io
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -104,6 +106,58 @@ class BrowserCliParserTests(unittest.TestCase):
             sau_commands.xiaohongshu._validate_declarations(args)
 
 
+class ContentTypeParserTests(unittest.TestCase):
+    """Repeated --content-type values must not silently overwrite each other."""
+
+    def _argv(self, platform, action, content_types):
+        self.media = self.tmp / "media.png"
+        self.media.write_bytes(b"media")
+        mode = ["--file", str(self.media)] if action == "upload-video" else [
+            "--images",
+            str(self.media),
+        ]
+        argv = [platform, action, "--account", "creator", "--title", "标题", *mode]
+        for value in content_types:
+            argv.extend(["--content-type", value])
+        return argv
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def _parse(self, platform, action, content_types):
+        parser = sau_cli.build_parser()
+        return parser.parse_args(self._argv(platform, action, content_types))
+
+    def test_one_content_type_is_kept(self):
+        for platform in ("xiaohongshu", "rednote"):
+            for action in ("upload-video", "upload-note"):
+                with self.subTest(platform=platform, action=action):
+                    args = self._parse(platform, action, ["ai"])
+                    self.assertEqual(args.content_type, "ai")
+
+    def test_the_same_content_type_repeated_is_accepted(self):
+        for platform in ("xiaohongshu", "rednote"):
+            with self.subTest(platform=platform):
+                args = self._parse(platform, "upload-video", ["ai", "ai"])
+                self.assertEqual(args.content_type, "ai")
+
+    def test_conflicting_content_types_exit_2_before_dispatch(self):
+        for platform in ("xiaohongshu", "rednote"):
+            for action in ("upload-video", "upload-note"):
+                with self.subTest(platform=platform, action=action):
+                    parser = sau_cli.build_parser()
+                    stderr = io.StringIO()
+                    with redirect_stderr(stderr), self.assertRaises(SystemExit) as ctx:
+                        parser.parse_args(
+                            self._argv(platform, action, ["ai", "marketing"])
+                        )
+                    self.assertEqual(ctx.exception.code, 2)
+                    message = stderr.getvalue()
+                    self.assertIn("--content-type", message)
+                    self.assertIn("ai", message)
+                    self.assertIn("marketing", message)
+
+
 class BrowserCliDispatchTests(unittest.TestCase):
 
     def test_dispatch_xiaohongshu_upload_video_uses_headed_request(self):
@@ -113,8 +167,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             account="creator",
             file=Path("demo.mp4"),
             title="视频标题",
-            desc="视频简介",
-            tags="测试,视频",
+            desc="视频简介 #测试 #视频",
             schedule=0,
             thumbnail=None,
             debug=False,
@@ -125,7 +178,8 @@ class BrowserCliDispatchTests(unittest.TestCase):
 
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "视频标题")
-        self.assertEqual(request.description, "视频简介")
+        self.assertEqual(request.description, "视频简介 #测试 #视频")
+        self.assertEqual(request.tags, [])
         self.assertFalse(request.headless)
 
     def test_dispatch_xiaohongshu_upload_note_uses_headless_request(self):
@@ -135,8 +189,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             account="creator",
             images=[Path("1.png"), Path("2.png")],
             title="图文标题",
-            note="图文正文",
-            tags="测试,图文",
+            note="图文正文 #测试 #图文",
             schedule=0,
             debug=False,
             headless=True,
@@ -146,7 +199,8 @@ class BrowserCliDispatchTests(unittest.TestCase):
 
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "图文标题")
-        self.assertEqual(request.note, "图文正文")
+        self.assertEqual(request.note, "图文正文 #测试 #图文")
+        self.assertEqual(request.tags, [])
         self.assertTrue(request.headless)
         self.assertEqual(len(request.image_files), 2)
 
@@ -158,7 +212,6 @@ class BrowserCliDispatchTests(unittest.TestCase):
             images=[Path("1.png")],
             title="图文标题",
             note="图文正文",
-            tags="",
             schedule=0,
             debug=False,
             headless=True,

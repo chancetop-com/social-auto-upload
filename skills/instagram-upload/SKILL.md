@@ -15,7 +15,7 @@ summary: 发布 Instagram Reels、单图或轮播，并核验作品。
 ```powershell
 sau instagram login --account creator
 sau instagram check --account creator
-sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail videos/demo.png --title "标题" --desc "正文" --tags 生活,分享 --result .local/instagram-video.json
+sau instagram upload-video --account creator --file videos/demo.mp4 --thumbnail videos/demo.png --title "标题" --desc "正文 #生活 #分享" --result .local/instagram-video.json
 sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --result .local/instagram-images.json
 ```
 
@@ -27,7 +27,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 视频/图文验收显式传 `--no-publish`，上传素材、编辑和检查就绪后停在 Share 前，结果为 `prepared`；可能留下草稿，不证明真实发布成功。上传流程会自动跳过首次通知提示、确认 Reels 介绍，没有提示则继续。登录验证仍由用户完成；未知弹窗或提示关闭失败须报告，不能宣称上传成功。
 
-视频支持 MP4/MOV，照片支持 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际处理取决于平台。多图按输入顺序发布轮播，单图和两图轮播已实测。标题、正文、标签合计最多 2200 字符；超过时退出 `2`，且静态校验都在启动浏览器前完成。当前账号独立网页版的照片/Reels 表单及高级设置没有定时入口，当前 CLI 仅支持立即发布；不能把定时任务转换成立即发布。
+视频支持 MP4/MOV，照片支持 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际处理取决于平台。多图按输入顺序发布轮播，单图和两图轮播已实测。标题与正文（含正文中的 `#话题`）合计最多 2200 字符；超过时退出 `2`，且静态校验都在启动浏览器前完成。公开话题直接写在正文或标题里；旧 `--tags` 已移除，传入会退出 `2`。当前账号独立网页版的照片/Reels 表单及高级设置没有定时入口，当前 CLI 仅支持立即发布；不能把定时任务转换成立即发布。
 
 已接入四项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，不传即完全不动页面默认：
 
@@ -44,7 +44,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 创建流程按当次页面状态兼容普通账号的直接编辑器与 creator 的“创建 → 帖子”子菜单，视频、图文及本地/托管会话共用业务选择器；账号别名不绑定账号类型。入口使用链接与图标 aria-label，目标须唯一且可交互；未知/歧义页面停止并保留证据。裁剪/编辑主按钮没有稳定专用属性时，限定当前 dialog 的 button role 与已观察的完整 Next/下一步/继续名称，最终 Share/分享/发布动作单独识别。所有可见点击和配文保留 Humanizer，HUMANIZE=0 沿用原生快速路径。
 
-历史真实发布验收仅覆盖 2026-11-10 的 English UI / Personal / 本地 cookie：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags` 发布后回读一致，均已删除。2026-11-17 的真实中文 creator 验收只到视频/图文 no-publish 停止点；普通账号本次仅复验受控 DOM，没有另一个真实 Profile。它们不证明 creator 四项高级选项、实际发布、`--not-before`、`--proxy`、`--headless` 或托管真实账号验收。界面语言由 Profile 和站点决定，未观察的语言/菜单结构可能安全失败。
+历史真实发布验收仅覆盖 2026-11-10 的 English UI / Personal / 本地 cookie：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags`（旧版 `--tags` 行为，现已移除）发布后回读一致，均已删除。2026-11-17 的真实中文 creator 验收只到视频/图文 no-publish 停止点；普通账号本次仅复验受控 DOM，没有另一个真实 Profile。它们不证明 creator 四项高级选项、实际发布、`--not-before`、`--proxy`、`--headless` 或托管真实账号验收。界面语言由 Profile 和站点决定，未观察的语言/菜单结构可能安全失败。
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 

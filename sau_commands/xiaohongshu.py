@@ -1,6 +1,5 @@
 """xiaohongshu 的命令参数与执行逻辑。"""
 from __future__ import annotations
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,25 +9,28 @@ from uploader.xiaohongshu_uploader.main import (
     XHS_CONTEXT_KWARGS,
     XHS_INIT_SCRIPT,
     XHS_LAUNCH_KWARGS,
-    XHS_MAX_TAGS,
     XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE,
     XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED,
     XiaoHongShuNote,
     XiaoHongShuVideo,
     _blocked_message,
-    format_tag_cap_warning,
     probe_session,
     xiaohongshu_setup,
 )
-from sau_commands.output import report_upload_success
+from sau_commands.output import (
+    report_ai_declaration,
+    report_caption_topics,
+    report_location,
+    report_upload_success,
+)
 from sau_commands.local_profile import add_reset_profile_action, run_reset_profile
 from sau_commands.publish_media import add_task_id, media_source
 from sau_commands.arguments import (
     SCHEDULE_HELP,
+    ContentTypeAction,
     add_not_before_flag,
     add_local_runtime_flags,
     parse_image_files,
-    parse_tags,
     schedule_value,
 )
 from sau_commands.browser import (
@@ -76,6 +78,7 @@ def _add_declaration_flags(parser) -> None:
         "--content-type",
         choices=CONTENT_TYPE_CHOICES,
         default=None,
+        action=ContentTypeAction,
         help=CONTENT_TYPE_HELP,
     )
     parser.add_argument(
@@ -156,6 +159,18 @@ def _validate_declarations(
     )
 
 
+def _validate_location(args) -> str | None:
+    """Reject an explicit empty/whitespace location before any browser work."""
+    location = getattr(args, "location", None)
+    if location is None:
+        return None
+    if not str(location).strip():
+        raise UsageError(
+            "--location 不能为空或纯空白；省略该参数可保留页面当前值。"
+        )
+    return str(location).strip()
+
+
 def register(platform_parsers):
     """声明本平台命令、参数及合法选项。"""
     xiaohongshu_parser = platform_parsers.add_parser("xiaohongshu", help="Xiaohongshu operations")
@@ -176,8 +191,14 @@ def register(platform_parsers):
         "--file", required=True, type=media_source, help="Local video path or HTTP(S) URL"
     )
     xiaohongshu_upload_video_parser.add_argument("--title", type=single_line_value, required=True, help="Video title")
-    xiaohongshu_upload_video_parser.add_argument("--desc", default="", help="Optional video description")
-    xiaohongshu_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    xiaohongshu_upload_video_parser.add_argument(
+        "--desc", default="", help="正文；公开话题写为 #话题"
+    )
+    xiaohongshu_upload_video_parser.add_argument(
+        "--location",
+        default=None,
+        help="帖子地点名称；省略则保留页面当前值（不同于 --shoot-location）",
+    )
     xiaohongshu_upload_video_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(xiaohongshu_upload_video_parser)
     xiaohongshu_upload_video_parser.add_argument(
@@ -194,8 +215,14 @@ def register(platform_parsers):
         "--images", required=True, nargs="+", type=media_source, help="Local image paths or HTTP(S) URLs in post order"
     )
     xiaohongshu_upload_note_parser.add_argument("--title", type=single_line_value, required=True, help="Note title")
-    xiaohongshu_upload_note_parser.add_argument("--note", default="", help="Optional note content")
-    xiaohongshu_upload_note_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    xiaohongshu_upload_note_parser.add_argument(
+        "--note", default="", help="正文；公开话题写为 #话题"
+    )
+    xiaohongshu_upload_note_parser.add_argument(
+        "--location",
+        default=None,
+        help="帖子地点名称；省略则保留页面当前值（不同于 --shoot-location）",
+    )
     xiaohongshu_upload_note_parser.add_argument("--schedule", type=schedule_value, help=SCHEDULE_HELP)
     add_not_before_flag(xiaohongshu_upload_note_parser)
     _add_declaration_flags(xiaohongshu_upload_note_parser)
@@ -223,6 +250,10 @@ class XiaohongshuVideoUploadRequest:
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
+    location: str | None = None
+    declaration_report: dict[str, str | None] | None = None
+    location_report: dict[str, str | None] | None = None
+    topic_results: list[dict[str, str | int | None]] | None = None
 
 
 @dataclass(slots=True)
@@ -244,6 +275,10 @@ class XiaohongshuNoteUploadRequest:
     no_publish: bool = False
     publish_not_before: datetime | None = None
     local_browser: str | None = None
+    location: str | None = None
+    declaration_report: dict[str, str | None] | None = None
+    location_report: dict[str, str | None] | None = None
+    topic_results: list[dict[str, str | int | None]] | None = None
 
 
 async def login_xiaohongshu_account(account_name: str, headless=None, local_browser=None) -> dict:
@@ -284,6 +319,7 @@ def _build_video_uploader(request: XiaohongshuVideoUploadRequest) -> XiaoHongShu
         repost_source=request.repost_source,
         shoot_location=request.shoot_location,
         shoot_date=request.shoot_date,
+        location=request.location,
         no_publish=request.no_publish,
         account_name=request.account_name,
         local_browser=request.local_browser,
@@ -309,6 +345,7 @@ def _build_note_uploader(request: XiaohongshuNoteUploadRequest) -> XiaoHongShuNo
         repost_source=request.repost_source,
         shoot_location=request.shoot_location,
         shoot_date=request.shoot_date,
+        location=request.location,
         no_publish=request.no_publish,
         account_name=request.account_name,
         local_browser=request.local_browser,
@@ -363,10 +400,16 @@ async def upload_xiaohongshu_video(
                 extra_ignored=ignored_keys,
             ) as session:
                 await app.xiaohongshu_upload_video(session=session)
+        request.declaration_report = getattr(app, "declaration_report", None)
+        request.location_report = getattr(app, "location_report", None)
+        request.topic_results = getattr(app, "topic_results", None)
         return None
 
     app = _build_video_uploader(request)
     await app.main()
+    request.declaration_report = getattr(app, "declaration_report", None)
+    request.location_report = getattr(app, "location_report", None)
+    request.topic_results = getattr(app, "topic_results", None)
     return None
 
 
@@ -391,10 +434,16 @@ async def upload_xiaohongshu_note(
                 extra_ignored=ignored_keys,
             ) as session:
                 await app.xiaohongshu_upload_note(session=session)
+        request.declaration_report = getattr(app, "declaration_report", None)
+        request.location_report = getattr(app, "location_report", None)
+        request.topic_results = getattr(app, "topic_results", None)
         return None
 
     app = _build_note_uploader(request)
     await app.main()
+    request.declaration_report = getattr(app, "declaration_report", None)
+    request.location_report = getattr(app, "location_report", None)
+    request.topic_results = getattr(app, "topic_results", None)
     return None
 
 
@@ -413,7 +462,9 @@ async def run(args):
 
     original_declaration = content_type = repost_source = None
     shoot_location = shoot_date = None
+    location = None
     if args.action in {"upload-video", "upload-note"}:
+        location = _validate_location(args)
         (
             original_declaration,
             content_type,
@@ -459,15 +510,12 @@ async def run(args):
     )
 
     if args.action == "upload-video":
-        parsed_tags = parse_tags(args.tags)
-        if len(parsed_tags) > XHS_MAX_TAGS:
-            print(f"警告：{format_tag_cap_warning(parsed_tags)}", file=sys.stderr)
         request = XiaohongshuVideoUploadRequest(
             account_name=account_label,
             video_file=args.file,
             title=args.title,
             description=args.desc,
-            tags=parsed_tags,
+            tags=[],
             publish_date=args.schedule or 0,
             thumbnail_file=args.thumbnail,
             publish_strategy=publish_strategy,
@@ -479,25 +527,26 @@ async def run(args):
             repost_source=repost_source,
             shoot_location=shoot_location,
             shoot_date=shoot_date,
+            location=location,
             no_publish=getattr(args, "no_publish", False),
             publish_not_before=args.not_before,
         )
         await upload_xiaohongshu_video(
             request, target=target, ignored_keys=ignored_keys
         )
+        report_ai_declaration(request)
+        report_location(request)
+        report_caption_topics(request, "Xiaohongshu")
         args.post_published = report_upload_success(request, "Xiaohongshu video", request.video_file)
         return 0
 
     if args.action == "upload-note":
-        parsed_tags = parse_tags(args.tags)
-        if len(parsed_tags) > XHS_MAX_TAGS:
-            print(f"警告：{format_tag_cap_warning(parsed_tags)}", file=sys.stderr)
         request = XiaohongshuNoteUploadRequest(
             account_name=account_label,
             image_files=parse_image_files(args.images),
             title=args.title,
             note=args.note,
-            tags=parsed_tags,
+            tags=[],
             publish_date=args.schedule or 0,
             publish_strategy=publish_strategy,
             debug=args.debug,
@@ -508,12 +557,16 @@ async def run(args):
             repost_source=repost_source,
             shoot_location=shoot_location,
             shoot_date=shoot_date,
+            location=location,
             no_publish=getattr(args, "no_publish", False),
             publish_not_before=args.not_before,
         )
         await upload_xiaohongshu_note(
             request, target=target, ignored_keys=ignored_keys
         )
+        report_ai_declaration(request)
+        report_location(request)
+        report_caption_topics(request, "Xiaohongshu")
         args.post_published = report_upload_success(request, "Xiaohongshu note", f"{len(request.image_files)} images")
         return 0
 

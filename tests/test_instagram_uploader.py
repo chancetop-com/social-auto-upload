@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -18,10 +19,12 @@ from uploader.meta_uploader.insgraph_uploader.main import (
     instagram_created_media, instagram_response_payload, _dismiss_optional_prompt,
 )
 from uploader.meta_uploader.insgraph_uploader.options import (
-    DEFAULT_OFF, SET, InstagramPublishOptions,
+    DEFAULT_OFF, NOT_REQUESTED, OPTION_KEYS, SET, InstagramPublishOptions,
+    instagram_caption,
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_id, find_instagram_post
 from utils.errors import LoginRequiredError, PublishResultUnknownError, UsageError
+from utils.humanize import HumanizeProfile, Humanizer, LogNormal
 
 
 class InstagramContractTests(unittest.TestCase):
@@ -985,6 +988,466 @@ _LOCATION_HTML = '''
   });
 </script>
 '''
+
+
+# 配文话题：AI 开关 + 地点联想 + Lexical 配文框 + Share 计数器。
+# 配文编辑器的受控故障由 body.dataset.captionMode 切换，模拟吞字/错位/多余追加
+# 与编辑器硬限制；Share 始终只在计数后返回，便于证明失败时零点击。
+_FAST_ZERO = LogNormal(0.0, 0.0, 0.0, 0.0)
+_FAST_HUMANIZE_PROFILE = HumanizeProfile(
+    keystroke=_FAST_ZERO,
+    after_type=_FAST_ZERO,
+    after_navigate=_FAST_ZERO,
+    before_submit=_FAST_ZERO,
+    pointer_settle=_FAST_ZERO,
+    click_hold=_FAST_ZERO,
+    before_click=_FAST_ZERO,
+    after_click=_FAST_ZERO,
+    between_scroll=_FAST_ZERO,
+    reading=_FAST_ZERO,
+    after_interact=_FAST_ZERO,
+)
+_TOPIC_COMPOSER_HTML = '''
+<div role="dialog" id="compose">
+  <div class="_ac76"><div role="heading">Create new post</div></div>
+  <div class="row" id="ai-row">
+    <div><div><span dir="auto">Add AI label</span></div></div>
+    <div><div><div><div>
+      <input id="ai-switch" role="switch" type="checkbox" aria-checked="false">
+    </div></div></div></div>
+  </div>
+  <div class="_abgh _aw1v">
+    <label><input aria-label="Add location" placeholder="Add location"
+                  name="creation-location-input" autocomplete="off"></label>
+  </div>
+  <div id="suggestions" style="overflow-y:auto; max-height:240px; width:320px"></div>
+  <div role="textbox" contenteditable="true" data-lexical-editor="true"
+       id="caption-editor"></div>
+  <div data-share-clicks="0"></div>
+  <div role="button" id="share"
+       onclick="const holder=document.querySelector('[data-share-clicks]');
+                holder.dataset.shareClicks=String(Number(holder.dataset.shareClicks||0)+1);">Share</div>
+</div>
+<script>
+  const aiSwitch = document.getElementById('ai-switch');
+  aiSwitch.addEventListener('click', () => {
+    aiSwitch.setAttribute('aria-checked', String(aiSwitch.checked));
+  });
+
+  const locationCandidates = ['Shanghai, China', 'Hangzhou', 'Shanghai', 'SHANGHAI'];
+  const locationInput = document.querySelector('input[placeholder="Add location"]');
+  locationInput.addEventListener('input', () => {
+    const list = document.getElementById('suggestions');
+    list.innerHTML = '';
+    const wanted = locationInput.value.trim().toLowerCase();
+    if (!wanted) return;
+    setTimeout(() => {
+      const matches = locationCandidates.filter(
+        (label) => label.toLowerCase().includes(wanted));
+      document.body.dataset.candidates = matches.join('|');
+      list.innerHTML = '';
+      for (const label of matches) {
+        const row = document.createElement('div');
+        row.style.height = '60px';
+        row.style.width = '237px';
+        row.textContent = label;
+        row.addEventListener('click', () => {
+          locationInput.value = label;
+          document.body.dataset.clicked = label;
+          list.innerHTML = '';
+        });
+        list.appendChild(row);
+      }
+    }, 200);
+  });
+
+  const editor = document.getElementById('caption-editor');
+  // Lexical 用 <br> 表示换行；原生 contenteditable 的 Enter 会生成额外段落，
+  // 受控页统一成一次 Enter 一个换行，才能逐字比较含空行的配文。
+  editor.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      document.execCommand('insertLineBreak');
+    }
+  });
+  const captionMode = () => document.body.dataset.captionMode || 'normal';
+  const restoreCaret = () => {
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+  editor.addEventListener('input', () => {
+    const limit = Number(document.body.dataset.captionLimit || 24);
+    const length = editor.innerText.length;
+    if ((captionMode() === 'swallow' || captionMode() === 'limit')
+        && length > limit) {
+      editor.innerText = editor.innerText.slice(0, limit);
+      restoreCaret();
+      return;
+    }
+    if (captionMode() === 'trailing' && length >= Number(document.body.dataset.captionLimit)) {
+      editor.append('\u00a0');
+      restoreCaret();
+      return;
+    }
+    if (captionMode() === 'append' && length > 0
+        && !document.body.dataset.mutated) {
+      document.body.dataset.mutated = '1';
+      editor.append('多余追加');
+      restoreCaret();
+      return;
+    }
+    if (captionMode() === 'misplace' && length >= 4
+        && !document.body.dataset.mutated) {
+      document.body.dataset.mutated = '1';
+      const text = editor.innerText;
+      editor.innerText = text.slice(1, 2) + text.slice(0, 1) + text.slice(2);
+      restoreCaret();
+    }
+  });
+</script>
+'''
+
+
+class InstagramCaptionTopicsDomTests(unittest.TestCase):
+    """C5：真实 Chrome 配文页的全文回读话题证据、失败停止与结果兼容。"""
+
+    def _run_no_publish(self, *, title, description="", tags=None, options=None,
+                        media="video", default_result_file=False):
+        """执行 ``_publish`` 直到 prepared，返回 (app, caption, saved, clicks)。"""
+        caption = instagram_caption(title, description, tags)
+
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel="chrome", headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content(_TOPIC_COMPOSER_HTML)
+                    with tempfile.TemporaryDirectory() as folder:
+                        video = Path(folder) / "video.mp4"
+                        video.touch()
+                        image = Path(folder) / "image.png"
+                        image.touch()
+                        explicit = Path(folder) / "result.json"
+                        kwargs = dict(
+                            title=title, description=description, tags=tags,
+                            options=options, no_publish=True,
+                        )
+                        if media == "note":
+                            kwargs["image_files"] = [image]
+                        else:
+                            kwargs["video_file"] = video
+                        if not default_result_file:
+                            kwargs["result_file"] = explicit
+                        app = InstagramUploader("unused.json", **kwargs)
+                        app._humanizer_instance = Humanizer(
+                            page, profile=_FAST_HUMANIZE_PROFILE
+                        )
+                        budget = app.start_publish_budget()
+                        budget.deadline = time.monotonic() + 30
+                        previous = os.getcwd()
+                        if default_result_file:
+                            os.chdir(folder)
+                        try:
+                            await app._publish(
+                                page,
+                                {"user_id": "42", "username": "creator"},
+                                budget=budget,
+                            )
+                        finally:
+                            os.chdir(previous)
+                        clicks = int(
+                            await page.locator("[data-share-clicks]")
+                            .get_attribute("data-share-clicks") or 0
+                        )
+                        if default_result_file:
+                            saved_path, = (
+                                Path(folder) / ".local/instagram-results"
+                            ).glob("*.json")
+                        else:
+                            saved_path = explicit
+                        saved = json.loads(
+                            saved_path.read_text(encoding="utf-8")
+                        )
+                        self.assertEqual(app.result["topics"], saved["topics"])
+                        return app, caption, saved, clicks
+                finally:
+                    await browser.close()
+
+        return asyncio.run(scenario())
+
+    def _run_readback_failure(self, *, title, description="", mode,
+                              limit=None, media="video"):
+        """受控编辑器改写配文：回读失败、零 Share，返回 (app, error, clicks, saved)。"""
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel="chrome", headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content(_TOPIC_COMPOSER_HTML)
+                    await page.evaluate(
+                        "mode => document.body.dataset.captionMode = mode", mode
+                    )
+                    if limit is not None:
+                        await page.evaluate(
+                            "limit => document.body.dataset.captionLimit = String(limit)",
+                            limit,
+                        )
+                    with tempfile.TemporaryDirectory() as folder:
+                        video = Path(folder) / "video.mp4"
+                        video.touch()
+                        image = Path(folder) / "image.png"
+                        image.touch()
+                        result_file = Path(folder) / "result.json"
+                        kwargs = dict(
+                            title=title, description=description,
+                            result_file=result_file, no_publish=True,
+                        )
+                        if media == "note":
+                            kwargs["image_files"] = [image]
+                        else:
+                            kwargs["video_file"] = video
+                        app = InstagramUploader("unused.json", **kwargs)
+                        app._humanizer_instance = Humanizer(
+                            page, profile=_FAST_HUMANIZE_PROFILE
+                        )
+                        app.stage = "publish"
+                        budget = app.start_publish_budget()
+                        budget.deadline = time.monotonic() + 5
+                        try:
+                            await app._publish(
+                                page,
+                                {"user_id": "42", "username": "creator"},
+                                budget=budget,
+                            )
+                        except AssertionError as error:
+                            clicks = int(
+                                await page.locator("[data-share-clicks]")
+                                .get_attribute("data-share-clicks") or 0
+                            )
+                            # 模拟 CLI 的失败落盘：结果文件仍须可读且不改顶层状态。
+                            previous = os.getcwd()
+                            os.chdir(folder)
+                            try:
+                                await app._capture_failure(page, error)
+                            finally:
+                                os.chdir(previous)
+                            saved = json.loads(
+                                result_file.read_text(encoding="utf-8")
+                            )
+                            return app, error, clicks, saved
+                        self.fail("受控编辑器改写配文后仍通过回读")
+                finally:
+                    await browser.close()
+
+        return asyncio.run(scenario())
+
+    def test_no_publish_reports_topics_with_ai_and_location_for_both_post_types(self):
+        title = "第一行 #coffee，配 #咖啡。"
+        description = (
+            "重复 #coffee 与 #Coffee! 链接 https://example.com/page/#frag\n\n"
+            "空行后 #咖啡_2 与 #a1_b 结束"
+        )
+        expected_texts = [
+            "#coffee", "#咖啡", "#coffee", "#Coffee", "#咖啡_2", "#a1_b", "#legacy",
+        ]
+        expected_names = [
+            "coffee", "咖啡", "coffee", "Coffee", "咖啡_2", "a1_b", "legacy",
+        ]
+        for media in ("video", "note"):
+            with self.subTest(media=media):
+                app, caption, saved, clicks = self._run_no_publish(
+                    title=title, description=description, tags=["legacy"],
+                    options=InstagramPublishOptions(
+                        location="Shanghai", ai_generated=True,
+                    ),
+                    media=media,
+                )
+                records = saved["topics"]
+                self.assertEqual([item["text"] for item in records], expected_texts)
+                self.assertEqual([item["name"] for item in records], expected_names)
+                self.assertEqual(
+                    [item["index"] for item in records],
+                    list(range(1, len(expected_texts) + 1)),
+                )
+                for item in records:
+                    self.assertEqual(
+                        caption[item["start"]:item["end"]], item["text"]
+                    )
+                    self.assertEqual(item["status"], "text")
+                    self.assertEqual(item["reason"], "配文全文逐字回读一致")
+                # 原有顶层键与选项结构不变，新增 topics 只是兼容追加。
+                self.assertEqual(saved["platform"], "instagram")
+                self.assertEqual(saved["title"], title)
+                self.assertEqual(saved["status"], "prepared")
+                self.assertEqual(tuple(saved["options"]), OPTION_KEYS)
+                self.assertEqual(saved["options"]["location"]["status"], SET)
+                self.assertEqual(saved["options"]["ai_generated"]["status"], SET)
+                self.assertEqual(
+                    saved["options"]["comments"]["status"], NOT_REQUESTED
+                )
+                self.assertEqual(
+                    saved["options"]["alt_text"]["status"], NOT_REQUESTED
+                )
+                for key in ("content_id", "post_id", "post_url", "schedule",
+                            "media_count"):
+                    self.assertNotIn(key, saved)
+                self.assertEqual(clicks, 0)
+
+    def test_default_and_explicit_result_files_keep_topic_evidence(self):
+        for default_result_file in (False, True):
+            with self.subTest(default_result_file=default_result_file):
+                app, caption, saved, clicks = self._run_no_publish(
+                    title="标题 #咖啡",
+                    description="正文 #coffee 与 #咖啡",
+                    default_result_file=default_result_file,
+                )
+                self.assertEqual(
+                    [item["text"] for item in saved["topics"]],
+                    ["#咖啡", "#coffee", "#咖啡"],
+                )
+                self.assertEqual(saved["status"], "prepared")
+                self.assertEqual(saved["platform"], "instagram")
+                self.assertEqual(tuple(saved["options"]), OPTION_KEYS)
+                self.assertEqual(app.result["topics"], saved["topics"])
+                self.assertEqual(clicks, 0)
+
+    def test_omitted_caption_and_options_keep_the_existing_path(self):
+        app, caption, saved, clicks = self._run_no_publish(
+            title="plain caption",
+        )
+        self.assertEqual(saved["topics"], [])
+        self.assertEqual(saved["status"], "prepared")
+        self.assertEqual(tuple(saved["options"]), OPTION_KEYS)
+        for key in OPTION_KEYS:
+            self.assertEqual(
+                saved["options"][key],
+                {"requested": None, "applied": None, "status": NOT_REQUESTED},
+            )
+        self.assertEqual(clicks, 0)
+
+    def test_readback_swallow_misplace_and_extra_append_stop_before_share(self):
+        for media in ("video", "note"):
+            for mode, marker in (
+                ("swallow", "第 9 个字符"),
+                ("misplace", "第 1 个字符"),
+                ("append", "多余追加"),
+            ):
+                with self.subTest(media=media, mode=mode):
+                    app, error, clicks, saved = self._run_readback_failure(
+                        title="第一行 #coffee 与 #咖啡。", mode=mode,
+                        limit=8, media=media,
+                    )
+                    message = str(error)
+                    self.assertIn("配文回读不一致", message)
+                    self.assertIn(marker, message)
+                    self.assertIn("期望", message)
+                    self.assertIn("实际", message)
+                    self.assertEqual(app.result["status"], "not_submitted")
+                    self.assertNotIn("topics", app.result)
+                    self.assertEqual(saved["status"], "not_submitted")
+                    self.assertEqual(saved["stage"], "publish")
+                    self.assertIn(marker, saved["error"])
+                    self.assertNotIn("topics", saved)
+                    self.assertEqual(clicks, 0)
+
+    def test_trailing_editor_whitespace_stops_before_share(self):
+        app, error, clicks, _ = self._run_readback_failure(title="tag", mode="trailing", limit=3)
+        self.assertIn("配文回读不一致", str(error))
+        self.assertEqual((app.result["status"], clicks), ("not_submitted", 0))
+
+    def test_editor_hard_limit_stops_before_share(self):
+        for media in ("video", "note"):
+            with self.subTest(media=media):
+                app, error, clicks, saved = self._run_readback_failure(
+                    title="超过编辑器硬限制的配文 #hardlimit",
+                    mode="limit", limit=10, media=media,
+                )
+                self.assertIn("配文回读不一致", str(error))
+                self.assertEqual(app.result["status"], "not_submitted")
+                self.assertNotIn("topics", app.result)
+                self.assertEqual(saved["status"], "not_submitted")
+                self.assertNotIn("topics", saved)
+                self.assertEqual(clicks, 0)
+
+    def test_published_result_keeps_topics_and_existing_keys(self):
+        title = "发布话题 #coffee"
+        description = "正文 #咖啡 与 https://example.com/#frag"
+        caption = instagram_caption(title, description)
+
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel="chrome", headless=True)
+                page = await browser.new_page()
+                try:
+                    async def route(request):
+                        if "/configure_to_clips/" in request.request.url:
+                            payload = {"payload": {"media": {
+                                "id": "123_42", "code": "ABC",
+                                "user": {"pk": "42"},
+                                "caption": {"text": caption},
+                            }}}
+                            await request.fulfill(
+                                body="for (;;);" + json.dumps(payload),
+                                content_type="application/json",
+                            )
+                            return
+                        await request.fulfill(
+                            body="<body></body>", content_type="text/html"
+                        )
+                    # Share 需要真正发出创建请求，才进入响应观察循环。
+                    html = _TOPIC_COMPOSER_HTML.replace(
+                        'holder.dataset.shareClicks=String(Number(holder.dataset.shareClicks||0)+1);',
+                        "holder.dataset.shareClicks=String(Number(holder.dataset.shareClicks||0)+1); "
+                        "fetch('/api/v1/media/configure_to_clips/', {method:'POST'});",
+                    )
+                    await page.route("https://www.instagram.com/**", route)
+                    await page.goto("https://www.instagram.com/")
+                    await page.set_content(html)
+                    with tempfile.TemporaryDirectory() as folder:
+                        video = Path(folder) / "video.mp4"
+                        video.touch()
+                        app = InstagramUploader(
+                            "unused.json", title=title,
+                            description=description, video_file=video,
+                            result_file=Path(folder) / "result.json",
+                        )
+                        app._humanizer_instance = Humanizer(
+                            page, profile=_FAST_HUMANIZE_PROFILE
+                        )
+                        budget = app.start_publish_budget()
+                        budget.deadline = time.monotonic() + 30
+                        await app._publish(
+                            page,
+                            {"user_id": "42", "username": "creator"},
+                            budget=budget,
+                        )
+                        clicks = int(
+                            await page.locator("[data-share-clicks]")
+                            .get_attribute("data-share-clicks") or 0
+                        )
+                        saved = json.loads(
+                            (Path(folder) / "result.json").read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                finally:
+                    await browser.close()
+            return app, saved, clicks
+
+        app, saved, clicks = asyncio.run(scenario())
+        self.assertEqual(clicks, 1)
+        self.assertEqual(saved["status"], "published")
+        self.assertEqual(saved["content_id"], "123_42")
+        self.assertEqual(
+            [item["text"] for item in saved["topics"]], ["#coffee", "#咖啡"]
+        )
+        self.assertEqual(app.result["topics"], saved["topics"])
+        self.assertEqual(tuple(saved["options"]), OPTION_KEYS)
+        self.assertEqual(saved["title"], title)
 
 
 class InstagramLocationOptionDomTests(unittest.TestCase):

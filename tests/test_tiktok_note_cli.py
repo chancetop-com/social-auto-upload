@@ -145,9 +145,18 @@ class _Locator:
             self.page.keyboard_target = "caption"
 
     async def inner_text(self) -> str:
+        if self.selector == "body":
+            return self.page.body_text
         if 'item_id=' in self.selector:
             return self.page.caption_text or self.page.title_text or ""
+        if self.selector.endswith("div.public-DraftEditor-content"):
+            return self.page.caption_text
         return ""
+
+    async def all_inner_texts(self) -> list[str]:
+        if '[data-e2e="poi_container"]' in self.selector and self.page.location_notice:
+            return [self.page.location_notice]
+        return []
 
     async def get_attribute(self, name: str, *, timeout=None):
         if "text=Post" in self.selector:
@@ -240,6 +249,8 @@ class _StudioPage:
         self.publish_clicked = False
         self.title_text = ""
         self.caption_text = ""
+        self.body_text = ""
+        self.location_notice = None
         self.keyboard_target = "caption"
         self.keyboard = _Keyboard(self)
 
@@ -385,6 +396,13 @@ class UploadNoteParserTests(unittest.TestCase):
                         ]
                     )
         self.assertEqual(ctx.exception.code, 2)
+
+    def test_location_flag_is_registered_without_shoot_location(self):
+        parser = _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
+        options = _option_strings(parser)
+        self.assertIn("--location", options)
+        self.assertNotIn("--shoot-location", options)
+        self.assertIsNone(parser._option_string_actions["--location"].default)
 
     def test_parse_upload_note_keeps_image_order(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -534,7 +552,7 @@ class UploadNoteValidationTests(unittest.TestCase):
             self._assert_exit_2_without_browser(self._argv([str(huge)]))
 
     def test_title_over_90_characters_exits_2_without_browser(self):
-        tiktok_command._validate_note_metadata("x" * 90, None, [])
+        tiktok_command._validate_note_metadata("x" * 90, None)
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
@@ -542,7 +560,7 @@ class UploadNoteValidationTests(unittest.TestCase):
             )
 
     def test_description_over_4000_characters_exits_2_without_browser(self):
-        tiktok_command._validate_note_metadata(None, "x" * 4000, [])
+        tiktok_command._validate_note_metadata(None, "x" * 4000)
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
@@ -560,40 +578,18 @@ class UploadNoteValidationTests(unittest.TestCase):
                 )
             )
 
-    def test_scheduled_note_with_only_tags_exits_2_without_browser(self):
+    def test_description_length_counts_inline_topics(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir, 1)
             self._assert_exit_2_without_browser(
-                self._argv(
-                    images,
-                    "--tags",
-                    "fyp",
-                    "--schedule",
-                    "2026-11-06T10:15:00Z",
-                )
+                self._argv(images, "--note", "x" * 3996 + " #tag")
             )
 
-    def test_description_length_includes_expanded_tags(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            images = self._images(tmp_dir, 1)
-            self._assert_exit_2_without_browser(
-                self._argv(
-                    images,
-                    "--note",
-                    "x" * 3990,
-                    "--tags",
-                    "0123456789",
-                )
-            )
-
-    def test_more_than_50_hashtags_exits_2_without_browser(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            images = self._images(tmp_dir, 1)
-            tags = [f"tag{index}" for index in range(51)]
-            tiktok_command._validate_note_metadata(None, None, tags[:50])
-            self._assert_exit_2_without_browser(
-                self._argv(images, "--tags", ",".join(tags))
-            )
+    def test_inline_topics_over_50_are_not_statically_rejected(self):
+        # Inline occurrences are associations, not camera-ready text: the
+        # uploader keeps the 51st word and reports the per-post limit.
+        caption = " ".join(f"#tag{index}" for index in range(51))
+        tiktok_command._validate_note_metadata(None, caption)
 
     def test_missing_notef_file_exits_2_without_browser(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -645,6 +641,15 @@ class UploadNoteValidationTests(unittest.TestCase):
                     "--branded-content",
                 )
             )
+
+    def test_blank_location_exits_2_without_browser(self):
+        for value in ("", "   ", "\t \n"):
+            with self.subTest(value=repr(value)):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    images = self._images(tmp_dir, 1)
+                    self._assert_exit_2_without_browser(
+                        self._argv(images, "--location", value)
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -806,22 +811,22 @@ class UploadNoteCliTests(unittest.TestCase):
                         "--title",
                         "Photo title",
                         "--note",
-                        "Photo body",
-                        "--tags",
-                        "one, two",
+                        "Photo body #one #two",
                         "--privacy",
                         "friends",
                         "--no-comments",
                         "--no-aigc",
                         "--your-brand",
+                        "--location",
+                        "  London   Eye ",
                     ]
                 )
 
         self.assertEqual(code, 0, err)
         request = builder.call_args.args[0]
         self.assertEqual(request.title, "Photo title")
-        self.assertEqual(request.note, "Photo body")
-        self.assertEqual(request.tags, ["one", "two"])
+        self.assertEqual(request.note, "Photo body #one #two")
+        self.assertEqual(request.tags, [])
         self.assertTrue(request.debug)
         self.assertTrue(request.headless)
         self.assertEqual(
@@ -833,6 +838,7 @@ class UploadNoteCliTests(unittest.TestCase):
                 aigc=False,
                 your_brand=True,
                 branded_content=None,
+                location="  London   Eye ",
             ),
         )
         self.assertIsNone(request.options.allow_reuse)
@@ -841,7 +847,7 @@ class UploadNoteCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             images = self._images(tmp_dir)
             note_file = Path(tmp_dir) / "note.md"
-            note_file.write_text("from a markdown file", encoding="utf-8")
+            note_file.write_text("from a markdown file #fromfile", encoding="utf-8")
             _, _, factory = _fake_session(object())
             app = MagicMock()
             app.upload = AsyncMock()
@@ -877,7 +883,8 @@ class UploadNoteCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0, err)
         request = builder.call_args.args[0]
-        self.assertEqual(request.note, "from a markdown file")
+        self.assertEqual(request.note, "from a markdown file #fromfile")
+        self.assertEqual(request.tags, [])
 
     def test_cli_without_metadata_keeps_none_and_empty_tags(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1162,9 +1169,9 @@ class UploadNoteMetadataTests(unittest.TestCase):
 
         self.assertIn(("press", "ControlOrMeta+A"), page.events)
 
-    def test_description_and_tags_follow_the_note_text(self):
+    def test_inline_topics_follow_the_note_text(self):
         page = self._page()
-        note = self._note(note="hello world", tags=("one", "two"))
+        note = self._note(note="hello world #one #two")
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))
@@ -1176,16 +1183,16 @@ class UploadNoteMetadataTests(unittest.TestCase):
             page.caption_text.index("#one"), page.caption_text.index("#two")
         )
 
-    def test_tags_only_still_reach_the_editor(self):
+    def test_python_tags_alone_fill_the_caption(self):
         page = self._page()
         note = self._note(tags=("only",))
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))
 
-        self.assertIn("#only", page.caption_text)
+        self.assertEqual(page.caption_text, "#only")
 
-    def test_no_note_and_no_tags_makes_zero_editor_interactions(self):
+    def test_no_note_makes_zero_editor_interactions(self):
         page = self._page()
         note = self._note()
         note.locator_base = page.locator("body")
@@ -1203,7 +1210,7 @@ class UploadNoteMetadataTests(unittest.TestCase):
 
     def test_metadata_fill_does_not_touch_images(self):
         page = self._page()
-        note = self._note(title="T", note="hello", tags=("one",))
+        note = self._note(title="T", note="hello #one")
         note.locator_base = page.locator("body")
 
         asyncio.run(note.fill_metadata(page))
@@ -1219,9 +1226,18 @@ class UploadNoteMetadataTests(unittest.TestCase):
 
 
 class _FakeToggle:
-    def __init__(self, checked: bool, *, click_toggles: bool = True) -> None:
+    def __init__(
+        self,
+        checked: bool,
+        *,
+        click_toggles: bool = True,
+        disabled: bool = False,
+        unreadable: bool = False,
+    ) -> None:
         self.checked = checked
         self.click_toggles = click_toggles
+        self.disabled = disabled
+        self.unreadable = unreadable
         self.checked_reads = 0
         self.disabled_reads = 0
         self.click_calls = 0
@@ -1229,11 +1245,13 @@ class _FakeToggle:
 
     async def is_checked(self) -> bool:
         self.checked_reads += 1
+        if self.unreadable:
+            raise RuntimeError("locator detached while reading the state")
         return self.checked
 
     async def is_disabled(self) -> bool:
         self.disabled_reads += 1
-        return False
+        return self.disabled
 
     async def click(self) -> None:
         self.click_calls += 1
@@ -1242,6 +1260,8 @@ class _FakeToggle:
 
     async def get_attribute(self, name: str) -> str | None:
         if name == "aria-checked":
+            if self.unreadable:
+                return None
             return "true" if self.checked else "false"
         return None
 
@@ -1313,6 +1333,7 @@ def _note_controls(
     brand_switch=None,
     your_brand=None,
     branded_content=None,
+    location=None,
 ):
     return tk_main.TiktokSettingsControls(
         privacy=privacy,
@@ -1322,6 +1343,7 @@ def _note_controls(
         brand_switch=brand_switch,
         your_brand=your_brand,
         branded_content=branded_content,
+        location=location,
     )
 
 
@@ -1341,6 +1363,258 @@ class UploadNoteOptionTests(unittest.TestCase):
         resolver = AsyncMock(return_value=controls)
         note.resolve_option_controls = resolver
         return resolver
+
+    def _run_option_cli(self, page, controls, extra_args):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "cover.png"
+            image.write_bytes(b"x")
+            session, session_cm, factory = _fake_session(_StudioContext(page))
+            with (
+                patch.object(
+                    tk_main, "TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS", 0
+                ),
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    TiktokNote,
+                    "resolve_option_controls",
+                    new=AsyncMock(return_value=controls),
+                ),
+            ):
+                code, out, err = _run(
+                    [
+                        "tiktok",
+                        "upload-note",
+                        "--folder-id",
+                        "folder",
+                        "--profile-id",
+                        "profile",
+                        "--images",
+                        str(image),
+                        *extra_args,
+                    ]
+                )
+        return code, out, err, page, session_cm
+
+    def test_cli_no_aigc_missing_entry_reaches_no_publish_stop(self):
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=None),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=default_off", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=yes", out)
+        self.assertIn("素材已上传，发布前检查已通过；已停止，未点击发布按钮。", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_no_aigc_disabled_and_still_on_exits_1_without_publish(self):
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=_FakeToggle(True, disabled=True)),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("applied=true", out)
+        self.assertIn("status=mismatch", out)
+        self.assertIn("continue=no", out)
+        self.assertIn("aigc", err)
+        self.assertIn("stage=disabled", err)
+        self.assertFalse(page.publish_clicked)
+        self.assertNotIn("素材已上传", out)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_no_aigc_visible_but_unreadable_exits_1_without_publish(self):
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=_FakeToggle(False, unreadable=True)),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=mismatch", out)
+        self.assertIn("reason=read_error", out)
+        self.assertIn("continue=no", out)
+        self.assertIn("aigc", err)
+        self.assertIn("stage=read", err)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_no_aigc_on_to_off_reports_set_and_stops_before_publish(self):
+        page = _StudioPage()
+        aigc = _FakeToggle(True)
+
+        code, out, err, page, session_cm = self._run_option_cli(
+            page,
+            _note_controls(aigc=aigc),
+            ["--no-aigc", "--no-publish"],
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertIn("requested=false", out)
+        self.assertIn("applied=false", out)
+        self.assertIn("status=set", out)
+        self.assertIn("continue=yes", out)
+        self.assertIn("素材已上传，发布前检查已通过；已停止，未点击发布按钮。", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_aigc_omitted_preserves_preset_and_reports_not_requested(self):
+        aigc = _FakeToggle(True)
+        note = self._note(TiktokPublishOptions(allow_comments=False))
+        self._install(
+            note,
+            _note_controls(comments=_FakeToggle(True), aigc=aigc),
+        )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertTrue(aigc.checked)
+        self.assertEqual(aigc.checked_reads, 0)
+        self.assertEqual(aigc.disabled_reads, 0)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(note.ai_outcome.requested)
+        self.assertEqual(note.ai_outcome.status, "not_requested")
+        self.assertEqual(out.getvalue(), "")
+
+    def test_no_aigc_missing_entry_continues_as_default_off(self):
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=None))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertEqual(note.ai_outcome.requested, False)
+        self.assertIsNone(note.ai_outcome.applied)
+        self.assertEqual(note.ai_outcome.status, "default_off")
+        self.assertEqual(note.ai_outcome.reason, "entry_missing")
+        line = out.getvalue()
+        self.assertIn("requested=false", line)
+        self.assertIn("applied=null", line)
+        self.assertIn("status=default_off", line)
+        self.assertIn("reason=entry_missing", line)
+        self.assertIn("continue=yes", line)
+
+    def test_no_aigc_already_off_reports_default_off_without_click(self):
+        aigc = _FakeToggle(False)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(note.ai_outcome.applied, False)
+        self.assertEqual(note.ai_outcome.status, "default_off")
+        self.assertIsNone(note.ai_outcome.reason)
+        line = out.getvalue()
+        self.assertIn("applied=false", line)
+        self.assertIn("status=default_off", line)
+        self.assertIn("continue=yes", line)
+
+    def test_no_aigc_on_to_off_reports_set(self):
+        aigc = _FakeToggle(True)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertFalse(aigc.checked)
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(note.ai_outcome.applied, False)
+        self.assertEqual(note.ai_outcome.status, "set")
+        line = out.getvalue()
+        self.assertIn("requested=false", line)
+        self.assertIn("applied=false", line)
+        self.assertIn("status=set", line)
+        self.assertIn("continue=yes", line)
+
+    def test_no_aigc_readback_still_on_fails_mismatch(self):
+        aigc = _FakeToggle(True, click_toggles=False)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertIn("stage=readback", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 1)
+        self.assertEqual(note.ai_outcome.applied, True)
+        self.assertEqual(note.ai_outcome.status, "mismatch")
+        self.assertIn("continue=no", out.getvalue())
+
+    def test_no_aigc_disabled_and_still_on_fails_mismatch(self):
+        aigc = _FakeToggle(True, disabled=True)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertIn("stage=disabled", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertEqual(note.ai_outcome.applied, True)
+        self.assertEqual(note.ai_outcome.status, "mismatch")
+        line = out.getvalue()
+        self.assertIn("applied=true", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("continue=no", line)
+
+    def test_no_aigc_visible_but_unreadable_fails_mismatch(self):
+        aigc = _FakeToggle(False, unreadable=True)
+        note = self._note(TiktokPublishOptions(aigc=False))
+        self._install(note, _note_controls(aigc=aigc))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(RuntimeError) as ctx:
+                asyncio.run(note.apply_options(_StudioPage()))
+
+        self.assertIn("stage=read", str(ctx.exception))
+        self.assertEqual(aigc.click_calls, 0)
+        self.assertIsNone(note.ai_outcome.applied)
+        self.assertEqual(note.ai_outcome.status, "mismatch")
+        self.assertEqual(note.ai_outcome.reason, "read_error")
+        line = out.getvalue()
+        self.assertIn("applied=null", line)
+        self.assertIn("status=mismatch", line)
+        self.assertIn("reason=read_error", line)
+        self.assertIn("continue=no", line)
 
     def test_privacy_comments_aigc_and_brand_are_applied_and_read_back(self):
         privacy = _FakePrivacy("Everyone", ["Everyone", "Friends", "Only you"])
@@ -1448,6 +1722,285 @@ class UploadNoteOptionTests(unittest.TestCase):
         self.assertNotIn("submitted", out)
         self.assertIn("aigc", err)
         self.assertIn("control-not-found", err)
+        self.assertIn("requested=true", out)
+        self.assertIn("applied=null", out)
+        self.assertIn("status=unsupported", out)
+        self.assertIn("reason=entry_missing", out)
+        self.assertIn("continue=no", out)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+
+class _FakeLocationCandidate:
+    def __init__(self, name: str, address: str | None = None) -> None:
+        self.name = name
+        self.address = address
+        self.click_calls = 0
+        self.on_click = None
+
+    async def click(self) -> None:
+        self.click_calls += 1
+        if self.on_click is not None:
+            self.on_click(self)
+
+
+class _FakeLocation:
+    def __init__(
+        self,
+        rows=(),
+        *,
+        collapsed: bool = True,
+        final_value: str | None = None,
+    ) -> None:
+        self.rows = []
+        for item in rows:
+            candidate = (
+                item
+                if isinstance(item, _FakeLocationCandidate)
+                else _FakeLocationCandidate(*item)
+            )
+            candidate.on_click = self._select
+            self.rows.append(candidate)
+        self.collapsed = collapsed
+        self.final_value = final_value
+        self.candidates = ("fake-location",)
+        self.search_calls = 0
+        self.searches: list[str] = []
+        self.selected: str | None = None
+        self.collapse_reads = 0
+        self.value_reads = 0
+
+    def _select(self, candidate: _FakeLocationCandidate) -> None:
+        self.selected = candidate.name
+
+    async def search(self, text: str) -> None:
+        self.search_calls += 1
+        self.searches.append(text)
+
+    async def candidate_rows(self):
+        return list(self.rows)
+
+    async def wait_collapsed(self) -> bool:
+        self.collapse_reads += 1
+        return self.collapsed
+
+    async def read_value(self) -> str:
+        self.value_reads += 1
+        if self.final_value is not None:
+            return self.final_value
+        return self.selected or ""
+
+    async def is_disabled(self) -> bool:
+        return False
+
+    async def is_visible(self) -> bool:
+        return True
+
+    async def count(self) -> int:
+        return 1
+
+
+class UploadNoteLocationTests(unittest.TestCase):
+    def _run_cli(self, page, controls, location="London Eye", extra=()):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image = Path(tmp_dir) / "cover.png"
+            image.write_bytes(b"x")
+            session, session_cm, factory = _fake_session(_StudioContext(page))
+            with (
+                patch.object(
+                    tiktok_command,
+                    "async_playwright",
+                    lambda: _AsyncCM(object()),
+                ),
+                patch.object(tiktok_command, "browser_session", new=factory),
+                patch.object(
+                    tiktok_command,
+                    "is_logged_in",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    TiktokNote,
+                    "resolve_option_controls",
+                    new=AsyncMock(return_value=controls),
+                ),
+            ):
+                argv = [
+                    "tiktok",
+                    "upload-note",
+                    "--folder-id",
+                    "folder",
+                    "--profile-id",
+                    "profile",
+                    "--images",
+                    str(image),
+                ]
+                if location is not None:
+                    argv += ["--location", location]
+                argv += ["--no-publish", *extra]
+                code, out, err = _run(argv)
+        return code, out, err, page, session_cm
+
+    def test_cli_success_reports_clicked_row_and_final_value(self):
+        rows = [
+            ("London Eye Afternoon Tea", "Riverside building, London"),
+            ("London Eye", "Riverside Building, County Hall, London, UK"),
+            ("London Eye", "Dolgoprudnyy, Moscow, Russia"),
+        ]
+        location = _FakeLocation(rows)
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_cli(
+            page,
+            _note_controls(location=location),
+            location="  london   EYE ",
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(location.searches, ["london EYE"])
+        self.assertEqual(location.rows[1].click_calls, 1)
+        self.assertEqual(location.rows[0].click_calls, 0)
+        self.assertEqual(location.rows[2].click_calls, 0)
+        self.assertIn("requested='london EYE'", out)
+        self.assertIn("candidate='London Eye'", out)
+        self.assertIn(
+            "address='Riverside Building, County Hall, London, UK'", out
+        )
+        self.assertIn("final='London Eye'", out)
+        self.assertIn("status=set", out)
+        self.assertIn("TikTok note upload: 1 images", out)
+        self.assertIn("已停止，未点击发布按钮。", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def _assert_failure(self, controls, reason, *, page=None):
+        page = page or _StudioPage()
+        code, out, err, page, session_cm = self._run_cli(page, controls)
+        self.assertEqual(code, 1)
+        self.assertIn(f"reason={reason}", out)
+        self.assertIn("continue=no", out)
+        self.assertIn("option=location", err)
+        self.assertNotIn("TikTok note upload:", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_approximate_only_exits_1_without_publish(self):
+        self._assert_failure(
+            _note_controls(
+                location=_FakeLocation(
+                    [
+                        ("London Eye Afternoon Tea", "London, UK"),
+                        ("London", "Greater London, United Kingdom"),
+                    ]
+                )
+            ),
+            "no_same_name_candidate",
+        )
+
+    def test_cli_name_only_row_succeeds_without_address(self):
+        location = _FakeLocation([("人民公园", None)])
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_cli(
+            page,
+            _note_controls(location=location),
+            location="人民公园",
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(location.rows[0].click_calls, 1)
+        self.assertIn("candidate='人民公园'", out)
+        self.assertIn("address=null", out)
+        self.assertIn("final='人民公园'", out)
+        self.assertIn("status=set", out)
+        self.assertFalse(page.publish_clicked)
+        self.assertEqual(session_cm.exit_calls, 1)
+
+    def test_cli_empty_candidate_list_exits_1_without_publish(self):
+        self._assert_failure(
+            _note_controls(location=_FakeLocation([])),
+            "no_same_name_candidate",
+        )
+
+    def test_cli_entry_missing_exits_1_without_publish(self):
+        self._assert_failure(
+            _note_controls(location=None), "entry_missing"
+        )
+
+    def test_cli_explicit_account_prompt_exits_1_without_publish(self):
+        page = _StudioPage()
+        page.location_notice = "Location isn't available for this account."
+        self._assert_failure(
+            _note_controls(location=None),
+            "account_ineligible",
+            page=page,
+        )
+
+    def test_cli_list_not_collapsed_exits_1_without_publish(self):
+        self._assert_failure(
+            _note_controls(
+                location=_FakeLocation(
+                    [("London Eye", "London, UK")], collapsed=False
+                )
+            ),
+            "list_not_collapsed",
+        )
+
+    def test_cli_empty_final_value_exits_1_without_publish(self):
+        self._assert_failure(
+            _note_controls(
+                location=_FakeLocation(
+                    [("London Eye", "London, UK")], final_value=""
+                )
+            ),
+            "final_empty",
+        )
+
+    def test_cli_wrong_final_value_exits_1_without_publish(self):
+        self._assert_failure(
+            _note_controls(
+                location=_FakeLocation(
+                    [("London Eye", "London, UK")], final_value="London"
+                )
+            ),
+            "final_mismatch",
+        )
+
+    def test_cli_omitted_location_makes_zero_location_calls(self):
+        location = _FakeLocation(
+            [("London Eye", "London, UK")], final_value="London Eye"
+        )
+        page = _StudioPage()
+
+        code, out, err, page, session_cm = self._run_cli(
+            page,
+            _note_controls(comments=_FakeToggle(True), location=location),
+            location=None,
+            extra=("--no-comments",),
+        )
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(location.search_calls, 0)
+        self.assertEqual(location.collapse_reads, 0)
+        self.assertEqual(location.value_reads, 0)
+        for candidate in location.rows:
+            self.assertEqual(candidate.click_calls, 0)
+        self.assertNotIn("TikTok 帖子地点", out)
+        self.assertIn("TikTok note upload: 1 images", out)
+        self.assertFalse(page.publish_clicked)
+
+    def test_photos_tab_gap_keeps_its_own_diagnostic_with_location(self):
+        page = _StudioPage(photo_mode=False, photos_tab=False)
+
+        code, out, err, page, session_cm = self._run_cli(
+            page, _note_controls(location=_FakeLocation([]))
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("Photos", err)
+        self.assertIn("未覆盖", err)
+        self.assertNotIn("TikTok 帖子地点", out)
+        self.assertNotIn("account_ineligible", out)
+        self.assertNotIn("entry_missing", out)
+        self.assertFalse(page.publish_clicked)
         self.assertEqual(session_cm.exit_calls, 1)
 
 

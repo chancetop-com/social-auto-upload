@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
+import json
 import re
 import sys
+from uuid import uuid4
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -46,9 +48,17 @@ from pathlib import Path
 from utils.humanize import DEFAULT_PROFILE
 from utils.humanize import MAYBE_DISPATCHED
 from utils.humanize import MAYBE_DISPATCHED_VALUE
+from utils.text_compare import normalize_text
 from utils.text_validation import validate_single_line
 from utils.humanize import Humanizer
 from utils.log import tiktok_logger
+from utils.caption_topics import (
+    STATUS_LINKED as TOPIC_LINKED,
+    STATUS_TEXT as TOPIC_TEXT,
+    CaptionTopics,
+    TopicOccurrence,
+    parse_caption_topics,
+)
 
 # Managed uploads keep their existing ignored-option diagnostics. The local
 # persistent path never consumes these legacy metadata exports.
@@ -60,6 +70,17 @@ _LOGIN_URL_MARKERS = ("/login", "captcha", "verify", "two-factor", "2fa")
 TIKTOK_RESULT_READ_TIMEOUT_MS = 30_000
 TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS = 3_000
 TIKTOK_HASHTAG_SETTLE_MS = 600
+TIKTOK_TOPIC_ERROR_SELECTOR = (
+    ':is([data-e2e*="caption"], .caption-textarea) '
+    ':is([role="alert"],[class*="error" i],[aria-live="assertive"],[aria-live="polite"]):visible'
+    ':not([contenteditable],[contenteditable] *,[data-e2e*="preview" i],[data-e2e*="preview" i] *,[class*="preview" i],[class*="preview" i] *), '
+    '[data-e2e*="hashtag_error"]:visible, [data-e2e*="caption_error"]:visible, '
+    '[data-e2e*="toast"][role="alert"]:visible'
+)
+#: Location search: wait for suggestions, then verify the clicked list closes.
+TIKTOK_LOCATION_SUGGESTION_TIMEOUT_MS = 5_000
+TIKTOK_LOCATION_COLLAPSE_TIMEOUT_MS = 5_000
+TIKTOK_LOCATION_POLL_MS = 100
 #: ``--no-publish`` dry run: upper bound for the publish-ready wait.  It is
 #: also clamped by whatever remains of the shared publish budget.
 TIKTOK_DRY_RUN_READY_TIMEOUT_MS = 60_000
@@ -400,6 +421,294 @@ class TiktokPublishOptions:
     aigc: bool | None = None
     your_brand: bool | None = None
     branded_content: bool | None = None
+    location: str | None = None         # exact candidate name; None = untouched
+
+
+# AI disclosure outcome vocabulary, aligned with the Instagram options record.
+AI_NOT_REQUESTED = "not_requested"
+AI_SET = "set"
+AI_DEFAULT_OFF = "default_off"
+AI_UNSUPPORTED = "unsupported"
+AI_MISMATCH = "mismatch"
+AI_ENTRY_MISSING = "entry_missing"
+AI_READ_ERROR = "read_error"
+AI_DIALOG_ERROR = "dialog_error"
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokAiOutcome:
+    """Terminal result for one tri-state AI disclosure request.
+
+    ``applied`` stays ``None`` when the page value was never observed (a
+    genuinely missing entry or an unreadable switch).  ``default_off`` with
+    ``entry_missing`` is the only continuing outcome whose final value is
+    unknown; it must never be presented as an observed ``false``.
+    """
+
+    requested: bool | None
+    applied: bool | None
+    status: str
+    reason: str | None = None
+
+    @property
+    def can_continue(self) -> bool:
+        return self.status in (AI_NOT_REQUESTED, AI_SET, AI_DEFAULT_OFF)
+
+
+def format_ai_outcome(outcome: TiktokAiOutcome) -> str:
+    """One machine-greppable line: requested/applied/status/reason/continue."""
+
+    def tri(value: bool | None) -> str:
+        if value is None:
+            return "null"
+        return "true" if value else "false"
+
+    reason = outcome.reason or "-"
+    return (
+        "TikTok AI 声明: option=aigc "
+        f"requested={tri(outcome.requested)} "
+        f"applied={tri(outcome.applied)} "
+        f"status={outcome.status} reason={reason} "
+        f"continue={'yes' if outcome.can_continue else 'no'}"
+    )
+
+
+# Post-location outcome vocabulary.  ``no_match`` is distinct from
+# ``unsupported``: the first means the search produced no same-name row, the
+# second means the page entry is missing or explicitly restricted.
+LOCATION_NOT_REQUESTED = "not_requested"
+LOCATION_SET = "set"
+LOCATION_NO_MATCH = "no_match"
+LOCATION_UNSUPPORTED = "unsupported"
+LOCATION_MISMATCH = "mismatch"
+
+LOCATION_NO_SAME_NAME = "no_same_name_candidate"
+LOCATION_ENTRY_MISSING = "entry_missing"
+LOCATION_ACCOUNT_INELIGIBLE = "account_ineligible"
+LOCATION_CONTROL_DISABLED = "control_disabled"
+LOCATION_SEARCH_ERROR = "search_error"
+LOCATION_CLICK_ERROR = "click_error"
+LOCATION_LIST_NOT_COLLAPSED = "list_not_collapsed"
+LOCATION_FINAL_EMPTY = "final_empty"
+LOCATION_FINAL_MISMATCH = "final_mismatch"
+LOCATION_READ_ERROR = "read_error"
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokLocationOutcome:
+    """Terminal result for one ``--location`` request.
+
+    ``candidate_name``/``candidate_address`` describe the row that was clicked
+    (the address may be absent); ``final_value`` is the collapsed control's
+    visible value.  Unobserved values stay ``None`` and are never guessed.
+    """
+
+    requested: str | None
+    status: str
+    candidate_name: str | None = None
+    candidate_address: str | None = None
+    final_value: str | None = None
+    reason: str | None = None
+
+    @property
+    def can_continue(self) -> bool:
+        return self.status in (LOCATION_NOT_REQUESTED, LOCATION_SET)
+
+
+def format_location_outcome(outcome: TiktokLocationOutcome) -> str:
+    """One machine-greppable line with the clicked row and final value."""
+
+    def value(text: str | None) -> str:
+        return "null" if text is None else repr(text)
+
+    return (
+        "TikTok 帖子地点: option=location "
+        f"requested={value(outcome.requested)} "
+        f"candidate={value(outcome.candidate_name)} "
+        f"address={value(outcome.candidate_address)} "
+        f"final={value(outcome.final_value)} "
+        f"status={outcome.status} reason={outcome.reason or '-'} "
+        f"continue={'yes' if outcome.can_continue else 'no'}"
+    )
+
+
+#: TikTok caption-topic evidence vocabulary.  ``linked`` means the editor
+#: mention span was read back with the same name; ``text`` means the occurrence
+#: stayed plain text (no same-name row or the per-post association limit).
+TOPIC_NO_SAME_NAME = "no_same_name_candidate"
+TOPIC_ASSOCIATION_LIMIT = "association_limit"
+TOPIC_HARD_LIMIT = "hard_limit"
+TOPIC_WRONG_TOPIC = "wrong_topic"
+TOPIC_CAPTION_MISMATCH = "caption_mismatch"
+TOPIC_READ_ERROR = "read_error"
+TOPIC_SELECT_ERROR = "select_error"
+TOPIC_MISMATCH = "mismatch"
+
+
+class TiktokTopicError(RuntimeError):
+    """A per-occurrence caption-topic failure (CLI exit 1)."""
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class TiktokTopicOutcome:
+    """Terminal evidence for one caption ``#topic`` occurrence."""
+
+    occurrence: TopicOccurrence
+    status: str
+    reason: str | None = None
+    can_continue: bool = True
+
+    @property
+    def index(self) -> int:
+        return self.occurrence.index
+
+    @property
+    def text(self) -> str:
+        return self.occurrence.text
+
+
+def _topic_result_label(outcome: TiktokTopicOutcome) -> str:
+    """Human-readable counterpart of the machine status/reason pair."""
+
+    if outcome.status == TOPIC_LINKED:
+        return "已关联"
+    if outcome.reason == TOPIC_NO_SAME_NAME:
+        return "保留文字，无同名候选"
+    if outcome.reason == TOPIC_ASSOCIATION_LIMIT:
+        return "保留文字，已达可关联上限"
+    if outcome.reason == TOPIC_HARD_LIMIT:
+        return "保留文字，整帖硬限制"
+    if outcome.status == TOPIC_MISMATCH:
+        return "回读不一致"
+    return "-"
+
+
+def format_topic_outcome(outcome: TiktokTopicOutcome) -> str:
+    """One machine-greppable line per occurrence, in caption order."""
+
+    return (
+        "TikTok 配文话题: "
+        f"index={outcome.index} "
+        f"text={outcome.text!r} "
+        f"status={outcome.status} "
+        f"reason={outcome.reason or '-'} "
+        f"continue={'yes' if outcome.can_continue else 'no'} "
+        f"result={_topic_result_label(outcome)}"
+    )
+
+
+def _caption_difference(expected: str, observed: str) -> str:
+    """Describe the first divergence without dumping the whole caption."""
+
+    limit = min(len(expected), len(observed))
+    index = 0
+    while index < limit and expected[index] == observed[index]:
+        index += 1
+    expected_char = expected[index] if index < len(expected) else "<end>"
+    observed_char = observed[index] if index < len(observed) else "<end>"
+    return (
+        f"first-difference={index} "
+        f"expected-char={expected_char!r} observed-char={observed_char!r}"
+    )
+
+
+def _normalise_caption_newlines(text: str) -> str:
+    """Only the platform's line-ending handling is normalised."""
+
+    return str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def normalize_location_text(text: str | None) -> str:
+    """Name comparison: trim, collapse consecutive whitespace, ignore case."""
+    return normalize_text(text)
+
+
+def parse_location_row(text: str) -> tuple[str, str | None]:
+    """Split a candidate row into its visible name and address.
+
+    Studio renders the name on the first line and the address on the
+    following line(s).  A name-only row yields ``(name, None)`` and is still a
+    valid exact match; the address is evidence, never part of matching.
+    """
+    lines = [line.strip() for line in str(text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return "", None
+    name = " ".join(lines[0].split())
+    address = " ".join(" ".join(lines[1:]).split()) or None
+    return name, address
+
+
+# Explicit restriction copy only.  A missing entry alone must never be
+# reported as ineligible, and an unrelated ``... aren't available`` hint (for
+# example the private-account Duet/Stitch hint) must not match.  Every pattern
+# therefore keeps the location subject and the negation adjacent, or requires
+# an explicit account/region qualifier.
+_LOCATION_INELIGIBLE_PATTERNS = (
+    re.compile(
+        r"(?:location|地点)\s*(?:is|are|was|were)?\s*"
+        r"(?:not|isn['’]t|aren['’]t)\s*"
+        r"(?:available|supported|offered|eligible)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:location|地点)\s*(?:不可用|不支持|不符合资格|无法使用|无法选择)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:can['’]?t|cannot|unable\s+to|无法|不能)"
+        r"[^.\n]{0,20}"
+        r"(?:add|select|use|choose|添加|选择|设置)"
+        r"[^.\n]{0,20}(?:location|地点)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:account|账号)\s*(?:is|are)?\s*"
+        r"(?:not\s+eligible|ineligible|不符合资格|无资格)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:location|地点)[^.\n]{0,40}"
+        r"(?:not\s+available|unavailable|not\s+supported|not\s+eligible|"
+        r"ineligible|不可用|不支持|不符合资格)"
+        r"[^.\n]{0,40}"
+        r"(?:(?:this|your|当前|该)\s*(?:account|账号)|"
+        r"region|country|地区|国家|年龄|age)",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _location_restriction_message(body: str | None) -> str | None:
+    """Return the explicit restriction sentence, or ``None``."""
+    if not body:
+        return None
+    text = " ".join(str(body).split())
+    for pattern in _LOCATION_INELIGIBLE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return match.group(0).strip()
+    return None
+
+
+async def _read_location_restriction(page) -> str | None:
+    """Look for a location-specific notice from Studio."""
+    try:
+        notices = await page.locator(
+            '[data-e2e="poi_container"] :is([class*="error" i],[role="alert"],[aria-live]):visible, '
+            '[data-e2e*="location_error"]:visible'
+        ).all_inner_texts()
+        for notice in notices:
+            reason = _location_restriction_message(notice)
+            if reason:
+                return reason
+    except Exception:
+        return None
+    return None
 
 
 # Page copy -> CLI/API semantic value.  ``Only you`` and ``Private`` are the
@@ -452,6 +761,9 @@ class TiktokOptionControl:
 
     async def is_checked(self) -> bool:
         raise NotImplementedError
+
+    async def native_switch_state(self) -> bool:
+        return await self.is_checked()
 
     async def is_disabled(self) -> bool:
         raise NotImplementedError
@@ -541,6 +853,16 @@ class _LocatorControl(TiktokOptionControl):
             except Exception:
                 pass
             raise original
+
+    async def native_switch_state(self) -> bool:
+        target = await self._target()
+        state = await target.evaluate("""el => {
+            const input = el.matches('input[type=checkbox]') ? el : el.querySelector('input[type=checkbox]');
+            return input && !input.indeterminate ? input.checked : null;
+        }""")
+        if not isinstance(state, bool):
+            raise ValueError("无法确认原生 checkbox 状态")
+        return state
 
     async def is_disabled(self) -> bool:
         target = await self._target()
@@ -682,6 +1004,282 @@ class _LocatorPrivacyControl(TiktokOptionControl):
         return await self._trigger.count()
 
 
+class TiktokLocationCandidate:
+    """One visible candidate row: name on the first line, address after it."""
+
+    def __init__(
+        self,
+        name: str,
+        address: str | None = None,
+        *,
+        locator=None,
+        humanizer: Humanizer | None = None,
+    ) -> None:
+        self.name = name
+        self.address = address
+        self._locator = locator
+        self._humanizer = humanizer
+
+    async def click(self) -> None:
+        if self._locator is None:
+            raise NotImplementedError
+        if parse_location_row(await self._locator.inner_text()) != (self.name, self.address):
+            raise RuntimeError("地点候选在点选前已变更")
+        await _humanized_click(self._humanizer, self._locator)
+
+
+class TiktokLocationControl:
+    """Location combobox seam: search, ordered rows, collapse and readback.
+
+    ``candidates`` is the selector-description tuple used by the shared error
+    context; the live rows come from ``candidate_rows`` so tests can provide
+    in-memory candidates without modelling the DOM.
+    """
+
+    candidates: tuple[str, ...] = ()
+    candidate_index: int | None = None
+
+    async def count(self) -> int:
+        raise NotImplementedError
+
+    async def is_visible(self) -> bool:
+        raise NotImplementedError
+
+    async def is_disabled(self) -> bool:
+        raise NotImplementedError
+
+    async def search(self, text: str) -> None:
+        raise NotImplementedError
+
+    async def candidate_rows(self) -> list[TiktokLocationCandidate]:
+        raise NotImplementedError
+
+    async def wait_collapsed(self) -> bool:
+        raise NotImplementedError
+
+    async def read_value(self) -> str:
+        raise NotImplementedError
+
+    async def get_attribute(self, name: str) -> str | None:
+        raise NotImplementedError
+
+
+_LOCATION_INPUT_SELECTORS = (
+    "input.Select__searchInput",
+    'input[placeholder*="Search locations" i]',
+    'input[placeholder*="地点" i]',
+)
+
+
+class _LocatorLocationControl(TiktokLocationControl):
+    """Studio ``poi_container`` adapter over a Patchright locator."""
+
+    def __init__(
+        self,
+        input_locator,
+        container,
+        *,
+        page,
+        candidates: tuple[str, ...] = (),
+        humanizer: Humanizer | None = None,
+    ) -> None:
+        self._input_locator = input_locator
+        self._container = container
+        self._page = page
+        self.candidates = candidates
+        self._humanizer = humanizer
+
+    async def _input(self):
+        locator = self._input_locator
+        try:
+            total = await locator.count()
+        except Exception:
+            total = 0
+        if total > 1:
+            for index in range(total):
+                node = locator.nth(index)
+                try:
+                    if await node.is_visible():
+                        return node
+                except Exception:
+                    continue
+        first = getattr(locator, "first", None)
+        return first if first is not None else locator
+
+    async def count(self) -> int:
+        return await self._input_locator.count()
+
+    async def is_visible(self) -> bool:
+        try:
+            return bool(await (await self._input()).is_visible())
+        except Exception:
+            # A transient probe error must not turn into a false
+            # "entry missing"; the search/readback will carry the real error.
+            return True
+
+    async def is_disabled(self) -> bool:
+        target = await self._input()
+        try:
+            if await target.is_disabled():
+                return True
+            if str(
+                await target.get_attribute("readonly")
+            ).lower() == "true":
+                return True
+        except Exception:
+            pass
+        try:
+            classes = (
+                (await self._container.get_attribute("class")) or ""
+            ).casefold()
+            return _classes_mark_disabled(classes)
+        except Exception:
+            return False
+
+    async def get_attribute(self, name: str) -> str | None:
+        return await (await self._input()).get_attribute(name)
+
+    async def search(self, text: str) -> None:
+        target = await self._input()
+        if self._humanizer is None:
+            # Direct construction (offline seam) has no page-backed Humanizer.
+            await target.fill(text)  # native-fill: offline seam 无 page-backed Humanizer
+        else:
+            humanizer = self._humanizer
+            await _humanized_click(humanizer, target)
+            await humanizer.press("ControlOrMeta+A")
+            await humanizer.press("Delete")
+            await humanizer.type_text(text)
+        await self._wait_for_rows()
+
+    async def _wait_for_rows(self) -> None:
+        deadline = (
+            time.monotonic() + TIKTOK_LOCATION_SUGGESTION_TIMEOUT_MS / 1000
+        )
+        while True:
+            if await self.candidate_rows():
+                return
+            if time.monotonic() >= deadline:
+                return
+            await self._page.wait_for_timeout(TIKTOK_LOCATION_POLL_MS)
+
+    async def _rows_in_scope(self, scope) -> list[TiktokLocationCandidate]:
+        # Stamp the nodes in the same DOM snapshot as their visible labels.
+        # A locator based on nth() could target another address after a rerender.
+        token = uuid4().hex
+        rows = await scope.locator('[role="option"]:visible').evaluate_all(
+            """(nodes, token) => nodes.map((node, index) => {
+                const id = token + "-" + index;
+                node.setAttribute("data-sau-location-option", id);
+                return {id, text: node.innerText};
+            })""", token,
+        )
+        candidates = []
+        for row in rows:
+            name, address = parse_location_row(row["text"])
+            if name:
+                locator = scope.locator(f'[data-sau-location-option="{row["id"]}"]')
+                # textContent can concatenate adjacent name/address elements.
+                # Keep the verified text in the locator throughout hover and click.
+                locator = locator.filter(has_text=re.compile(
+                    r"^\s*" + r"\s*".join(re.escape(part) for part in row["text"].split()) + r"\s*$"
+                ))
+                candidates.append(TiktokLocationCandidate(
+                    name, address,
+                    locator=locator,
+                    humanizer=self._humanizer,
+                ))
+        return candidates
+
+    def _combobox(self):
+        """The visible trigger button that owns the listbox.
+
+        Studio's ``input.Select__searchInput`` has no ``aria-expanded``; the
+        sibling ``button[role=combobox]`` does.  Scoping the listbox through
+        ``aria-controls`` also keeps unrelated ``role=option`` rows (privacy
+        menus, other selects) out of the location result.
+        """
+        return self._container.locator(
+            '[role="combobox"][aria-expanded]'
+        ).first
+
+    async def _listbox_scope(self):
+        target = await self._input()
+        button = self._combobox()
+        for control in (target, button):
+            if not await control.count():
+                continue
+            list_id = await control.get_attribute("aria-controls") or await control.get_attribute("aria-owns")
+            if list_id:
+                owner = target.locator("xpath=ancestor::html")
+                return owner.locator(f'[id={json.dumps(list_id, ensure_ascii=False)}]').first
+        return None
+
+    async def candidate_rows(self) -> list[TiktokLocationCandidate]:
+        listbox = await self._listbox_scope()
+        return await self._rows_in_scope(listbox if listbox is not None else self._container)
+
+    async def _expanded(self) -> bool | None:
+        try:
+            button = self._combobox()
+            if await button.count() > 0:
+                aria = await button.get_attribute("aria-expanded")
+                if aria is not None:
+                    return str(aria).lower() == "true"
+        except Exception:
+            pass
+        target = await self._input()
+        for node in (target, self._container):
+            try:
+                aria = await node.get_attribute("aria-expanded")
+            except Exception:
+                aria = None
+            if aria is not None:
+                return str(aria).lower() == "true"
+        return None
+
+    async def wait_collapsed(self) -> bool:
+        deadline = (
+            time.monotonic() + TIKTOK_LOCATION_COLLAPSE_TIMEOUT_MS / 1000
+        )
+        while True:
+            expanded = await self._expanded()
+            # ``aria-expanded=false`` on the combobox is the authoritative
+            # collapsed signal.  Only when the page exposes no such attribute
+            # do we infer collapse from the absence of visible rows.
+            if expanded is False:
+                return True
+            if expanded is None and not await self.candidate_rows():
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await self._page.wait_for_timeout(TIKTOK_LOCATION_POLL_MS)
+
+    async def read_value(self) -> str:
+        target = await self._input()
+        try:
+            value = (await target.input_value()).strip()
+        except Exception:
+            value = ""
+        if value:
+            return value
+        # Fallback for a future chip-only rendering: the container's visible
+        # text minus its label/placeholder.  The input value is the evidence
+        # recorded on the current Studio.
+        try:
+            text = await self._container.inner_text()
+        except Exception:
+            return ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.casefold() in ("location", "search locations", "地点"):
+                continue
+            return line
+        return ""
+
+
 @dataclass(frozen=True, slots=True)
 class TiktokSettingsControls:
     """Resolved controls for one ``apply_options`` run."""
@@ -693,6 +1291,7 @@ class TiktokSettingsControls:
     brand_switch: TiktokOptionControl | None = None
     your_brand: TiktokOptionControl | None = None
     branded_content: TiktokOptionControl | None = None
+    location: "TiktokLocationControl | None" = None
 
 
 def _page_url(page) -> str:
@@ -733,9 +1332,13 @@ async def _read_toggle_state(control: TiktokOptionControl) -> bool:
 async def _read_switch_state(control: TiktokOptionControl) -> bool:
     """Read an ARIA switch state (``aria-checked``) with a native fallback."""
     aria = await control.get_attribute("aria-checked")
-    if aria is not None:
-        return str(aria).lower() == "true"
-    return bool(await control.is_checked())
+    if aria is None:
+        state = await control.native_switch_state()
+        if isinstance(state, bool):
+            return state
+    elif str(aria).strip().lower() in ("true", "false"):
+        return str(aria).strip().lower() == "true"
+    raise ValueError(f"无法读取开关的布尔状态: aria-checked={aria!r}")
 
 
 async def _guarded_state(
@@ -1188,6 +1791,11 @@ class TiktokBaseUploader(BaseVideoUploader):
     upload_url = TIKTOK_UPLOAD_URL
     upload_entry_selector = TIKTOK_UPLOAD_ENTRY_SELECTOR
 
+    #: Last AI disclosure outcome; ``not_requested`` until a run applies options.
+    ai_outcome: TiktokAiOutcome | None = None
+    #: Last caption-topic evidence, one entry per occurrence in caption order.
+    topic_outcomes: list[TiktokTopicOutcome] = []
+
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
             "TikTok",
@@ -1399,10 +2007,15 @@ class TiktokBaseUploader(BaseVideoUploader):
         control interaction, not even a read.
         """
         options = getattr(self, "options", None)
+        self.ai_outcome = TiktokAiOutcome(None, None, AI_NOT_REQUESTED)
+        self.location_outcome = TiktokLocationOutcome(
+            None, LOCATION_NOT_REQUESTED
+        )
         if options is None:
             return
         if (
             options.privacy is None
+            and options.location is None
             and options.allow_comments is None
             and options.allow_reuse is None
             and options.aigc is None
@@ -1410,11 +2023,19 @@ class TiktokBaseUploader(BaseVideoUploader):
         ):
             return
 
-        # AIGC/brand switches live in the collapsed advanced-settings section.
-        # Expand it before resolving controls so they are visible and clickable.
-        await self._expand_advanced_settings(page)
-        controls = await self.resolve_option_controls(page)
+        try:
+            controls = await self.resolve_option_controls(page)
+        except Exception:
+            if options.aigc is not None:
+                self._record_ai_outcome(TiktokAiOutcome(
+                    requested=options.aigc, applied=None, status=AI_MISMATCH, reason=AI_READ_ERROR
+                ))
+            raise
         url = _page_url(page)
+        if options.location is not None:
+            await self._apply_location_option(
+                controls.location, options.location, page=page, url=url
+            )
         if options.privacy is not None:
             await _set_privacy_option(
                 controls.privacy, options.privacy, url=url
@@ -1440,10 +2061,9 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
         if options.aigc is not None:
-            self._require_option_control(
-                controls.aigc, "aigc", options.aigc, url
+            await self._apply_aigc_option(
+                controls.aigc, options.aigc, page=page, url=url
             )
-            await self._set_aigc_option(controls.aigc, options.aigc, page=page, url=url)
         if self._brand_requested():
             await self._apply_brand_options(controls, page=page, url=url)
 
@@ -1452,6 +2072,241 @@ class TiktokBaseUploader(BaseVideoUploader):
         if options is None:
             return False
         return options.your_brand is True or options.branded_content is True
+
+    def _record_location_outcome(self, outcome: TiktokLocationOutcome) -> None:
+        """Store and print the location field outcome; keep the summary intact."""
+        self.location_outcome = outcome
+        print(format_location_outcome(outcome))
+
+    async def _apply_location_option(
+        self,
+        control: TiktokLocationControl | None,
+        requested: str,
+        *,
+        page,
+        url: str,
+    ) -> None:
+        """Search by exact name, click the first same-name row, then read back.
+
+        Success requires both the candidate list to be collapsed/gone and the
+        control to show the clicked row's name.  Every failure stops the chain
+        before the publish click.
+        """
+        query = " ".join(str(requested).split())
+        if control is None:
+            # Only an explicit page prompt may use account-ineligible wording;
+            # a genuinely absent entry is reported as entry_missing.
+            restriction = await _read_location_restriction(getattr(self, "locator_base", None) or page)
+            if restriction:
+                outcome = TiktokLocationOutcome(
+                    requested=query,
+                    status=LOCATION_UNSUPPORTED,
+                    reason=LOCATION_ACCOUNT_INELIGIBLE,
+                )
+                self._record_location_outcome(outcome)
+                raise _option_error(
+                    option="location",
+                    stage="resolve",
+                    requested=query,
+                    actual="account-ineligible",
+                    control=None,
+                    url=url,
+                    detail=restriction,
+                )
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_UNSUPPORTED,
+                reason=LOCATION_ENTRY_MISSING,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="resolve",
+                requested=query,
+                actual="control-not-found",
+                control=None,
+                url=url,
+                candidates=tuple(
+                    label for label, _ in self._option_candidate_factories(
+                        "location"
+                    )
+                ),
+            )
+
+        if await control.is_disabled():
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_UNSUPPORTED,
+                reason=LOCATION_CONTROL_DISABLED,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="resolve",
+                requested=query,
+                actual="control-disabled",
+                control=control,
+                url=url,
+            )
+
+        try:
+            await control.search(query)
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                reason=LOCATION_SEARCH_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="search",
+                requested=query,
+                actual="search-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
+
+        rows = await control.candidate_rows()
+        exact = [
+            row
+            for row in rows
+            if normalize_location_text(row.name)
+            == normalize_location_text(query)
+        ]
+        if not exact:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_NO_MATCH,
+                reason=LOCATION_NO_SAME_NAME,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="match",
+                requested=query,
+                actual="no-same-name",
+                control=control,
+                url=url,
+                candidates=tuple(row.name for row in rows[:10]),
+            )
+
+        candidate = exact[0]
+        candidate_name = " ".join(str(candidate.name).split())
+        candidate_address = (
+            " ".join(str(candidate.address).split())
+            if candidate.address
+            else None
+        )
+        try:
+            await candidate.click()  # native-click: manage；控件底座内部走 Humanizer
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_CLICK_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="click",
+                requested=query,
+                actual="click-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
+
+        if not await control.wait_collapsed():
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_LIST_NOT_COLLAPSED,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="collapse",
+                requested=query,
+                actual="list-open",
+                control=control,
+                url=url,
+            )
+
+        try:
+            final_value = (await control.read_value()).strip()
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_READ_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="readback",
+                requested=query,
+                actual="read-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
+
+        if not final_value:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_FINAL_EMPTY,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="readback",
+                requested=query,
+                actual="empty",
+                control=control,
+                url=url,
+            )
+
+        if normalize_location_text(final_value) != normalize_location_text(
+            candidate_name
+        ):
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                final_value=final_value,
+                reason=LOCATION_FINAL_MISMATCH,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="readback",
+                requested=query,
+                actual=final_value,
+                control=control,
+                url=url,
+            )
+
+        self._record_location_outcome(
+            TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_SET,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                final_value=final_value,
+            )
+        )
 
     @staticmethod
     def _require_option_control(control, option, requested, url) -> None:
@@ -1465,6 +2320,49 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
 
+    def _record_ai_outcome(self, outcome: TiktokAiOutcome) -> None:
+        """Store and print the AI field outcome; never replace the summary."""
+        self.ai_outcome = outcome
+        print(format_ai_outcome(outcome))
+
+    async def _apply_aigc_option(
+        self,
+        control: TiktokOptionControl | None,
+        requested: bool,
+        *,
+        page,
+        url: str,
+    ) -> None:
+        if control is None:
+            # ``--aigc`` without the entry cannot be verified: stop.  An
+            # explicit ``--no-aigc`` treats a genuinely absent entry as the
+            # platform default (contract 04), but the final value stays
+            # unknown and is reported as ``applied=null``.
+            outcome = TiktokAiOutcome(
+                requested=requested,
+                applied=None,
+                status=AI_UNSUPPORTED if requested else AI_DEFAULT_OFF,
+                reason=AI_ENTRY_MISSING,
+            )
+            self._record_ai_outcome(outcome)
+            if requested:
+                raise _option_error(
+                    option="aigc",
+                    stage="resolve",
+                    requested=requested,
+                    actual="control-not-found",
+                    control=None,
+                    url=url,
+                    candidates=tuple(
+                        label
+                        for label, _ in self._option_candidate_factories(
+                            "aigc"
+                        )
+                    ),
+                )
+            return
+        await self._set_aigc_option(control, requested, page=page, url=url)
+
     async def _set_aigc_option(
         self,
         control: TiktokOptionControl,
@@ -1473,19 +2371,46 @@ class TiktokBaseUploader(BaseVideoUploader):
         page,
         url: str,
     ) -> None:
-        current = await _guarded_state(
-            _read_switch_state,
-            control,
-            option="aigc",
-            stage="read",
-            requested=requested,
-            url=url,
-        )
+        try:
+            current = await _guarded_state(
+                _read_switch_state,
+                control,
+                option="aigc",
+                stage="read",
+                requested=requested,
+                url=url,
+            )
+        except Exception:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=None,
+                    status=AI_MISMATCH,
+                    reason=AI_READ_ERROR,
+                )
+            )
+            raise
         if current == requested:
             # Already satisfied, even when the account-level setting disabled
             # the switch: no click and no dialog.
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=current,
+                    status=AI_SET if requested else AI_DEFAULT_OFF,
+                )
+            )
             return
         if await control.is_disabled():
+            # Visible, disabled and still on the opposite value: the request
+            # cannot be honoured and publishing must stop.
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=current,
+                    status=AI_MISMATCH,
+                )
+            )
             raise _option_error(
                 option="aigc",
                 stage="disabled",
@@ -1495,17 +2420,46 @@ class TiktokBaseUploader(BaseVideoUploader):
                 url=url,
             )
         await control.click()  # native-click: manage；控件底座内部走 Humanizer
-        if requested:
-            await self._confirm_aigc_turn_on(page)
-        actual = await _guarded_state(
-            _read_switch_state,
-            control,
-            option="aigc",
-            stage="readback",
-            requested=requested,
-            url=url,
-        )
+        try:
+            if requested:
+                await self._confirm_aigc_turn_on(page)
+        except Exception:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=None,
+                    status=AI_MISMATCH,
+                    reason=AI_DIALOG_ERROR,
+                )
+            )
+            raise
+        try:
+            actual = await _guarded_state(
+                _read_switch_state,
+                control,
+                option="aigc",
+                stage="readback",
+                requested=requested,
+                url=url,
+            )
+        except Exception:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=None,
+                    status=AI_MISMATCH,
+                    reason=AI_READ_ERROR,
+                )
+            )
+            raise
         if actual != requested:
+            self._record_ai_outcome(
+                TiktokAiOutcome(
+                    requested=requested,
+                    applied=actual,
+                    status=AI_MISMATCH,
+                )
+            )
             raise _option_error(
                 option="aigc",
                 stage="readback",
@@ -1514,6 +2468,13 @@ class TiktokBaseUploader(BaseVideoUploader):
                 control=control,
                 url=url,
             )
+        self._record_ai_outcome(
+            TiktokAiOutcome(
+                requested=requested,
+                applied=actual,
+                status=AI_SET,
+            )
+        )
 
     async def _confirm_aigc_turn_on(self, page) -> None:
         """Click the first-run ``Labeling AI-generated content`` -> ``Turn on``.
@@ -1641,6 +2602,8 @@ class TiktokBaseUploader(BaseVideoUploader):
         if options is None:
             return []
         names = []
+        if options.location is not None:
+            names.append("location")
         if options.privacy is not None:
             names.append("privacy")
         if options.allow_comments is not None:
@@ -1661,6 +2624,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         if name in ("your_brand", "branded_content"):
             return getattr(options, name) is True
         return {
+            "location": options.location,
             "privacy": options.privacy,
             "comments": options.allow_comments,
             "reuse": options.allow_reuse,
@@ -1680,11 +2644,55 @@ class TiktokBaseUploader(BaseVideoUploader):
             humanizer=self._option_humanizer(),
         )
 
+    def _location_control(self, input_locator, container):
+        return _LocatorLocationControl(
+            input_locator,
+            container,
+            page=self._option_page,
+            humanizer=self._option_humanizer(),
+        )
+
     def _option_candidate_factories(self, name: str):
         """Ordered candidates per spec §5.5: data-e2e, role, then text."""
         base = self.locator_base
         if base is None:
             return ()
+
+        if name == "location":
+            poi = base.locator('[data-e2e="poi_container"]')
+            def legacy_location(selector):
+                field = base.locator(selector)
+                widget = field.locator(
+                    "xpath=ancestor::*[@role='combobox' or "
+                    "contains(concat(' ', normalize-space(@class), ' '), ' Select ')][1]"
+                )
+                return self._location_control(field, widget)
+
+            return (
+                (
+                    'data-e2e=poi_container+input.Select__searchInput',
+                    lambda: self._location_control(
+                        poi.locator("input.Select__searchInput"), poi
+                    ),
+                ),
+                (
+                    'data-e2e=poi_container+input[placeholder*="Search locations" i]',
+                    lambda: self._location_control(
+                        poi.locator(
+                            'input[placeholder*="Search locations" i]'
+                        ),
+                        poi,
+                    ),
+                ),
+                (
+                    'input[placeholder*="Search locations" i]',
+                    lambda: legacy_location('input[placeholder*="Search locations" i]'),
+                ),
+                (
+                    'input[placeholder*="地点" i]',
+                    lambda: legacy_location('input[placeholder*="地点" i]'),
+                ),
+            )
 
         if name == "privacy":
             def from_container():
@@ -1868,104 +2876,66 @@ class TiktokBaseUploader(BaseVideoUploader):
         factories = self._option_candidate_factories(name)
         labels = tuple(label for label, _ in factories)
         for index, (label, factory) in enumerate(factories):
-            try:
-                control = factory()
-                if await control.count() > 0 and await control.is_visible():
-                    control.candidates = labels
-                    control.candidate_index = index
-                    tiktok_logger.info(
-                        f"[+] TikTok options: {name} resolved by "
-                        f"candidate #{index} ({label})"
-                    )
-                    return control
-            except Exception:
-                continue
+            control = factory()
+            if await control.count() > 0 and await control.is_visible():
+                control.candidates = labels
+                control.candidate_index = index
+                tiktok_logger.info(
+                    f"[+] TikTok options: {name} resolved by candidate #{index} ({label})"
+                )
+                return control
         return None
-
-    async def _wait_for_settings_surface(
-        self, page, *, timeout_ms: int = 3000
-    ) -> None:
-        """Wait for a collapsed option surface to become visible after expand."""
-        if self.locator_base is None:
-            return
-        selectors = (
-            '[data-e2e="user_perm_container"]',
-            '[data-e2e="aigc_container"]',
-            '[data-e2e="disclose_content_container"]',
-        )
-        deadline = time.monotonic() + timeout_ms / 1000
-        while time.monotonic() < deadline:
-            for selector in selectors:
-                try:
-                    locator = self.locator_base.locator(selector)
-                    if (
-                        await locator.count()
-                        and await locator.first.is_visible()
-                    ):
-                        return
-                except Exception:
-                    continue
-            await page.wait_for_timeout(150)
 
     async def _expand_advanced_settings(self, page) -> None:
         if self.locator_base is None:
             return
-        humanizer = self._humanizer(page)
-        # Idempotent: a second call must not toggle "Show more" back closed.
-        for selector in (
-            '[data-e2e="user_perm_container"]',
-            '[data-e2e="aigc_container"]',
-            '[data-e2e="disclose_content_container"]',
-        ):
-            try:
-                surface = self.locator_base.locator(selector)
-                if (
-                    await surface.count()
-                    and await surface.first.is_visible()
-                ):
-                    return
-            except Exception:
-                continue
-        container = self.locator_base.locator(
-            '[data-e2e="advanced_settings_container"]'
-        )
-        try:
-            if await container.count() == 0:
-                # The photo composer has no advanced_settings_container; its
-                # comment/AIGC/brand controls live behind a global Show more.
-                show_more = self.locator_base.get_by_text(
-                    "Show more", exact=True
-                )
-                if await show_more.count():
-                    await _humanized_click(humanizer, show_more.first)
-                    await self._wait_for_settings_surface(page)
-                    tiktok_logger.info(
-                        "[+] expanded photo settings via Show more"
-                    )
-                return
-            classes = ((await container.get_attribute("class")) or "").casefold()
-        except Exception:
+        scope = self.locator_base
+        container = scope.locator('[data-e2e="advanced_settings_container"]')
+        if await container.count():
+            scope = container
+        button = scope.get_by_text("Show more", exact=True)
+        if await container.count():
+            classes = (await container.get_attribute("class") or "").casefold().split()
+            if "collapsed" in classes:
+                button = container.locator(".more-btn")
+                await button.wait_for(state="visible", timeout=3000)
+        if not await button.count() or not await button.first.is_visible():
             return
-        collapsed = "collapsed" in classes.split()
+        await _humanized_click(self._humanizer(page), button.first)
+        # Show more changes into Show less in the same node on Studio. Wait for
+        # the collapsed state to disappear before deciding an option is absent.
+        collapsed_button = scope.get_by_text("Show more", exact=True)
+        await collapsed_button.first.wait_for(state="hidden", timeout=3000)
+        if await container.count():
+            await scope.locator("xpath=self::*[contains(concat(' ', normalize-space(@class), ' '), ' collapsed ')]").wait_for(
+                state="hidden", timeout=3000
+            )
 
-        more_btn = container.locator(".more-btn")
-        try:
-            if await more_btn.count():
-                text = (await more_btn.first.inner_text()).strip().casefold()
-                if collapsed or "show more" in text:
-                    await _humanized_click(humanizer, more_btn.first)
-                    await self._wait_for_settings_surface(page)
-                    return
-        except Exception:
-            pass
-
-        show_more = container.get_by_text("Show more", exact=True)
-        try:
-            if await show_more.count():
-                await _humanized_click(humanizer, show_more.first)
-                await self._wait_for_settings_surface(page)
-        except Exception:
-            pass
+    async def _settled_ai_control(self, page):
+        # Expansion can finish before the framework mounts the switch.
+        deadline = time.monotonic() + 3
+        while True:
+            control = await self._resolve_single_control("aigc")
+            if control is not None:
+                return control
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.15)
+        editor = self.locator_base.locator(
+            '.public-DraftEditor-content[contenteditable="true"]:visible'
+        ).first
+        modal = 'dialog[open]:visible, [role="dialog"][aria-modal="true"]:visible'
+        busy_settings = self.locator_base.locator(
+            '[data-e2e="advanced_settings_container"][aria-busy="true"]:visible, '
+            '[data-e2e="advanced_settings_container"] :is([aria-busy="true"],[role="progressbar"]):visible'
+        )
+        if await page.locator(modal).count() or await self.locator_base.locator(modal).count() or await busy_settings.count():
+            raise RuntimeError("TikTok 高级设置仍在加载或被弹窗遮挡")
+        if not await editor.count() or not await editor.evaluate(
+            """el => !el.closest('[inert],[aria-hidden="true"],[aria-busy="true"]')"""
+        ):
+            raise RuntimeError("无法确认 TikTok 编辑器已就绪")
+        return None
 
     async def resolve_option_controls(self, page) -> TiktokSettingsControls:
         """Resolve only the requested controls; expand advanced settings once.
@@ -1987,12 +2957,25 @@ class TiktokBaseUploader(BaseVideoUploader):
             await self._expand_advanced_settings(page)
             still_missing: list[str] = []
             for name in missing:
-                control = await self._resolve_single_control(name)
+                control = (await self._settled_ai_control(page) if name == "aigc"
+                           else await self._resolve_single_control(name))
                 if control is None:
                     still_missing.append(name)
                 else:
                     resolved[name] = control
 
+            # The AI entry is decided by ``_apply_aigc_option``: missing is
+            # fatal for ``--aigc`` and a ``default_off/entry_missing`` fallback
+            # for ``--no-aigc``.  The location entry is decided by
+            # ``_apply_location_option``: missing is always a distinct
+            # ``entry_missing`` diagnostic, never aggregated generically and
+            # never conflated with ``account_ineligible``.  Both must not be
+            # aggregated into the generic control-not-found error here.
+            still_missing = [
+                name
+                for name in still_missing
+                if name not in ("aigc", "location")
+            ]
             if still_missing:
                 url = _page_url(page)
                 details = []
@@ -2020,6 +3003,7 @@ class TiktokBaseUploader(BaseVideoUploader):
             brand_switch=resolved.get("brand_switch"),
             your_brand=resolved.get("your_brand"),
             branded_content=resolved.get("branded_content"),
+            location=resolved.get("location"),
         )
 
     async def apply_cover(self, page) -> None:
@@ -2399,6 +3383,285 @@ class TiktokBaseUploader(BaseVideoUploader):
                 return
             await page.wait_for_timeout(100)
 
+    def _topic_scopes(self, page):
+        """Scopes to search for TikTok's hashtag suggestion rows."""
+
+        scopes = []
+        if self.locator_base is not None:
+            scopes.append(self.locator_base)
+        if not any(scope is page for scope in scopes):
+            scopes.append(page)
+        return scopes
+
+    async def _poll_exact_topic_option(
+        self, page, wanted: str, scopes
+    ) -> tuple[object, bool] | None:
+        """Wait for the first same-name suggestion row.
+
+        Returns ``(option_handle, aria_selected)``; every other handle is
+        disposed.  ``None`` means no row whose first line is exactly ``wanted``
+        appeared before the settle/timeout window.  The caller owns the
+        returned handle and must dispose it after clicking.
+        """
+
+        wanted_casefold = wanted.casefold()
+        deadline = (
+            time.monotonic() + TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS / 1000
+        )
+        settle_deadline = None
+        rendered = False
+        while True:
+            for scope in scopes:
+                try:
+                    # A snapshot pins each option to the node whose name we read.
+                    # Re-resolving nth after an async refresh can wait 30s or click
+                    # a different hashtag at the same position.
+                    options = await scope.locator(
+                        '[role="option"]'
+                    ).element_handles()
+                except Exception:
+                    continue
+                keep = None
+                try:
+                    if options:
+                        rendered = True
+                    for option in options:
+                        try:
+                            first_line = (
+                                await option.inner_text()
+                            ).strip().splitlines()[0].strip()
+                        except Exception:
+                            continue
+                        if not first_line.startswith("#"):
+                            continue
+                        if first_line.casefold() != wanted_casefold:
+                            continue
+                        selected = False
+                        try:
+                            selected = (
+                                str(
+                                    await option.get_attribute(
+                                        "aria-selected"
+                                    )
+                                ).lower()
+                                == "true"
+                            )
+                        except Exception:
+                            selected = False
+                        keep = (option, selected)
+                        break
+                finally:
+                    for option in options:
+                        if keep is None or option is not keep[0]:
+                            try:
+                                await option.dispose()
+                            except Exception:
+                                pass
+                if keep is not None:
+                    return keep
+
+            now = time.monotonic()
+            if rendered and settle_deadline is None:
+                # Let a partially rendered list settle before giving up, but
+                # don't wait the full timeout when the dropdown is already up.
+                settle_deadline = now + TIKTOK_HASHTAG_SETTLE_MS / 1000
+            if settle_deadline is not None and now >= settle_deadline:
+                return None
+            if not rendered and now >= deadline:
+                return None
+            await page.wait_for_timeout(200)
+
+    async def _read_topic_state(self, editor) -> tuple[str, list[str]]:
+        """Read the editor text and mention spans in document order."""
+
+        try:
+            text = await editor.inner_text()
+        except Exception as exc:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=read text-error "
+                f"detail={exc}",
+                reason=TOPIC_READ_ERROR,
+            ) from exc
+        mentions: list[str] = []
+        try:
+            locator = editor.locator(
+                'span.mention[data-testid="mentionText"]'
+            )
+            count = await locator.count()
+            for index in range(count):
+                node = locator.nth(index)
+                mentions.append((await node.inner_text()).strip())
+        except Exception as exc:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=read mention-error "
+                f"detail={exc}",
+                reason=TOPIC_READ_ERROR,
+            ) from exc
+        return text, mentions
+
+    async def _topic_hard_limit_visible(self, page) -> bool:
+        """True when the page shows a whole-post hashtag hard-limit error."""
+
+        scope = getattr(self, "locator_base", None) or page
+        notices = await scope.locator(TIKTOK_TOPIC_ERROR_SELECTOR).all_inner_texts()
+        pattern = (
+            r"(?:maximum number of hashtags|too many hashtags|"
+            r"hashtag(?:s)? limit|can(?:'|no)t add more hashtags|"
+            r"最多.{0,8}(?:话题|标签)|(?:话题|标签).{0,8}上限)"
+        )
+        return any(re.search(pattern, text, re.IGNORECASE) for text in notices)
+
+    async def _check_topic_limit(self, page):
+        if self.topic_outcomes and await self._topic_hard_limit_visible(page):
+            print("TikTok 配文话题: reason=hard_limit continue=no result=保留文字，整帖硬限制")
+            raise RuntimeError("TikTok 配文话题触及页面整帖硬限制；未点击发布。")
+
+    @staticmethod
+    def _compose_caption(text: str | None, tags=None) -> str:
+        caption = text or ""
+        if tags:
+            tag_line = " ".join(f"#{tag}" for tag in tags)
+            return f"{caption}\n{tag_line}" if caption else tag_line
+        return caption
+
+    def _record_topic_outcome(self, outcome: TiktokTopicOutcome) -> None:
+        self.topic_outcomes.append(outcome)
+        print(format_topic_outcome(outcome))
+
+    async def _insert_topic_in_place(
+        self,
+        page,
+        editor,
+        occurrence: TopicOccurrence,
+        humanizer: Humanizer,
+        caption: str,
+        *,
+        allow_association: bool,
+        linked: list[str],
+    ) -> tuple[bool, str | None, int]:
+        """Type one occurrence and select its same-name row in place.
+
+        Returns ``(linked, reason, next_cursor)``.  Any readback that does not
+        prove the association and the exact surrounding text raises a
+        ``RuntimeError`` (CLI exit 1) before the publish step.
+        """
+
+        prefix = caption[: occurrence.end]
+        text_before, _ = await self._read_topic_state(editor)
+        if text_before != caption[: occurrence.start]:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=before-topic "
+                f"index={occurrence.index} text={occurrence.text!r} "
+                f"expected={caption[: occurrence.start]!r} "
+                f"observed={text_before!r} 未点击发布",
+                reason=TOPIC_CAPTION_MISMATCH,
+            )
+
+        if not allow_association:
+            await humanizer.type_text(occurrence.text)
+            await humanizer.press("Escape")
+            await page.wait_for_timeout(100)
+            text_after, mentions = await self._read_topic_state(editor)
+            if text_after != prefix or mentions != list(linked):
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=text-fallback "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={prefix!r} observed={text_after!r} "
+                    f"mentions={mentions!r} 未点击发布",
+                    reason=TOPIC_CAPTION_MISMATCH,
+                )
+            return False, TOPIC_ASSOCIATION_LIMIT, occurrence.end
+
+        await humanizer.type_text(occurrence.text)
+        match = await self._poll_exact_topic_option(
+            page, occurrence.text, self._topic_scopes(page)
+        )
+        if match is None:
+            # Keep the typed word in place and close the suggestion popup
+            # without accepting an approximate row.
+            await humanizer.press("Escape")
+            await page.wait_for_timeout(100)
+            text_after, mentions = await self._read_topic_state(editor)
+            if text_after != prefix or mentions != list(linked):
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=text-fallback "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={prefix!r} observed={text_after!r} "
+                    f"mentions={mentions!r} 未点击发布",
+                    reason=TOPIC_CAPTION_MISMATCH,
+                )
+            return False, TOPIC_NO_SAME_NAME, occurrence.end
+
+        option, selected = match
+        try:
+            if selected:
+                # The typed tag is already the focused suggestion; Enter
+                # accepts it without viewport/overlay issues.
+                await humanizer.press("Enter")
+            else:
+                await _humanized_click(humanizer, option)
+        except Exception as exc:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=select "
+                f"index={occurrence.index} text={occurrence.text!r} "
+                f"detail={exc} 未点击发布",
+                reason=TOPIC_SELECT_ERROR,
+            ) from exc
+        finally:
+            try:
+                await option.dispose()
+            except Exception:
+                pass
+
+        await page.wait_for_timeout(300)
+        await self._wait_for_no_options(self._topic_scopes(page), page)
+
+        text_after, mentions = await self._read_topic_state(editor)
+        expected_mentions = [*linked, occurrence.text]
+        if mentions != expected_mentions:
+            raise TiktokTopicError(
+                "TikTok 配文话题: stage=mention-readback "
+                f"index={occurrence.index} text={occurrence.text!r} "
+                f"expected={expected_mentions!r} observed={mentions!r} "
+                "未点击发布",
+                reason=TOPIC_WRONG_TOPIC,
+            )
+        if text_after == prefix + " ":
+            next_char = caption[occurrence.end: occurrence.end + 1]
+            if next_char == " ":
+                # The platform space is the author's own space: consume it
+                # instead of typing a second one.
+                return True, None, occurrence.end + 1
+            await humanizer.press("Backspace")
+            await page.wait_for_timeout(100)
+            text_after, mentions = await self._read_topic_state(editor)
+            if text_after != prefix:
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=auto-space "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={prefix!r} observed={text_after!r} "
+                    "未点击发布",
+                    reason=TOPIC_CAPTION_MISMATCH,
+                )
+            if mentions != expected_mentions:
+                raise TiktokTopicError(
+                    "TikTok 配文话题: stage=auto-space-mention "
+                    f"index={occurrence.index} text={occurrence.text!r} "
+                    f"expected={expected_mentions!r} observed={mentions!r} "
+                    "未点击发布",
+                    reason=TOPIC_WRONG_TOPIC,
+                )
+            return True, None, occurrence.end
+        if text_after == prefix:
+            return True, None, occurrence.end
+        raise TiktokTopicError(
+            "TikTok 配文话题: stage=caption-readback "
+            f"index={occurrence.index} text={occurrence.text!r} "
+            f"expected={prefix!r} observed={text_after!r} "
+            f"{_caption_difference(prefix, text_after)} 未点击发布",
+            reason=TOPIC_CAPTION_MISMATCH,
+        )
+
     async def _apply_hashtag(
         self, page, tag: str, *, humanizer: Humanizer | None = None
     ) -> bool:
@@ -2412,97 +3675,43 @@ class TiktokBaseUploader(BaseVideoUploader):
         with a different one.
         """
         humanizer = humanizer or self._humanizer(page)
-        wanted = f"#{tag}".casefold()
-        scopes = []
-        if self.locator_base is not None:
-            scopes.append(self.locator_base)
-        if not any(scope is page for scope in scopes):
-            scopes.append(page)
+        wanted = f"#{tag}"
+        scopes = self._topic_scopes(page)
 
         # Character by character: the dropdown reacts to real key events.
         await humanizer.type_text("#" + tag)
-        deadline = (
-            time.monotonic() + TIKTOK_HASHTAG_SUGGESTION_TIMEOUT_MS / 1000
-        )
-        settle_deadline = None
-        suggestion_failed = False
-        while True:
-            rendered = False
-            for scope in scopes:
+        match = await self._poll_exact_topic_option(page, wanted, scopes)
+        if match is not None:
+            option, selected = match
+            clicked = False
+            try:
+                if selected:
+                    # The typed tag is already the focused suggestion;
+                    # Enter accepts it without viewport/overlay issues.
+                    await humanizer.press("Enter")
+                else:
+                    try:
+                        await _humanized_click(humanizer, option)
+                        clicked = True
+                    except Exception as exc:
+                        # Keep the plain text and fire the association
+                        # suggestion instead of aborting the publish.  A click
+                        # that may have been dispatched is never retried.
+                        tiktok_logger.warning(
+                            f"  [-] tag #{tag} suggestion click failed: {exc}"
+                        )
+            finally:
                 try:
-                    # A snapshot pins each option to the node whose name we read.
-                    # Re-resolving nth after an async refresh can wait 30s or click
-                    # a different hashtag at the same position.
-                    options = await scope.locator('[role="option"]').element_handles()
+                    await option.dispose()
                 except Exception:
-                    continue
-                try:
-                    if options:
-                        rendered = True
-                    for option in options:
-                        try:
-                            first_line = (
-                                await option.inner_text()
-                            ).strip().splitlines()[0].strip()
-                        except Exception:
-                            continue
-                        if not first_line.startswith("#"):
-                            continue
-                        if first_line.casefold() == wanted:
-                            selected = False
-                            try:
-                                selected = (
-                                    str(
-                                        await option.get_attribute(
-                                            "aria-selected"
-                                        )
-                                    ).lower()
-                                    == "true"
-                                )
-                            except Exception:
-                                selected = False
-                            if selected:
-                                # The typed tag is already the focused suggestion;
-                                # Enter accepts it without viewport/overlay issues.
-                                await humanizer.press("Enter")
-                            else:
-                                try:
-                                    await _humanized_click(humanizer, option)
-                                except Exception as exc:
-                                    # Keep the plain text and fire the association
-                                    # suggestion instead of aborting the publish.
-                                    # A click that may have been dispatched is
-                                    # never retried (the loop exits below).
-                                    tiktok_logger.warning(
-                                        f"  [-] tag #{tag} suggestion click failed: {exc}"
-                                    )
-                                    suggestion_failed = True
-                                    break
-                            await page.wait_for_timeout(300)
-                            tiktok_logger.info(
-                                f"  [-] tag #{tag} inserted as hashtag entity"
-                            )
-                            await self._wait_for_no_options(scopes, page)
-                            return True
-                finally:
-                    await asyncio.gather(
-                        *(option.dispose() for option in options), return_exceptions=True
-                    )
-                if suggestion_failed:
-                    break
-
-            if suggestion_failed:
-                break
-            now = time.monotonic()
-            if rendered and settle_deadline is None:
-                # Let a partially rendered list settle before giving up, but
-                # don't wait the full timeout when the dropdown is already up.
-                settle_deadline = now + TIKTOK_HASHTAG_SETTLE_MS / 1000
-            if settle_deadline is not None and now >= settle_deadline:
-                break
-            if not rendered and now >= deadline:
-                break
-            await page.wait_for_timeout(200)
+                    pass
+            if clicked or selected:
+                await page.wait_for_timeout(300)
+                tiktok_logger.info(
+                    f"  [-] tag #{tag} inserted as hashtag entity"
+                )
+                await self._wait_for_no_options(scopes, page)
+                return True
 
         # No exact suggestion: one Space is enough for a plain-text tag (the
         # old insert/space/backspace dance only produced the same result).
@@ -2513,8 +3722,8 @@ class TiktokBaseUploader(BaseVideoUploader):
         )
         return False
 
-    async def fill_caption(self, page, text, tags, *, editor=None) -> None:
-
+    async def fill_caption(self, page, text, tags=None, *, editor=None) -> None:
+        # Python callers can still supply tags. CLI callers supply only the caption.
         editor_locator = (
             editor
             if editor is not None
@@ -2535,19 +3744,97 @@ class TiktokBaseUploader(BaseVideoUploader):
 
         await page.wait_for_timeout(1000)  # 等待1秒
 
-        await humanizer.type_text(text)
-        await page.wait_for_timeout(1000)  # 等待1秒
-        await humanizer.press("End")
+        caption = self._compose_caption(text, tags)
+        self.topic_outcomes: list[TiktokTopicOutcome] = []
+        if not caption:
+            # Nothing public to verify; the clear sequence above is unchanged.
+            return
 
-        await humanizer.press("Enter")
+        parsed: CaptionTopics = parse_caption_topics(caption)
+        cursor = 0
+        linked: list[str] = []
+        for occurrence in parsed.occurrences:
+            segment = caption[cursor: occurrence.start]
+            if segment:
+                await humanizer.type_text(segment)
+                if "#" in segment:
+                    # A URL fragment or a bare ``#`` is not a topic.  Close any
+                    # suggestion popup it opened before typing the next real
+                    # occurrence.
+                    await humanizer.press("Escape")
+                    await page.wait_for_timeout(100)
 
-        # tag part
-        for index, tag in enumerate(tags, start=1):
-            tiktok_logger.info("Setting the %s tag" % index)
-            await humanizer.press("End")
-            await page.wait_for_timeout(300)
-            await self._apply_hashtag(page, tag, humanizer=humanizer)
-            await humanizer.press("End")
+            allow = len(linked) < TIKTOK_MAX_HASHTAG_COUNT
+            try:
+                linked_ok, reason, cursor = await self._insert_topic_in_place(
+                    page,
+                    editor_locator,
+                    occurrence,
+                    humanizer,
+                    caption,
+                    allow_association=allow,
+                    linked=linked,
+                )
+            except TiktokTopicError as exc:
+                self._record_topic_outcome(
+                    TiktokTopicOutcome(
+                        occurrence=occurrence,
+                        status=TOPIC_MISMATCH,
+                        reason=exc.reason,
+                        can_continue=False,
+                    )
+                )
+                raise
+            if linked_ok:
+                linked.append(occurrence.text)
+                self._record_topic_outcome(
+                    TiktokTopicOutcome(
+                        occurrence=occurrence, status=TOPIC_LINKED
+                    )
+                )
+            else:
+                self._record_topic_outcome(
+                    TiktokTopicOutcome(
+                        occurrence=occurrence,
+                        status=TOPIC_TEXT,
+                        reason=reason,
+                    )
+                )
+
+        tail = caption[cursor:]
+        if tail:
+            await humanizer.type_text(tail)
+
+        await self._check_topic_limit(page)
+
+        # Whole-caption gate: every character, every mention, in order.
+        observed_text, observed_mentions = await self._read_topic_state(
+            editor_locator
+        )
+        expected_text = _normalise_caption_newlines(caption)
+        actual_text = _normalise_caption_newlines(observed_text)
+        if actual_text != expected_text:
+            print(
+                "TikTok 配文回读: status=mismatch continue=no "
+                f"{_caption_difference(expected_text, actual_text)} "
+                f"expected={expected_text!r} observed={actual_text!r}"
+            )
+            raise RuntimeError(
+                "TikTok 配文回读不一致："
+                f"{_caption_difference(expected_text, actual_text)} "
+                f"expected={expected_text!r} observed={actual_text!r} "
+                "未点击发布。"
+            )
+        if observed_mentions != linked:
+            print(
+                "TikTok 配文话题标记回读: status=mismatch continue=no "
+                f"expected={linked!r} observed={observed_mentions!r}"
+            )
+            raise RuntimeError(
+                "TikTok 配文话题标记回读不一致："
+                f"expected={linked!r} observed={observed_mentions!r} "
+                "未点击发布。"
+            )
 
     async def wait_publish_ready(
         self,
@@ -2580,6 +3867,7 @@ class TiktokBaseUploader(BaseVideoUploader):
                 raise budget.pre_click_error()
             await _guard_login(page)
             button = await self._publish_button_ready(page)
+            await self._check_topic_limit(page)
             if button is not None:
                 return button
             remaining = min(
@@ -2670,6 +3958,7 @@ class TiktokBaseUploader(BaseVideoUploader):
         # 1) — never re-click. A failure after mouse.down may already have
         # published, so it is treated as sent and never re-dispatched.
         await humanizer.before_submit()
+        await self._check_topic_limit(page)
         budget.check_pre_click()
         try:
             await _humanized_click(humanizer, publish_button)
@@ -3486,12 +4775,11 @@ class TiktokNote(TiktokBaseUploader):
             await self._fill_title(page)
 
         note_text = self.note or ""
-        tags = list(self.tags or [])
-        if not note_text and not tags:
+        if not note_text and not self.tags:
             return
 
         editor = await self._resolve_caption_editor(page)
-        await self.fill_caption(page, note_text, tags, editor=editor)
+        await self.fill_caption(page, note_text, self.tags, editor=editor)
 
     async def apply_options(self, page) -> None:
         """Reuse the shared option steps, minus the content-reuse control.

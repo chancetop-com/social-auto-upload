@@ -15,8 +15,7 @@ sau xiaohongshu upload-video \
   --account "$account" \
   --file "$video" \
   --title "Xiaohongshu video from bash" \
-  --desc "Xiaohongshu video description from bash" \
-  --tags "cli,video" \
+  --desc "Xiaohongshu video description from bash #cli #video" \
   --thumbnail "$thumbnail" \
   --headless
 
@@ -24,6 +23,5 @@ sau xiaohongshu upload-note \
   --account "$account" \
   --images "videos/demo1.png" "videos/demo2.png" \
   --title "Xiaohongshu note title from bash" \
-  --note "Xiaohongshu note from bash" \
-  --tags "cli,note" \
+  --note "Xiaohongshu note from bash #cli #note" \
   --headless
