@@ -1,0 +1,49 @@
+{
+  "platform": "instagram",
+  "title": "Color study",
+  "status": "prepared",
+  "options": {
+    "location": {
+      "requested": "Shanghai",
+      "applied": "Shanghai",
+      "status": "set",
+      "candidate_name": "Shanghai",
+      "candidate_index": 1
+    },
+    "alt_text": {
+      "requested": null,
+      "applied": null,
+      "status": "not_requested"
+    },
+    "comments": {
+      "requested": null,
+      "applied": null,
+      "status": "not_requested"
+    },
+    "ai_generated": {
+      "requested": false,
+      "applied": false,
+      "status": "default_off"
+    }
+  },
+  "topics": [
+    {
+      "index": 1,
+      "text": "#color",
+      "name": "color",
+      "start": 23,
+      "end": 29,
+      "status": "text",
+      "reason": "配文全文逐字回读一致"
+    },
+    {
+      "index": 2,
+      "text": "#study",
+      "name": "study",
+      "start": 30,
+      "end": 36,
+      "status": "text",
+      "reason": "配文全文逐字回读一致"
+    }
+  ]
+}

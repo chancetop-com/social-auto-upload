@@ -66,8 +66,6 @@ AUTOCOMPLETE_VISIBLE = (
 )
 #: 候选项等待上限：补全靠网络，等不到就按纯文本继续，不拖住整条发布链。
 HASHTAG_CANDIDATE_TIMEOUT_MS = 1500
-#: 一段 `#` 话题：`#` 后到空白 / 下一个 `#` 之前。
-
 #: YouTube 简介整帖硬限制（平台文档口径：5000 字符）。
 YOUTUBE_DESCRIPTION_MAX_LENGTH = 5000
 #: 简介字段附近的整帖错误提示。选择器来自受控页面；真实账号界面未实测。

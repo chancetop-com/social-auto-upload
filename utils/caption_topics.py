@@ -20,8 +20,10 @@ import re
 STATUS_TEXT = "text"
 STATUS_LINKED = "linked"
 
-#: Schemes and host prefixes whose ``#fragment`` is part of a URL.
-_URL_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s]*")
+#: Schemes and host prefixes whose first ``#fragment`` is part of a URL.
+#: A second ``#`` ends the URL so a topic immediately after a link
+#: (``详情https://x/#frag，#咖啡``) is still recognised.
+_URL_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s#]*(?:#[^\s#]*)?")
 
 
 @dataclass(frozen=True, slots=True)

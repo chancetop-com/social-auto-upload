@@ -113,6 +113,24 @@ def test_a_topic_next_to_a_url_is_not_taken_from_the_url():
     assert _spans(caption) == [("topic", "#topic", 32, 38, 1)]
 
 
+def test_a_topic_immediately_after_a_url_fragment_without_a_space():
+    caption = "详情https://example.com/#frag，#咖啡"
+
+    report = parse_caption_topics(caption)
+
+    assert [item.text for item in report.occurrences] == ["#咖啡"]
+    item = report.occurrences[0]
+    assert caption[item.start:item.end] == "#咖啡"
+
+
+def test_a_fragment_without_a_path_is_still_part_of_the_url():
+    caption = "见 https://example.com#咖啡 然后 #真话题"
+
+    assert [item.text for item in parse_caption_topics(caption).occurrences] == [
+        "#真话题"
+    ]
+
+
 def test_every_offset_points_into_the_original_caption():
     caption = "第一行 #A\n第二行 https://x.test/#frag 与 #b，结束"
 

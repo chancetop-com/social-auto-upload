@@ -23,6 +23,21 @@ HTML = """
 <div id="privacy-list" role="listbox">
   <div role="option">Public</div>
 </div>
+<script>
+const input = document.querySelector('input.Select__searchInput');
+const list = document.getElementById('loc-list');
+const button = document.querySelector('button[role="combobox"]');
+input.addEventListener('input', () => {
+  const show = input.value.toLowerCase().includes('london');
+  list.style.display = show ? 'block' : 'none';
+  button.setAttribute('aria-expanded', show ? 'true' : 'false');
+});
+document.getElementById('loc-list').addEventListener('click', () => {
+  input.value = 'London Eye';
+  list.style.display = 'none';
+  button.setAttribute('aria-expanded', 'false');
+});
+</script>
 """
 
 
@@ -73,6 +88,43 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
     async def test_open_list_is_not_collapsed(self):
         with patch.object(tk, "TIKTOK_LOCATION_COLLAPSE_TIMEOUT_MS", 150):
             self.assertFalse(await self.control.wait_collapsed())
+
+    @staticmethod
+    def _probe():
+        probe = object.__new__(tk.TiktokBaseUploader)
+        probe.location_outcome = None
+        probe._record_location_outcome = lambda outcome: setattr(
+            probe, "location_outcome", outcome
+        )
+        return probe
+
+    async def test_apply_location_selects_and_reads_back_through_the_adapter(self):
+        probe = self._probe()
+
+        await probe._apply_location_option(
+            self.control, "London Eye", page=self.page, url="https://studio"
+        )
+
+        outcome = probe.location_outcome
+        self.assertEqual(outcome.status, "set")
+        self.assertEqual(outcome.candidate_name, "London Eye")
+        self.assertEqual(
+            outcome.candidate_address,
+            "Riverside Building, County Hall, London SE1 7PB, United Kingdom",
+        )
+        self.assertEqual(outcome.final_value, "London Eye")
+        self.assertIsNone(outcome.reason)
+
+    async def test_apply_location_no_match_stops_without_a_selection(self):
+        probe = self._probe()
+
+        with self.assertRaises(RuntimeError):
+            await probe._apply_location_option(
+                self.control, "Nowhere", page=self.page, url="https://studio"
+            )
+
+        self.assertEqual(probe.location_outcome.status, "no_match")
+        self.assertIsNone(probe.location_outcome.candidate_name)
 
 
 if __name__ == "__main__":

@@ -2186,47 +2186,28 @@ class TiktokBaseUploader(BaseVideoUploader):
             if candidate.address
             else None
         )
-        collapsed = False
-        for attempt in range(2):
-            # A re-rendered list can move the row between the humanized
-            # pointer move and the press.  A second click is safe only while
-            # the combobox is still open: a successful first click collapses
-            # it and exits the loop before any second dispatch.
-            if attempt:
-                refreshed = [
-                    row
-                    for row in await control.candidate_rows()
-                    if normalize_location_text(row.name)
-                    == normalize_location_text(query)
-                ]
-                if not refreshed:
-                    break
-                candidate = refreshed[0]
-            try:
-                await candidate.click()  # native-click: manage；控件底座内部走 Humanizer
-            except Exception as exc:
-                outcome = TiktokLocationOutcome(
-                    requested=query,
-                    status=LOCATION_MISMATCH,
-                    candidate_name=candidate_name,
-                    candidate_address=candidate_address,
-                    reason=LOCATION_CLICK_ERROR,
-                )
-                self._record_location_outcome(outcome)
-                raise _option_error(
-                    option="location",
-                    stage="click",
-                    requested=query,
-                    actual="click-error",
-                    control=control,
-                    url=url,
-                    detail=str(exc),
-                ) from exc
-            if await control.wait_collapsed():
-                collapsed = True
-                break
+        try:
+            await candidate.click()  # native-click: manage；控件底座内部走 Humanizer
+        except Exception as exc:
+            outcome = TiktokLocationOutcome(
+                requested=query,
+                status=LOCATION_MISMATCH,
+                candidate_name=candidate_name,
+                candidate_address=candidate_address,
+                reason=LOCATION_CLICK_ERROR,
+            )
+            self._record_location_outcome(outcome)
+            raise _option_error(
+                option="location",
+                stage="click",
+                requested=query,
+                actual="click-error",
+                control=control,
+                url=url,
+                detail=str(exc),
+            ) from exc
 
-        if not collapsed:
+        if not await control.wait_collapsed():
             outcome = TiktokLocationOutcome(
                 requested=query,
                 status=LOCATION_MISMATCH,

@@ -444,7 +444,7 @@ XHS_ORIGINAL_CONFIRM_CANDIDATES = (
 XHS_DECLARATION_CONTAINER_SELECTOR = ".publish-container"
 # 实机把属性写成 ``lass``（不是 class）；选中值在包装层内的
 # ``.d-select-description``，入口占位文案节点在选择后会清空。
-XHS_DECLARATION_WRAPPER_SELECTOR = '[lass="declaration-wrapper"]'
+XHS_DECLARATION_SELECTED_SELECTOR = ".d-select-description"
 XHS_DECLARATION_TRIGGER_CANDIDATES = (
     _zh_css(
         '.publish-container [tabindex="1"]:has-text("添加内容类型声明")',
@@ -2806,9 +2806,9 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
     ) -> None:
         """显式内容类型：设置 → 等菜单收起 → 回读选中的标签，不符即停。
 
-        小红书入口的 ``innerText`` 会从占位文案变成所选标签（实机 26 §6.1），
-        因此在点击前先钉住入口元素，选择后再读同一节点的文本。任何缺失、
-        空值或其他标签都在发布前退出 1，绝不 warning 继续。
+        实机选择后入口占位节点会清空，选中值显示在同一 ``.d-select-wrapper``
+        内的 ``.d-select-description``。因此先钉住入口的包装层，选择后再读
+        该层的描述节点。任何缺失、空值或其他标签都在发布前退出 1。
         """
         content_type = self.content_type
         label = XHS_CONTENT_TYPE_LABELS.get(content_type)
@@ -2824,13 +2824,10 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             trigger = await self._open_content_declaration_menu(
                 page, humanizer=humanizer
             )
-            # 钉住声明包装层：实机选择后入口占位节点会清空，选中值显示在
-            # 同一包装层内的 ``.d-select-description``。
-            wrapper = page.locator(XHS_DECLARATION_WRAPPER_SELECTOR).first
-            if await wrapper.count() == 0:
-                wrapper = trigger.locator.locator(
-                    "xpath=ancestor::div[contains(@class,'d-select-wrapper')][1]"
-                )
+            # 钉住入口元素：选择后从它的最近包装层读取选中值。实机会清空入口
+            # 占位节点，选中值显示在同一 ``.d-select-wrapper`` 的
+            # ``.d-select-description``；按祖先查找避免误读其他声明块。
+            handle = await trigger.element_handle()
             phase = "option"
             if source_label:
                 await self._click_declaration_option(
@@ -2852,7 +2849,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             elif content_type == "repost":
                 await self._fill_repost_source(page, humanizer=humanizer)
 
-            observed = await self._read_selected_declaration(wrapper)
+            observed = await self._read_selected_declaration(handle)
             if observed is None:
                 reason = "未读到选中的内容类型"
             elif not observed:
@@ -2893,16 +2890,20 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         )
 
     @staticmethod
-    async def _read_selected_declaration(wrapper) -> str | None:
-        """读声明包装层内的选中值；读不到返回 ``None``（区别于读到空串）。"""
-        description = wrapper.locator(".d-select-description")
+    async def _read_selected_declaration(handle) -> str | None:
+        """读入口最近包装层内的选中值；读不到返回 ``None``（区别于空串）。"""
+        script = (
+            "el => { const wrapper = el.closest('.d-select-wrapper');"
+            f" const desc = wrapper && wrapper.querySelector('{XHS_DECLARATION_SELECTED_SELECTOR}');"
+            " return desc ? desc.innerText : null; }"
+        )
         try:
-            if not await description.count():
-                return None
-            text = await description.first.inner_text()
+            text = await handle.evaluate(script)
         except Exception:
             return None
-        return text.strip()
+        if text is None:
+            return None
+        return str(text).strip()
 
     async def _assert_declaration_menu_collapsed(self, option) -> None:
         """选项点击后，所属声明弹层必须已隐藏（菜单收起后才能回读）。"""

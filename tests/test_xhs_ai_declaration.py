@@ -69,24 +69,20 @@ def _declaration_selectors(
         computed_style=dict(VISIBLE_FACTS),
         children={xhs_main.XHS_DECLARATION_MENU_XPATH: menu},
     )
+    def evaluate_handler(expression, _arg):
+        if isinstance(expression, str) and "d-select-description" in expression:
+            return final_text
+        return dict(VISIBLE_FACTS)
+
     trigger = FakeLocator(
         "declaration-trigger",
         count=1 if entry else 0,
         computed_style=dict(VISIBLE_FACTS),
         text="添加内容类型声明",
-    )
-    wrapper = FakeLocator(
-        "declaration-wrapper",
-        count=1 if entry else 0,
-        children={
-            ".d-select-description": FakeLocator(
-                "declaration-description", text=final_text
-            )
-        },
+        evaluate_handler=evaluate_handler,
     )
     selectors = {
         TRIGGER_SELECTOR: trigger,
-        xhs_main.XHS_DECLARATION_WRAPPER_SELECTOR: wrapper,
         FALLBACK_KEY: FakeLocator("declaration-text-fallback", count=0),
         OPTION_SELECTOR: option,
     }

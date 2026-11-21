@@ -2032,9 +2032,7 @@ class TiktokLocationOptionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 asyncio.run(video.apply_options(_OptionPage()))
 
-        # The list never collapses, so the safe retry happens only while the
-        # combobox is still open; the final readback is never reached.
-        self.assertEqual(location.rows[0].click_calls, 2)
+        self.assertEqual(location.rows[0].click_calls, 1)
         self.assertEqual(location.value_reads, 0)
         line = out.getvalue()
         self.assertIn("status=mismatch", line)
