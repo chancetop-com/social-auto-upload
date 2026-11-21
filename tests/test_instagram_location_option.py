@@ -275,6 +275,10 @@ def _location_page_html(
           document.body.dataset.clickedIndex = String(
             [...list.children].indexOf(row));
           document.body.dataset.clickedName = candidate.name;
+          if (outcome === 'rerender') {{
+            list.replaceChildren(...[...list.children].map(child => child.cloneNode(true)));
+            return;
+          }}
           if (outcome === 'stale') {{
             input.value = candidate.name;
             return;
@@ -610,6 +614,16 @@ class InstagramLocationControlledCliTests(unittest.TestCase):
                 self.assertIn(prompt, record['detail'])
                 self.assertIn('location=unsupported(account_ineligible)', stderr)
                 self.assertIn(prompt, stderr)
+
+    def test_replacing_candidate_rows_does_not_confirm_a_selection(self):
+        code, saved, holder, _, _ = self._run(
+            action='upload-note',
+            html=_location_page_html([('Shanghai', 'First')], outcome='rerender'),
+            suggestion_timeout_ms=500,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(holder['share_clicks'], 0)
+        self.assertEqual(saved['options']['location']['reason'], LIST_NOT_COLLAPSED)
 
     def test_list_that_never_collapses_stops_before_share(self):
         candidates = [('Shanghai', 'Huangpu, Shanghai')]

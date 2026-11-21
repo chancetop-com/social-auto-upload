@@ -23,7 +23,7 @@ STATUS_LINKED = "linked"
 #: Schemes and host prefixes whose first ``#fragment`` is part of a URL.
 #: A second ``#`` ends the URL so a topic immediately after a link
 #: (``详情https://x/#frag，#咖啡``) is still recognised.
-_URL_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s#，。！？；：、（）【】《》“”‘’<>\"`]*")
+_URL_RE = re.compile(r"(?i)(?:https?://|www\.)[^\s#，。！？；：、《》“”‘’<>\"`]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +80,7 @@ def _url_spans(caption: str) -> list[tuple[int, int]]:
         if end == len(caption) or caption[end] != "#":
             continue
         url = match.group()
-        if any(url.count(close) > url.count(opening) for opening, close in (("(", ")"), ("[", "]"))):
+        if any(url.count(close) > url.count(opening) for opening, close in (("(", ")"), ("[", "]"), ("（", "）"), ("【", "】"))):
             continue
         spans.append((end, end + 1))
     return spans

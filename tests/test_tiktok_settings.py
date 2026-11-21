@@ -1399,6 +1399,7 @@ class TiktokAigcOptionTests(unittest.TestCase):
         video = _uploader(TiktokPublishOptions(aigc=False))
         video._resolve_single_control = AsyncMock(return_value=None)
         video._expand_advanced_settings = AsyncMock()
+        video._settled_ai_control = AsyncMock(return_value=None)
 
         out = io.StringIO()
         with redirect_stdout(out):
@@ -1412,6 +1413,7 @@ class TiktokAigcOptionTests(unittest.TestCase):
         video = _uploader(TiktokPublishOptions(aigc=True))
         video._resolve_single_control = AsyncMock(return_value=None)
         video._expand_advanced_settings = AsyncMock()
+        video._settled_ai_control = AsyncMock(return_value=None)
 
         with self.assertRaises(RuntimeError) as ctx:
             asyncio.run(video.apply_options(_OptionPage()))

@@ -179,6 +179,7 @@ _SUGGESTION_JS = """(el, action) => {
     if (norm(parsed.name).toLowerCase() !==
         norm(action.name).toLowerCase()) return false;
     if (norm(parsed.address || '') !== norm(action.address || '')) return false;
+    list.setAttribute('data-instagram-location-list', String(action.stamp));
     node.setAttribute('data-instagram-suggestion', String(action.stamp));
     return true;
   }
@@ -242,16 +243,15 @@ class LocationControl:
         try:
             dialog = self._dialog()
             notices = await dialog.locator(
-                '#location-restriction:visible, [role="alert"]:visible, '
-                '[aria-live="assertive"]:visible, [aria-live="polite"]:visible'
+                '#location-restriction:visible, [data-testid*="location"] '
+                ':is([role="alert"],[aria-live="assertive"]):visible'
             ).all_inner_texts()
         except Exception:
             return None
         for notice in notices:
-            if re.search(r"location|地点", notice, re.IGNORECASE):
-                reason = location_restriction_message(notice)
-                if reason:
-                    return reason
+            reason = location_restriction_message(notice)
+            if reason:
+                return reason
         return None
 
     async def resolve(self) -> str:
@@ -314,8 +314,8 @@ class LocationControl:
                 applied=None,
                 reason=NO_SAME_NAME,
             )
-        node = await self._click_entry(entry, chosen)
-        if node is None:
+        candidate_list = await self._click_entry(entry, chosen)
+        if candidate_list is None:
             raise OptionMismatchError(
                 self._mismatch_message(requested, entries),
                 applied=None,
@@ -328,7 +328,7 @@ class LocationControl:
         }
         if chosen.address:
             self.last_evidence['candidate_address'] = chosen.address
-        if not await self._wait_row_detached(node):
+        if not await self._wait_list_collapsed(entry, candidate_list, chosen):
             # 被点节点仍在 DOM 里说明选择没生效：不把输入框里的输入当成已选地点。
             raise OptionMismatchError(
                 'Instagram 地点候选在点击后仍未收起：'
@@ -466,31 +466,18 @@ class LocationControl:
             return None
         humanizer = self._behavior()
         await humanizer.click(node)
-        return node
+        return self._page.locator(f'[data-instagram-location-list="{token}"]')
 
-    async def _wait_row_detached(self, node: Locator) -> bool:
-        """选中后 Instagram 会卸载整个联想列表：以被点节点脱离 DOM 为准。
-
-        实测（2026-11-10）：点击候选后列表节点 ``isConnected === false``，而
-        输入框值保持不变；用“页面上是否还有类似尺寸的 div”判断会误判，因为
-        配文栏滚动容器与页面其他节点也满足几何条件。这里用属性戳的当前匹配数
-        判断，避免 ``Locator.evaluate`` 在节点消失后仍等待默认超时。
-        """
+    async def _wait_list_collapsed(self, entry, candidate_list, chosen: LocationCandidate) -> bool:
+        """Wait out row replacement as well as the original list's collapse."""
         deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
         while True:
-            try:
-                if await node.count() == 0:
+            if not await candidate_list.locator(":scope > :visible").count():
+                # The portal can replace its entire list after a click. An exact
+                # candidate still present under the input means search is open.
+                rows = await entry.evaluate(_SUGGESTION_JS)
+                if not any(location_matches(chosen.name, row['name']) for row in rows):
                     return True
-            except Exception:
-                # Locator 已随旧文档销毁，同样视为消失。
-                return True
-            # 内存 page double 的 count() 不跟随 detached 状态；真实浏览器在
-            # 节点消失后 count() 已为 0，不会走到下面的 evaluate 等待。
-            try:
-                if await node.evaluate('el => !el.isConnected'):
-                    return True
-            except Exception:
-                return True
             if time.monotonic() >= deadline:
                 return False
             await asyncio.sleep(_POLL_SECONDS)

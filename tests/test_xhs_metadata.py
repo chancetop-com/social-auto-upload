@@ -520,6 +520,15 @@ class Decision11ReadbackBodyLengthTests(unittest.TestCase):
     def test_length_error_checked_exactly_once_after_topics(self):
         app = _note_app(desc="正文", tags=["旅行pov"])
         page = RecordingPage(url=NOTE_URL, selectors=_meta_selectors())
+        editor = page.locator('div.tiptap[role="textbox"][contenteditable="true"]')
+        original = editor.evaluate
+
+        async def evaluate(script, *args):
+            if 'ProseMirror-trailingBreak' in script:
+                return ''.join(value for action, value in page.keyboard.actions if action == 'insert_text')
+            return await original(script, *args)
+
+        editor.evaluate = evaluate
         counting = _CountingLocator("length-error", count=0)
         page._selectors[xhs_main.XHS_BODY_LENGTH_ERROR_SELECTOR] = counting
         with (

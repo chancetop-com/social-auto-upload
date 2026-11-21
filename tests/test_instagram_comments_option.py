@@ -128,14 +128,13 @@ class InstagramCommentsPipelineTests(unittest.TestCase):
     def test_disabled_comments_report_the_observed_value(self):
         with tempfile.TemporaryDirectory() as folder:
             app = self._app(InstagramPublishOptions(comments=False), folder=folder)
-            for enabled in (False, True):
+            for enabled in (False, True, None):
                 control = _FakeCommentsControl(presence="ineligible", values=[enabled])
-                if enabled:
-                    with self.assertRaises(RuntimeError):
-                        self._apply(app, {"comments": control})
-                else:
-                    self._apply(app, {"comments": control})
-                self.assertIs(app.result["options"]["comments"]["applied"], enabled)
+                self._apply(app, {"comments": control})
+                result = app.result["options"]["comments"]
+                self.assertIs(result["applied"], enabled)
+                self.assertEqual(result["status"], DEFAULT_OFF)
+                self.assertEqual(control.calls, ["resolve", "read"])
 
     def test_unconfirmed_visible_comments_stop_before_share(self):
         with tempfile.TemporaryDirectory() as folder:

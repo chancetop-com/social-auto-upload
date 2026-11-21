@@ -213,6 +213,8 @@ class _Base:
         self.env = env
 
     def locator(self, selector):
+        if selector == tk_main.TIKTOK_TOPIC_ERROR_SELECTOR:
+            return _Body(self.env)
         if selector == '[role="option"]':
             return _Options(self.env)
         if selector.endswith("div.public-DraftEditor-content"):
@@ -648,6 +650,14 @@ class TiktokInlineTopicTests(unittest.TestCase):
             asyncio.run(app.fill_metadata(env.page))
         self.assertEqual(env.buffer, "#coffee")
         self.assertEqual(env.mentions, ["#coffee"])
+
+    def test_python_photo_tags_preserve_the_caption_separator(self):
+        env = TopicEnv(photo_mode=True)
+        env.add_suggestion("coffee")
+        app = _note(env, "Caption", tags=["coffee"])
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(app.fill_metadata(env.page))
+        self.assertEqual(env.buffer, "Caption\n#coffee")
 
     def test_hard_limit_stops_without_publishing(self):
         env = TopicEnv(photo_mode=True)

@@ -241,7 +241,12 @@ def _location_selectors(module, *, final="人民公园", collapse=True):
         wait_error=None if collapse else TimeoutError("candidate list stayed open"),
     )
     rows_locator = FakeLocator("location-rows", items=[row])
+    rows_locator.evaluate_all = AsyncMock(
+        return_value=[{"name": "人民公园", "address": "上海市黄浦区南京西路231号"}]
+    )
     selectors = {
+        ".option-name": FakeLocator("location-name"),
+        ".option-subname:visible": FakeLocator("location-address"),
         module.XHS_LOCATION_CONTAINER_SELECTOR
         if module is xhs
         else module.REDNOTE_LOCATION_CONTAINER_SELECTOR: FakeLocator(
@@ -262,15 +267,6 @@ def _location_selectors(module, *, final="人民公园", collapse=True):
         ),
     }
     return selectors, rows_locator, row
-
-
-def _evaluate_handler(rows):
-    def handler(expression, arg):
-        if "option-item" in str(expression):
-            return rows
-        return True
-
-    return handler
 
 
 class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
@@ -296,9 +292,6 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
                 module, collapse=collapse
             )
             page._selectors.update(selectors)
-            page._evaluate_handler = _evaluate_handler(
-                [{"name": "人民公园", "address": "上海市黄浦区南京西路231号"}]
-            )
         else:
             rows = row = None
         return page, rows, row
@@ -380,9 +373,9 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
             for action in ("video", "note"):
                 with self.subTest(platform=prefix, action=action):
                     page, _rows, row = self._page(module, action)
-                    page._evaluate_handler = _evaluate_handler(
-                        [{"name": "房山人民公园", "address": "北京市房山区"}]
-                    )
+                    _rows.evaluate_all.return_value = [
+                        {"name": "房山人民公园", "address": "北京市房山区"}
+                    ]
                     app = self._app(module, action, location="人民公园")
                     with self.assertRaisesRegex(RuntimeError, "无同名候选"):
                         await self._run(module, action, app, page)

@@ -682,6 +682,7 @@ class YouTubePublishDispatchGuardTests(unittest.TestCase):
         with (
             patch.object(youtube_main, "_click_if_present", _click_if_present),
             patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(youtube_main, "_read_editable", AsyncMock(return_value="")),
             patch.object(youtube_main, "_verify_editable", AsyncMock()),
             patch.object(
                 youtube_main, "_description_limit_message", AsyncMock(return_value=None)
@@ -754,6 +755,7 @@ class YouTubePostPublishCloseTests(unittest.TestCase):
         with (
             patch.object(youtube_main, "_click_if_present", _click_if_present),
             patch.object(youtube_main, "_fill_editable", AsyncMock()),
+            patch.object(youtube_main, "_read_editable", AsyncMock(return_value="")),
             patch.object(youtube_main, "_verify_editable", AsyncMock()),
             patch.object(
                 youtube_main, "_description_limit_message", AsyncMock(return_value=None)

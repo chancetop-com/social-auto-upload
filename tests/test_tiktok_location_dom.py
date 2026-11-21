@@ -96,6 +96,78 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
         await rows[0].click()
         self.assertEqual(await self.page.locator('#loc-list').get_attribute('data-clicked'), rows[0].address)
 
+    async def test_recycled_row_cannot_click_the_replacement_address(self):
+        self.page.set_default_timeout(700)
+        await self.page.locator('#loc-list [role="option"]').evaluate("""row => {
+            row.onmouseenter = () => row.lastElementChild.textContent = 'Recycled address';
+            row.onclick = () => document.body.dataset.clicked = 'yes';
+        }""")
+        rows = await self.control.candidate_rows()
+        with self.assertRaises(tk.PlaywrightTimeoutError):
+            await rows[0].click()
+        self.assertIsNone(await self.page.locator('body').get_attribute('data-clicked'))
+
+    async def test_switch_without_boolean_evidence_stops(self):
+        for html in ('<button role=switch>AI</button>',
+                     '<input type=checkbox role=switch><script>document.querySelector("input").indeterminate=true</script>'):
+            with self.subTest(html=html):
+                await self.page.set_content(f'<div data-e2e="aigc_container">{html}</div>')
+                app = tk.TiktokVideo("Caption", "v.mp4", [], 0, None, options=tk.TiktokPublishOptions(aigc=False))
+                app.locator_base = self.page.locator('body')
+                with self.assertRaises(RuntimeError):
+                    await app.apply_options(self.page)
+                self.assertEqual(app.ai_outcome.reason, "read_error")
+                self.assertIsNone(app.ai_outcome.applied)
+
+    async def test_final_readiness_checks_deferred_caption_errors_inside_iframe(self):
+        await self.page.set_content('<iframe id="upload"></iframe><div aria-live="polite">Too many hashtags</div>')
+        frame = self.page.frames[1]
+        await frame.set_content('<div class="caption-textarea"></div><div aria-live="polite">Too many hashtags</div>')
+        app = tk.TiktokVideo("Caption", "v.mp4", [], 0, None)
+        app.locator_base = self.page.frame_locator("#upload")
+        self.assertFalse(await app._topic_hard_limit_visible(self.page))
+        await frame.locator('.caption-textarea').evaluate("""el => {
+            el.innerHTML = '<div role="alert">Too many hashtags</div>';
+        }""")
+        app.topic_outcomes = [object()]
+        with patch.object(app, "_publish_button_ready", return_value=object()):
+            with self.assertRaisesRegex(RuntimeError, "硬限制"):
+                await app.wait_publish_ready(self.page)
+
+    async def test_iframe_and_legacy_search_use_the_location_list_only(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                await self.page.set_content('<iframe id="upload"></iframe>')
+                frame = self.page.frames[1]
+                html = HTML.replace('data-e2e="poi_container"', 'class="Select"') if legacy else HTML
+                await frame.set_content(html)
+                probe = self._probe()
+                probe.locator_base = self.page.frame_locator('#upload')
+                probe._option_page = self.page
+                control = await probe._resolve_single_control("location")
+                self.assertIsNotNone(control)
+                await probe._apply_location_option(control, "London Eye", page=self.page, url="about:blank")
+                self.assertEqual(probe.location_outcome.candidate_address,
+                                 "Riverside Building, County Hall, London SE1 7PB, United Kingdom")
+
+    async def test_ai_control_can_mount_after_show_more_disappears(self):
+        await self.page.set_content("""
+            <div class="public-DraftEditor-content" contenteditable="true">Caption</div>
+            <button onclick="this.remove(); setTimeout(mount, 250)">Show more</button>
+            <script>function mount() {
+                const row = document.createElement('div');
+                row.dataset.e2e = 'aigc_container';
+                row.innerHTML = '<button role="switch" aria-checked="true" disabled>AI</button>';
+                document.body.append(row);
+            }</script>
+        """)
+        app = tk.TiktokVideo("Caption", "v.mp4", [], 0, None, options=tk.TiktokPublishOptions(aigc=False))
+        app.locator_base = self.page.locator("body")
+        with self.assertRaises(RuntimeError):
+            await app.apply_options(self.page)
+        self.assertEqual(app.ai_outcome.status, "mismatch")
+        self.assertIs(app.ai_outcome.applied, True)
+
     async def test_expanded_reads_the_combobox_button(self):
         self.assertTrue(await self.control._expanded())
         await self._expanded("false")

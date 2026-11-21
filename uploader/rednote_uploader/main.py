@@ -342,7 +342,7 @@ REDNOTE_CAPTION_READBACK_JS = """
       if (child.tagName === 'BR') {
         const trailing = child.classList
           && child.classList.contains('ProseMirror-trailingBreak');
-        if (!trailing && child.nextSibling) out += '\\n';
+        if (!trailing && (child.previousSibling || child.nextSibling || !blocks.has(node.tagName))) out += '\\n';
         continue;
       }
       hasSibling = true;

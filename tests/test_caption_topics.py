@@ -206,3 +206,8 @@ def test_url_closed_by_prose_punctuation_does_not_hide_the_next_topic():
     for caption in ("详情（https://example.com/path），#咖啡。", "(https://example.com/x)#咖啡", "https://example.com，#咖啡"):
         assert [item.name for item in parse_caption_topics(caption).occurrences] == ["咖啡"]
     assert parse_caption_topics("https://example.com/a_(b)#fragment").occurrences == ()
+
+
+def test_balanced_cjk_url_path_keeps_its_fragment():
+    caption = "<https://example.com/电影（2024）#角色>，#电影"
+    assert [item.text for item in parse_caption_topics(caption).occurrences] == ["#电影"]

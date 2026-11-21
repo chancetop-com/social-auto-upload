@@ -1046,7 +1046,7 @@ class InstagramUploader:
             # 必须按实际回读判定，不能因为“不可用”就一律记 default_off 放行。
             if (
                 presence == INELIGIBLE
-                and kind == 'toggle'
+                and key == 'ai_generated'
                 and requested is False
             ):
                 try:
@@ -1070,8 +1070,13 @@ class InstagramUploader:
                     applied=applied,
                     reason=ACCOUNT_INELIGIBLE,
                 )
+            if presence == INELIGIBLE and key == 'comments' and requested is False:
+                try:
+                    applied = await control.read()
+                except Exception:
+                    pass
             status, reason = option_status(
-                requested, None, kind=kind, presence=presence
+                requested, applied, kind=kind, presence=presence
             )
             self._record_option(
                 key,

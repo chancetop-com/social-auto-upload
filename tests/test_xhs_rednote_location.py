@@ -134,6 +134,18 @@ class LocationDomTests(unittest.IsolatedAsyncioTestCase):
             app.start_publish_budget()
             self.enterContext(patch.object(app, "_settle", AsyncMock()))
 
+    async def test_caption_readback_distinguishes_authored_and_editor_breaks(self):
+        await self.page.set_content('<div id="editor"></div>')
+        editor = self.page.locator('#editor')
+        for markup, expected in (
+            ('<p>Caption<br></p>', "Caption\n"),
+            ('<p>Caption<br class="ProseMirror-trailingBreak"></p>', "Caption"),
+            ('<p>Caption</p><p><br class="ProseMirror-trailingBreak"></p>', "Caption\n"),
+        ):
+            await editor.evaluate('(el, html) => el.innerHTML = html', markup)
+            for reader in (xhs.XHS_CAPTION_READBACK_JS, rednote.REDNOTE_CAPTION_READBACK_JS):
+                self.assertEqual(await editor.evaluate(reader), expected)
+
     async def render(
         self,
         rows,
