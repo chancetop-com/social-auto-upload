@@ -229,6 +229,14 @@ class XiaohongshuUploaderTests(unittest.TestCase):
             desc="描述内容",
         )
         page = RecordingPage()
+        editor = page.locators['div.tiptap[role="textbox"][contenteditable="true"]']
+
+        async def read_caption(_script):
+            # The title was typed before the editor's select-all and delete.
+            start = page.keyboard.actions.index(("press", "Delete")) + 1
+            return "".join(value for action, value in page.keyboard.actions[start:] if action == "insert_text")
+
+        editor.evaluate = read_caption
 
         # HUMANIZE=0：快路径（一次 insert_text / 一次普通 click），这里验证的是
         # 调用点语义（顺序、清理键、话题点击），不是行为层的时延。
@@ -289,6 +297,8 @@ class XiaohongshuUploaderTests(unittest.TestCase):
         )
 
     def test_apply_declarations_repost_fills_media_name(self):
+        self_test = self
+
         class FakeTrigger:
             def __init__(self, text="来源转载"):
                 self.clicks = 0
@@ -317,6 +327,10 @@ class XiaohongshuUploaderTests(unittest.TestCase):
                 return self
 
             async def inner_text(self):
+                return self.text
+
+            async def evaluate(self, script):
+                self_test.assertIn(".d-select-description", script)
                 return self.text
 
         class FakeMenu(FakeTrigger):
