@@ -442,6 +442,9 @@ XHS_ORIGINAL_CONFIRM_CANDIDATES = (
 # 12. 内容类型声明：容器是 class 不是 id（旧 id 写法恒为 0 命中）。
 #     触发器限定 .publish-container 内 text 的 [tabindex="1"]；选项限定下拉 + 精确文案。
 XHS_DECLARATION_CONTAINER_SELECTOR = ".publish-container"
+# 实机把属性写成 ``lass``（不是 class）；选中值在包装层内的
+# ``.d-select-description``，入口占位文案节点在选择后会清空。
+XHS_DECLARATION_WRAPPER_SELECTOR = '[lass="declaration-wrapper"]'
 XHS_DECLARATION_TRIGGER_CANDIDATES = (
     _zh_css(
         '.publish-container [tabindex="1"]:has-text("添加内容类型声明")',
@@ -2821,8 +2824,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             trigger = await self._open_content_declaration_menu(
                 page, humanizer=humanizer
             )
-            # 钉住入口节点：选择后带 has-text 过滤的 locator 不再匹配占位文案。
-            handle = await trigger.element_handle()
+            # 钉住声明包装层：实机选择后入口占位节点会清空，选中值显示在
+            # 同一包装层内的 ``.d-select-description``。
+            wrapper = page.locator(XHS_DECLARATION_WRAPPER_SELECTOR).first
+            if await wrapper.count() == 0:
+                wrapper = trigger.locator.locator(
+                    "xpath=ancestor::div[contains(@class,'d-select-wrapper')][1]"
+                )
             phase = "option"
             if source_label:
                 await self._click_declaration_option(
@@ -2844,7 +2852,7 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
             elif content_type == "repost":
                 await self._fill_repost_source(page, humanizer=humanizer)
 
-            observed = await self._read_selected_declaration(handle)
+            observed = await self._read_selected_declaration(wrapper)
             if observed is None:
                 reason = "未读到选中的内容类型"
             elif not observed:
@@ -2885,10 +2893,13 @@ class XiaoHongShuBaseUploader(BaseVideoUploader):
         )
 
     @staticmethod
-    async def _read_selected_declaration(handle) -> str | None:
-        """读入口节点的最终文本；读不到返回 ``None``（区别于读到空串）。"""
+    async def _read_selected_declaration(wrapper) -> str | None:
+        """读声明包装层内的选中值；读不到返回 ``None``（区别于读到空串）。"""
+        description = wrapper.locator(".d-select-description")
         try:
-            text = await handle.inner_text()
+            if not await description.count():
+                return None
+            text = await description.first.inner_text()
         except Exception:
             return None
         return text.strip()

@@ -9,7 +9,8 @@
 - **破坏性变更（CLI）**：`xiaohongshu upload-video|upload-note`、`rednote upload-video|upload-note`、`instagram upload-video|upload-note`、`tiktok upload-video|upload-note`、`facebook upload-video|upload-note`、`facebook-page upload-video|upload-note` 和 `youtube upload-video` 共 13 条命令移除 `--tags`。旧脚本继续传该参数会在参数解析阶段退出 `2`，不会启动浏览器或上传素材。
 - 迁移：旧 `--note '今天喝了咖啡，配上栗子蛋糕。' --tags 咖啡,栗子蛋糕` 改为 `--note '今天喝了 #咖啡，配上 #栗子蛋糕。'`。逐词结果显示「#咖啡 已关联」（有同名候选）与「#栗子蛋糕 保留文字，无同名候选」（只有近似候选）；公开配文逐字一致才放行。
 - YouTube 旧 `--tags` 写入的是 **Studio 后台关键词，不是公开配文**；CLI 不再写入关键词栏，页面预填的关键词保持原值。调用方须自行决定哪些词写进公开的 `--desc`。Facebook Page Reel 的独立关键词栏同样保留页面原值，CLI 不写入。
-- 验证范围：13 条命令的旧参数退出 `2`、内联话题改写、YouTube Studio 与 Facebook Page Reel 预填关键词未改动，均由离线/受控页面覆盖；本轮未新增真实账号实机验收，相关 CLI 样本标「未实测」。
+- 验证范围：13 条命令的旧参数退出 `2`、内联话题改写、YouTube Studio 与 Facebook Page Reel 预填关键词未改动，均由离线/受控页面覆盖。
+- 2026-11-21 真实账号 `--no-publish` 回归：小红书 `180`、Rednote `rednote` 的视频与图文均回读 AI 声明、地点 `人民公园` 与 `#咖啡`/`#栗子蛋糕` 原位关联；Instagram `luke` 的 Reel 与两图轮播为 `prepared`，地点 `Shanghai`、AI `set`/`default_off`、`#color #study` 文本证据；TikTok `lukechen` 的视频与 Photos 均回读地点 `London Eye`、AI `default_off` 与 `#coffee` 关联。全部停在发布/Share 前，未发布任何内容。
 
 ### Rednote 初始支持
 

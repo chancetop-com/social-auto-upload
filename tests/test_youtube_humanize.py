@@ -386,6 +386,37 @@ class YouTubeEventSequenceTests(unittest.TestCase):
         self.assertEqual(page.mouse.down_count, 2)
         self.assertEqual(timeline.count("after_type"), 5)
 
+    def test_description_topic_candidate_excludes_trailing_punctuation_and_url_fragment(self):
+        timeline = Timeline()
+        keyboard = BufferKeyboard(timeline)
+        desc_box = ClickableLocator("description", timeline=timeline)
+        hit = ClickableLocator("candidate", timeline=timeline)
+        frag = ClickableLocator("fragment", timeline=timeline)
+        page = _hashtag_page(
+            timeline,
+            keyboard,
+            text_locator=desc_box,
+            candidates={
+                "text:#hit:exact": hit,
+                "text:#frag:exact": frag,
+            },
+        )
+        humanizer = NamedHumanizer(page, timeline)
+        text = "开头 #hit, 中间 https://example.com/#frag 结尾"
+
+        asyncio.run(
+            youtube_main._fill_editable(
+                page, DESC_INPUT, text, humanizer, multiline=True
+            )
+        )
+
+        # The comma stays outside the topic and the URL fragment is not a
+        # topic at all: only ``#hit`` gets an autocomplete lookup/click.
+        self.assertEqual(keyboard.finish(), [text])
+        self.assertEqual(page.mouse.down_count, 2)
+        self.assertTrue(hit.evaluate_calls)
+        self.assertEqual(frag.evaluate_calls, [])
+
     def test_over_the_horizon_goes_through_exactly_one_bulk_insert(self):
         timeline = Timeline()
         keyboard = BufferKeyboard(timeline)

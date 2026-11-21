@@ -2,10 +2,10 @@
 """XHS explicit content-type declaration: read back the selected label (ticket 15).
 
 The controlled page models the two facts the real page shows after the
-declaration menu collapses (``26-readback-signal-evidence.md`` §6.1):
+declaration menu collapses:
 
-* the declaration ``.d-select`` entry's ``innerText`` becomes the selected label
-  (the placeholder ``添加内容类型声明`` is gone);
+* the selected label is rendered in the declaration wrapper's
+  ``.d-select-description``; the placeholder node itself is cleared;
 * the option menu is hidden.
 
 Every failure must stop before the publish step with the requested value, the
@@ -73,10 +73,20 @@ def _declaration_selectors(
         "declaration-trigger",
         count=1 if entry else 0,
         computed_style=dict(VISIBLE_FACTS),
-        text=final_text,
+        text="添加内容类型声明",
+    )
+    wrapper = FakeLocator(
+        "declaration-wrapper",
+        count=1 if entry else 0,
+        children={
+            ".d-select-description": FakeLocator(
+                "declaration-description", text=final_text
+            )
+        },
     )
     selectors = {
         TRIGGER_SELECTOR: trigger,
+        xhs_main.XHS_DECLARATION_WRAPPER_SELECTOR: wrapper,
         FALLBACK_KEY: FakeLocator("declaration-text-fallback", count=0),
         OPTION_SELECTOR: option,
     }

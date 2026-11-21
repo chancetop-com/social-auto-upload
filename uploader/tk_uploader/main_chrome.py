@@ -1167,11 +1167,42 @@ class _LocatorLocationControl(TiktokLocationControl):
                 return rows
         return []
 
+    def _combobox(self):
+        """The visible trigger button that owns the listbox.
+
+        Studio's ``input.Select__searchInput`` has no ``aria-expanded``; the
+        sibling ``button[role=combobox]`` does.  Scoping the listbox through
+        ``aria-controls`` also keeps unrelated ``role=option`` rows (privacy
+        menus, other selects) out of the location result.
+        """
+        return self._container.locator(
+            '[role="combobox"][aria-expanded]'
+        ).first
+
+    async def _listbox_scope(self):
+        try:
+            button = self._combobox()
+            if await button.count() == 0:
+                return None
+            listbox_id = await button.get_attribute("aria-controls")
+        except Exception:
+            return None
+        if not listbox_id:
+            return None
+        try:
+            return self._page.locator(f'[id="{listbox_id}"]').first
+        except Exception:
+            return None
+
     async def candidate_rows(self) -> list[TiktokLocationCandidate]:
-        # Current Studio portals the listbox to the page root; an
-        # iframe-scoped list is still covered by the base scope first.  Only
-        # visible rows count, so a hidden stale listbox cannot mask the open
-        # one or turn into a false no-match.
+        # Prefer the exact listbox named by the combobox.  Current Studio
+        # portals the listbox to the page root; the container/page fallbacks
+        # keep older layouts working.
+        listbox = await self._listbox_scope()
+        if listbox is not None:
+            rows = await self._rows_in_scope(listbox)
+            if rows:
+                return rows
         seen: set[int] = set()
         for scope in (self._row_scope, self._page):
             if scope is None or id(scope) in seen:
@@ -1183,6 +1214,14 @@ class _LocatorLocationControl(TiktokLocationControl):
         return []
 
     async def _expanded(self) -> bool | None:
+        try:
+            button = self._combobox()
+            if await button.count() > 0:
+                aria = await button.get_attribute("aria-expanded")
+                if aria is not None:
+                    return str(aria).lower() == "true"
+        except Exception:
+            pass
         target = await self._input()
         for node in (target, self._container):
             try:
@@ -1200,9 +1239,12 @@ class _LocatorLocationControl(TiktokLocationControl):
         while True:
             expanded = await self._expanded()
             rows = await self.candidate_rows()
-            # Both signals matter: a stale ``aria-expanded=true`` means the
-            # combobox is still open even if the visible rows briefly vanish.
-            if expanded is not True and not rows:
+            # ``aria-expanded=false`` on the combobox is the authoritative
+            # collapsed signal.  Only when the page exposes no such attribute
+            # do we infer collapse from the absence of visible rows.
+            if expanded is False:
+                return True
+            if expanded is None and not rows:
                 return True
             if time.monotonic() >= deadline:
                 return False
@@ -2144,28 +2186,47 @@ class TiktokBaseUploader(BaseVideoUploader):
             if candidate.address
             else None
         )
-        try:
-            await candidate.click()  # native-click: manage；控件底座内部走 Humanizer
-        except Exception as exc:
-            outcome = TiktokLocationOutcome(
-                requested=query,
-                status=LOCATION_MISMATCH,
-                candidate_name=candidate_name,
-                candidate_address=candidate_address,
-                reason=LOCATION_CLICK_ERROR,
-            )
-            self._record_location_outcome(outcome)
-            raise _option_error(
-                option="location",
-                stage="click",
-                requested=query,
-                actual="click-error",
-                control=control,
-                url=url,
-                detail=str(exc),
-            ) from exc
+        collapsed = False
+        for attempt in range(2):
+            # A re-rendered list can move the row between the humanized
+            # pointer move and the press.  A second click is safe only while
+            # the combobox is still open: a successful first click collapses
+            # it and exits the loop before any second dispatch.
+            if attempt:
+                refreshed = [
+                    row
+                    for row in await control.candidate_rows()
+                    if normalize_location_text(row.name)
+                    == normalize_location_text(query)
+                ]
+                if not refreshed:
+                    break
+                candidate = refreshed[0]
+            try:
+                await candidate.click()  # native-click: manage；控件底座内部走 Humanizer
+            except Exception as exc:
+                outcome = TiktokLocationOutcome(
+                    requested=query,
+                    status=LOCATION_MISMATCH,
+                    candidate_name=candidate_name,
+                    candidate_address=candidate_address,
+                    reason=LOCATION_CLICK_ERROR,
+                )
+                self._record_location_outcome(outcome)
+                raise _option_error(
+                    option="location",
+                    stage="click",
+                    requested=query,
+                    actual="click-error",
+                    control=control,
+                    url=url,
+                    detail=str(exc),
+                ) from exc
+            if await control.wait_collapsed():
+                collapsed = True
+                break
 
-        if not await control.wait_collapsed():
+        if not collapsed:
             outcome = TiktokLocationOutcome(
                 requested=query,
                 status=LOCATION_MISMATCH,

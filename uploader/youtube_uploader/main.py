@@ -11,13 +11,13 @@ Login is interactive (Google account, no QR code): the browser opens, the user s
 the dedicated persistent browser Profile retains the session for later uploads.
 """
 import asyncio
-import re
 from pathlib import Path
 
 from patchright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 from uploader.base_video import BaseVideoUploader
 from uploader.publish_timeout import PublishTimeoutBudget
+from utils.caption_topics import parse_caption_topics
 from utils.local_account import local_account_alias
 from utils.dom import ElementUnusableError, reject_ambiguous
 from utils.browser_cleanup import close_browser_resources
@@ -67,7 +67,7 @@ AUTOCOMPLETE_VISIBLE = (
 #: 候选项等待上限：补全靠网络，等不到就按纯文本继续，不拖住整条发布链。
 HASHTAG_CANDIDATE_TIMEOUT_MS = 1500
 #: 一段 `#` 话题：`#` 后到空白 / 下一个 `#` 之前。
-_HASHTAG_RE = re.compile(r"#[^\s#]+")
+
 #: YouTube 简介整帖硬限制（平台文档口径：5000 字符）。
 YOUTUBE_DESCRIPTION_MAX_LENGTH = 5000
 #: 简介字段附近的整帖错误提示。选择器来自受控页面；真实账号界面未实测。
@@ -358,23 +358,26 @@ async def _type_with_hashtags(page: Page, humanizer: Humanizer, text: str) -> No
 
     阈值先按**整段总长度**判定（spec §2.4 规则 4 / §3.14）：越过共享层视野
     （1000 码点）时由共享层一次性 bulk ``insert_text``，平台不按 ``#`` 切段、
-    不设第二个阈值，也不挑 hashtag 候选。视野内时逐段逐字，每段 ``#tag`` 后点选
-    全等候选，匹配失败降级为纯文本继续。
+    不设第二个阈值，也不挑 hashtag 候选。视野内时按共享解析器给出的
+    ``#话题`` 逐段逐字输入；结尾标点留在话题外，URL 片段不当作话题。每段
+    ``#topic`` 后点选全等候选，匹配失败降级为纯文本继续。
     """
     if len(text) > DEFAULT_PROFILE.type_horizon_chars:
         await humanizer.type_text(text)
         return
+    topics = parse_caption_topics(text)
     cursor = 0
-    for match in _HASHTAG_RE.finditer(text):
-        if match.start() > cursor:
-            await humanizer.type_text(text[cursor:match.start()])
-        tag = match.group(0)
-        await humanizer.type_text(tag)
-        if not await _select_hashtag_candidate(page, humanizer, tag):
+    for occurrence in topics.occurrences:
+        if occurrence.start > cursor:
+            await humanizer.type_text(text[cursor:occurrence.start])
+        await humanizer.type_text(occurrence.text)
+        if not await _select_hashtag_candidate(
+            page, humanizer, occurrence.text
+        ):
             await _dismiss_autocomplete(page, humanizer, blur=False)
-        cursor = match.end()
+        cursor = occurrence.end
     if cursor == 0:
-        # 没有 `#`：一次 type_text。
+        # 没有 `#` 话题：一次 type_text。
         await humanizer.type_text(text)
     elif cursor < len(text):
         await humanizer.type_text(text[cursor:])
