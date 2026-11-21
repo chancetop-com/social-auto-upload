@@ -2929,11 +2929,10 @@ class TiktokBaseUploader(BaseVideoUploader):
             '[data-e2e="advanced_settings_container"][aria-busy="true"]:visible, '
             '[data-e2e="advanced_settings_container"] :is([aria-busy="true"],[role="progressbar"]):visible'
         )
-        if await page.locator(modal).count() or await busy_settings.count():
+        if await page.locator(modal).count() or await self.locator_base.locator(modal).count() or await busy_settings.count():
             raise RuntimeError("TikTok 高级设置仍在加载或被弹窗遮挡")
         if not await editor.count() or not await editor.evaluate(
-            """el => !el.closest('[inert],[aria-hidden="true"],[aria-busy="true"]') &&
-            !el.ownerDocument.querySelector('dialog[open], [role=dialog][aria-modal=true]:not([aria-hidden=true])')"""
+            """el => !el.closest('[inert],[aria-hidden="true"],[aria-busy="true"]')"""
         ):
             raise RuntimeError("无法确认 TikTok 编辑器已就绪")
         return None

@@ -153,6 +153,11 @@ class _Locator:
             return self.page.caption_text
         return ""
 
+    async def all_inner_texts(self) -> list[str]:
+        if '[data-e2e="poi_container"]' in self.selector and self.page.location_notice:
+            return [self.page.location_notice]
+        return []
+
     async def get_attribute(self, name: str, *, timeout=None):
         if "text=Post" in self.selector:
             return None if self.page.post_enabled else "disabled"
@@ -245,6 +250,7 @@ class _StudioPage:
         self.title_text = ""
         self.caption_text = ""
         self.body_text = ""
+        self.location_notice = None
         self.keyboard_target = "caption"
         self.keyboard = _Keyboard(self)
 
@@ -1921,7 +1927,7 @@ class UploadNoteLocationTests(unittest.TestCase):
 
     def test_cli_explicit_account_prompt_exits_1_without_publish(self):
         page = _StudioPage()
-        page.body_text = "Location isn't available for this account."
+        page.location_notice = "Location isn't available for this account."
         self._assert_failure(
             _note_controls(location=None),
             "account_ineligible",

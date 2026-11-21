@@ -180,6 +180,14 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
         control = await app._resolve_single_control('location')
         self.assertEqual(await control.candidate_rows(), [])
 
+    async def test_hidden_dialog_does_not_obstruct_missing_ai_entry(self):
+        await self.page.set_content("""<div role="dialog" aria-modal="true" hidden></div>
+            <div class="public-DraftEditor-content" contenteditable="true">Caption</div>""")
+        app = tk.TiktokVideo("Caption", "v.mp4", [], 0, None, options=tk.TiktokPublishOptions(aigc=False))
+        app.locator_base = self.page.locator('body')
+        await app.apply_options(self.page)
+        self.assertEqual(app.ai_outcome.reason, "entry_missing")
+
     async def test_unavailable_settings_cannot_confirm_missing_ai_entry(self):
         for overlay in (False, True):
             with self.subTest(overlay=overlay):

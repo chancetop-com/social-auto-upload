@@ -617,6 +617,16 @@ class InstagramLocationControlledCliTests(unittest.TestCase):
                 self.assertIn('location=unsupported(account_ineligible)', stderr)
                 self.assertIn(prompt, stderr)
 
+    def test_unrelated_scroller_does_not_keep_location_list_open(self):
+        html = _location_page_html([('Shanghai', 'First')]).replace(
+            '<div role="textbox"', '<div style="overflow-y:auto;width:320px;height:60px">'
+            '<div>Add collaborators</div></div><div role="textbox"'
+        )
+        code, saved, holder, _, err = self._run(action='upload-note', html=html)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(holder['share_clicks'], 0)
+        self.assertEqual(saved['options']['location']['status'], SET)
+
     def test_replacing_candidate_rows_does_not_confirm_a_selection(self):
         code, saved, holder, _, _ = self._run(
             action='upload-note',

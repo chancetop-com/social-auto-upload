@@ -166,6 +166,20 @@ _SUGGESTION_JS = """(el, action) => {
     if (Math.abs((box.left + box.width / 2) - mid) > 320) return false;
     return node.children.length >= 1;
   });
+  const selectionKey = Symbol.for('sau.instagram.locationSelection');
+  if (action && action.verifyCollapse) {
+    const selected = el[selectionKey];
+    if (!selected || selected.token !== action.verifyCollapse) return false;
+    const replaced = selected.parent.children[selected.slot];
+    return !containers.some(node => {
+      const owned = node === selected.list || (
+        !selected.existing.has(node) &&
+        (node === replaced || (selected.list.id && node.id === selected.list.id) ||
+         !selected.parent.isConnected)
+      );
+      return owned && [...node.children].some(row => row.getClientRects().length && parseRow(row).name);
+    });
+  }
   const innermost = containers.filter(
     (node) => !containers.some((other) => other !== node && node.contains(other))
   );
@@ -179,7 +193,9 @@ _SUGGESTION_JS = """(el, action) => {
     if (norm(parsed.name).toLowerCase() !==
         norm(action.name).toLowerCase()) return false;
     if (norm(parsed.address || '') !== norm(action.address || '')) return false;
-    list.setAttribute('data-instagram-location-list', String(action.stamp));
+    const parent = list.parentElement;
+    el[selectionKey] = {token: action.stamp, list, parent,
+      slot: [...parent.children].indexOf(list), existing: new WeakSet(document.querySelectorAll('div'))};
     node.setAttribute('data-instagram-suggestion', String(action.stamp));
     return true;
   }
@@ -314,8 +330,8 @@ class LocationControl:
                 applied=None,
                 reason=NO_SAME_NAME,
             )
-        candidate_list = await self._click_entry(entry, chosen)
-        if candidate_list is None:
+        selection = await self._click_entry(entry, chosen)
+        if selection is None:
             raise OptionMismatchError(
                 self._mismatch_message(requested, entries),
                 applied=None,
@@ -328,7 +344,7 @@ class LocationControl:
         }
         if chosen.address:
             self.last_evidence['candidate_address'] = chosen.address
-        if not await self._wait_list_collapsed(entry, candidate_list):
+        if not await self._wait_list_collapsed(entry, selection):
             # 被点节点仍在 DOM 里说明选择没生效：不把输入框里的输入当成已选地点。
             raise OptionMismatchError(
                 'Instagram 地点候选在点击后仍未收起：'
@@ -434,7 +450,7 @@ class LocationControl:
 
     async def _click_entry(
         self, entry: Locator, candidate: LocationCandidate
-    ) -> Locator | None:
+    ) -> str | None:
         """把被选候选变成 ``Locator`` 并走 Humanizer 点击；点击前再核对名称/地址。
 
         联想行没有 role、也不是输入框后代，唯一的桥是把 JS 找到的节点打上一次
@@ -466,16 +482,14 @@ class LocationControl:
             return None
         humanizer = self._behavior()
         await humanizer.click(node)
-        return self._page.locator(f'[data-instagram-location-list="{token}"]')
+        return token
 
-    async def _wait_list_collapsed(self, entry, candidate_list) -> bool:
+    async def _wait_list_collapsed(self, entry: Locator, token: str) -> bool:
         """Wait out row replacement as well as the original list's collapse."""
         deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
         while True:
-            if not await candidate_list.locator(":scope > :visible").count():
-                # The portal can replace its entire list, including every row.
-                if not await entry.evaluate(_SUGGESTION_JS):
-                    return True
+            if await entry.evaluate(_SUGGESTION_JS, {"verifyCollapse": token}):
+                return True
             if time.monotonic() >= deadline:
                 return False
             await asyncio.sleep(_POLL_SECONDS)
