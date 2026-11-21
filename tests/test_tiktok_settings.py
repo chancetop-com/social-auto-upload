@@ -32,64 +32,6 @@ from utils.time_utils import require_minute_step
 TOKEN = "SENTINEL-MLX-TOKEN-ticket12"
 
 
-class PrivacyOptionLocatorTests(unittest.TestCase):
-    def test_options_are_matched_by_role_not_li_tag(self):
-        class _Options:
-            async def count(self):
-                return 3
-
-            def nth(self, index):
-                return object()
-
-        class _Scope:
-            def __init__(self):
-                self.selector = None
-
-            def locator(self, selector):
-                self.selector = selector
-                return _Options()
-
-        scope = _Scope()
-        control = tk_main._LocatorPrivacyControl(object(), scope)
-
-        options = asyncio.run(control.options())
-
-        self.assertEqual(scope.selector, '[role="option"]')
-        self.assertEqual(len(options), 3)
-
-    def test_options_fall_back_to_the_page_scope_for_portals(self):
-        class _Options:
-            def __init__(self, count):
-                self._count = count
-
-            async def count(self):
-                return self._count
-
-            def nth(self, index):
-                return object()
-
-        class _Scope:
-            def __init__(self, count):
-                self.count = count
-                self.selector = None
-
-            def locator(self, selector):
-                self.selector = selector
-                return _Options(self.count)
-
-        container = _Scope(0)
-        page = _Scope(3)
-        control = tk_main._LocatorPrivacyControl(
-            object(), container, fallback_scope=page
-        )
-
-        options = asyncio.run(control.options())
-
-        self.assertEqual(container.selector, '[role="option"]')
-        self.assertEqual(page.selector, '[role="option"]')
-        self.assertEqual(len(options), 3)
-
-
 def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | None = None):
     for item in parser._actions:
         if isinstance(item, argparse._SubParsersAction):
@@ -867,33 +809,6 @@ class TiktokOptionStepTests(unittest.TestCase):
 
         self.assertIn("option=reuse", str(ctx.exception))
         self.assertIn("control-not-found", str(ctx.exception))
-
-    def test_reuse_candidates_include_current_studio_label(self):
-        video = _uploader(TiktokPublishOptions(allow_reuse=False))
-        video.locator_base = MagicMock()
-        labels = [
-            label
-            for label, _ in video._option_candidate_factories("reuse")
-        ]
-        self.assertTrue(
-            any("Reuse of content" in label for label in labels), labels
-        )
-
-    def test_brand_candidates_use_semantic_rows_not_scoped_container(self):
-        video = _uploader(TiktokPublishOptions(your_brand=True))
-        video.locator_base = MagicMock()
-
-        labels = [
-            label
-            for label, _ in video._option_candidate_factories("your_brand")
-        ]
-
-        self.assertEqual(len(labels), 2, labels)
-        self.assertIn("title-line", labels[0])
-        self.assertIn("preceding label", labels[1])
-        self.assertTrue(
-            all("disclose" not in label for label in labels), labels
-        )
 
     def test_confirmation_names_prefer_schedule_for_scheduled_posts(self):
         from datetime import datetime

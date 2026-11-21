@@ -108,7 +108,7 @@ class _UploadPage:
         self.wait_timeouts.append(ms)
 
     def locator(self, selector: str) -> _Locator:
-        if selector in xhs_main.XHS_LOGIN_POSITIVE_SELECTORS:
+        if selector == "input.upload-input":
             return _Locator(count=1 if self.xhs_upload_anchor else 0)
         if "login-box" in selector:
             return _Locator(count=1 if self.xhs_login_visible else 0, visible=self.xhs_login_visible)

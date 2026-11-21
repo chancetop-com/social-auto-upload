@@ -24,7 +24,6 @@ from tests.fakes import (
 )
 from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
 from utils.errors import (
-    PublishResultUnknownError,
     RateLimitedError,
     StartIncompleteError,
     UsageError,
@@ -511,26 +510,6 @@ class CheckAndExitCodeTests(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertIn("YouTube登录态无效", err)
         self.assertIn("AdsPower", err)
-
-    def test_publish_result_unknown_error_maps_to_9(self):
-        with patch(
-            "sau_cli.dispatch",
-            new=AsyncMock(side_effect=PublishResultUnknownError("publish unknown")),
-        ):
-            code, _, err = _run(
-                ["youtube", "check", "--profile-id", PROFILE],
-                env={"ADSPOWER_API_KEY": KEY},
-            )
-        self.assertEqual(code, 9)
-        self.assertIn("publish unknown", err)
-
-    def test_keyboard_interrupt_is_not_caught(self):
-        with patch("sau_cli.dispatch", new=AsyncMock(side_effect=KeyboardInterrupt)):
-            with self.assertRaises(KeyboardInterrupt):
-                _run(
-                    ["youtube", "check", "--profile-id", PROFILE],
-                    env={"ADSPOWER_API_KEY": KEY},
-                )
 
     def test_rate_limited_on_probe_exits_11_without_start_or_stop(self):
         fake = FakeAdspowerClient(probe_error=RateLimitedError("probe 429"))

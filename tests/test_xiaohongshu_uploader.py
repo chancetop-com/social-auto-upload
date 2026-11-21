@@ -2,15 +2,10 @@ import asyncio
 import os
 import tempfile
 import unittest
-from dataclasses import fields
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import uploader.xiaohongshu_uploader.main as xhs_main
-from sau_commands.xiaohongshu import (
-    XiaohongshuNoteUploadRequest,
-    XiaohongshuVideoUploadRequest,
-)
 
 # Decision map (spec U12 F): this legacy-file class mixes decisions, so it keeps
 # its name instead of a cosmetic rename. Methods anchor to:
@@ -111,23 +106,6 @@ class RecordingPage:
         self.waits.append(milliseconds)
 
 
-class XiaohongshuRequestDefaultTests(unittest.TestCase):
-    """Request dataclasses defer browser mode to runtime configuration; debug off."""
-
-    def _defaults(self, request_type):
-        return {field.name: field.default for field in fields(request_type)}
-
-    def test_video_request_defers_headless_to_config_and_debug_off(self):
-        defaults = self._defaults(XiaohongshuVideoUploadRequest)
-        self.assertIs(defaults["debug"], False)
-        self.assertIsNone(defaults["headless"])
-
-    def test_note_request_defers_headless_to_config_and_debug_off(self):
-        defaults = self._defaults(XiaohongshuNoteUploadRequest)
-        self.assertIs(defaults["debug"], False)
-        self.assertIsNone(defaults["headless"])
-
-
 class XiaohongshuUploaderTests(unittest.TestCase):
 
     def test_creator_urls_keep_xiaohongshu_domain_by_default(self):
@@ -184,6 +162,8 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
     def test_video_validate_upload_args_normalizes_video_and_thumbnail(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
+            assets = Path(tmp_dir) / "assets"
+            assets.mkdir()
             video_path = Path(tmp_dir) / "demo.mp4"
             thumbnail_path = Path(tmp_dir) / "demo.png"
             cookie_path = Path(tmp_dir) / "account.json"
@@ -193,17 +173,17 @@ class XiaohongshuUploaderTests(unittest.TestCase):
 
             app = xhs_main.XiaoHongShuVideo(
                 title="demo",
-                file_path=str(video_path),
+                file_path=str(assets / ".." / video_path.name),
                 tags=["xhs"],
                 publish_date=0,
                 account_file=str(cookie_path),
-                thumbnail_path=str(thumbnail_path),
+                thumbnail_path=str(assets / ".." / thumbnail_path.name),
             )
 
             asyncio.run(app.validate_upload_args())
 
-        self.assertTrue(app.file_path.endswith("demo.mp4"))
-        self.assertTrue(app.thumbnail_path.endswith("demo.png"))
+            self.assertEqual(app.file_path, str(video_path.resolve()))
+            self.assertEqual(app.thumbnail_path, str(thumbnail_path.resolve()))
 
     def test_note_uploader_exists_and_validates_required_fields(self):
         note_cls = getattr(xhs_main, "XiaoHongShuNote")

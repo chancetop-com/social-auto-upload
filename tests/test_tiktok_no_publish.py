@@ -222,7 +222,8 @@ class TiktokDryRunFlowTests(unittest.TestCase):
     def test_dry_run_does_all_form_work_then_stops_before_publish(self):
         order: list[str] = []
         video = _video(no_publish=True)
-        video.locator_base = _ButtonBase(_Button())
+        button = _Button()
+        video.locator_base = _ButtonBase(button)
         video.publish_not_before = datetime.now() + timedelta(hours=1)
         self._install_form_hooks(video, order)
 
@@ -264,6 +265,7 @@ class TiktokDryRunFlowTests(unittest.TestCase):
             ],
         )
         video.click_publish.assert_not_awaited()
+        self.assertEqual(button.click_calls, 0)
         video.read_result.assert_not_awaited()
         not_before.assert_not_awaited()
 
@@ -294,30 +296,6 @@ class TiktokDryRunFlowTests(unittest.TestCase):
         success.assert_called_once_with(DRY_RUN_LOG)
         app.click_publish.assert_not_awaited()
         app.read_result.assert_not_awaited()
-
-    def test_dry_run_never_clicks_the_publish_button(self):
-        video = _video(no_publish=True)
-        button = _Button()
-        video.locator_base = _ButtonBase(button)
-        for name in (
-            "open_upload_page",
-            "attach_media",
-            "fill_metadata",
-            "wait_media_ready",
-            "apply_options",
-            "apply_cover",
-            "apply_schedule",
-        ):
-            setattr(video, name, AsyncMock())
-
-        with patch.object(tk_main.asyncio, "sleep", AsyncMock()):
-            asyncio.run(
-                video._upload_on_page(
-                    object(), managed=False, budget=None
-                )
-            )
-
-        self.assertEqual(button.click_calls, 0)
 
     def test_publish_still_runs_when_the_flag_is_absent(self):
         order: list[str] = []

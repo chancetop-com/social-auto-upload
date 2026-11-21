@@ -112,10 +112,8 @@ class _ProbePage(FakePage):
     def locator(self, selector: str) -> _ProbeLocator:
         if "login-box" in selector:
             return _ProbeLocator(self.login_box_count)
-        if selector in xhs_main.XHS_LOGIN_POSITIVE_SELECTORS:
+        if selector == "input.upload-input":
             return _ProbeLocator(self.anchor_count)
-        # Upload anchors are the union of the positive selectors; unknown
-        # selectors default to absent so a test must name its anchor.
         return _ProbeLocator(0)
 
     async def close(self) -> None:

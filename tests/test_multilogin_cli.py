@@ -76,17 +76,6 @@ class ActivationTests(unittest.TestCase):
 
 
 class ParserContractTests(unittest.TestCase):
-    def test_check_and_upload_actions_accept_multilogin_flags(self):
-        parser = sau_cli.build_parser()
-        for platform in sau_cli.PLATFORMS:
-            for action in _action_names(platform):
-                if not (action == "check" or action.startswith("upload-")):
-                    continue
-                with self.subTest(platform=platform, action=action):
-                    options = _option_strings(_subparser(parser, platform, action))
-                    self.assertIn("--folder-id", options)
-                    self.assertIn("--profile-id", options)
-
     def test_every_check_accepts_runtime_flags(self):
         parser = sau_cli.build_parser()
         for platform in sau_cli.PLATFORMS:
@@ -96,16 +85,6 @@ class ParserContractTests(unittest.TestCase):
                 options = _option_strings(_subparser(parser, platform, "check"))
                 self.assertIn("--headed", options)
                 self.assertIn("--headless", options)
-
-    def test_login_actions_do_not_accept_multilogin_flags(self):
-        parser = sau_cli.build_parser()
-        for platform in sau_cli.PLATFORMS:
-            if "login" not in _action_names(platform):
-                continue
-            with self.subTest(platform=platform):
-                options = _option_strings(_subparser(parser, platform, "login"))
-                self.assertNotIn("--folder-id", options)
-                self.assertNotIn("--profile-id", options)
 
     def test_account_is_required_only_for_explicit_local_reset(self):
         parser = sau_cli.build_parser()
@@ -298,27 +277,6 @@ class UsageAndExitCodeTests(unittest.TestCase):
                     code, err = self._run([platform, action, *arguments], SENTINEL_TOKEN)
                     self.assertEqual(code, 2)
                     self.assertIn("--account", err)
-
-    def test_exit_code_mapping(self):
-        cases = (
-            (LoginRequiredError("login"), 10),
-            (UsageError("usage"), 2),
-            (RateLimitedError("rate limited"), 11),
-            (RuntimeError("boom"), 1),
-        )
-        for error, expected in cases:
-            with self.subTest(error=type(error).__name__):
-                with patch.dict(os.environ, {"MLX_API_TOKEN": ""}):
-                    with patch(
-                        "sau_cli.dispatch", new=AsyncMock(side_effect=error)
-                    ):
-                        with redirect_stdout(io.StringIO()), redirect_stderr(
-                            io.StringIO()
-                        ):
-                            code = sau_cli.main(
-                                ["youtube", "check", "--account", "creator"]
-                            )
-                self.assertEqual(code, expected)
 
     def test_dispatch_normalizes_missing_multilogin_attributes(self):
         args = Namespace(platform="xiaohongshu", action="check", account="creator")

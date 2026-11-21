@@ -454,5 +454,5 @@ class LoginPage(RecordingPage):
         if selector == xhs.XHS_LOGIN_BOX_SELECTOR:
             if self.scanned or '/publish/' in self.url: return FakeLocator('absent', count=0, children=self.box._children)
             return self.box
-        if selector in xhs.XHS_LOGIN_POSITIVE_SELECTORS: return FakeLocator('upload')
+        if selector == 'input.upload-input': return FakeLocator('upload')
         return FakeLocator('absent', count=0)

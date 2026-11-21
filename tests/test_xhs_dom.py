@@ -791,14 +791,13 @@ def _geometry(
     width: float = 60.0,
     height: float = 30.0,
     inside: bool = True,
-    clipped: bool = False,
     child_frame: bool = False,
 ) -> dict:
     return {
         "width": width,
         "height": height,
         "inside": inside,
-        "clipped": clipped,
+        "clipped": False,
         "childFrame": child_frame,
     }
 
@@ -863,33 +862,29 @@ class _PredicatePage:
 
 
 class EnsureInViewportTests(unittest.IsolatedAsyncioTestCase):
-    async def test_point_inside_frame_does_not_scroll(self):
-        locator = _PredicateLocator(DEFAULT_BOX, geometry=_geometry())
-        page = _PredicatePage()
+    async def test_scrolls_only_when_the_requested_point_is_clipped(self):
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            try:
+                page = await browser.new_page()
+                await page.set_content("""
+                    <div id="clip" style="width:100px; overflow:auto">
+                        <button style="margin-left:60px; width:80px">Publish</button>
+                    </div>
+                """)
+                button = page.get_by_role("button", name="Publish")
+                clip = page.locator("#clip")
+                self.assertFalse(await dom.ensure_in_viewport(page, button, point=(0.25, 0.5)))
+                self.assertEqual(await clip.evaluate("el => el.scrollLeft"), 0)
 
-        scrolled = await dom.ensure_in_viewport(page, locator, point=(0.65, 0.5))
-
-        self.assertFalse(scrolled)
-        self.assertEqual(locator.scrolled, 0)
-        # The predicate runs in the element's own frame, with the fractional point.
-        self.assertEqual(len(locator.evaluate_calls), 1)
-        self.assertIn("overflowX", locator.evaluate_calls[0][0])
-        self.assertEqual(locator.evaluate_calls[0][1], (0.65, 0.5))
-        # Same-frame targets never need the main-frame projection round-trip.
-        self.assertEqual(page.evaluate_calls, [])
+                self.assertTrue(await dom.ensure_in_viewport(page, button, point=(0.9, 0.5)))
+                self.assertGreater(await clip.evaluate("el => el.scrollLeft"), 0)
+                self.assertFalse(await dom.ensure_in_viewport(page, button, point=(0.9, 0.5)))
+            finally:
+                await browser.close()
 
     async def test_point_outside_frame_scrolls(self):
         locator = _PredicateLocator(DEFAULT_BOX, geometry=_geometry(inside=False))
-
-        scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
-
-        self.assertTrue(scrolled)
-        self.assertEqual(locator.scrolled, 1)
-
-    async def test_ancestor_overflow_clip_scrolls(self):
-        locator = _PredicateLocator(
-            DEFAULT_BOX, geometry=_geometry(inside=True, clipped=True)
-        )
 
         scrolled = await dom.ensure_in_viewport(_PredicatePage(), locator)
 

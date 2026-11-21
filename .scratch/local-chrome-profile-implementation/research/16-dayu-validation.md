@@ -41,7 +41,7 @@
 
 ## 真实浏览器受控证据
 
-以 [02 的八配置持久化/匿名证据](./02-browser-validation.md) 为基础，本票没有修改共享浏览器 resolver 或 session API。补跑 Dayu 实际 `verify_dayu_article` 的受控匿名流程，脚本 [16-dayu-browser-smoke.py](./16-dayu-browser-smoke.py)，无真实平台请求（页面全部 route 为合成 HTML，后台 API 使用离线响应）。
+以 [02 的八配置持久化/匿名证据](./02-browser-validation.md) 为基础，本票没有修改共享浏览器 resolver 或 session API。补跑 Dayu 实际 `verify_dayu_article` 的受控匿名流程，无真实平台请求（页面全部 route 为合成 HTML，后台 API 使用离线响应）。当时使用的 `16-dayu-browser-smoke.py` 可在提交 `f76a532` 中查看。
 
 | 浏览器 | 模式 | 实际版本 | 结果 |
 | --- | --- | --- | --- |

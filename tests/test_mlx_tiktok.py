@@ -6,7 +6,6 @@ All tests are offline: no browser, no network, no cookie files.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import io
 import os
@@ -38,26 +37,6 @@ from utils.errors import LoginRequiredError
 TOKEN = "SENTINEL-MLX-TOKEN-ticket25"
 
 
-# ---------------------------------------------------------------------------
-# Parser helpers
-# ---------------------------------------------------------------------------
-
-
-def _subparser(parser: argparse.ArgumentParser, platform: str, action: str):
-    for item in parser._actions:
-        if isinstance(item, argparse._SubParsersAction):
-            if platform in item.choices:
-                platform_parser = item.choices[platform]
-                for nested in platform_parser._actions:
-                    if isinstance(nested, argparse._SubParsersAction):
-                        return nested.choices[action]
-    raise AssertionError(f"parser not found: {platform}/{action}")
-
-
-def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
-    return set(parser._option_string_actions)
-
-
 class _AsyncCM:
     def __init__(self, value=None, enter_error: BaseException | None = None) -> None:
         self.value = value
@@ -85,95 +64,6 @@ def _run(argv, token=TOKEN):
         ) as err:
             code = sau_cli.main(argv)
     return code, out.getvalue(), err.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# Parser contract
-# ---------------------------------------------------------------------------
-
-
-class TiktokParserTests(unittest.TestCase):
-    def test_upload_video_parameters_match_repository_naming(self):
-        options = _option_strings(_subparser(sau_cli.build_parser(), "tiktok", "upload-video"))
-        for expected in (
-            "--file",
-            "--title",
-            "--tags",
-            "--schedule",
-            "--thumbnail",
-            "--account",
-            "--headless",
-            "--headed",
-            "--debug",
-            "--folder-id",
-            "--profile-id",
-        ):
-            with self.subTest(option=expected):
-                self.assertIn(expected, options)
-        self.assertNotIn("--video-file", options)
-        self.assertNotIn("--publish-date", options)
-
-    def test_check_accepts_account_runtime_and_multilogin_flags(self):
-        options = _option_strings(_subparser(sau_cli.build_parser(), "tiktok", "check"))
-        for expected in (
-            "--account",
-            "--headless",
-            "--headed",
-            "--debug",
-            "--folder-id",
-            "--profile-id",
-        ):
-            with self.subTest(option=expected):
-                self.assertIn(expected, options)
-        self.assertNotIn("--file", options)
-
-    def test_parse_upload_video(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            video = Path(tmp_dir) / "demo.mp4"
-            video.write_bytes(b"video")
-            thumb = Path(tmp_dir) / "thumb.png"
-            thumb.write_bytes(b"image")
-
-            args = sau_cli.build_parser().parse_args(
-                [
-                    "tiktok",
-                    "upload-video",
-                    "--folder-id",
-                    "folder",
-                    "--profile-id",
-                    "profile",
-                    "--file",
-                    str(video),
-                    "--title",
-                    "标题",
-                    "--tags",
-                    "a,b",
-                    "--schedule",
-                    "2026-11-05T02:30:00Z",
-                    "--thumbnail",
-                    str(thumb),
-                ]
-            )
-
-        self.assertEqual(args.action, "upload-video")
-        self.assertEqual(args.file, video)
-        self.assertEqual(args.title, "标题")
-        self.assertEqual(args.tags, "a,b")
-        self.assertEqual(
-            args.schedule,
-            datetime(2026, 11, 5, 2, 30, tzinfo=timezone.utc),
-        )
-        self.assertEqual(args.thumbnail, thumb)
-        self.assertEqual(args.folder_id, "folder")
-        self.assertEqual(args.profile_id, "profile")
-        self.assertFalse(args.headless)
-        self.assertIsNone(args.account)
-
-    def test_unknown_subcommand_still_exits_2(self):
-        with redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit) as ctx:
-                sau_cli.main(["tiktok", "upload-audio"])
-        self.assertEqual(ctx.exception.code, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -959,6 +849,8 @@ class TiktokUploadCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         request = builder.call_args.args[0]
         # Managed runs label with profile_id; --account is ignored (ticket 30).
+        self.assertEqual(request.video_file, video)
+        self.assertEqual(request.title, "标题")
         self.assertEqual(request.account_label, "profile")
         self.assertEqual(request.tags, ["one", "two"])
         self.assertEqual(

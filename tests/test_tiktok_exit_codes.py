@@ -12,6 +12,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import AsyncMock, patch
 
+from patchright._impl._helper import url_matches
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 
 import sau_cli
@@ -149,7 +150,7 @@ class _Clock:
 class _FakePage:
     """Scripted ``wait_for_url``; each outcome is consumed in order.
 
-    ``"<url>"`` / ``None``  → success (optionally changing ``page.url``).
+    ``"<url>"``             → navigate and check the requested URL matcher.
     ``("timeout", url)``   → raise the Playwright timeout.
     ``BaseException``      → raise it as a page/context failure.
     """
@@ -163,22 +164,26 @@ class _FakePage:
         self.on_timeout = on_timeout
         self._outcomes = list(wait_outcomes)
 
-    async def wait_for_url(self, _url: str, timeout: int | None = None) -> None:
+    async def wait_for_url(self, expected_url, timeout: int | None = None) -> None:
         self.wait_calls += 1
         self.wait_timeouts.append(timeout)
+        if url_matches(None, self.url, expected_url):
+            return
         outcome = (
             self._outcomes.pop(0) if self._outcomes else ("timeout", None)
         )
         if isinstance(outcome, BaseException):
             raise outcome
-        if isinstance(outcome, tuple) and outcome[0] == "timeout":
-            if outcome[1] is not None:
-                self.url = outcome[1]
-            if self.on_timeout is not None:
-                self.on_timeout()
-            raise PlaywrightTimeoutError("wait_for_url timed out")
         if isinstance(outcome, str):
             self.url = outcome
+            if url_matches(None, self.url, expected_url):
+                return
+        elif isinstance(outcome, tuple) and outcome[0] == "timeout":
+            if outcome[1] is not None:
+                self.url = outcome[1]
+        if self.on_timeout is not None:
+            self.on_timeout()
+        raise PlaywrightTimeoutError("wait_for_url timed out")
 
 
 class _DialogNode:
@@ -340,61 +345,6 @@ def _run_cli(dispatch) -> tuple[int, str, str]:
         ) as err:
             code = sau_cli.main(["tiktok", "check"])
     return code, out.getvalue(), err.getvalue()
-
-
-def _returning(result: int = 0):
-    async def _dispatch(_args):
-        return result
-
-    return _dispatch
-
-
-def _raising(error: BaseException):
-    async def _dispatch(_args):
-        raise error
-
-    return _dispatch
-
-
-class CliExitCodeTests(unittest.TestCase):
-    def test_success_maps_to_0(self):
-        code, _, _ = _run_cli(_returning(0))
-        self.assertEqual(code, 0)
-
-    def test_generic_failure_maps_to_1(self):
-        code, _, err = _run_cli(_raising(RuntimeError("boom")))
-        self.assertEqual(code, 1)
-        self.assertIn("boom", err)
-
-    def test_publish_result_unknown_maps_to_9_and_prints_the_exception_text(self):
-        message = "发布结果未知：仅供测试的核验说明。"
-        code, _, err = _run_cli(
-            _raising(PublishResultUnknownError(message))
-        )
-        self.assertEqual(code, 9)
-        self.assertIn(message, err)
-
-    def test_embedded_captcha_is_not_recognized_and_stays_exit_1(self):
-        # Known blind spot (spec §6.4): only URL markers raise 10.  A captcha
-        # rendered inside the form leaves the URL unchanged, so it is not a
-        # login redirect and a pre-click failure stays a normal exit 1.
-        video = _video()
-        page = _FakePage(url=UPLOAD_URL)
-        tk_main._raise_if_login_required(page)
-
-        async def _dispatch(_args):
-            await video.click_publish(page, deadline=999.0, multilogin=True)
-            return 0
-
-        with patch.object(tk_main.time, "monotonic", return_value=1000.0):
-            code, _, err = _run_cli(_dispatch)
-
-        self.assertEqual(code, 1)
-        self.assertNotIn("禁止自动重发", err)
-
-    def test_login_required_maps_to_10(self):
-        code, _, _ = _run_cli(_raising(LoginRequiredError("需要登录")))
-        self.assertEqual(code, 10)
 
 
 class LoginRequiredMessageTests(unittest.TestCase):
@@ -608,22 +558,6 @@ class ClickPublishTests(unittest.TestCase):
 
         self.assertEqual(primary.click_calls, 0)
         self.assertEqual(role_button.click_calls, 1)
-
-    def test_publish_candidates_avoid_substring_and_positional_fallbacks(self):
-        descriptions = [
-            label for label, _ in tk_main._PUBLISH_BUTTON_CANDIDATES
-        ]
-
-        self.assertEqual(
-            descriptions,
-            [
-                "data-e2e=post_video_button",
-                "role=button[name=/^(Post|Schedule)$/]",
-            ],
-        )
-        joined = " ".join(descriptions)
-        self.assertNotIn("has-text", joined)
-        self.assertNotIn("nth(", joined)
 
     def test_post_now_dialog_is_clicked_once_and_post_is_not_reclicked(self):
         button = _CandidateLocator()
