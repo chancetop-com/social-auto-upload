@@ -45,10 +45,6 @@ def _subparser(parser: argparse.ArgumentParser, platform: str, action: str | Non
     raise AssertionError(f"parser not found: {platform}/{action}")
 
 
-def _option_strings(parser: argparse.ArgumentParser) -> set[str]:
-    return set(parser._option_string_actions)
-
-
 def _run(argv, token=TOKEN):
     environ = {"MLX_API_TOKEN": token}
     with patch.dict(os.environ, environ):
@@ -137,17 +133,23 @@ class TiktokOptionsParserTests(unittest.TestCase):
             with self.subTest(feature=feature):
                 self.assertIn(feature, help_text)
 
-    def test_location_flag_exists_on_both_commands_without_shoot_location(self):
+    def test_shoot_location_is_rejected_on_both_commands(self):
         parser = sau_cli.build_parser()
-        for action in ("upload-video", "upload-note"):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        for action, flag, name in (
+            ("upload-video", "--file", "video.mp4"),
+            ("upload-note", "--images", "image.png"),
+        ):
             with self.subTest(action=action):
-                command = _subparser(parser, "tiktok", action)
-                options = _option_strings(command)
-                self.assertIn("--location", options)
-                self.assertNotIn("--shoot-location", options)
-                self.assertIsNone(
-                    command._option_string_actions["--location"].default
-                )
+                media = root / name
+                media.touch()
+                with redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as ctx:
+                    parser.parse_args([
+                        "tiktok", action, "--account", "creator", flag, str(media),
+                        "--title", "标题", "--shoot-location", "London",
+                    ])
+                self.assertEqual(ctx.exception.code, 2)
+                self.assertIn("unrecognized arguments: --shoot-location", err.getvalue())
 
 
 # ---------------------------------------------------------------------------

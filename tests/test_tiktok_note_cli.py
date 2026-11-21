@@ -397,13 +397,6 @@ class UploadNoteParserTests(unittest.TestCase):
                     )
         self.assertEqual(ctx.exception.code, 2)
 
-    def test_location_flag_is_registered_without_shoot_location(self):
-        parser = _subparser(sau_cli.build_parser(), "tiktok", "upload-note")
-        options = _option_strings(parser)
-        self.assertIn("--location", options)
-        self.assertNotIn("--shoot-location", options)
-        self.assertIsNone(parser._option_string_actions["--location"].default)
-
     def test_parse_upload_note_keeps_image_order(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             first = Path(tmp_dir) / "first.PNG"

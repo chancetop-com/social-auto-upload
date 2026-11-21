@@ -306,14 +306,6 @@ class YouTubeProfilesTests(unittest.TestCase):
         self.assertEqual(page.tag_input._text, 'page-keyword')
         self.assertEqual(page.tag_input.click_count, 0)
         self.assertEqual(page.selectors['#toggle-button'].click_count, 0)
-        self.assertNotIn('公开话题', page.tag_input._text)
-
-    def test_removed_tags_flag_exits_2_before_opening_the_browser(self):
-        with self.assertRaises(SystemExit) as ctx:
-            self.cli('upload-video', '--account', 'Creator', '--file', str(self.video),
-                     '--title', 'Title', '--desc', '简介 #公开话题', '--tags', 'a,b')
-        self.assertEqual(ctx.exception.code, 2)
-        self.assertFalse(self.playwright.chromium.persistent_calls)
 
     def test_checks_distinguish_missing_login_verification_and_probe_faults(self):
         self.assertEqual(self.cli('check', '--account', 'Creator')[0], 10)

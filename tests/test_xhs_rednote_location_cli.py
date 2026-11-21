@@ -76,16 +76,6 @@ class LocationCliReportTests(unittest.TestCase):
             code = sau_cli.main(self.argv(platform, action, *extra))
         return code, stdout.getvalue(), stderr.getvalue()
 
-    def test_parser_declares_location_on_all_four_commands(self):
-        parser = sau_cli.build_parser()
-        for platform in ("xiaohongshu", "rednote"):
-            for action in ("upload-video", "upload-note"):
-                with self.subTest(platform=platform, action=action):
-                    args = parser.parse_args(
-                        self.argv(platform, action, "--location", "人民公园")
-                    )
-                    self.assertEqual(args.location, "人民公园")
-
     def test_omitted_location_is_not_requested_and_uploader_keeps_none(self):
         for platform in ("xiaohongshu", "rednote"):
             for action in ("upload-video", "upload-note"):
@@ -313,12 +303,11 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
             return rednote.RednoteVideo(file_path="a.mp4", **common)
         return rednote.RednoteNote(image_paths=["a.png"], note="", **common)
 
-    async def _run(self, module, action, app, page):
-        seen = {}
+    async def _run(self, module, action, app, page, armed_reports):
         gate = "_video_upload_gate" if action == "video" else "_note_upload_gate"
 
         async def arm(*_args, **_kwargs):
-            seen["report"] = app.location_report
+            armed_reports.append(app.location_report)
 
         with ExitStack() as stack:
             stack.enter_context(
@@ -329,19 +318,19 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
             )
             stack.enter_context(patch.object(module, gate, AsyncMock()))
             stack.enter_context(patch.object(module, "_wait_for_arm", new=arm))
-            fire = stack.enter_context(
-                patch.object(module, "_fire_publish", AsyncMock())
+            stack.enter_context(
+                patch.object(
+                    module, "_fire_publish", side_effect=AssertionError("unexpected publish")
+                )
             )
             stack.enter_context(patch.object(module, "Humanizer", _QuietHumanizer))
             stack.enter_context(patch.object(app, "fill_meta", AsyncMock()))
             stack.enter_context(patch.object(app, "apply_declarations", AsyncMock()))
             if action == "video":
                 stack.enter_context(patch.object(app, "set_thumbnail", AsyncMock()))
-            if action == "video":
                 await app.upload_video_content(page, mode="local")
             else:
                 await app.upload_note_content(page, mode="local")
-        return seen, fire
 
     async def test_location_runs_before_the_no_publish_stop_in_all_four_flows(self):
         for module, prefix in ((xhs, "xiaohongshu"), (rednote, "rednote")):
@@ -349,7 +338,8 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(platform=prefix, action=action):
                     page, _rows, row = self._page(module, action)
                     app = self._app(module, action, location="人民公园")
-                    seen, fire = await self._run(module, action, app, page)
+                    armed_reports = []
+                    await self._run(module, action, app, page, armed_reports)
                     self.assertEqual(
                         app.location_report,
                         {
@@ -360,13 +350,12 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
                             "status": "set",
                         },
                     )
-                    self.assertEqual(seen["report"], app.location_report)
+                    self.assertEqual(armed_reports, [app.location_report])
                     self.assertEqual(row.click_count, 1)
                     self.assertEqual(page.mouse.down_count, 0)
                     self.assertEqual(
                         page.locator("xhs-publish-btn").click_count, 0
                     )
-                    fire.assert_not_awaited()
 
     async def test_location_failure_stops_before_arm_and_publish_in_all_four_flows(self):
         for module, prefix in ((xhs, "xiaohongshu"), (rednote, "rednote")):
@@ -376,9 +365,11 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
                     _rows.evaluate_all.return_value = [
                         {"name": "房山人民公园", "address": "北京市房山区"}
                     ]
-                    app = self._app(module, action, location="人民公园")
+                    app = self._app(module, action, location="人民公园", no_publish=False)
+                    armed_reports = []
                     with self.assertRaisesRegex(RuntimeError, "无同名候选"):
-                        await self._run(module, action, app, page)
+                        await self._run(module, action, app, page, armed_reports)
+                    self.assertEqual(armed_reports, [])
                     self.assertEqual(row.click_count, 0)
                     self.assertEqual(page.mouse.down_count, 0)
                     self.assertEqual(page.locator("xhs-publish-btn").click_count, 0)
@@ -391,11 +382,11 @@ class LocationPublishFlowTests(unittest.IsolatedAsyncioTestCase):
                     # read of the control raises UnscriptedSelectorError.
                     page, _rows, _row = self._page(module, action, location=False)
                     app = self._app(module, action)
-                    seen, fire = await self._run(module, action, app, page)
+                    armed_reports = []
+                    await self._run(module, action, app, page, armed_reports)
                     self.assertIsNone(app.location_report)
-                    self.assertIsNone(seen["report"])
+                    self.assertEqual(armed_reports, [None])
                     self.assertEqual(page.mouse.down_count, 0)
-                    fire.assert_not_awaited()
 
 
 if __name__ == "__main__":

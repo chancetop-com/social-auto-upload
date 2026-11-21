@@ -14,10 +14,11 @@ observed value (or ``未读到``) and a reason.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
+
+from patchright.async_api import async_playwright
 
 import uploader.xiaohongshu_uploader.main as xhs_main
 from tests.fakes_xhs_dom import FakeLocator, RecordingPage
@@ -61,9 +62,8 @@ def _declaration_selectors(
     *,
     entry: bool = True,
     final_text: str = AI_LABEL,
-    menu_error: BaseException | None = None,
 ) -> tuple[dict[str, FakeLocator], FakeLocator, FakeLocator]:
-    menu = FakeLocator("declaration-menu", wait_error=menu_error)
+    menu = FakeLocator("declaration-menu")
     option = FakeLocator(
         "declaration-option",
         computed_style=dict(VISIBLE_FACTS),
@@ -89,13 +89,6 @@ def _declaration_selectors(
     return selectors, trigger, option
 
 
-def _page(*, entry: bool = True, final_text: str = AI_LABEL, menu_error=None):
-    selectors, trigger, option = _declaration_selectors(
-        entry=entry, final_text=final_text, menu_error=menu_error
-    )
-    return RecordingPage(selectors=selectors), trigger, option
-
-
 def _fast_missing_anchor():
     """Collapse the 5 s anchor window to one attempt for a missing entry."""
     original = xhs_main.wait_resolved
@@ -115,27 +108,56 @@ class XhsAiDeclarationReadbackTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(app, "_settle", AsyncMock()):
             return await app.apply_declarations(page)
 
-    async def test_ai_success_reads_back_the_collapsed_selected_label(self):
-        for app in (_video_app(content_type="ai"), _note_app(content_type="ai")):
-            with self.subTest(post_type=type(app).__name__):
-                page, _trigger, option = _page()
-                await self.apply(app, page)
+    async def declaration_page(self, *, final_text=None, leave_menu_open=False):
+        playwright = await async_playwright().start()
+        self.addAsyncCleanup(playwright.stop)
+        browser = await playwright.chromium.launch(headless=True, channel="chromium")
+        self.addAsyncCleanup(browser.close)
+        page = await browser.new_page()
+        await page.set_content("""
+            <div class="publish-container">
+              <div class="d-select-wrapper"><span class="d-select-description">其他声明</span></div>
+              <div class="d-select-wrapper">
+                <button id="trigger" tabindex="1">添加内容类型声明</button>
+                <span id="selection" class="d-select-description"></span>
+              </div>
+            </div>
+            <div id="menu" class="d-popover declaration-drop-down" hidden>
+              <button class="d-option">内容包含营销广告</button>
+              <button class="d-option">笔记含AI合成内容</button>
+            </div>
+        """)
+        await page.evaluate("""([finalText, leaveMenuOpen]) => {
+            const trigger = document.getElementById('trigger');
+            const menu = document.getElementById('menu');
+            trigger.onclick = () => { menu.hidden = false; };
+            menu.onclick = event => {
+                const option = event.target.closest('.d-option');
+                if (!option) return;
+                document.getElementById('selection').textContent = finalText ?? option.textContent;
+                trigger.textContent = '';
+                menu.hidden = !leaveMenuOpen;
+            };
+        }""", [final_text, leave_menu_open])
+        return page
 
-                self.assertEqual(option.click_count, 1)
-                self.assertEqual(
-                    app.declaration_report,
-                    {
-                        "requested": "ai",
-                        "requested_label": AI_LABEL,
-                        "observed": AI_LABEL,
-                        "status": "set",
-                    },
-                )
-                menu = option.locator(xhs_main.XHS_DECLARATION_MENU_XPATH)
-                self.assertEqual(menu.wait_calls[-1].kwargs["state"], "hidden")
+    async def test_ai_success_reads_back_the_collapsed_selected_label(self):
+        page = await self.declaration_page()
+        app = _video_app(content_type="ai")
+        await self.apply(app, page)
+        self.assertEqual(
+            app.declaration_report,
+            {
+                "requested": "ai",
+                "requested_label": AI_LABEL,
+                "observed": AI_LABEL,
+                "status": "set",
+            },
+        )
 
     async def test_missing_declaration_entry_reports_request_and_reason(self):
-        page, _trigger, _option = _page(entry=False)
+        selectors, _, _ = _declaration_selectors(entry=False)
+        page = RecordingPage(selectors=selectors)
         app = _video_app(content_type="ai")
         with _fast_missing_anchor(), self.assertRaises(RuntimeError) as ctx:
             await self.apply(app, page)
@@ -147,7 +169,7 @@ class XhsAiDeclarationReadbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("尚未点击发布", message)
 
     async def test_empty_final_value_stops_before_publish(self):
-        page, _trigger, option = _page(final_text="")
+        page = await self.declaration_page(final_text="")
         app = _note_app(content_type="ai")
         with self.assertRaises(RuntimeError) as ctx:
             await self.apply(app, page)
@@ -156,10 +178,9 @@ class XhsAiDeclarationReadbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("终值=（空）", message)
         self.assertIn("选中的内容类型为空", message)
         self.assertIn("尚未点击发布", message)
-        self.assertEqual(option.click_count, 1)
 
     async def test_different_selected_value_is_reported_and_stops(self):
-        page, _trigger, _option = _page(final_text=MARKETING_LABEL)
+        page = await self.declaration_page(final_text=MARKETING_LABEL)
         app = _video_app(content_type="ai")
         with self.assertRaises(RuntimeError) as ctx:
             await self.apply(app, page)
@@ -170,9 +191,12 @@ class XhsAiDeclarationReadbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("尚未点击发布", message)
 
     async def test_menu_that_does_not_collapse_stops_before_publish(self):
-        page, _trigger, _option = _page(menu_error=TimeoutError("menu still open"))
+        page = await self.declaration_page(leave_menu_open=True)
         app = _video_app(content_type="ai")
-        with self.assertRaises(RuntimeError) as ctx:
+        with (
+            patch.object(xhs_main, "XHS_DECLARATION_CONFIRM_TIMEOUT_MS", 500),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
             await self.apply(app, page)
         self.assertIn("声明菜单未收起", str(ctx.exception))
         self.assertIn("尚未点击发布", str(ctx.exception))

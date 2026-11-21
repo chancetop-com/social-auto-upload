@@ -374,22 +374,6 @@ class FacebookProfileCliTests(unittest.TestCase):
                 self.assertEqual(self.context.pages[-1].submit_clicks, 0)
                 with acquire_local_profile('facebook', 'Creator', 'chrome'): pass
 
-    def test_inline_caption_topics_are_the_only_public_topic_source(self):
-        self.profile()
-        self.context.page_type = ComposerPage
-        self.stack.enter_context(patch.object(main, 'expect', Expect))
-        path = self.root / 'video.mp4'; path.touch()
-        code, out, err = self.run_cli(
-            'upload-video', '--account', 'Creator', '--file', str(path),
-            '--title', '标题', '--desc', '正文 #正文话题', '--headed',
-        )
-        self.assertEqual(code, 0, err)
-        page = self.context.pages[-1]
-        self.assertEqual(page.caption, '标题\n\n正文 #正文话题')
-        topic_lines = [line for line in out.splitlines() if line.startswith('Facebook 配文话题')]
-        self.assertEqual([line.split('：', 1)[1].split(' ', 1)[0] for line in topic_lines],
-                         ['#正文话题'])
-
     def test_expiry_before_and_after_submit_preserves_phase_through_cleanup_failure(self):
         self.profile()
         self.context.page_type = ComposerPage

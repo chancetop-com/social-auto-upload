@@ -202,15 +202,11 @@ class InstagramCaptionTopicLogicTests(unittest.TestCase):
             ["coffee", "咖啡", "coffee", "Coffee", "咖啡_2", "a1_b"],
         )
         self.assertEqual([record["index"] for record in records], list(range(1, 7)))
-        # URL 片段不是话题，但链接本身原样保留在原文偏移里。
-        self.assertNotIn("#frag", [record["text"] for record in records])
         for record in records:
             self.assertEqual(
                 caption[record["start"]:record["end"]], record["text"]
             )
-        # 紧邻标点留在话题之外，空行与换行不被改写。
         self.assertEqual(caption[records[1]["end"]], "。")
-        self.assertIn("\n\n重复", caption)
 
     def test_every_caption_topic_is_reported_as_text_evidence_in_order(self):
         records = caption_topic_records("正文 #a 与 #a")

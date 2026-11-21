@@ -241,6 +241,7 @@ class RednoteProfileCliTests(unittest.TestCase):
                     )
                 self.assertEqual(code, 0, err)
                 lines = out.splitlines()
+                self.assertIn('AI 声明：未请求（保留页面当前值）', lines)
                 self.assertEqual(
                     [line for line in lines if '配文话题' in line],
                     [
@@ -256,43 +257,50 @@ class RednoteProfileCliTests(unittest.TestCase):
                 self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
 
     def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):
-        from tests.test_xhs_submit import _note_page
-        media = self.root / 'image.png'
-        media.write_bytes(b'image fixture')
-        for final_text, expected_code in [
-            ('笔记含AI合成内容', 0),
-            ('内容包含营销广告', 1),
-        ]:
-            with self.subTest(final_text=final_text):
-                page = _note_page()
-                self.prepare_editor(page)
-                self.prepare_declaration(page, final_text=final_text)
-                self.context.created_pages = []
-                code, out, err = self.cli(
-                    'upload-note',
-                    '--account',
-                    'creator',
-                    '--images',
-                    str(media),
-                    '--title',
-                    'Title',
-                    '--content-type',
-                    'ai',
-                    '--no-publish',
-                )
-                self.assertEqual(code, expected_code, err)
-                self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
-                self.assertEqual(page.mouse.down_count, 0)
-                if expected_code == 0:
-                    self.assertIn('AI 声明：请求=ai（笔记含AI合成内容）', out)
-                    self.assertIn('终值=笔记含AI合成内容', out)
-                    self.assertIn('素材已上传，发布前检查已通过', out)
-                else:
-                    self.assertEqual(out, '')
-                    self.assertIn('请求=ai', err)
-                    self.assertIn('终值=内容包含营销广告', err)
-                    self.assertIn('尚未点击发布', err)
-                    self.assertNotIn('素材已上传', out)
+        from tests.fakes_clock import FakeClock
+        from tests.test_xhs_submit import _note_page, _video_page
+
+        for action, media_flag, filename, make_page in (
+            ('upload-video', '--file', 'video.mp4', _video_page),
+            ('upload-note', '--images', 'image.png', _note_page),
+        ):
+            media = self.root / filename
+            media.write_bytes(b'media fixture')
+            for final_text, expected_code in [
+                ('笔记含AI合成内容', 0),
+                ('内容包含营销广告', 1),
+            ]:
+                with self.subTest(action=action, final_text=final_text), FakeClock().patch(rednote):
+                    page = make_page()
+                    self.prepare_editor(page)
+                    self.prepare_declaration(page, final_text=final_text)
+                    self.context.created_pages = []
+                    code, out, err = self.cli(
+                        action,
+                        '--account',
+                        'creator',
+                        media_flag,
+                        str(media),
+                        '--title',
+                        'Title',
+                        '--content-type',
+                        'ai',
+                        '--no-publish',
+                    )
+                    self.assertEqual(code, expected_code, err)
+                    self.assertEqual(page.locator('xhs-publish-btn').click_count, 0)
+                    self.assertEqual(page.mouse.down_count, 0)
+                    if expected_code == 0:
+                        self.assertIn('AI 声明：请求=ai（笔记含AI合成内容）', out)
+                        self.assertIn('终值=笔记含AI合成内容', out)
+                        self.assertIn('结果=已设置', out)
+                        self.assertIn('素材已上传，发布前检查已通过', out)
+                    else:
+                        self.assertEqual(out, '')
+                        self.assertIn('请求=ai', err)
+                        self.assertIn('终值=内容包含营销广告', err)
+                        self.assertIn('尚未点击发布', err)
+                        self.assertNotIn('素材已上传', out)
 
     def test_no_publish_failures_never_print_success_or_submit(self):
         from tests.fakes import FakeManagedProvider, FakeBrowser

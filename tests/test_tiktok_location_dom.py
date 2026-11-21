@@ -32,8 +32,10 @@ input.addEventListener('input', () => {
   list.style.display = show ? 'block' : 'none';
   button.setAttribute('aria-expanded', show ? 'true' : 'false');
 });
-document.getElementById('loc-list').addEventListener('click', () => {
-  input.value = 'London Eye';
+list.addEventListener('click', event => {
+  const option = event.target.closest('[role="option"]');
+  if (!option) return;
+  input.value = option.firstElementChild.textContent;
   list.style.display = 'none';
   button.setAttribute('aria-expanded', 'false');
 });
@@ -122,12 +124,17 @@ class TiktokLocationDomTests(unittest.IsolatedAsyncioTestCase):
     async def test_final_readiness_checks_deferred_caption_errors_inside_iframe(self):
         await self.page.set_content('<iframe id="upload"></iframe><div aria-live="polite">Too many hashtags</div>')
         frame = self.page.frames[1]
-        await frame.set_content('<div class="caption-textarea"></div><div aria-live="polite">Too many hashtags</div>')
+        await frame.set_content("""
+            <div class="caption-textarea">
+                <div contenteditable="true"><span aria-live="polite">Too many hashtags</span></div>
+            </div>
+            <div aria-live="polite">Too many hashtags</div>
+        """)
         app = tk.TiktokVideo("Caption", "v.mp4", [], 0, None)
         app.locator_base = self.page.frame_locator("#upload")
         self.assertFalse(await app._topic_hard_limit_visible(self.page))
         await frame.locator('.caption-textarea').evaluate("""el => {
-            el.innerHTML = '<div aria-live="polite">Too many hashtags</div>';
+            el.insertAdjacentHTML('beforeend', '<div aria-live="polite">Too many hashtags</div>');
         }""")
         app.topic_outcomes = [object()]
         with patch.object(app, "_publish_button_ready", return_value=object()):

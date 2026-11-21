@@ -213,6 +213,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                     )
                 self.assertEqual(code, 0, err)
                 lines = out.splitlines()
+                self.assertIn('AI 声明：未请求（保留页面当前值）', lines)
                 self.assertEqual(
                     [line for line in lines if '配文话题' in line],
                     [
@@ -230,7 +231,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
     def test_ai_declaration_readback_success_and_failure_stop_before_publish(self):
         from tests.fakes_clock import FakeClock
         from tests.test_xhs_ai_declaration import _declaration_selectors
-        from tests.test_xhs_submit import _note_page
+        from tests.test_xhs_submit import _note_page, _video_page
         self.profile()
         image = self.root / 'image.png'
         image.write_bytes(b'image')
@@ -245,7 +246,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                 ('内容包含营销广告', 1),
             ]:
                 with self.subTest(action=action, final_text=final_text):
-                    page = _note_page()
+                    page = _video_page() if action == 'upload-video' else _note_page()
                     selectors, _trigger, _option = _declaration_selectors(
                         final_text=final_text
                     )
@@ -269,6 +270,7 @@ class XiaohongshuProfileCliTests(unittest.TestCase):
                     if expected_code == 0:
                         self.assertIn('AI 声明：请求=ai（笔记含AI合成内容）', out)
                         self.assertIn('终值=笔记含AI合成内容', out)
+                        self.assertIn('结果=已设置', out)
                         self.assertIn('素材已上传，发布前检查已通过', out)
                     else:
                         self.assertEqual(out, '')

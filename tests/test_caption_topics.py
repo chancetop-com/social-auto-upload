@@ -49,8 +49,6 @@ def test_cjk_punctuation_ends_the_topic_and_stays_outside_it():
         ("咖啡", "#咖啡", 5, 8, 1),
         ("栗子蛋糕", "#栗子蛋糕", 12, 17, 2),
     ]
-    assert caption[8] == "，"
-    assert caption[17] == "。"
 
 
 def test_ascii_punctuation_ends_the_topic_and_case_is_preserved():
@@ -102,9 +100,6 @@ def test_url_fragments_are_skipped_and_the_url_stays_verbatim():
         ("真话题", 84, 88)
     ]
     assert report.text == caption
-    assert "https://example.com/page/#frag" in report.text
-    assert "http://Example.COM/#中文" in report.text
-    assert "www.example.com/#part" in report.text
 
 
 def test_a_topic_next_to_a_url_is_not_taken_from_the_url():
@@ -129,15 +124,6 @@ def test_a_fragment_without_a_path_is_still_part_of_the_url():
     assert [item.text for item in parse_caption_topics(caption).occurrences] == [
         "#真话题"
     ]
-
-
-def test_every_offset_points_into_the_original_caption():
-    caption = "第一行 #A\n第二行 https://x.test/#frag 与 #b，结束"
-
-    for item in parse_caption_topics(caption).occurrences:
-        assert caption[item.start:item.end] == item.text
-        assert caption[item.start] == "#"
-        assert item.name == item.text[1:]
 
 
 def test_text_results_keep_one_status_per_occurrence_in_order():

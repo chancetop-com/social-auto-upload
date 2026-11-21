@@ -110,13 +110,10 @@ class ContentTypeParserTests(unittest.TestCase):
     """Repeated --content-type values must not silently overwrite each other."""
 
     def _argv(self, platform, action, content_types):
-        self.media = self.tmp / "media.png"
-        self.media.write_bytes(b"media")
-        mode = ["--file", str(self.media)] if action == "upload-video" else [
-            "--images",
-            str(self.media),
-        ]
-        argv = [platform, action, "--account", "creator", "--title", "标题", *mode]
+        flag, name = ("--file", "video.mp4") if action == "upload-video" else ("--images", "image.png")
+        media = self.tmp / name
+        media.write_bytes(b"media")
+        argv = [platform, action, "--account", "creator", "--title", "标题", flag, str(media)]
         for value in content_types:
             argv.extend(["--content-type", value])
         return argv
@@ -145,12 +142,16 @@ class ContentTypeParserTests(unittest.TestCase):
         for platform in ("xiaohongshu", "rednote"):
             for action in ("upload-video", "upload-note"):
                 with self.subTest(platform=platform, action=action):
-                    parser = sau_cli.build_parser()
                     stderr = io.StringIO()
-                    with redirect_stderr(stderr), self.assertRaises(SystemExit) as ctx:
-                        parser.parse_args(
+                    with (
+                        patch("sau_cli.dispatch") as dispatch,
+                        redirect_stderr(stderr),
+                        self.assertRaises(SystemExit) as ctx,
+                    ):
+                        sau_cli.main(
                             self._argv(platform, action, ["ai", "marketing"])
                         )
+                    dispatch.assert_not_called()
                     self.assertEqual(ctx.exception.code, 2)
                     message = stderr.getvalue()
                     self.assertIn("--content-type", message)

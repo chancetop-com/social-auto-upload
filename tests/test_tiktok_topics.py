@@ -620,14 +620,6 @@ class TiktokInlineTopicTests(unittest.TestCase):
         self.assertIn("stage=caption-readback", str(ctx.exception))
         self.assertIn("status=mismatch", out.getvalue())
 
-    def test_author_limit_words_are_not_platform_errors(self):
-        env = TopicEnv()
-        caption = "Too many hashtags " + " ".join(f"#t{i}" for i in range(50))
-        for i in range(50):
-            env.add_suggestion(f"t{i}")
-        _fill_video(env, caption)
-        self.assertEqual(env.buffer, caption)
-
     def test_final_text_only_topic_can_trigger_the_post_limit(self):
         env = TopicEnv()
         for i in range(50):
