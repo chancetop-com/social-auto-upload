@@ -15,6 +15,12 @@ Label: wayfinder:map
 - 延用本地模式及两种现有托管模式的参数和退出码。调度方需要区分调用错误、登录失效、API 限流和发布结果未知。[CLI 契约](../../docs/CLI.md#托管浏览器模式通用) · [领域术语](../../GLOSSARY.md)
 - 后续会话使用 Wayfinder，依照[本地工单约定](../../docs/agents/issue-tracker.md#wayfinding-operations)选取可开始的决策。以当前 CLI 为准。
 
+### 实现参照
+
+- 用户指定以 AdsPower 为实现范本。沿用 `AdspowerTarget`、`AdspowerClient`、`AdspowerProvider` 的职责划分：窗口 ID 标识目标，HTTP 客户端处理比特浏览器的请求与响应，provider 向共享会话层提供窗口状态、连接地址和关闭能力。[AdsPower 实现](../../utils/adspower.py) · [共享 provider 接口](../../utils/managed_browser.py)
+- 在现有 `resolve_managed_provider` 入口接入比特浏览器。各平台继续通过 `browser_session` 使用浏览器，跨平台并行、页面归属和最后退出的协调沿用共享会话层。[CLI 选择入口](../../sau_commands/browser.py) · [浏览器会话](../../utils/browser_session.py) · [共享协调](../../utils/managed_sharing.py)
+- 鉴权头、已开窗口的调试端口、关闭后进程退出的时机均按比特浏览器的行为适配。离线验证参照 AdsPower 的客户端、CLI 和会话测试，使用比特浏览器自己的响应样例。[本机 API 研究笔记](research/01-local-api.md) · [客户端测试](../../tests/test_adspower_client.py) · [CLI 测试](../../tests/test_adspower_cli.py) · [会话测试](../../tests/test_adspower_browser_session.py)
+
 ## Decisions so far
 
 - [比特浏览器本机 API 能为既有窗口提供哪些能力](issues/01-local-api.md) — 已有窗口可按 ID 打开、查调试端口和关闭。普通 Local API 的 Token 可选。
