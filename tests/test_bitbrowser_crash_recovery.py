@@ -101,15 +101,19 @@ def advance_clock_to(clock, value):
     clock.write_text(repr(float(value)))
 
 
-def test_lost_open_response_recovers_only_a_connectable_current_instance(profile):
+@pytest.mark.parametrize("gateway_status", [None, 502, 504], ids=["dropped", "502", "504"])
+def test_lost_open_response_recovers_only_a_connectable_current_instance(profile, gateway_status):
     def lost_without_reply(request, target):
         target.active = True
-        return None
+        if gateway_status is not None:
+            request.send_error(gateway_status)
 
     profile.start_hook = lost_without_reply
     lost = controlled(profile, 0, 'instagram')
     code, output = finish_any(lost)
     assert code == 1 and ('start' in output or '启动' in output), output
+    if gateway_status is not None:
+        assert str(gateway_status) in output
     assert profile.opens == [{'id': WINDOW}] and profile.closes == []
     assert profile.pages_requested == []
     _, record = read_record(profile)
@@ -319,8 +323,9 @@ def test_all_killed_commands_recover_current_window_without_replaying_drafts(
     assert float(virtual_clock.read_text()) >= float(record['stop_acknowledged_at']) + 5
 
 
+@pytest.mark.parametrize("reboot", [False, True], ids=["same-boot", "after-reboot"])
 def test_close_ack_requires_the_settle_interval_and_confirmed_process_exit(
-        create_profile, tmp_path, virtual_clock):
+        create_profile, tmp_path, virtual_clock, reboot):
     profile = create_profile()
     profile.stop_hook = lambda request, target: request.respond_json({})
     first = controlled(profile, 0, 'instagram', clock=virtual_clock)
@@ -339,14 +344,51 @@ def test_close_ack_requires_the_settle_interval_and_confirmed_process_exit(
     current.home, current.api_port = profile.home, profile.api_port
     profile.profiles[WINDOW] = current
     clock = virtual_clock
-    clock.write_text(repr(ack + 1))
+    clock.write_text(repr(1.0 if reboot else ack + 1))
     successor = controlled(current, 1, 'tiktok', clock=clock)
     current.entered('tiktok', successor)
-    assert float(clock.read_text()) >= ack + 5
+    if reboot:
+        assert 6 <= float(clock.read_text()) <= 11
+    else:
+        assert float(clock.read_text()) >= ack + 5
     assert profile.opens == [{'id': WINDOW}, {'id': WINDOW}]
     assert profile.closes == [WINDOW]
     current.finish('tiktok', successor)
     assert profile.closes == [WINDOW, WINDOW]
+
+
+def test_desktop_reopen_after_confirmed_exit_joins_existing_window(create_profile, tmp_path, virtual_clock):
+    old = create_profile()
+    first = controlled(old, 0, 'instagram', clock=virtual_clock)
+    old.entered('instagram', first)
+    old.finish('instagram', first)
+    assert not old.active
+
+    current = create_profile(tmp_path / 'desktop')
+    current.home, current.api_port = old.home, old.api_port
+    current.active = True
+    old.profiles[WINDOW] = current
+    joined = controlled(current, 1, 'tiktok', clock=virtual_clock)
+    current.entered('tiktok', joined)
+    assert old.opens == [{'id': WINDOW}] and old.closes == [WINDOW]
+    current.finish('tiktok', joined)
+    assert old.closes == [WINDOW, WINDOW]
+
+
+def test_uncertain_close_preserves_main_result_and_exposes_port_error(profile, virtual_clock):
+    profile.stop_hook = lambda request, target: request.send_error(504)
+    first = controlled(profile, 0, 'instagram', clock=virtual_clock)
+    profile.entered('instagram', first)
+    assert '停止或清理失败' in profile.finish('instagram', first)
+    _, record = read_record(profile)
+    assert record['phase'] == 'stopping'
+
+    profile.ports_hook = lambda request: request.send_error(404)
+    profile.requests.clear()
+    code, output = finish_any(controlled(profile, 1, 'tiktok', clock=virtual_clock))
+    assert code == 1 and '调试端口' in output and 'HTTP 404' in output, output
+    assert profile.requests.count(('ports', None)) == 1
+    assert profile.opens == [{'id': WINDOW}] and profile.closes == [WINDOW]
 
 
 def test_close_ack_without_process_exit_reports_and_sends_no_open(profile, virtual_clock):

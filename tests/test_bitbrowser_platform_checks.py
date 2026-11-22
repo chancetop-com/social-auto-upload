@@ -717,8 +717,9 @@ def test_unrecognized_business_envelope_is_exit_1(harness):
     assert harness.site.documents == []
 
 
-def test_unrecognized_query_data_is_exit_1(harness):
-    harness.api.queue("/browser/pids/alive", payload={"success": True, "data": "nonsense"})
+@pytest.mark.parametrize("data", ["nonsense", {WINDOW_ID: None}, {"wrapped": {WINDOW_ID: 123}}])
+def test_unrecognized_query_data_is_exit_1(harness, data):
+    harness.api.queue("/browser/pids/alive", payload={"success": True, "data": data})
 
     result = harness.run("tiktok", timeout=20)
 

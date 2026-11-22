@@ -9,6 +9,7 @@ No real network and no ``http.server``: every HTTP call goes through injected
 
 from __future__ import annotations
 
+import traceback
 import unittest
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch
@@ -40,11 +41,6 @@ class ErrorTypeTests(unittest.TestCase):
     def test_provider_diagnostic_error_is_a_runtime_error(self):
         self.assertTrue(issubclass(ProviderDiagnosticError, RuntimeError))
 
-    def test_provider_diagnostic_error_is_safe_for_the_shared_wrapper(self):
-        # The shared wrapper must pass it through unchanged instead of
-        # replacing the actionable message with a generic one.
-        self.assertTrue(issubclass(ProviderDiagnosticError, ProviderRequestRejected))
-
 
 class BitBrowserClientProbeTests(unittest.TestCase):
     def _client(self, *outcomes: object) -> tuple[BitBrowserClient, FakeHttp]:
@@ -63,6 +59,13 @@ class BitBrowserClientProbeTests(unittest.TestCase):
         self.assertEqual(call["headers"], {"x-api-key": KEY})
         self.assertEqual(call["timeout"], 3)
         self.assertEqual(call["json"], {})
+
+    def test_authenticated_post_stops_at_redirect(self):
+        client, http = self._client(FakeResponse(307, None))
+        with self.assertRaisesRegex(ProviderDiagnosticError, "HTTP 307"):
+            client.probe()
+        self.assertEqual(len(http.post_calls), 1)
+        self.assertIs(http.post_calls[0]["allow_redirects"], False)
 
     def test_probe_connection_failure_uses_fixed_unreachable_message(self):
         client, _ = self._client(OSError("connection refused"))
@@ -294,6 +297,7 @@ class BitBrowserClientStartTests(unittest.TestCase):
             client.start(WINDOW_ID, headless=True)
 
         self.assertNotIsInstance(caught.exception, StartIncompleteError)
+        self.assertIsInstance(caught.exception, ProviderRequestRejected)
         message = str(caught.exception)
         self.assertIn("HTTP 200", message)
         self.assertIn("窗口不存在或已被删除", message)
@@ -499,6 +503,14 @@ class BitBrowserClientObserveTests(unittest.TestCase):
         self.assertFalse(state.active)
         self.assertIsNone(state.endpoint)
         self.assertEqual(len(http.calls), 1)
+
+    def test_status_understands_window_to_pid_maps(self):
+        for pid in (123, "123"):
+            with self.subTest(pid=pid):
+                client, _ = self._client(post_outcomes=[
+                    FakeResponse(200, {"success": True, "data": {WINDOW_ID: pid}})
+                ])
+                self.assertEqual(client.status(WINDOW_ID), "running")
 
     def test_observe_malformed_pids_payload_is_not_reported_as_inactive(self):
         client, _ = self._client(
@@ -799,6 +811,7 @@ class BitBrowserSanitisationTests(unittest.TestCase):
 
     def test_raw_exception_and_echoed_server_text_redact_key(self):
         scenarios = [
+            ([], [TimeoutError(f"timeout with {KEY}")], lambda c: c.probe()),
             ([], [RuntimeError(f"transport failed with {KEY}")],
              lambda c: c.start(WINDOW_ID, False)),
             ([], [RuntimeError(f"transport failed with {KEY}")],
@@ -821,6 +834,7 @@ class BitBrowserSanitisationTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError) as caught:
                     invoke(client)
                 self.assertNotIn(KEY, str(caught.exception))
+                self.assertNotIn(KEY, "".join(traceback.format_exception(caught.exception)))
 
 
 if __name__ == "__main__":

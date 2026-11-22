@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import requests
 
 from utils.errors import (
+    ProfileConnectionUnavailableError,
     ProviderDiagnosticError,
     ProviderRequestRejected,
     RateLimitedError,
@@ -61,6 +62,14 @@ _TIMEOUTS = (TimeoutError, requests.exceptions.Timeout)
 
 HttpGet = Callable[..., Any]
 HttpPost = Callable[..., Any]
+
+
+class _RequestRejected(ProviderDiagnosticError, ProviderRequestRejected):
+    """The Local API explicitly rejected this operation."""
+
+
+class _ConnectionUnavailable(ProviderDiagnosticError, ProfileConnectionUnavailableError):
+    """The window is alive but its debugging connection is unavailable."""
 
 
 def _browser_endpoint(value: Any) -> str | None:
@@ -145,6 +154,7 @@ class BitBrowserClient:
             json=json,
             timeout=timeout,
             headers=self._headers(),
+            allow_redirects=False,
             verify=True,
         )
 
@@ -192,6 +202,8 @@ class BitBrowserClient:
             parts.append(_UNAUTHORIZED_HINT)
         elif status == 404:
             parts.append(_CLIENT_CAPABILITY_HINT)
+        if status in (400, 401, 403, 404, 405, 422):
+            return _RequestRejected("；".join(parts))
         return ProviderDiagnosticError("；".join(parts))
 
     @staticmethod
@@ -209,7 +221,7 @@ class BitBrowserClient:
             self._redact(str(payload.get("msg") or "").strip())
             or "success=false"
         )
-        return ProviderDiagnosticError(
+        return _RequestRejected(
             f"{action}失败：HTTP {status}；msg={message}"
         )
 
@@ -248,14 +260,14 @@ class BitBrowserClient:
         """POST one business call and return ``data`` from a trusted envelope."""
         try:
             response = self._post(path, json=body, timeout=timeout)
-        except _TIMEOUTS as exc:
+        except _TIMEOUTS:
             raise ProviderDiagnosticError(
                 f"{action}失败：请求超时（{timeout} 秒）。"
-            ) from exc
+            ) from None
         except Exception as exc:
             raise ProviderDiagnosticError(
                 f"{action}失败：{self._redact(str(exc))}"
-            ) from exc
+            ) from None
         return self._trusted_payload(action, response).get("data")
 
     # ------------------------------------------------------------- Endpoints
@@ -267,15 +279,15 @@ class BitBrowserClient:
                 json={},
                 timeout=PROBE_TIMEOUT_SECONDS,
             )
-        except _TIMEOUTS as exc:
+        except _TIMEOUTS:
             raise ProviderDiagnosticError(
                 f"{PROBE_ACTION}失败：请求超时（{PROBE_TIMEOUT_SECONDS} 秒）。"
                 f"{_unreachable_message(self._base)}"
-            ) from exc
-        except Exception as exc:
+            ) from None
+        except Exception:
             raise ProviderDiagnosticError(
                 f"{PROBE_ACTION}失败：{_unreachable_message(self._base)}"
-            ) from exc
+            ) from None
 
         self._trusted_payload(PROBE_ACTION, response)
 
@@ -297,7 +309,7 @@ class BitBrowserClient:
         except Exception as exc:
             raise RuntimeError(
                 f"{START_ACTION}失败：{self._redact(str(exc))}"
-            ) from exc
+            ) from None
 
         payload = self._trusted_payload(
             START_ACTION,
@@ -324,7 +336,7 @@ class BitBrowserClient:
         except Exception as exc:
             raise RuntimeError(
                 f"{STOP_ACTION}失败：{self._redact(str(exc))}"
-            ) from exc
+            ) from None
 
         self._trusted_payload(
             STOP_ACTION,
@@ -350,14 +362,21 @@ class BitBrowserClient:
         if isinstance(data, list):
             ids: set[str] = set()
             for item in data:
-                if isinstance(item, bool) or not isinstance(item, (str, int)):
+                if isinstance(item, bool) or not isinstance(item, (str, int)) or not str(item).strip():
                     raise ProviderDiagnosticError(
                         f"{action}失败：响应包含无法识别的窗口 ID。"
                     )
                 ids.add(str(item))
             return ids
         if isinstance(data, dict):
-            return {str(key) for key, value in data.items() if value}
+            # The map form associates each live window ID with its PID.
+            # An invalid value cannot establish that the window has exited.
+            for window_id, pid in data.items():
+                if not isinstance(window_id, str) or not window_id.strip():
+                    raise ProviderDiagnosticError(f"{action}失败：响应包含无法识别的窗口 ID。")
+                if not re.fullmatch(r"[1-9][0-9]*", str(pid)):
+                    raise ProviderDiagnosticError(f"{action}失败：响应包含无法识别的进程 ID。")
+            return set(data)
         raise ProviderDiagnosticError(
             f"{action}失败：响应缺少可识别的 data。"
         )
@@ -380,29 +399,31 @@ class BitBrowserClient:
             raise ProviderDiagnosticError(
                 f"{action}失败：响应缺少可识别的 data。"
             )
-        port = _port_value(data.get(str(profile_id)))
+        if profile_id not in data:
+            raise _ConnectionUnavailable(f"{action}失败：窗口进程存活，但响应未包含该窗口的调试端口。")
+        port = _port_value(data[profile_id])
         if port is None:
-            if str(profile_id) in data:
-                reason = "返回的调试端口无效"
-            else:
-                reason = "窗口进程存活，但响应未包含该窗口的调试端口"
-            raise ProviderDiagnosticError(f"{action}失败：{reason}。")
+            raise ProviderDiagnosticError(f"{action}失败：返回的调试端口无效。")
         return port
 
     def _cdp_endpoint(self, port: str) -> str:
         url = f"http://127.0.0.1:{port}/json/version"
         try:
             response = self._get(url, timeout=CDP_TIMEOUT_SECONDS)
-        except _TIMEOUTS as exc:
+        except _TIMEOUTS:
             raise ProviderDiagnosticError(
                 f"{CDP_ACTION}失败：请求超时（{CDP_TIMEOUT_SECONDS} 秒）；"
                 f"窗口调试端口 {port} 未响应。"
-            ) from exc
+            ) from None
+        except (ConnectionError, requests.exceptions.ConnectionError):
+            raise _ConnectionUnavailable(
+                f"{CDP_ACTION}失败：窗口调试端口 {port} 不可用。"
+            ) from None
         except Exception as exc:
             raise ProviderDiagnosticError(
                 f"{CDP_ACTION}失败：{self._redact(str(exc))}；"
                 f"窗口调试端口 {port} 不可用。"
-            ) from exc
+            ) from None
 
         if not self._is_success(response):
             raise ProviderDiagnosticError(

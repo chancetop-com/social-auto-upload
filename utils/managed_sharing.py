@@ -49,30 +49,6 @@ def _stop_settle_seconds(provider) -> float:
     return float(value)
 
 
-def _stop_settle_until(provider, record, now):
-    """When a pending stop may be followed by a cold start at the earliest.
-
-    BitBrowser acknowledges ``/browser/close`` before the process exits and
-    requires at least five seconds before the same ID is opened again.  The
-    acknowledgement time and the closed instance's endpoint digest are stored
-    in the shared record so a later command can enforce both conditions.
-    """
-    settle = _stop_settle_seconds(provider)
-    if settle <= 0 or record is None:
-        return None
-    base = None
-    if record.get("phase") == "stop_acknowledged":
-        base = record.get("stop_acknowledged_at")
-        if base is None:
-            base = record.get("stop_requested_at")
-    elif record.get("phase") == "stopping":
-        base = record.get("stop_requested_at")
-    if isinstance(base, bool) or not isinstance(base, (int, float)):
-        # An older record has no timestamp.  Waiting from now is conservative.
-        base = now
-    return float(base) + settle
-
-
 def _stop_timeout_message(provider, reason):
     if _stop_settle_seconds(provider) <= 0:
         return f"{provider.mode} Profile 上次停止尚未确认，等待超时。"
@@ -135,7 +111,9 @@ def _stop_finished(state, acknowledged_record):
     )
 
 
-async def _wait_for_stopped(provider, deadline, acknowledged_record=None, settle_until=None):
+async def _wait_for_stopped(
+    provider, deadline, acknowledged_record=None, *, confirmed=False, settle_until=None,
+):
     # Only read operations may outlive the deadline. asyncio.run joins its
     # default executor on exit, so a stalled HTTP read needs a daemon thread.
     outcome = Future()
@@ -153,9 +131,9 @@ async def _wait_for_stopped(provider, deadline, acknowledged_record=None, settle
                     # exited; keep polling until the admission deadline.
                     failure["reason"] = "unconfirmed"
                 else:
-                    if _stop_finished(state, acknowledged_record):
+                    if confirmed or _stop_finished(state, acknowledged_record):
                         now = monotonic()
-                        if settle_until is None or now >= settle_until:
+                        if state.active or settle_until is None or now >= settle_until:
                             outcome.set_result(state)
                             return
                         failure["reason"] = "settle"
@@ -214,24 +192,45 @@ class ManagedCommand:
             lock.close()
         return False
 
+    async def observe_after_stop(self, provider, record, deadline):
+        state = None
+        if record["phase"] != "stopped":
+            acknowledged = record if record["phase"] == "stop_acknowledged" else None
+            state = await _wait_for_stopped(provider, deadline, acknowledged)
+            if _stop_settle_seconds(provider) == 0 or state.active:
+                return state
+            record = {**record, "phase": "stopped", "exit_observed_at": monotonic()}
+            self.store.write_record(record)
+
+        # A stop without an ACK owes a full interval from the first confirmed
+        # exit. A timestamp from a previous boot may exceed current uptime.
+        now = monotonic()
+        since = record.get("stop_acknowledged_at", record["exit_observed_at"])
+        settle_until = min(since, now) + _stop_settle_seconds(provider)
+        if state is not None and now >= settle_until:
+            return state
+        # Exit was confirmed under the lifecycle lock. A live observation now
+        # describes a new desktop run. Only cold starts owe the quiet period.
+        return await _wait_for_stopped(
+            provider, deadline, confirmed=True, settle_until=settle_until,
+        )
+
     async def connection(self, provider: SharedBrowserProvider, headless: bool, deadline: float):
         record = self.store.read_record()
         resource = _digest(provider.resource_identity)
-        if record is not None and record.get("resource") != resource:
+        if record is not None and record["phase"] != "stopped" and record.get("resource") != resource:
             raise RuntimeError(f"{self.mode} Profile 的服务或文件夹与共享记录不符。")
         peers = self.has_members()
         if peers and (not record or record.get("phase") != "active"):
             raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
 
-        if record and record["phase"] in {"stopping", "stop_acknowledged"}:
-            acknowledged = record if record["phase"] == "stop_acknowledged" else None
-            settle_until = _stop_settle_until(provider, record, monotonic())
-            state = await _wait_for_stopped(provider, deadline, acknowledged, settle_until)
+        if record and record["phase"] in {"stopping", "stop_acknowledged", "stopped"}:
+            state = await self.observe_after_stop(provider, record, deadline)
         else:
             await _provider_call(provider, "probe")
             try:
                 state = await _provider_call(provider, "observe")
-            except ProfileConnectionUnavailableError as exc:
+            except (ProfileConnectionUnavailableError, ProviderDiagnosticError) as exc:
                 hint = _provider_hints(provider).start_unconfirmed_hint
                 if hint is not None and record and record.get("phase") == "starting":
                     # The previous start reply was lost and the current
@@ -370,27 +369,15 @@ class ManagedCommand:
             self.store.clear_record()
             raise
         if self.provider.asynchronous_stop:
-            acknowledged = {**record, "phase": "stop_acknowledged"}
+            acknowledged = {**stopping, "phase": "stop_acknowledged"}
             if settle > 0:
-                # BitBrowser acknowledges Close before the process exits.  Keep
-                # the acknowledged instance digest and timestamp so the next
-                # cold start can require both a confirmed exit and the client's
-                # five-second quiet period.  Closing by ID means an old last
-                # leaver may close a same-ID window reopened from the desktop
-                # while this command was still running; the specification
-                # accepts that consequence.
-                acknowledged["stop_requested_at"] = stopping["stop_requested_at"]
                 acknowledged["stop_acknowledged_at"] = monotonic()
-                self.store.write_record(acknowledged)
-                # Keep the record even when this observation already sees the
-                # process gone: the next cold start still owes the settle
-                # interval.  The read also preserves the existing failure
-                # diagnostics if the client cannot answer at all.
-                _provider_request(self.provider, "observe")
-                return
             self.store.write_record(acknowledged)
             state = _provider_request(self.provider, "observe")
             if not _stop_finished(state, record):
+                return
+            if settle > 0 and not state.active:
+                self.store.write_record({**acknowledged, "phase": "stopped", "exit_observed_at": monotonic()})
                 return
         self.store.clear_record()
 
