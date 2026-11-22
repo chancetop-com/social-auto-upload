@@ -16,7 +16,9 @@ from utils.errors import (
     ProfileConnectionUnavailableError, ProfileStartingError, ProviderDiagnosticError,
     ProviderRequestRejected, RateLimitedError,
 )
-from utils.managed_browser import ProviderHints, SharedBrowserProvider
+from utils.managed_browser import (
+    ProviderHints, ProviderReadProgress, SharedBrowserProvider, current_read_progress,
+)
 from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
 
@@ -55,19 +57,16 @@ def _stop_timeout_message(provider, reason):
     hints = _provider_hints(provider)
     if reason == "process-alive":
         return (
-            f"{provider.mode} Profile 上次停止未完成：关闭请求已获回应，"
-            "但旧窗口进程仍在运行，等待超时；"
+            f"{provider.mode} Profile 上次停止未完成：旧窗口进程仍在运行，等待超时；"
             f"{hints.stop_settle_hint}"
         )
     if reason == "settle":
         return (
-            f"{provider.mode} Profile 上次停止未完成：关闭请求已获回应，"
-            f"但关闭后尚未满 {_stop_settle_seconds(provider):g} 秒，等待超时；"
+            f"{provider.mode} Profile 关闭后的 {_stop_settle_seconds(provider):g} 秒等待期尚未结束；"
             "请稍后重试。"
         )
     return (
-        f"{provider.mode} Profile 上次停止尚未确认：关闭请求已获回应，"
-        "但无法确认旧窗口进程已退出，等待超时；"
+        f"{provider.mode} Profile 上次停止尚未确认：无法确认旧窗口进程已退出，等待超时；"
         f"{hints.stop_unconfirmed_hint}"
     )
 
@@ -111,18 +110,19 @@ def _stop_finished(state, acknowledged_record):
     )
 
 
-async def _wait_for_stopped(
-    provider, deadline, acknowledged_record=None, *, confirmed=False, settle_until=None,
-):
+async def _wait_for_stopped(provider, deadline, acknowledged_record=None):
     # Only read operations may outlive the deadline. asyncio.run joins its
     # default executor on exit, so a stalled HTTP read needs a daemon thread.
     outcome = Future()
     outcome.set_running_or_notify_cancel()
     failure = {"reason": "unconfirmed"}
+    progress = ProviderReadProgress()
 
     def observe():
+        current_read_progress.set(progress)
         try:
             _provider_request(provider, "probe")
+            progress.operation = None
             while monotonic() < deadline:
                 try:
                     state = _provider_request(provider, "observe")
@@ -131,17 +131,12 @@ async def _wait_for_stopped(
                     # exited; keep polling until the admission deadline.
                     failure["reason"] = "unconfirmed"
                 else:
-                    if confirmed or _stop_finished(state, acknowledged_record):
-                        now = monotonic()
-                        if state.active or settle_until is None or now >= settle_until:
-                            outcome.set_result(state)
-                            return
-                        failure["reason"] = "settle"
-                        sleep(min(0.5, max(0.0, min(settle_until - now,
-                                                        deadline - now))))
-                        continue
+                    if _stop_finished(state, acknowledged_record):
+                        outcome.set_result(state)
+                        return
                     if state.active:
                         failure["reason"] = "process-alive"
+                progress.operation = None
                 sleep(min(0.5, max(0, deadline - monotonic())))
             raise asyncio.TimeoutError
         except Exception as exc:
@@ -154,6 +149,9 @@ async def _wait_for_stopped(
             return await asyncio.wait_for(asyncio.wrap_future(outcome), remaining)
         except asyncio.TimeoutError:
             pass
+    operation = progress.operation
+    if operation:
+        raise RuntimeError(f"{operation}超时，等待上次停止确认的时限已到。")
     raise RuntimeError(_stop_timeout_message(provider, failure["reason"]))
 
 
@@ -192,37 +190,50 @@ class ManagedCommand:
             lock.close()
         return False
 
+    def record_stopped(self, resource, cooldown_since):
+        record = {"phase": "stopped", "resource": resource, "cooldown_since": cooldown_since}
+        self.store.write_record(record)
+        return record
+
     async def observe_after_stop(self, provider, record, deadline):
+        settle = _stop_settle_seconds(provider)
         state = None
         if record["phase"] != "stopped":
             acknowledged = record if record["phase"] == "stop_acknowledged" else None
             state = await _wait_for_stopped(provider, deadline, acknowledged)
-            if _stop_settle_seconds(provider) == 0 or state.active:
+            if not settle or state.active:
                 return state
-            record = {**record, "phase": "stopped", "exit_observed_at": monotonic()}
-            self.store.write_record(record)
+            # Without a close ACK, start the quiet period at the first known exit.
+            record = self.record_stopped(record["resource"], record.get("stop_acknowledged_at", monotonic()))
 
-        # A stop without an ACK owes a full interval from the first confirmed
-        # exit. A timestamp from a previous boot may exceed current uptime.
-        now = monotonic()
-        since = record.get("stop_acknowledged_at", record["exit_observed_at"])
-        settle_until = min(since, now) + _stop_settle_seconds(provider)
-        if state is not None and now >= settle_until:
+        if state is None:
+            await _provider_call(provider, "probe")
+            state = await _provider_call(provider, "observe")
+        remaining = record["cooldown_since"] + settle - monotonic()
+        if state.active or remaining <= 0:
             return state
-        # Exit was confirmed under the lifecycle lock. A live observation now
-        # describes a new desktop run. Only cold starts owe the quiet period.
-        return await _wait_for_stopped(
-            provider, deadline, confirmed=True, settle_until=settle_until,
-        )
+        if remaining > deadline - monotonic():
+            raise RuntimeError(_stop_timeout_message(provider, "settle"))
+        await asyncio.to_thread(sleep, remaining)
+        # The operator may have opened a new desktop window during the wait.
+        return await _provider_call(provider, "observe")
 
     async def connection(self, provider: SharedBrowserProvider, headless: bool, deadline: float):
         record = self.store.read_record()
         resource = _digest(provider.resource_identity)
+        peers = self.has_members()
+        if peers and (not record or record["phase"] != "active"):
+            raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
+        if record and record["phase"] in {"stopping", "stop_acknowledged", "stopped"}:
+            # Monotonic time cannot go backwards within a boot. A timestamp
+            # beyond current uptime proves the old process cannot still exist.
+            since = record.get("cooldown_since", record.get("stop_acknowledged_at",
+                                                             record.get("stop_requested_at")))
+            now = monotonic()
+            if since is not None and since > now:
+                record = self.record_stopped(record["resource"], now)
         if record is not None and record["phase"] != "stopped" and record.get("resource") != resource:
             raise RuntimeError(f"{self.mode} Profile 的服务或文件夹与共享记录不符。")
-        peers = self.has_members()
-        if peers and (not record or record.get("phase") != "active"):
-            raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
 
         if record and record["phase"] in {"stopping", "stop_acknowledged", "stopped"}:
             state = await self.observe_after_stop(provider, record, deadline)
@@ -377,7 +388,7 @@ class ManagedCommand:
             if not _stop_finished(state, record):
                 return
             if settle > 0 and not state.active:
-                self.store.write_record({**acknowledged, "phase": "stopped", "exit_observed_at": monotonic()})
+                self.record_stopped(acknowledged["resource"], acknowledged["stop_acknowledged_at"])
                 return
         self.store.clear_record()
 

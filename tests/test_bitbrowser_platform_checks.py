@@ -717,7 +717,7 @@ def test_unrecognized_business_envelope_is_exit_1(harness):
     assert harness.site.documents == []
 
 
-@pytest.mark.parametrize("data", ["nonsense", {WINDOW_ID: None}, {"wrapped": {WINDOW_ID: 123}}])
+@pytest.mark.parametrize("data", ["nonsense", {WINDOW_ID: None}, {"wrapped": {WINDOW_ID: 123}}, [1234]])
 def test_unrecognized_query_data_is_exit_1(harness, data):
     harness.api.queue("/browser/pids/alive", payload={"success": True, "data": data})
 

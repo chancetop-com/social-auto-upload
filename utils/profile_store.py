@@ -82,17 +82,17 @@ def _valid_record(record: object) -> bool:
     phase = record.get("phase")
     if phase == "starting":
         return record.keys() == {"phase", "resource"}
-    if phase == "stopped" and not timestamp("exit_observed_at"):
-        return False
+    if phase == "stopped":
+        return record.keys() == {"phase", "resource", "cooldown_since"} and timestamp("cooldown_since")
     if "launched_at_ns" in record and (type(record["launched_at_ns"]) is not int or record["launched_at_ns"] <= 0):
         return False
     if "stop_requested_at" in record:
-        if phase not in ("stopping", "stop_acknowledged", "stopped") or not timestamp("stop_requested_at"):
+        if phase not in ("stopping", "stop_acknowledged") or not timestamp("stop_requested_at"):
             return False
     if "stop_acknowledged_at" in record:
-        if phase not in ("stop_acknowledged", "stopped") or not timestamp("stop_acknowledged_at"):
+        if phase != "stop_acknowledged" or not timestamp("stop_acknowledged_at"):
             return False
-    return (phase in ("active", "stopping", "stop_acknowledged", "stopped")
+    return (phase in ("active", "stopping", "stop_acknowledged")
             and digest("endpoint") and "headless" in record
             and (record["headless"] is None or type(record["headless"]) is bool))
 

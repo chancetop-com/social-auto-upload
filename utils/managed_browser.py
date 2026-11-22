@@ -9,10 +9,29 @@ deliberately no ABC and no ``@runtime_checkable``.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 ProviderMode = Literal["multilogin", "adspower", "bitbrowser"]
+
+
+@dataclass(slots=True)
+class ProviderReadProgress:
+    """Name of the operation in flight when a bounded observation times out."""
+
+    operation: str | None = None
+
+
+current_read_progress: ContextVar[ProviderReadProgress | None] = ContextVar(
+    "provider_read_progress", default=None,
+)
+
+
+def report_read_operation(operation: str) -> None:
+    progress = current_read_progress.get()
+    if progress is not None:
+        progress.operation = operation
 
 
 @dataclass(frozen=True, slots=True)

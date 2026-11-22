@@ -257,7 +257,7 @@ def test_all_killed_commands_recover_current_window_without_replaying_drafts(
     assert code == 0 and 'prepared' in saved.read_text(), output
     snapshot = saved.read_bytes()
     _, record = read_record(profile)
-    advance_clock_to(virtual_clock, float(record['stop_acknowledged_at']) + 6)
+    advance_clock_to(virtual_clock, float(record['cooldown_since']) + 6)
 
     # The stopped profile is replaced by a fresh local Chromium, as the desktop
     # would after a close/open cycle.  Both profiles share the same window ID,
@@ -320,7 +320,7 @@ def test_all_killed_commands_recover_current_window_without_replaying_drafts(
     assert profile.closes == [WINDOW, WINDOW]
     assert saved.read_bytes() == snapshot
     assert json.loads(saved.read_text())['status'] == 'prepared'
-    assert float(virtual_clock.read_text()) >= float(record['stop_acknowledged_at']) + 5
+    assert float(virtual_clock.read_text()) >= float(record['cooldown_since']) + 5
 
 
 @pytest.mark.parametrize("reboot", [False, True], ids=["same-boot", "after-reboot"])
@@ -345,10 +345,17 @@ def test_close_ack_requires_the_settle_interval_and_confirmed_process_exit(
     profile.profiles[WINDOW] = current
     clock = virtual_clock
     clock.write_text(repr(1.0 if reboot else ack + 1))
+    if reboot:
+        # An interrupted recovery must not reset the five-second wait on every retry.
+        profile.alive_hook = lambda request, ids: request.send_error(503)
+        code, output = finish_any(controlled(current, 1, 'tiktok', clock=clock))
+        assert code == 1 and '503' in output
+        profile.alive_hook = None
+        advance_clock_to(clock, 3.0)
     successor = controlled(current, 1, 'tiktok', clock=clock)
     current.entered('tiktok', successor)
     if reboot:
-        assert 6 <= float(clock.read_text()) <= 11
+        assert float(clock.read_text()) == 6.0
     else:
         assert float(clock.read_text()) >= ack + 5
     assert profile.opens == [{'id': WINDOW}, {'id': WINDOW}]
@@ -357,17 +364,29 @@ def test_close_ack_requires_the_settle_interval_and_confirmed_process_exit(
     assert profile.closes == [WINDOW, WINDOW]
 
 
-def test_desktop_reopen_after_confirmed_exit_joins_existing_window(create_profile, tmp_path, virtual_clock):
+@pytest.mark.parametrize("reboot", [False, True], ids=["confirmed-exit", "prior-boot-ack"])
+def test_desktop_reopen_after_confirmed_exit_joins_existing_window(create_profile, tmp_path, virtual_clock, reboot):
     old = create_profile()
+    if reboot:
+        old.stop_hook = lambda request, target: request.respond_json({})
     first = controlled(old, 0, 'instagram', clock=virtual_clock)
     old.entered('instagram', first)
     old.finish('instagram', first)
+    if reboot:
+        assert old.active and read_record(old)[1]['phase'] == 'stop_acknowledged'
+        old.close_browser()
+        old.active = False
+        advance_clock_to(virtual_clock, 1.0)
     assert not old.active
 
     current = create_profile(tmp_path / 'desktop')
     current.home, current.api_port = old.home, old.api_port
     current.active = True
     old.profiles[WINDOW] = current
+    old.ports_hook = lambda request: request.respond_json({})
+    code, output = finish_any(controlled(current, 1, 'tiktok', clock=virtual_clock))
+    assert code == 1 and '未包含该窗口的调试端口' in output and '旧窗口' not in output
+    old.ports_hook = None
     joined = controlled(current, 1, 'tiktok', clock=virtual_clock)
     current.entered('tiktok', joined)
     assert old.opens == [{'id': WINDOW}] and old.closes == [WINDOW]
@@ -383,12 +402,24 @@ def test_uncertain_close_preserves_main_result_and_exposes_port_error(profile, v
     _, record = read_record(profile)
     assert record['phase'] == 'stopping'
 
+    code, output = finish_any(controlled(profile, 1, 'tiktok', clock=virtual_clock))
+    assert code == 1 and '旧窗口进程' in output and '已获回应' not in output
     profile.ports_hook = lambda request: request.send_error(404)
     profile.requests.clear()
     code, output = finish_any(controlled(profile, 1, 'tiktok', clock=virtual_clock))
     assert code == 1 and '调试端口' in output and 'HTTP 404' in output, output
     assert profile.requests.count(('ports', None)) == 1
     assert profile.opens == [{'id': WINDOW}] and profile.closes == [WINDOW]
+
+    # The admission deadline expires before the HTTP client's read timeout.
+    # stderr should still identify the precise pending operation.
+    release = threading.Event()
+    profile.ports_hook = lambda request: release.wait(20)
+    try:
+        code, output = finish_any(controlled(profile, 1, 'tiktok', clock=virtual_clock))
+        assert code == 1 and '查询比特浏览器窗口调试端口超时' in output
+    finally:
+        release.set()
 
 
 def test_close_ack_without_process_exit_reports_and_sends_no_open(profile, virtual_clock):

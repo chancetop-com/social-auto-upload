@@ -31,7 +31,7 @@ from utils.errors import (
     RateLimitedError,
     StartIncompleteError,
 )
-from utils.managed_browser import ProfileObservation, ProviderHints, ProviderMode
+from utils.managed_browser import ProfileObservation, ProviderHints, ProviderMode, report_read_operation
 
 PROBE_TIMEOUT_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 30
@@ -258,6 +258,7 @@ class BitBrowserClient:
         timeout: int = REQUEST_TIMEOUT_SECONDS,
     ) -> Any:
         """POST one business call and return ``data`` from a trusted envelope."""
+        report_read_operation(action)
         try:
             response = self._post(path, json=body, timeout=timeout)
         except _TIMEOUTS:
@@ -273,6 +274,7 @@ class BitBrowserClient:
     # ------------------------------------------------------------- Endpoints
     def probe(self) -> None:
         """Health-check the local API with a 3s timeout."""
+        report_read_operation(PROBE_ACTION)
         try:
             response = self._post(
                 "/health",
@@ -358,41 +360,24 @@ class BitBrowserClient:
         return f"{parts.scheme}://[{host}]:{port}"
 
     # --------------------------------------------------------- Window status
-    def _alive_ids(self, action: str, data: Any) -> set[str]:
-        if isinstance(data, list):
-            ids: set[str] = set()
-            for item in data:
-                if isinstance(item, bool) or not isinstance(item, (str, int)) or not str(item).strip():
-                    raise ProviderDiagnosticError(
-                        f"{action}失败：响应包含无法识别的窗口 ID。"
-                    )
-                ids.add(str(item))
-            return ids
+    def _is_alive(self, profile_id: str) -> bool:
+        data = self._post_json(ALIVE_ACTION, "/browser/pids/alive", {"ids": [profile_id]})
         if isinstance(data, dict):
             # The map form associates each live window ID with its PID.
-            # An invalid value cannot establish that the window has exited.
-            for window_id, pid in data.items():
-                if not isinstance(window_id, str) or not window_id.strip():
-                    raise ProviderDiagnosticError(f"{action}失败：响应包含无法识别的窗口 ID。")
+            for pid in data.values():
                 if not re.fullmatch(r"[1-9][0-9]*", str(pid)):
-                    raise ProviderDiagnosticError(f"{action}失败：响应包含无法识别的进程 ID。")
-            return set(data)
-        raise ProviderDiagnosticError(
-            f"{action}失败：响应缺少可识别的 data。"
-        )
-
-    def _alive(self, profile_id: str) -> set[str]:
-        data = self._post_json(
-            ALIVE_ACTION,
-            "/browser/pids/alive",
-            {"ids": [profile_id]},
-        )
-        return self._alive_ids(ALIVE_ACTION, data)
+                    raise ProviderDiagnosticError(f"{ALIVE_ACTION}失败：响应包含无法识别的进程 ID。")
+        elif not isinstance(data, list):
+            raise ProviderDiagnosticError(f"{ALIVE_ACTION}失败：响应缺少可识别的 data。")
+        if any(not isinstance(key, str) or not key.strip() for key in data):
+            raise ProviderDiagnosticError(f"{ALIVE_ACTION}失败：响应包含无法识别的窗口 ID。")
+        if data and profile_id not in data:
+            raise ProviderDiagnosticError(f"{ALIVE_ACTION}失败：响应的窗口 ID 与请求不符。")
+        return profile_id in data
 
     def status(self, profile_id: str) -> str:
         """Return a diagnostic window state; never used for control flow."""
-        alive = self._alive(profile_id)
-        return "running" if str(profile_id) in alive else "stopped"
+        return "running" if self._is_alive(profile_id) else "stopped"
 
     def _port_for(self, action: str, data: Any, profile_id: str) -> str:
         if not isinstance(data, dict):
@@ -408,6 +393,7 @@ class BitBrowserClient:
 
     def _cdp_endpoint(self, port: str) -> str:
         url = f"http://127.0.0.1:{port}/json/version"
+        report_read_operation(CDP_ACTION)
         try:
             response = self._get(url, timeout=CDP_TIMEOUT_SECONDS)
         except _TIMEOUTS:
@@ -476,8 +462,7 @@ class BitBrowserClient:
         port or CDP endpoint raises instead, so callers never mistake an
         unclear instance for an exited one.
         """
-        alive = self._alive(profile_id)
-        if str(profile_id) not in alive:
+        if not self._is_alive(profile_id):
             return ProfileObservation(False)
 
         data = self._post_json(
