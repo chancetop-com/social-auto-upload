@@ -1,6 +1,7 @@
 # 07: 用窗口 ID 完成第一次 TikTok 登录检查
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: None (can start immediately)
 
 ## What to build
@@ -17,3 +18,7 @@ Blocked by: None (can start immediately)
 - [ ] 用比特浏览器样例验证 POST、JSON、健康检查和窗口业务响应。用可识别的测试 Token 检查 stdout、stderr、日志、异常、结果及对象的可打印表示，均无凭据值。
 
 [比特浏览器托管模式规格](../spec.md) · [模式选择决定](02-activation.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_bitbrowser_client.py`, `tests/test_bitbrowser_cli.py`, `tests/test_bitbrowser_browser_session.py`。真机验收由 14 独立跟踪。

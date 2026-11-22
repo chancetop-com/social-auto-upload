@@ -1,6 +1,6 @@
 # 14: 在真实桌面客户端验收登录与并行草稿
 
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 08, 10, 11
 
 ## What to build
@@ -17,3 +17,7 @@ Blocked by: 08, 10, 11
 - [ ] 记录客户端及 Chromium 内核版本、命令与退出顺序、脱敏 API 计数、页面标记及最终窗口状态。实际遇到限流时记下 HTTP 状态和脱敏业务响应，每项凭对应证据标记真机通过，未观察的情况保留待验证。
 
 [比特浏览器托管模式规格](../spec.md) · [真机通过标准](05-acceptance.md)
+
+## Comments
+
+实现侧 07–13 已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。本单仍需真实比特浏览器客户端、Token 鉴权和已登录窗口；截至 2026-11-22 用户暂无账号，所有真机步骤保持待验证。取得环境后按本单与 spec 的「真机通过标准」逐项记录。

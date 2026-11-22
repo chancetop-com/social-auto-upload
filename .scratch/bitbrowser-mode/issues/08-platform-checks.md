@@ -1,6 +1,7 @@
 # 08: 七个平台都能检查登录态并报告失败原因
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 07
 
 ## What to build
@@ -16,3 +17,7 @@ Blocked by: 07
 - [ ] 按实际操作检验客户端能力。对运行中窗口的端口查询分别返回 HTTP 404 和超时，诊断可区分两者，均在开页前退出 `1` 并保留窗口。具备所需能力但缺少已打开窗口列表或 `opened` 筛选时仍可检查。无需探测版本或回退到旧接口。
 
 [比特浏览器托管模式规格](../spec.md) · [失败契约](04-failure-contract.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_bitbrowser_platform_checks.py`。真机验收由 14 独立跟踪。

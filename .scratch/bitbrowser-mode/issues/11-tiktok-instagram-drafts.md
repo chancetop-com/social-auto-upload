@@ -1,6 +1,7 @@
 # 11: TikTok 和 Instagram 准备视频与图文草稿
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 07
 
 ## What to build
@@ -14,3 +15,7 @@ Blocked by: 07
 - [ ] 四项均退出 `0`，受控页面观察到的最终提交次数各为零。核对各自的 stdout、stderr 与平台结果，TikTok 有发布前检查通过的摘要，Instagram 报告 `prepared`。
 
 [比特浏览器托管模式规格](../spec.md) · [验收决定](05-acceptance.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_bitbrowser_tiktok_instagram_drafts.py`。真机验收由 14 独立跟踪。

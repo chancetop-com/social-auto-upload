@@ -1,6 +1,7 @@
 # 12: 大陆版小红书和 Rednote 准备视频与图文草稿
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 07
 
 ## What to build
@@ -14,3 +15,7 @@ Blocked by: 07
 - [ ] 四项均按各平台现有格式报告准备结果，核对 stdout、stderr 和退出码 `0`。两种素材在两个创作中心的最终提交次数均为零。
 
 [比特浏览器托管模式规格](../spec.md) · [验收决定](05-acceptance.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_bitbrowser_xhs_rednote_drafts.py`。真机验收由 14 独立跟踪。

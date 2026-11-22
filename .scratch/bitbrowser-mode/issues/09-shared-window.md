@@ -1,6 +1,7 @@
 # 09: 两条命令共享同一窗口并分别退出
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 07
 
 ## What to build
@@ -17,3 +18,7 @@ Blocked by: 07
 - [ ] 末条命令直接按原窗口 ID 调用一次 `/browser/close`，包括桌面预开的窗口。验收记录指出这一步按 ID 归还窗口，旧命令存活期间桌面若重开同一 ID，末条旧命令可能关闭新窗口。
 
 [比特浏览器托管模式规格](../spec.md) · [共享窗口决定](03-shared-window.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_shared_bitbrowser_process.py`。真机验收由 14 独立跟踪。

@@ -1,6 +1,7 @@
 # 13: Facebook、Facebook Page 和 YouTube 完成受控发布
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 07
 
 ## What to build
@@ -15,3 +16,7 @@ Blocked by: 07
 - [ ] 在派发前及派发后分别模拟平台要求登录或人机验证，均退出 `10`。只有派发后的 `10` 在 stderr 多出独立一行 `publish_attempted=true`。另让退出清理失败，确认已取得的 `9` 或 `10` 及相应信号仍可被调用方读取。
 
 [比特浏览器托管模式规格](../spec.md) · [发布失败契约](04-failure-contract.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_bitbrowser_publishing.py`。真机验收由 14 独立跟踪。

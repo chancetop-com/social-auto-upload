@@ -14,6 +14,7 @@ Label: wayfinder:map
 - 共享行为以现行契约为准：同一窗口允许不同平台并行，同平台同时限一条命令。每条命令清理自己的页面，最后离开的命令关闭整个窗口，包括用户从桌面打开的窗口。[共享托管 Profile](../../docs/CLI.md#共享托管-profile)
 - 延用本地模式及两种现有托管模式的参数和退出码。调度方需要区分调用错误、登录失效、API 限流和发布结果未知。[CLI 契约](../../docs/CLI.md#托管浏览器模式通用) · [领域术语](../../GLOSSARY.md)
 - 后续会话使用 Wayfinder，依照[本地工单约定](../../docs/agents/issue-tracker.md#wayfinding-operations)选取可开始的决策。以当前 CLI 为准。
+- 实现交付：07–13 已合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`），离线契约测试通过。14 保持 `ready-for-human`，待真实比特浏览器客户端验收。
 
 ### 实现参照
 

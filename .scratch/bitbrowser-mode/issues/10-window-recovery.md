@@ -1,6 +1,7 @@
 # 10: 中断后恢复窗口并保留命令结果
 
 Status: ready-for-agent
+Resolution: completed
 Blocked by: 09
 
 ## What to build
@@ -16,3 +17,7 @@ Blocked by: 09
 - [ ] 注入页面清理失败、CDP 断开失败及关闭时的 HTTP 429。诊断为告警，保留主结果、退出码和发布信号。常规用户中断仍退出 `130` 并释放该命令的平台占用，同行可继续。
 
 [比特浏览器托管模式规格](../spec.md) · [恢复与归还规则](03-shared-window.md)
+
+## Comments
+
+已完成并合并到 `feat/bitbrowser-managed-mode`（最终集成 HEAD `6b5d490`）。离线契约证据：`tests/test_bitbrowser_crash_recovery.py`。真机验收由 14 独立跟踪。
