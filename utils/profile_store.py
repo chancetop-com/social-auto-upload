@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import errno
+from functools import cache
 import hashlib
 import json
 import math
@@ -9,9 +10,40 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 import tempfile
 from typing import BinaryIO
+from uuid import UUID
+
+
+@cache
+def system_boot_id() -> str | None:
+    """Return the OS boot UUID when available, shared by independent CLIs."""
+    try:
+        if sys.platform == "darwin":
+            raw = subprocess.check_output(
+                ["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"],
+                stderr=subprocess.DEVNULL, text=True, timeout=1,
+            )
+            boot = UUID(raw.strip())
+        elif sys.platform == "win32":
+            import ctypes
+
+            # SYSTEM_BOOT_ENVIRONMENT_INFORMATION starts with the boot GUID.
+            info = ctypes.create_string_buffer(32)
+            returned = ctypes.c_ulong()
+            query = ctypes.windll.ntdll.NtQuerySystemInformation
+            if query(90, info, ctypes.sizeof(info), ctypes.byref(returned)) != 0 or returned.value < 16:
+                return None
+            boot = UUID(bytes_le=info.raw[:16])
+        elif sys.platform.startswith("linux"):
+            boot = UUID(Path("/proc/sys/kernel/random/boot_id").read_text().strip())
+        else:
+            return None
+    except (OSError, ValueError, AttributeError, subprocess.SubprocessError):
+        return None
+    return boot.hex if boot.int else None
 
 
 def _private(path: Path, info: os.stat_result, *, directory: bool) -> None:
@@ -80,10 +112,14 @@ def _valid_record(record: object) -> bool:
     if not digest("resource"):
         return False
     phase = record.get("phase")
+    if "boot_id" in record and (
+        not isinstance(record["boot_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", record["boot_id"])
+    ):
+        return False
     if phase == "starting":
         return record.keys() == {"phase", "resource"}
     if phase == "stopped":
-        return record.keys() == {"phase", "resource", "cooldown_since"} and timestamp("cooldown_since")
+        return record.keys() <= {"phase", "resource", "cooldown_since", "boot_id"} and timestamp("cooldown_since")
     if "launched_at_ns" in record and (type(record["launched_at_ns"]) is not int or record["launched_at_ns"] <= 0):
         return False
     if "stop_requested_at" in record:

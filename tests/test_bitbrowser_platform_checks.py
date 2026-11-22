@@ -717,14 +717,20 @@ def test_unrecognized_business_envelope_is_exit_1(harness):
     assert harness.site.documents == []
 
 
-@pytest.mark.parametrize("data", ["nonsense", {WINDOW_ID: None}, {"wrapped": {WINDOW_ID: 123}}, [1234]])
-def test_unrecognized_query_data_is_exit_1(harness, data):
+@pytest.mark.parametrize(("data", "diagnostic"), [
+    ("nonsense", "data"),
+    ({WINDOW_ID: None}, "进程 ID"),
+    ({"wrapped": {WINDOW_ID: 123}}, "进程 ID"),
+    ([1234], "窗口 ID"),
+    ({"different-window": 123}, "与请求不符"),
+])
+def test_unrecognized_query_data_is_exit_1(harness, data, diagnostic):
     harness.api.queue("/browser/pids/alive", payload={"success": True, "data": data})
 
     result = harness.run("tiktok", timeout=20)
 
     assert result.code == 1, result.err
-    assert "可识别" in result.err
+    assert diagnostic in result.err
     assert harness.api.paths() == ["/health", "/browser/pids/alive"]
     assert harness.site.documents == []
 

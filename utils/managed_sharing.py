@@ -20,7 +20,7 @@ from utils.managed_browser import (
     ProviderHints, ProviderReadProgress, SharedBrowserProvider, current_read_progress,
 )
 from utils.managed_pages import managed_pages
-from utils.profile_store import ProfileStore
+from utils.profile_store import ProfileStore, system_boot_id
 
 LIFECYCLE_TIMEOUT = 10.0
 # An admitted member must outlast a contender's provider reads, CDP retries
@@ -192,6 +192,9 @@ class ManagedCommand:
 
     def record_stopped(self, resource, cooldown_since):
         record = {"phase": "stopped", "resource": resource, "cooldown_since": cooldown_since}
+        boot_id = system_boot_id()
+        if boot_id:
+            record["boot_id"] = boot_id
         self.store.write_record(record)
         return record
 
@@ -224,18 +227,25 @@ class ManagedCommand:
         peers = self.has_members()
         if peers and (not record or record["phase"] != "active"):
             raise RuntimeError("托管 Profile 的成员与共享记录不一致。")
-        if record and record["phase"] in {"stopping", "stop_acknowledged", "stopped"}:
-            # Monotonic time cannot go backwards within a boot. A timestamp
-            # beyond current uptime proves the old process cannot still exist.
-            since = record.get("cooldown_since", record.get("stop_acknowledged_at",
-                                                             record.get("stop_requested_at")))
+        stop_timestamp = {
+            "stopping": "stop_requested_at",
+            "stop_acknowledged": "stop_acknowledged_at",
+            "stopped": "cooldown_since",
+        }.get(record["phase"]) if record else None
+        if stop_timestamp:
+            # Older records lack a boot UUID. Monotonic time moving backwards
+            # is still positive evidence that their process is gone.
+            since = record.get(stop_timestamp, record.get("stop_requested_at"))
             now = monotonic()
-            if since is not None and since > now:
+            saved_boot = record.get("boot_id")
+            current_boot = system_boot_id() if saved_boot else None
+            changed_boot = current_boot is not None and current_boot != saved_boot
+            if changed_boot or (since is not None and since > now):
                 record = self.record_stopped(record["resource"], now)
         if record is not None and record["phase"] != "stopped" and record.get("resource") != resource:
             raise RuntimeError(f"{self.mode} Profile 的服务或文件夹与共享记录不符。")
 
-        if record and record["phase"] in {"stopping", "stop_acknowledged", "stopped"}:
+        if stop_timestamp:
             state = await self.observe_after_stop(provider, record, deadline)
         else:
             await _provider_call(provider, "probe")
@@ -373,6 +383,9 @@ class ManagedCommand:
         stopping = {**record, "phase": "stopping"}
         if settle > 0:
             stopping["stop_requested_at"] = monotonic()
+            boot_id = system_boot_id()
+            if boot_id:
+                stopping["boot_id"] = boot_id
         self.store.write_record(stopping)
         try:
             _provider_request(self.provider, "stop")

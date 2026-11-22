@@ -364,19 +364,19 @@ def test_close_ack_requires_the_settle_interval_and_confirmed_process_exit(
     assert profile.closes == [WINDOW, WINDOW]
 
 
-@pytest.mark.parametrize("reboot", [False, True], ids=["confirmed-exit", "prior-boot-ack"])
-def test_desktop_reopen_after_confirmed_exit_joins_existing_window(create_profile, tmp_path, virtual_clock, reboot):
+@pytest.mark.parametrize("new_uptime", [None, 1.0, 2000.0], ids=["confirmed-exit", "lower-uptime", "higher-uptime"])
+def test_desktop_reopen_after_confirmed_exit_joins_existing_window(create_profile, tmp_path, virtual_clock, new_uptime):
     old = create_profile()
-    if reboot:
+    if new_uptime is not None:
         old.stop_hook = lambda request, target: request.respond_json({})
-    first = controlled(old, 0, 'instagram', clock=virtual_clock)
+    first = controlled(old, 0, 'instagram', clock=virtual_clock, env={'SAU_TEST_BOOT_ID': 'a' * 32})
     old.entered('instagram', first)
     old.finish('instagram', first)
-    if reboot:
+    if new_uptime is not None:
         assert old.active and read_record(old)[1]['phase'] == 'stop_acknowledged'
         old.close_browser()
         old.active = False
-        advance_clock_to(virtual_clock, 1.0)
+        advance_clock_to(virtual_clock, new_uptime)
     assert not old.active
 
     current = create_profile(tmp_path / 'desktop')
@@ -384,10 +384,11 @@ def test_desktop_reopen_after_confirmed_exit_joins_existing_window(create_profil
     current.active = True
     old.profiles[WINDOW] = current
     old.ports_hook = lambda request: request.respond_json({})
-    code, output = finish_any(controlled(current, 1, 'tiktok', clock=virtual_clock))
+    env = {'SAU_TEST_BOOT_ID': ('b' if new_uptime is not None else 'a') * 32}
+    code, output = finish_any(controlled(current, 1, 'tiktok', clock=virtual_clock, env=env))
     assert code == 1 and '未包含该窗口的调试端口' in output and '旧窗口' not in output
     old.ports_hook = None
-    joined = controlled(current, 1, 'tiktok', clock=virtual_clock)
+    joined = controlled(current, 1, 'tiktok', clock=virtual_clock, env=env)
     current.entered('tiktok', joined)
     assert old.opens == [{'id': WINDOW}] and old.closes == [WINDOW]
     current.finish('tiktok', joined)

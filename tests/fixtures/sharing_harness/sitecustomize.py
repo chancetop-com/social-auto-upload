@@ -42,6 +42,11 @@ if _clock:
     managed_sharing.monotonic = monotonic
     managed_sharing.sleep = sleep
 
+if "SAU_TEST_BOOT_ID" in os.environ:
+    from utils import managed_sharing
+
+    managed_sharing.system_boot_id = lambda: os.environ["SAU_TEST_BOOT_ID"]
+
 if os.environ.get("SAU_TEST_PAGE_CLOSE_FAILURE"):
     from patchright.async_api import Page
 
