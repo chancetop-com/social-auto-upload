@@ -42,6 +42,7 @@ CONNECT_BACKOFF_SECONDS = (2, 4)
 _PROVIDER_LABELS = {
     "multilogin": "Multilogin",
     "adspower": "AdsPower",
+    "bitbrowser": "比特浏览器",
 }
 
 _CONNECTION_HINTS = {
@@ -52,6 +53,10 @@ _CONNECTION_HINTS = {
     "adspower": (
         "请确认 AdsPower 桌面应用与 CLI 运行在同一台机器；"
         "AdsPower 不支持容器化或跨机部署。"
+    ),
+    "bitbrowser": (
+        "请确认比特浏览器桌面应用与 CLI 运行在同一台机器，"
+        "Local API 已开启，且 BITBROWSER_API_BASE 与客户端地址一致。"
     ),
 }
 
@@ -162,7 +167,7 @@ def _managed_extras(
 class BrowserSession:
     browser: "Browser"
     context: "BrowserContext"
-    mode: Literal["local", "multilogin", "adspower"]
+    mode: Literal["local", "multilogin", "adspower", "bitbrowser"]
 
     @property
     def managed(self) -> bool:

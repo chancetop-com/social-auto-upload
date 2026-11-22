@@ -8,19 +8,19 @@
 
 ## 托管浏览器模式（managed browser mode）
 
-由环境变量激活、通过桌面应用提供的 Profile 启动并接管浏览器的可选模式；本地模式的对立面。它由 `Managed browser provider` 抽象出两个子模式：`Multilogin X 模式（MLX）` 与 `AdsPower 模式`。两种子模式共享参数矩阵、退出码、登录失效契约与平台覆盖。
+由环境变量激活、通过桌面应用提供的 Profile 启动并接管浏览器的可选模式；本地模式的对立面。它由 `Managed browser provider` 抽象出三个子模式：`Multilogin X 模式（MLX）`、`AdsPower 模式` 与 `比特浏览器模式`。三种子模式共享参数矩阵、退出码、登录失效契约与平台覆盖。
 
 ## Managed browser provider
 
-把一个 Provider 的 Profile 身份与 HTTP client 原语组合起来的抽象。Multilogin X 与 AdsPower 各有一份实现；上传器只依赖 `BrowserSession`，不直接依赖具体 provider。
+把一个 Provider 的 Profile 身份与 HTTP client 原语组合起来的抽象。Multilogin X、AdsPower 与比特浏览器各有一份实现；上传器只依赖 `BrowserSession`，不直接依赖具体 provider。
 
 ## Profile
 
-浏览器身份容器：独立的 Cookie、localStorage、指纹，以及可选的代理配置。一个 Profile 可同时保存多个平台的登录态。Profile 是托管模式下 Cookie 的唯一真相源。定位方式因 provider 而异：MLX 用 `folder_id + profile_id`，AdsPower 用 `user_id`（V2 请求体字段为 `profile_id`）。
+浏览器身份容器：独立的 Cookie、localStorage、指纹，以及可选的代理配置。一个 Profile 可同时保存多个平台的登录态。Profile 是托管模式下 Cookie 的唯一真相源。定位方式因 provider 而异：MLX 用 `folder_id + profile_id`，AdsPower 用 `user_id`（V2 请求体字段为 `profile_id`），比特浏览器用桌面端复制的字符串窗口 ID。
 
 ## 窗口 ID（比特浏览器）
 
-比特浏览器为一个 Profile 分配的字符串标识，在桌面端可通过“复制 ID”取得。窗口列表另有用于展示的序号（`seq`）。
+比特浏览器为一个 Profile 分配的字符串标识，在桌面端可通过“复制 ID”取得。CLI 把它作为 `--profile-id` 传给 Local API 的 `id`；窗口列表中的展示序号（`seq`）和窗口名称不参与查找。
 
 ## 本地模式（Local 模式）
 
@@ -100,7 +100,7 @@
 
 ## 请求过于频繁（429）
 
-桌面应用或 Local API 返回 HTTP 429 的状态。托管模式下以退出码 `11` 表达，CLI 不等待、不自动重试；MLX 与 AdsPower 共用该契约，MLX 的 429 已由退出码 `1` 改为 `11`，调度层应改为退避重试。
+桌面应用或 Local API 返回 HTTP 429 的状态。托管模式下以退出码 `11` 表达，CLI 不等待、不自动重试；MLX、AdsPower 与比特浏览器共用该契约，MLX 的 429 已由退出码 `1` 改为 `11`，调度层应改为退避重试。HTTP 200 的业务失败（AdsPower `code != 0`、比特浏览器 `success=false`）不触发 `11`。
 
 ## 账号别名（Account label）
 
@@ -145,6 +145,22 @@ AdsPower 桌面应用在本机暴露的 HTTP 接口，默认地址为 `http://12
 ## user_id（AdsPower Profile 标识）
 
 AdsPower 的 Profile 标识。CLI 通过 `--profile-id` 传入；AdsPower V2 请求体字段名为 `profile_id`。本项目中不存在 `--user-id` 参数。
+
+## 比特浏览器
+
+多账号隔离的浏览器 Profile 管理产品。与 MLX / AdsPower 一样，它只提供浏览器身份、Cookie 存储与代理出口，不承担上传业务逻辑。
+
+## 比特浏览器 Local API
+
+比特浏览器桌面应用在本机暴露的 HTTP 接口，默认地址为 `http://127.0.0.1:54345`。请求使用 POST 与 JSON；Token 通过 `x-api-key` 请求头提交。业务响应为 `{"success": bool, "data": ..., "msg": ...}`。首版只使用已开启 Token 鉴权的配置，不做版本探测或旧接口回退；地址可用 `BITBROWSER_API_BASE` 覆盖。
+
+## API Key（`BITBROWSER_API_KEY`）
+
+比特浏览器客户端生成的 Local API Token，通过环境变量 `BITBROWSER_API_KEY` 提供；请求以 `x-api-key` 发送。它不是比特浏览器登录密码，也不会写入命令行、日志、异常文本或 `repr`。客户端重置 Token 后旧值立即失效，需要停服务、替换环境变量并重启。
+
+## 比特浏览器模式
+
+由环境变量 `BITBROWSER_API_KEY` 激活的托管模式子模式：CLI 通过比特浏览器 Local API 按复制的窗口 ID 打开或加入窗口，经浏览器级 CDP WebSocket 使用现有上下文和登录态；最后一条托管命令离开时按同一 ID 关闭整个窗口，包括桌面原有标签页。
 
 ## 设置后回读（set-then-readback）
 

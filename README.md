@@ -79,13 +79,13 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 小红书（浏览器版） | ✅ | ✅ | ✅ | ✅ | `xiaohongshu` | ✅ | 视频与图文发布 |
 | Rednote（国际版） | ✅ | 实验性 | 实验性 | 实验性 | `rednote` | ✅ | [本地登录及发布前准备已验收](./docs/rednote.md)，最终提交尚未实测 |
-| TikTok | ✅ | ✅ | ✅ | ✅ | `tiktok` | ✅ | 视频与图文发布；支持本地模式与托管浏览器模式（MLX / AdsPower）；托管下 Profile 界面需 English (US) |
+| TikTok | ✅ | ✅ | ✅ | ✅ | `tiktok` | ✅ | 视频与图文发布；支持本地模式与托管浏览器模式（MLX / AdsPower / 比特浏览器）；托管下 Profile 界面需 English (US) |
 | YouTube | ✅ | ✅ | - | - | `youtube` | ✅ | 视频发布 |
 | Facebook | ✅ | ✅ | ✅ | - | `facebook` | ✅ | 支持作品查询、移至回收站及永久删除 |
 | Facebook Page | ✅ | ✅ | ✅ | ✅ | `facebook-page` | ✅ | 支持视频与图文定时发布、查询和取消定时 |
 | Instagram | ✅ | ✅ | ✅ | - | `instagram` | ✅ | 支持 Reels、单图与轮播 |
 
-`实验性` 表示最终提交尚未通过真实账号验收。各平台的 `check`、`upload-video` 及表中支持的 `upload-note` 均可使用本地、AdsPower 或 Multilogin X 模式。
+`实验性` 表示最终提交尚未通过真实账号验收。各平台的 `check`、`upload-video` 及表中支持的 `upload-note` 均可使用本地、AdsPower、Multilogin X 或比特浏览器模式。
 
 
 ## 💾安装指南
@@ -190,11 +190,11 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 
 #### 托管浏览器模式（可选）
 
-七个平台的登录检查和发布都可以使用已登录的托管 Profile。设置 `MLX_API_TOKEN`（Multilogin X）或 `ADSPOWER_API_KEY`（AdsPower），两个凭据同时设置会退出 `1`。
+七个平台的登录检查和发布都可以使用已登录的托管 Profile。设置 `MLX_API_TOKEN`（Multilogin X）、`ADSPOWER_API_KEY`（AdsPower）或 `BITBROWSER_API_KEY`（比特浏览器）；任意两种或三种凭据同时设置会退出 `1`。
 
 同机、同一操作系统用户的兼容 CLI 默认共享同一托管 Profile。不同平台可以同时执行，各自在新标签页工作。同一平台的检查和发布合计限一条命令，冲突者立即退出 `1`。**最后一条已加入的命令离开时会关闭整个 Profile，包括用户从桌面打开的标签页。**
 
-将下例中的 `PROFILE_ID`、`FOLDER_ID` 换成桌面应用中的标识。
+将下例中的 `PROFILE_ID`、`FOLDER_ID`、`WINDOW_ID` 换成桌面应用中的标识。
 
 ##### Multilogin X（MLX）
 
@@ -230,14 +230,33 @@ sau xiaohongshu upload-video --headed --profile-id "PROFILE_ID" \
 
 AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Profile；`--profile-id` 映射 AdsPower 的 `user_id`，`--folder-id` 忽略。只支持 V2 API，客户端请升级到最新 patch。
 
+##### 比特浏览器
+
+```bash
+export BITBROWSER_API_KEY="$KEY"
+
+# check：0=已登录，10=需要人工登录
+sau xiaohongshu check --profile-id "$WINDOW_ID"
+
+# 上传：--folder-id 可省略；传了也会静默忽略
+sau xiaohongshu upload-video --profile-id "$WINDOW_ID" \
+  --file videos/demo.mp4 --title "示例标题" --desc "示例简介"
+
+# 需要人工处理验证码时使用有头模式
+sau xiaohongshu upload-video --headed --profile-id "$WINDOW_ID" \
+  --file videos/demo.mp4 --title "示例标题"
+```
+
+比特浏览器通过 Local API（默认 `http://127.0.0.1:54345`）打开或加入窗口；`--profile-id` 是桌面端“复制 ID”得到的字符串窗口 ID，`--folder-id` 忽略。请求使用 `x-api-key` 与 `success` 信封；窗口已开时按 ID 核对进程、查询调试端口并读取 CDP 版本后加入。Local API 需开启 Token 鉴权，客户端需支持按窗口 ID 查询进程与端口。截至 2026-11-22 暂无比特浏览器账号，真实客户端验证待执行；当前交付以离线契约通过为准。
+
 共同说明：
 
 - 托管检查和发布忽略 `--account`，使用 `--profile-id` 选择 Profile。本地浏览器动作使用 `--account` 定位专用 Profile。
 - 托管模式下 `login` 一律拒绝；请先在对应桌面应用中登录 Profile，并处理验证码/2FA。托管模式不提供 CLI 登录链路。
 - 退出码：`0` 成功、`1` 运行失败、`2` 用法错误、`9` 发布结果未知、`10` 需要登录、`11` 请求过于频繁（429）、`130` 用户中断。**MLX 的 429 已由 `1` 改为 `11`**，调度层需改为退避重试。
 - 收到 `9`（发布结果未知）时**禁止自动重发**：发布点击已发出但未确认成功，先到平台后台（如 TikTok Studio → Content/Posts）按标题、素材与发布时间核对；已存在不要重发，不存在才可人工重试。
-- 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核。两者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
-- 不支持：Docker / 跨机 / Linux 无桌面、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile。
+- 部署前提：MLX 需 CLI 与 Multilogin 桌面应用同机、Launcher 可用、Profile 使用 Mimic 内核；AdsPower 需付费版、桌面应用与 CLI 同机、Local API 已开启、Profile 为 Chromium 内核；比特浏览器需桌面应用与 CLI 同机、Local API 与 Token 鉴权已开启、客户端支持按窗口 ID 查询进程与端口、窗口为 Chromium 内核。三者都要求 Profile 已人工登录且无待处理验证码/2FA，TikTok 的 Profile 界面须为 English (US)。
+- 不支持：Docker / 跨机 / Linux 无桌面、通过 CLI 在托管模式登录；AdsPower 还不支持无 key 安装、V1 API、Firefox Profile；比特浏览器还不支持关闭 Token 鉴权的配置、按 `seq` / 窗口名称查找，以及缺少进程/端口查询能力的旧客户端。
 - TikTok 本地模式已使用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>` 持久化资料；默认系统 Chrome、有头（已有 `LOCAL_CHROME_HEADLESS=True` 仍生效）。先运行 `sau tiktok login --account <name> --headed`，人工登录后回终端按 Enter；`check` 与视频/图文复用同一 Profile。可显式 `--local-browser chromium` 或配置 `LOCAL_CHROME_PATH`；只要求选定来源，失败不回退。旧 Cookie JSON 不读写、不自动删除，不再修改语言或固定 viewport；明确未登录退出 `10`，故障退出 `1`。重建使用 `reset-profile --account <name> --browser-kind chrome|chromium`。两类浏览器隔离与四平台真实 no-publish 的证据和边界见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 - 小红书的 login/check/视频/图文及直接 uploader 也已使用 `browser_profiles/<chrome|chromium>/xiaohongshu/<原始别名>`，采用同一来源/headless 优先级，保留扫码二维码和当前语言；只有 login 引导登录，旧 JSON 不再读写。`--no-publish` 会上传素材、编辑并等到 ARM 就绪再停止，可能留下草稿；实际证据见[最终验收记录](./.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。
 - 与旧版 CLI 或其他工具混用时，调用方需串行使用同一托管 Profile；收到 `10` 安排人工登录；收到 `11` 退避重试；Stop 失败但上传返回 `0` 时清理残留 Profile；跨机调度应远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
@@ -246,7 +265,7 @@ AdsPower 通过 Local API（默认 `http://127.0.0.1:50325`）启动 Chromium Pr
 - 托管模式只验证“已登录”，Profile 即身份；各平台本地作品所需的身份比对在托管发布模式下不执行，账号错配风险由调度侧承担。
 - 已知限制：命令级登录检测已是 provider-aware 文案；但部分平台在上传过程中遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留。
 
-完整参数、平台支持范围、部署前提与安全说明见 [CLI 使用说明的托管浏览器模式](./docs/CLI.md#托管浏览器模式通用)；MLX 与 AdsPower 分别见 [Multilogin X 模式](./docs/CLI.md#multilogin-x-模式) 和 [AdsPower 模式](./docs/CLI.md#adspower-模式)。
+完整参数、平台支持范围、部署前提与安全说明见 [CLI 使用说明的托管浏览器模式](./docs/CLI.md#托管浏览器模式通用)；MLX、AdsPower 与比特浏览器分别见 [Multilogin X 模式](./docs/CLI.md#multilogin-x-模式)、[AdsPower 模式](./docs/CLI.md#adspower-模式) 和 [比特浏览器模式](./docs/CLI.md#比特浏览器模式)。
 
 #### 视频
 

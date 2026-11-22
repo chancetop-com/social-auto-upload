@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
-ProviderMode = Literal["multilogin", "adspower"]
+ProviderMode = Literal["multilogin", "adspower", "bitbrowser"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,13 @@ from typing import Sequence
 from sau_commands import article, media
 from sau_commands.publish_media import publish_media
 from utils.base_social_media import get_supported_social_media
-from sau_commands.browser import DUAL_CREDENTIALS_MESSAGE, active_mode, credentials_conflict, resolve_multilogin_target
+from sau_commands.browser import (
+    DUAL_CREDENTIALS_MESSAGE,
+    active_mode,
+    credentials_conflict,
+    credentials_conflict_message,
+    resolve_multilogin_target,
+)
 from utils.managed_sharing import managed_command
 from utils.errors import (
     LoginRequiredError,
@@ -77,7 +83,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         # ``--help`` / unknown subcommands keep their argparse semantics, while
         # a dual-credential setup wins over command-level rejections.
         if args.platform != "media" and credentials_conflict():
-            raise RuntimeError(DUAL_CREDENTIALS_MESSAGE)
+            raise RuntimeError(
+                credentials_conflict_message() or DUAL_CREDENTIALS_MESSAGE
+            )
         return asyncio.run(dispatch(args))
     except KeyboardInterrupt:
         if args.action in {"predownload", "upload-video", "upload-note"}:
