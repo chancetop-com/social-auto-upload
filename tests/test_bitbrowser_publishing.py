@@ -65,8 +65,15 @@ def wait_until(check, child, timeout=20, message="CLI did not reach its offline 
         time.sleep(.025)
 
 
-class BitBrowserProfile(OfflineProfile):
-    """A disposable Chromium window exposed through a BitBrowser Local API."""
+class PublishingBitBrowserProfile(OfflineProfile):
+    """A disposable Chromium window exposed through a BitBrowser Local API.
+
+    The shared-process harness in ``test_shared_bitbrowser_process`` deliberately
+    terminates Chromium on close.  Publishing also needs separate stdout/stderr
+    streams, an injectable failed close, and a window that survives the command
+    long enough to observe which page it owned.  This subclass therefore keeps
+    its own BitBrowser-shaped provider instead of changing that harness.
+    """
 
     default_profile_id = WINDOW
 
@@ -173,7 +180,7 @@ def publishing_profile(tmp_path, installations):
         facebook = FacebookSite()
         studio = Studio("success")
         studio_site = studio.site()
-        profile = BitBrowserProfile(
+        profile = PublishingBitBrowserProfile(
             tmp_path,
             stack,
             installations,
