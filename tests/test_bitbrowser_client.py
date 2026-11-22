@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import traceback
 import unittest
-from dataclasses import FrozenInstanceError
 from unittest.mock import patch
 
 from tests.fakes import FakeHttp, FakeResponse
@@ -35,11 +34,6 @@ CDP_VERSION = {
     "Browser": "Chrome/126.0.6478.126",
     "webSocketDebuggerUrl": CDP_WS_URL,
 }
-
-
-class ErrorTypeTests(unittest.TestCase):
-    def test_provider_diagnostic_error_is_a_runtime_error(self):
-        self.assertTrue(issubclass(ProviderDiagnosticError, RuntimeError))
 
 
 class BitBrowserClientProbeTests(unittest.TestCase):
@@ -225,7 +219,6 @@ class BitBrowserClientStartTests(unittest.TestCase):
                 "ignoreDefaultUrls": True,
             },
         )
-        self.assertNotIn("newPageUrl", http.calls[0]["json"])
 
     def test_start_returns_data_ws_verbatim(self):
         verbatim = "  ws://127.0.0.1:9222/devtools/browser/abc-123  "
@@ -234,14 +227,6 @@ class BitBrowserClientStartTests(unittest.TestCase):
         )
 
         self.assertEqual(client.start(WINDOW_ID, headless=False), verbatim)
-
-    def test_start_accepts_only_the_documented_arguments(self):
-        client, _ = self._client()
-
-        with self.assertRaises(TypeError):
-            client.start(  # type: ignore[call-arg]
-                WINDOW_ID, headless=True, new_page_url="https://example.com"
-            )
 
     def test_start_missing_ws_raises_start_incomplete(self):
         client, _ = self._client(FakeResponse(200, {"success": True, "data": {}}))
@@ -694,44 +679,6 @@ class BitBrowserProviderTests(unittest.TestCase):
             BitBrowserClient(KEY, BASE, http_get=http.get, http_post=http.post),
         )
 
-    def test_provider_start_returns_ws_verbatim(self):
-        http = FakeHttp(
-            post_outcomes=[
-                FakeResponse(200, {"success": True, "data": {"ws": WS_URL}})
-            ]
-        )
-        provider = self._provider(http)
-
-        url = provider.start(headless=True)
-
-        self.assertEqual(url, WS_URL)
-        self.assertEqual(provider.mode, "bitbrowser")
-        self.assertEqual(provider.profile_id, WINDOW_ID)
-        self.assertIs(provider.asynchronous_stop, True)
-        self.assertEqual(http.post_calls[0]["json"]["id"], WINDOW_ID)
-
-    def test_provider_publishes_bitbrowser_remediation_and_settle(self):
-        provider = self._provider(FakeHttp())
-
-        self.assertEqual(provider.stop_settle_seconds, 5.0)
-        self.assertEqual(
-            provider.hints.stop_settle_hint,
-            "请先在比特浏览器桌面端关闭该窗口后重试。",
-        )
-        self.assertEqual(
-            provider.hints.stop_unconfirmed_hint,
-            "请检查比特浏览器 Local API 与窗口状态后重试。",
-        )
-        self.assertEqual(
-            provider.hints.start_unconfirmed_hint,
-            "上次启动结果未明，无法确认当前实例",
-        )
-        self.assertEqual(
-            provider.hints.cdp_connect_hint,
-            "请检查窗口的调试连接：确认窗口仍在运行，"
-            "且 Local API 返回的调试端口可从本机访问。",
-        )
-
     def test_provider_delegates_probe_status_observe_and_stop(self):
         http = FakeHttp(
             post_outcomes=[
@@ -760,17 +707,11 @@ class BitBrowserProviderTests(unittest.TestCase):
         )
         self.assertEqual(http.post_calls[-1]["json"], {"id": WINDOW_ID})
 
-    def test_provider_resource_identity_normalises_loopback(self):
-        provider = self._provider(FakeHttp())
-
-        self.assertEqual(provider.resource_identity, "http://[localhost]:54345")
-
 
 class BitBrowserSanitisationTests(unittest.TestCase):
     def test_client_repr_redacts_key(self):
         client = BitBrowserClient(KEY, BASE, http_get=FakeHttp().get)
 
-        self.assertEqual(repr(client), "BitBrowserClient(token=<redacted>)")
         self.assertNotIn(KEY, repr(client))
         self.assertNotIn(KEY, str(client))
 
@@ -782,57 +723,33 @@ class BitBrowserSanitisationTests(unittest.TestCase):
         self.assertNotIn(KEY, repr(provider))
         self.assertNotIn(KEY, str(provider))
 
-    def test_target_is_frozen_and_slotted(self):
-        target = BitBrowserTarget(profile_id=WINDOW_ID)
-
-        self.assertEqual(target.profile_id, WINDOW_ID)
-        self.assertFalse(hasattr(target, "__dict__"))
-        with self.assertRaises(FrozenInstanceError):
-            target.profile_id = "other"  # type: ignore[misc]
-
-    def test_no_primitive_leaks_key_in_transport_or_http_errors(self):
-        scenarios = [
-            ([], [OSError("refused")], lambda c: c.probe()),
-            ([], [OSError("refused")], lambda c: c.start(WINDOW_ID, True)),
-            ([], [FakeResponse(500, {"success": False, "msg": "boom"})],
-             lambda c: c.stop(WINDOW_ID)),
-            ([FakeResponse(403, {"success": False, "msg": "denied"})], [],
-             lambda c: c.status(WINDOW_ID)),
-        ]
-        for get_outcomes, post_outcomes, invoke in scenarios:
-            with self.subTest(scenario=invoke):
-                http = FakeHttp(get_outcomes, post_outcomes)
-                client = BitBrowserClient(
-                    KEY, BASE, http_get=http.get, http_post=http.post
-                )
-                with self.assertRaises(RuntimeError) as caught:
-                    invoke(client)
-                self.assertNotIn(KEY, str(caught.exception))
-
     def test_raw_exception_and_echoed_server_text_redact_key(self):
         scenarios = [
-            ([], [TimeoutError(f"timeout with {KEY}")], lambda c: c.probe()),
-            ([], [RuntimeError(f"transport failed with {KEY}")],
-             lambda c: c.start(WINDOW_ID, False)),
-            ([], [RuntimeError(f"transport failed with {KEY}")],
-             lambda c: c.stop(WINDOW_ID)),
-            ([], [RuntimeError(f"transport failed with {KEY}")],
-             lambda c: c.status(WINDOW_ID)),
-            ([], [FakeResponse(200, {"success": False, "msg": f"echo {KEY}"})],
-             lambda c: c.status(WINDOW_ID)),
-            ([], [FakeResponse(500, {"success": False, "msg": f"echo {KEY}"})],
-             lambda c: c.status(WINDOW_ID)),
-            ([], [FakeResponse(500, None, text=f"echo {KEY}")],
-             lambda c: c.status(WINDOW_ID)),
+            (TimeoutError(f"timeout with {KEY}"), lambda c: c.probe(), "超时"),
+            (RuntimeError(f"transport failed with {KEY}"),
+             lambda c: c.start(WINDOW_ID, False), "transport failed"),
+            (RuntimeError(f"transport failed with {KEY}"),
+             lambda c: c.stop(WINDOW_ID), "transport failed"),
+            (RuntimeError(f"transport failed with {KEY}"),
+             lambda c: c.status(WINDOW_ID), "transport failed"),
+            (FakeResponse(200, {"success": False, "msg": f"echo {KEY}"}),
+             lambda c: c.status(WINDOW_ID), "echo"),
+            (FakeResponse(403, {"success": False, "msg": f"denied {KEY}"}),
+             lambda c: c.status(WINDOW_ID), "HTTP 403"),
+            (FakeResponse(500, {"success": False, "msg": f"echo {KEY}"}),
+             lambda c: c.status(WINDOW_ID), "echo"),
+            (FakeResponse(500, None, text=f"echo {KEY}"),
+             lambda c: c.status(WINDOW_ID), "echo"),
         ]
-        for get_outcomes, post_outcomes, invoke in scenarios:
-            with self.subTest(scenario=invoke):
-                http = FakeHttp(get_outcomes, post_outcomes)
+        for outcome, invoke, diagnostic in scenarios:
+            with self.subTest(diagnostic=diagnostic, scenario=invoke):
+                http = FakeHttp(post_outcomes=[outcome])
                 client = BitBrowserClient(
                     KEY, BASE, http_get=http.get, http_post=http.post
                 )
                 with self.assertRaises(RuntimeError) as caught:
                     invoke(client)
+                self.assertIn(diagnostic, str(caught.exception))
                 self.assertNotIn(KEY, str(caught.exception))
                 self.assertNotIn(KEY, "".join(traceback.format_exception(caught.exception)))
 

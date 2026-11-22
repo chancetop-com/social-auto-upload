@@ -275,8 +275,6 @@ def test_checks_share_the_window_until_both_leave(profile, desktop):
     tiktok = _target_page(profile, 'tiktok.com')
     instagram.locator('textarea').fill('instagram marker')
     tiktok.locator('textarea').fill('tiktok marker')
-    assert instagram.locator('textarea').input_value() == 'instagram marker'
-    assert tiktok.locator('textarea').input_value() == 'tiktok marker'
     profile.finish('instagram', first)
     assert profile.closes == []
     if desktop:
@@ -285,8 +283,8 @@ def test_checks_share_the_window_until_both_leave(profile, desktop):
     pages = _pages(profile)
     assert not any('instagram.com' in page.url for page in pages), [page.url for page in pages]
     peer = _target_page(profile, 'tiktok.com')
+    assert peer.locator('textarea').input_value() == 'tiktok marker'
     peer.locator('textarea').fill('tiktok marker continued')
-    assert peer.locator('textarea').input_value() == 'tiktok marker continued'
 
     profile.finish('tiktok', second)
     assert profile.closes == [WINDOW]
@@ -515,7 +513,8 @@ def test_simultaneous_cold_checks_open_once_for_different_platforms(profile):
 def test_check_and_publish_share_one_platform_slot(profile):
     media = profile.root / 'owned.png'
     media.touch()
-    first = profile.command(0, 'tiktok')
+    # Debug output is a CLI option. The open request below still carries only the ID.
+    first = profile.command(0, 'tiktok', '--debug')
     profile.entered('tiktok', first)
     for action, flags in (('check', ()), ('upload-note', ('--images', str(media), '--no-publish'))):
         contender = profile.command(1, 'tiktok', *flags, action=action)

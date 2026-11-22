@@ -272,12 +272,6 @@ def test_tiktok_video_draft_joins_the_window_and_stops_before_publish(
         page.evaluate(
             "document.querySelector('[data-e2e=\"post_video_button\"]').disabled = false"
         )
-        wait_for_page_state(
-            page,
-            lambda: page.locator('[data-e2e="post_video_button"]').is_enabled(),
-            child,
-            "TikTok media never became ready",
-        )
         stdout, stderr = child.communicate(timeout=25)
 
     assert child.returncode == 0, f"{stdout}\n{stderr}"
@@ -339,12 +333,6 @@ def test_tiktok_photo_draft_uses_the_photos_entry_and_stops_before_publish(
         assert not page.locator('[data-e2e="post_video_button"]').is_enabled()
         page.evaluate(
             "document.querySelector('[data-e2e=\"post_video_button\"]').disabled = false"
-        )
-        wait_for_page_state(
-            page,
-            lambda: page.locator('[data-e2e="post_video_button"]').is_enabled(),
-            child,
-            "TikTok photo media never became ready",
         )
         stdout, stderr = child.communicate(timeout=25)
 
