@@ -362,6 +362,7 @@ def test_close_ack_without_process_exit_reports_and_sends_no_open(profile, virtu
     successor = controlled(profile, 1, 'tiktok', clock=virtual_clock)
     code, output = finish_any(successor)
     assert code == 1 and '旧窗口进程' in output and '超时' in output, output
+    assert '请先在比特浏览器桌面端关闭该窗口后重试。' in output, output
     assert 'offline-key-' not in output
     assert urlsplit(profile.endpoint).netloc not in output
     assert profile.opens == [{'id': WINDOW}]

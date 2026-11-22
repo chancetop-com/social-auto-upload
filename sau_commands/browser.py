@@ -33,6 +33,8 @@ BITBROWSER_BASE_ENV = "BITBROWSER_API_BASE"
 DEFAULT_ADSPOWER_BASE = "http://127.0.0.1:50325"
 DEFAULT_BITBROWSER_BASE = "http://127.0.0.1:54345"
 
+# Historical MLX + AdsPower phrase, byte-identical to the generic two-variable
+# message below.  Kept for callers that name it directly.
 DUAL_CREDENTIALS_MESSAGE = (
     "MLX_API_TOKEN 与 ADSPOWER_API_KEY 不能同时设置；请只保留一个。"
 )
@@ -137,8 +139,7 @@ def credentials_conflict_message() -> str | None:
     """Return the conflict message, or ``None`` when at most one key is set.
 
     The three credentials are stripped before comparison.  Messages name only
-    the conflicting environment variables; values never appear.  The original
-    MLX + AdsPower text is preserved byte for byte.
+    the conflicting environment variables; values never appear.
     """
     configured = [
         name
@@ -151,8 +152,6 @@ def credentials_conflict_message() -> str | None:
     ]
     if len(configured) < 2:
         return None
-    if configured == [MLX_TOKEN_ENV, ADSPOWER_KEY_ENV]:
-        return DUAL_CREDENTIALS_MESSAGE
     if len(configured) == 2:
         return f"{configured[0]} 与 {configured[1]} 不能同时设置；请只保留一个。"
     return f"{configured[0]}、{configured[1]} 与 {configured[2]} 不能同时设置；请只保留一个。"

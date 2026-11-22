@@ -112,10 +112,12 @@ class ProfileConnectionUnavailableError(RuntimeError):
 class ProviderDiagnosticError(ProviderRequestRejected, ProfileConnectionUnavailableError):
     """An actionable provider diagnostic that is already redacted.
 
-    Provider clients build these messages from the operation, HTTP status and
-    the server's business ``msg`` only; they never contain credentials or full
-    CDP URLs.  The shared provider wrapper must pass the message through
-    unchanged instead of replacing it with a generic one.
+    Provider clients build these messages from the operation, HTTP status, the
+    server's business ``msg`` and local loopback endpoint diagnostics.  They
+    never contain API tokens, credentials or authorization headers; local port
+    and CDP endpoint details may appear because they are needed to fix a
+    connectivity failure.  The shared provider wrapper must pass the message
+    through unchanged instead of replacing it with a generic one.
 
     It is also a :class:`ProfileConnectionUnavailableError` so the bounded
     stop-confirmation loop treats a transient port/CDP failure as "still

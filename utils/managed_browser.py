@@ -25,6 +25,26 @@ class ProfileObservation:
     launched_at_ns: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderHints:
+    """Product-specific remediation for shared lifecycle diagnostics.
+
+    The defaults are provider-neutral: they never name a desktop application.
+    A provider may override only the fragments that are genuinely specific to
+    its own stop/start/CDP behaviour.
+    """
+
+    stop_settle_hint: str = "请先关闭该 Profile 的浏览器窗口后重试。"
+    stop_unconfirmed_hint: str = (
+        "请检查该 Provider 的 Local API 与窗口状态后重试。"
+    )
+    # ``None`` keeps the provider's original start-uncertainty error.  A value
+    # turns it into an actionable "start result unknown" diagnostic.
+    start_unconfirmed_hint: str | None = None
+    # Appended after "无法通过 CDP 连接当前 Profile。" when non-empty.
+    cdp_connect_hint: str = ""
+
+
 class ManagedBrowserProvider(Protocol):
     """A desktop-app profile that can be started, attached to, and stopped."""
 
@@ -49,6 +69,8 @@ class SharedBrowserProvider(ManagedBrowserProvider, Protocol):
     asynchronous_stop: bool
     # Minimum quiet period after a stop acknowledgement before the next start.
     stop_settle_seconds: float
+    # Product-specific wording for shared lifecycle diagnostics.
+    hints: ProviderHints
 
     @property
     def resource_identity(self) -> str:
@@ -58,4 +80,10 @@ class SharedBrowserProvider(ManagedBrowserProvider, Protocol):
         """Report the current run, or raise when its identity/state is uncertain."""
 
 
-__all__ = ["ManagedBrowserProvider", "SharedBrowserProvider", "ProfileObservation", "ProviderMode"]
+__all__ = [
+    "ManagedBrowserProvider",
+    "ProfileObservation",
+    "ProviderHints",
+    "ProviderMode",
+    "SharedBrowserProvider",
+]
