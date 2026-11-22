@@ -20,7 +20,7 @@ from urllib.parse import quote, urlsplit
 import requests
 
 from utils.errors import ProviderRequestRejected, RateLimitedError, StartIncompleteError
-from utils.managed_browser import ProfileObservation, ProviderMode
+from utils.managed_browser import ProfileObservation, ProviderHints, ProviderMode
 
 PROBE_TIMEOUT_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 30
@@ -370,6 +370,8 @@ class AdspowerProvider:
 
     mode: ProviderMode = "adspower"
     asynchronous_stop = False
+    stop_settle_seconds = 0.0
+    hints = ProviderHints()
 
     __slots__ = ("_target", "_client")
 

@@ -15,11 +15,13 @@ from unittest.mock import patch
 
 from tests.fakes import FakeHttpGet, FakeResponse
 from utils.errors import RateLimitedError
+from utils.managed_browser import ProviderHints
 from utils.multilogin import (
     LAUNCHER_BASE_URL,
     MultiloginClient,
     MultiloginProvider,
     MultiloginTarget,
+    SharedMultiloginProvider,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "multilogin"
@@ -309,6 +311,18 @@ class MultiloginProviderTests(unittest.TestCase):
         self.assertEqual(url, "http://127.0.0.1:55513")
         self.assertEqual(provider.mode, "multilogin")
         self.assertEqual(provider.profile_id, PROFILE_ID)
+
+    def test_providers_publish_neutral_shared_lifecycle_capabilities(self):
+        target = MultiloginTarget(folder_id=FOLDER_ID, profile_id=PROFILE_ID)
+        client = MultiloginClient(TOKEN, http_get=FakeHttpGet([]))
+
+        for provider in (
+            MultiloginProvider(target, client),
+            SharedMultiloginProvider(target, client),
+        ):
+            with self.subTest(provider=type(provider).__name__):
+                self.assertEqual(provider.stop_settle_seconds, 0.0)
+                self.assertEqual(provider.hints, ProviderHints())
 
     def test_provider_drops_folder_id_from_status_and_stop(self):
         http_get = FakeHttpGet(

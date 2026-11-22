@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import conf
 import sau_cli
 from sau_commands import browser as browser_command
+from sau_commands import facebook as facebook_command
 from sau_commands import tiktok as tiktok_command
 from sau_commands import youtube as youtube_command
 from tests.fakes import (
@@ -131,6 +132,29 @@ def _real_seam(client, *, logged_in=True):
         ),
         playwright,
     )
+
+
+def _platform_check_with_client(
+    module, platform, client, *, extra=(), conf_headless=None
+):
+    """Exercise one platform's real BitBrowser lifecycle through a check."""
+    playwright = FakePlaywright()
+    playwright.chromium.queue_connect_browser(
+        FakeBrowser([FakeContext()], allow_new_context=False)
+    )
+    with (
+        patch.object(module, "async_playwright", lambda: _AsyncCM(playwright)),
+        patch.object(module, "is_logged_in", new=AsyncMock(return_value=True)),
+        patch.object(
+            browser_command, "BitBrowserClient", MagicMock(return_value=client)
+        ),
+        patch.object(conf, "LOCAL_CHROME_HEADLESS", conf_headless),
+    ):
+        code, out, err = _run(
+            [platform, "check", "--profile-id", PROFILE, *extra],
+            env={"BITBROWSER_API_KEY": KEY},
+        )
+    return code, out, err, client
 
 
 def _check_with_client(
@@ -612,6 +636,27 @@ class ParameterMatrixTests(unittest.TestCase):
                 self.assertEqual(code, 0, err)
                 self.assertEqual(out.strip(), "valid")
                 self.assertEqual(client.start_calls, [(PROFILE, expected)])
+
+    def test_facebook_and_youtube_omitted_switch_read_local_chrome_headless(self):
+        platforms = (
+            (facebook_command, "facebook"),
+            (youtube_command, "youtube"),
+        )
+        for configured, expected in ((False, False), (True, True)):
+            for module, platform in platforms:
+                with self.subTest(configured=configured, platform=platform):
+                    client = FakeBitBrowserClient()
+                    code, out, err, client = _platform_check_with_client(
+                        module,
+                        platform,
+                        client,
+                        conf_headless=configured,
+                    )
+                    self.assertEqual(code, 0, err)
+                    self.assertEqual(out.strip(), "valid")
+                    self.assertEqual(
+                        client.start_calls, [(PROFILE, expected)]
+                    )
 
     def test_startup_log_records_the_requested_mode(self):
         client = FakeBitBrowserClient()

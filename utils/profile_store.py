@@ -63,14 +63,19 @@ def _valid_record(record: object) -> bool:
         return False
     def digest(key):
         value = record.get(key)
-        return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) is not None
+        return (
+            isinstance(value, str)
+            and re.fullmatch(r"[a-f0-9]{64}", value) is not None
+        )
 
     def timestamp(key):
         value = record.get(key)
-        return (not isinstance(value, bool)
-                and isinstance(value, (int, float))
-                and math.isfinite(value)
-                and value >= 0)
+        return (
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(value)
+            and value >= 0
+        )
 
     if not digest("resource"):
         return False

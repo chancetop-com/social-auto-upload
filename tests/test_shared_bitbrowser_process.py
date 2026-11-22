@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from contextlib import ExitStack
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
@@ -44,6 +45,21 @@ def _target_page(profile, marker):
     matching = [page for page in pages if marker in page.url]
     assert len(matching) == 1, [page.url for page in pages]
     return matching[0]
+
+
+def _config_with_headless(root, headless):
+    """Put one ``conf.py`` ahead of the installed copy for child processes."""
+    overlay = root / ("conf-headless" if headless else "conf-headed")
+    overlay.mkdir()
+    source = (Path(__file__).resolve().parents[1] / "conf.example.py").read_text(
+        encoding="utf-8"
+    )
+    source = source.replace(
+        "LOCAL_CHROME_HEADLESS = False",
+        f"LOCAL_CHROME_HEADLESS = {headless!r}",
+    )
+    (overlay / "conf.py").write_text(source, encoding="utf-8")
+    return {"PYTHONPATH": str(overlay)}
 
 
 class BitBrowserProfile(OfflineProfile):
@@ -147,7 +163,9 @@ class PlatformSites:
     """Gated offline pages for platform-name admission checks."""
 
     def __init__(self):
-        self.keys = ('xiaohongshu', 'rednote', 'facebook', 'facebook-page')
+        self.keys = (
+            'xiaohongshu', 'rednote', 'facebook', 'facebook-page', 'youtube',
+        )
         self.gates = {key: threading.Event() for key in self.keys}
         self.arrived = {key: threading.Event() for key in self.keys}
         self.pages = []
@@ -169,6 +187,30 @@ class PlatformSites:
 
         return Site
 
+    def youtube_handler(self):
+        """YouTube's check needs a stable ``/channel/`` Studio URL."""
+        sites = self
+
+        class Site(Handler):
+            def do_GET(self):
+                if self.path == '/gate.js':
+                    sites.arrived['youtube'].set()
+                    sites.gates['youtube'].wait(25)
+                    self.respond(b'', 'application/javascript')
+                elif self.path == '/favicon.ico':
+                    self.respond(b'', 'image/x-icon')
+                elif self.path == '/':
+                    self.send_response(302)
+                    self.send_header('Location', '/channel/offline')
+                    self.end_headers()
+                else:
+                    sites.pages.append('youtube')
+                    self.respond(b'<p>Offline Studio</p>'
+                                 b'<script defer src="/gate.js"></script>',
+                                 'text/html; charset=utf-8')
+
+        return Site
+
     def sites(self):
         upload = '<input class="upload-input"><script defer src="/gate.js"></script>'
         social = ('<input type="file" accept="image/png,video/mp4">'
@@ -178,6 +220,7 @@ class PlatformSites:
             'creator.rednote.com': self.handler('rednote', upload),
             'www.facebook.com': self.handler('facebook', social),
             'business.facebook.com': self.handler('facebook-page', social),
+            'studio.youtube.com': self.youtube_handler(),
         }
 
 
@@ -375,6 +418,40 @@ def test_explicit_mode_uses_the_shared_record_for_the_same_connection(profile):
     assert profile.closes == []
     profile.finish('tiktok', peer)
     assert profile.closes == [WINDOW]
+
+
+@pytest.mark.parametrize(
+    ('leader', 'peer', 'flag', 'headless', 'open_request'),
+    [
+        ('facebook', 'youtube', '--headed', False, {'id': WINDOW}),
+        ('youtube', 'facebook', '--headless', True, {
+            'id': WINDOW, 'args': ['--headless'], 'ignoreDefaultUrls': True,
+        }),
+    ],
+    ids=['headed', 'headless'],
+)
+def test_omitted_mode_resolves_config_records_it_and_peer_joins(
+        platform_profile, tmp_path, leader, peer, flag, headless, open_request):
+    """Facebook and YouTube resolve the omitted switch through conf exactly once."""
+    env = _config_with_headless(tmp_path, headless)
+    first = platform_profile.command(0, leader, env=env)
+    platform_profile.entered(leader, first)
+
+    record_path, = [path for path in platform_profile.home.rglob('*.json')
+                    if path.is_file()]
+    record = json.loads(record_path.read_text())
+    assert record['phase'] == 'active' and record['headless'] is headless
+    assert platform_profile.opens == [open_request]
+
+    explicit = platform_profile.command(1, peer, flag, env=env)
+    platform_profile.entered(peer, explicit)
+    assert platform_profile.opens == [open_request]
+    assert sorted(platform_profile.pages_requested) == sorted([leader, peer])
+
+    platform_profile.finish(peer, explicit)
+    assert platform_profile.closes == []
+    platform_profile.finish(leader, first)
+    assert platform_profile.closes == [WINDOW]
 
 
 @pytest.mark.parametrize('flag', ['--headed', '--headless'])

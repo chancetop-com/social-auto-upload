@@ -14,6 +14,7 @@ from unittest.mock import patch
 from tests.fakes import FakeHttp, FakeResponse
 from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
 from utils.errors import RateLimitedError, StartIncompleteError
+from utils.managed_browser import ProviderHints
 
 KEY = "adspower-ticket12-secret-key"
 BASE = "http://127.0.0.1:50325"
@@ -521,6 +522,22 @@ class AdspowerProviderTests(unittest.TestCase):
         self.assertEqual(provider.mode, "adspower")
         self.assertEqual(provider.profile_id, PROFILE_ID)
         self.assertEqual(http.post_calls[0]["json"]["profile_id"], PROFILE_ID)
+
+    def test_provider_publishes_neutral_shared_lifecycle_capabilities(self):
+        provider = self._provider(FakeHttp())
+
+        self.assertEqual(provider.stop_settle_seconds, 0.0)
+        self.assertEqual(provider.hints, ProviderHints())
+        self.assertEqual(
+            provider.hints.stop_settle_hint,
+            "请先关闭该 Profile 的浏览器窗口后重试。",
+        )
+        self.assertEqual(
+            provider.hints.stop_unconfirmed_hint,
+            "请检查该 Provider 的 Local API 与窗口状态后重试。",
+        )
+        self.assertIsNone(provider.hints.start_unconfirmed_hint)
+        self.assertEqual(provider.hints.cdp_connect_hint, "")
 
     def test_provider_delegates_probe_status_and_stop_with_its_profile(self):
         http = FakeHttp(

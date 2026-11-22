@@ -16,7 +16,7 @@ from utils.errors import (
     ProfileConnectionUnavailableError, ProfileStartingError, ProviderDiagnosticError,
     ProviderRequestRejected, RateLimitedError,
 )
-from utils.managed_browser import SharedBrowserProvider
+from utils.managed_browser import ProviderHints, SharedBrowserProvider
 from utils.managed_pages import managed_pages
 from utils.profile_store import ProfileStore
 
@@ -33,6 +33,12 @@ def current_command():
 
 def _digest(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _provider_hints(provider) -> ProviderHints:
+    """Return the provider's wording, or neutral defaults for older providers."""
+    hints = getattr(provider, "hints", None)
+    return hints if isinstance(hints, ProviderHints) else ProviderHints()
 
 
 def _stop_settle_seconds(provider) -> float:
@@ -70,11 +76,12 @@ def _stop_settle_until(provider, record, now):
 def _stop_timeout_message(provider, reason):
     if _stop_settle_seconds(provider) <= 0:
         return f"{provider.mode} Profile 上次停止尚未确认，等待超时。"
+    hints = _provider_hints(provider)
     if reason == "process-alive":
         return (
             f"{provider.mode} Profile 上次停止未完成：关闭请求已获回应，"
             "但旧窗口进程仍在运行，等待超时；"
-            "请先在比特浏览器桌面端关闭该窗口后重试。"
+            f"{hints.stop_settle_hint}"
         )
     if reason == "settle":
         return (
@@ -85,7 +92,7 @@ def _stop_timeout_message(provider, reason):
     return (
         f"{provider.mode} Profile 上次停止尚未确认：关闭请求已获回应，"
         "但无法确认旧窗口进程已退出，等待超时；"
-        "请检查比特浏览器 Local API 与窗口状态后重试。"
+        f"{hints.stop_unconfirmed_hint}"
     )
 
 
@@ -225,12 +232,13 @@ class ManagedCommand:
             try:
                 state = await _provider_call(provider, "observe")
             except ProfileConnectionUnavailableError as exc:
-                if self.mode == "bitbrowser" and record and record.get("phase") == "starting":
-                    # The previous /browser/open reply was lost and the current
+                hint = _provider_hints(provider).start_unconfirmed_hint
+                if hint is not None and record and record.get("phase") == "starting":
+                    # The previous start reply was lost and the current
                     # port/CDP state cannot prove that it finished.  Keep the
                     # starting record and scene; never retry open or close.
                     raise RuntimeError(
-                        f"{self.mode} Profile 上次启动结果未明，无法确认当前实例：{exc}"
+                        f"{self.mode} Profile {hint}：{exc}"
                     ) from None
                 raise
         launch_time = state.launched_at_ns
@@ -298,13 +306,10 @@ class ManagedCommand:
                     browser = await connect(playwright, provider, endpoint)
                     contexts = browser.contexts
                 except Exception:
-                    if self.mode == "bitbrowser":
-                        raise RuntimeError(
-                            f"{self.mode} 无法通过 CDP 连接当前 Profile。"
-                            "请检查窗口的调试连接：确认窗口仍在运行，"
-                            "且 Local API 返回的调试端口可从本机访问。"
-                        ) from None
-                    raise RuntimeError(f"{self.mode} 无法通过 CDP 连接当前 Profile。") from None
+                    hint = _provider_hints(provider).cdp_connect_hint
+                    raise RuntimeError(
+                        f"{self.mode} 无法通过 CDP 连接当前 Profile。{hint}"
+                    ) from None
                 if len(contexts) != 1:
                     raise RuntimeError(f"{self.mode} Profile 的浏览器上下文数量异常。")
                 self.store.write_record(record)

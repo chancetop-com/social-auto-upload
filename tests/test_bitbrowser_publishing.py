@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -25,12 +26,14 @@ from tests.test_shared_adspower_process import (
     Handler,
     OfflineProfile,
     installations,
-    pytestmark,
     serve,
 )
 from tests.test_shared_facebook_process import FacebookSite
 from tests.test_shared_youtube_cli import Studio
 
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX console-script fixture"
+)
 WINDOW = "window-13-7f3c9a"
 TOKEN = "SENTINEL-BITBROWSER-TOKEN-13"
 EPOCH = 1893456000  # 2030-01-01 00:00:00 UTC

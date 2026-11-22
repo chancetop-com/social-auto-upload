@@ -698,6 +698,28 @@ class BitBrowserProviderTests(unittest.TestCase):
         self.assertIs(provider.asynchronous_stop, True)
         self.assertEqual(http.post_calls[0]["json"]["id"], WINDOW_ID)
 
+    def test_provider_publishes_bitbrowser_remediation_and_settle(self):
+        provider = self._provider(FakeHttp())
+
+        self.assertEqual(provider.stop_settle_seconds, 5.0)
+        self.assertEqual(
+            provider.hints.stop_settle_hint,
+            "请先在比特浏览器桌面端关闭该窗口后重试。",
+        )
+        self.assertEqual(
+            provider.hints.stop_unconfirmed_hint,
+            "请检查比特浏览器 Local API 与窗口状态后重试。",
+        )
+        self.assertEqual(
+            provider.hints.start_unconfirmed_hint,
+            "上次启动结果未明，无法确认当前实例",
+        )
+        self.assertEqual(
+            provider.hints.cdp_connect_hint,
+            "请检查窗口的调试连接：确认窗口仍在运行，"
+            "且 Local API 返回的调试端口可从本机访问。",
+        )
+
     def test_provider_delegates_probe_status_observe_and_stop(self):
         http = FakeHttp(
             post_outcomes=[
@@ -763,6 +785,31 @@ class BitBrowserSanitisationTests(unittest.TestCase):
             ([], [FakeResponse(500, {"success": False, "msg": "boom"})],
              lambda c: c.stop(WINDOW_ID)),
             ([FakeResponse(403, {"success": False, "msg": "denied"})], [],
+             lambda c: c.status(WINDOW_ID)),
+        ]
+        for get_outcomes, post_outcomes, invoke in scenarios:
+            with self.subTest(scenario=invoke):
+                http = FakeHttp(get_outcomes, post_outcomes)
+                client = BitBrowserClient(
+                    KEY, BASE, http_get=http.get, http_post=http.post
+                )
+                with self.assertRaises(RuntimeError) as caught:
+                    invoke(client)
+                self.assertNotIn(KEY, str(caught.exception))
+
+    def test_raw_exception_and_echoed_server_text_redact_key(self):
+        scenarios = [
+            ([], [RuntimeError(f"transport failed with {KEY}")],
+             lambda c: c.start(WINDOW_ID, False)),
+            ([], [RuntimeError(f"transport failed with {KEY}")],
+             lambda c: c.stop(WINDOW_ID)),
+            ([], [RuntimeError(f"transport failed with {KEY}")],
+             lambda c: c.status(WINDOW_ID)),
+            ([], [FakeResponse(200, {"success": False, "msg": f"echo {KEY}"})],
+             lambda c: c.status(WINDOW_ID)),
+            ([], [FakeResponse(500, {"success": False, "msg": f"echo {KEY}"})],
+             lambda c: c.status(WINDOW_ID)),
+            ([], [FakeResponse(500, None, text=f"echo {KEY}")],
              lambda c: c.status(WINDOW_ID)),
         ]
         for get_outcomes, post_outcomes, invoke in scenarios:

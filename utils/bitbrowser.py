@@ -30,7 +30,7 @@ from utils.errors import (
     RateLimitedError,
     StartIncompleteError,
 )
-from utils.managed_browser import ProfileObservation, ProviderMode
+from utils.managed_browser import ProfileObservation, ProviderHints, ProviderMode
 
 PROBE_TIMEOUT_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 30
@@ -173,17 +173,20 @@ class BitBrowserClient:
             return ""
         return text if isinstance(text, str) else ""
 
-    @classmethod
-    def _http_error(cls, action: str, response: Any) -> ProviderDiagnosticError:
-        payload = cls._parse_json(response) or {}
-        message = str(payload.get("msg") or "").strip()
-        status = cls._status_code(response)
+    def _redact(self, text: str) -> str:
+        """Remove the API key from any untrusted/raw exception text."""
+        return text.replace(self._key, "<redacted>") if self._key else text
+
+    def _http_error(self, action: str, response: Any) -> ProviderDiagnosticError:
+        payload = self._parse_json(response) or {}
+        message = self._redact(str(payload.get("msg") or "").strip())
+        status = self._status_code(response)
 
         parts = [f"{action}失败：HTTP {status}"]
         if message:
             parts.append(f"msg={message}")
         else:
-            body = cls._response_text(response).strip()
+            body = self._redact(self._response_text(response).strip())
             parts.append(f"msg={body[:500]}" if body else "msg=响应无法识别")
         if status in (401, 403):
             parts.append(_UNAUTHORIZED_HINT)
@@ -199,23 +202,40 @@ class BitBrowserClient:
         if self._status_code(response) == 429:
             raise self._rate_limited(action)
 
-    @staticmethod
     def _business_error(
-        action: str, payload: dict[str, Any], status: Any
+        self, action: str, payload: dict[str, Any], status: Any
     ) -> ProviderDiagnosticError:
-        message = str(payload.get("msg") or "").strip() or "success=false"
+        message = (
+            self._redact(str(payload.get("msg") or "").strip())
+            or "success=false"
+        )
         return ProviderDiagnosticError(
             f"{action}失败：HTTP {status}；msg={message}"
         )
 
-    @classmethod
-    def _envelope_error(
-        cls, action: str, response: Any, reason: str
-    ) -> ProviderDiagnosticError:
-        status = cls._status_code(response)
-        return ProviderDiagnosticError(
-            f"{action}失败：HTTP {status}；msg={reason}"
-        )
+    def _trusted_payload(
+        self,
+        action: str,
+        response: Any,
+        *,
+        envelope_error: type[Exception] = ProviderDiagnosticError,
+    ) -> dict[str, Any]:
+        """Validate status and the success envelope, returning its payload."""
+        self._raise_if_rate_limited(action, response)
+        if not self._is_success(response):
+            raise self._http_error(action, response)
+
+        payload = self._parse_json(response)
+        if payload is None:
+            raise envelope_error(f"{action}失败：响应不是合法 JSON")
+        success = payload.get("success")
+        if not isinstance(success, bool):
+            raise envelope_error(f"{action}失败：响应缺少 success")
+        if not success:
+            raise self._business_error(
+                action, payload, self._status_code(response)
+            )
+        return payload
 
     def _post_json(
         self,
@@ -233,23 +253,10 @@ class BitBrowserClient:
                 f"{action}失败：请求超时（{timeout} 秒）。"
             ) from exc
         except Exception as exc:
-            raise ProviderDiagnosticError(f"{action}失败：{exc}") from exc
-
-        self._raise_if_rate_limited(action, response)
-        if not self._is_success(response):
-            raise self._http_error(action, response)
-
-        payload = self._parse_json(response)
-        if payload is None:
-            raise self._envelope_error(action, response, "响应不是合法 JSON")
-        success = payload.get("success")
-        if not isinstance(success, bool):
-            raise self._envelope_error(action, response, "响应缺少 success")
-        if not success:
-            raise self._business_error(
-                action, payload, self._status_code(response)
-            )
-        return payload.get("data")
+            raise ProviderDiagnosticError(
+                f"{action}失败：{self._redact(str(exc))}"
+            ) from exc
+        return self._trusted_payload(action, response).get("data")
 
     # ------------------------------------------------------------- Endpoints
     def probe(self) -> None:
@@ -270,24 +277,7 @@ class BitBrowserClient:
                 f"{PROBE_ACTION}失败：{_unreachable_message(self._base)}"
             ) from exc
 
-        self._raise_if_rate_limited(PROBE_ACTION, response)
-        if not self._is_success(response):
-            raise self._http_error(PROBE_ACTION, response)
-
-        payload = self._parse_json(response)
-        if payload is None:
-            raise self._envelope_error(
-                PROBE_ACTION, response, "响应不是合法 JSON"
-            )
-        success = payload.get("success")
-        if not isinstance(success, bool):
-            raise self._envelope_error(
-                PROBE_ACTION, response, "响应缺少 success"
-            )
-        if not success:
-            raise self._business_error(
-                PROBE_ACTION, payload, self._status_code(response)
-            )
+        self._trusted_payload(PROBE_ACTION, response)
 
     def start(self, profile_id: str, headless: bool) -> str:
         """Open a window and return ``data.ws`` verbatim."""
@@ -305,23 +295,15 @@ class BitBrowserClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except Exception as exc:
-            raise RuntimeError(f"{START_ACTION}失败：{exc}") from exc
+            raise RuntimeError(
+                f"{START_ACTION}失败：{self._redact(str(exc))}"
+            ) from exc
 
-        self._raise_if_rate_limited(START_ACTION, response)
-        if not self._is_success(response):
-            raise self._http_error(START_ACTION, response)
-
-        payload = self._parse_json(response)
-        if payload is None:
-            raise StartIncompleteError(f"{START_ACTION}失败：响应不是合法 JSON")
-        success = payload.get("success")
-        if not isinstance(success, bool):
-            raise StartIncompleteError(f"{START_ACTION}失败：响应缺少 success")
-        if not success:
-            raise self._business_error(
-                START_ACTION, payload, self._status_code(response)
-            )
-
+        payload = self._trusted_payload(
+            START_ACTION,
+            response,
+            envelope_error=StartIncompleteError,
+        )
         data = payload.get("data")
         ws = data.get("ws") if isinstance(data, dict) else None
         endpoint = _browser_endpoint(ws)
@@ -340,22 +322,15 @@ class BitBrowserClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except Exception as exc:
-            raise RuntimeError(f"{STOP_ACTION}失败：{exc}") from exc
+            raise RuntimeError(
+                f"{STOP_ACTION}失败：{self._redact(str(exc))}"
+            ) from exc
 
-        self._raise_if_rate_limited(STOP_ACTION, response)
-        if not self._is_success(response):
-            raise self._http_error(STOP_ACTION, response)
-
-        payload = self._parse_json(response)
-        if payload is None:
-            raise RuntimeError(f"{STOP_ACTION}失败：响应不是合法 JSON")
-        success = payload.get("success")
-        if not isinstance(success, bool):
-            raise RuntimeError(f"{STOP_ACTION}失败：响应缺少 success")
-        if not success:
-            raise self._business_error(
-                STOP_ACTION, payload, self._status_code(response)
-            )
+        self._trusted_payload(
+            STOP_ACTION,
+            response,
+            envelope_error=RuntimeError,
+        )
 
     @property
     def resource_identity(self) -> str:
@@ -425,7 +400,8 @@ class BitBrowserClient:
             ) from exc
         except Exception as exc:
             raise ProviderDiagnosticError(
-                f"{CDP_ACTION}失败：{exc}；窗口调试端口 {port} 不可用。"
+                f"{CDP_ACTION}失败：{self._redact(str(exc))}；"
+                f"窗口调试端口 {port} 不可用。"
             ) from exc
 
         if not self._is_success(response):
@@ -500,6 +476,17 @@ class BitBrowserProvider:
     mode: ProviderMode = "bitbrowser"
     asynchronous_stop = True
     stop_settle_seconds = STOP_SETTLE_SECONDS
+    hints = ProviderHints(
+        stop_settle_hint="请先在比特浏览器桌面端关闭该窗口后重试。",
+        stop_unconfirmed_hint=(
+            "请检查比特浏览器 Local API 与窗口状态后重试。"
+        ),
+        start_unconfirmed_hint="上次启动结果未明，无法确认当前实例",
+        cdp_connect_hint=(
+            "请检查窗口的调试连接：确认窗口仍在运行，"
+            "且 Local API 返回的调试端口可从本机访问。"
+        ),
+    )
 
     __slots__ = ("_target", "_client")
 

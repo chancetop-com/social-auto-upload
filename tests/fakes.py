@@ -432,7 +432,7 @@ class FakeBitBrowserClient:
         self.active = True
         return self.ws_url
 
-    def observe(self, profile_id: str) -> ProfileObservation:  # type: ignore[no-redef]
+    def observe(self, profile_id: str) -> ProfileObservation:
         self.calls.append("observe")
         self.events.append("observe")
         self.observe_calls.append(profile_id)

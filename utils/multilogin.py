@@ -21,7 +21,7 @@ import requests
 from utils.errors import (
     ProfileConnectionUnavailableError, ProfileStartingError, ProviderRequestRejected, RateLimitedError,
 )
-from utils.managed_browser import ProfileObservation, ProviderMode
+from utils.managed_browser import ProfileObservation, ProviderHints, ProviderMode
 
 PROFILE_METAS_URL = "https://api.multilogin.com/profile/metas"
 LAUNCHER_BASE_URL = "https://launcher.mlx.yt:45001"
@@ -312,6 +312,8 @@ class MultiloginProvider:
     """
 
     mode: ProviderMode = "multilogin"
+    stop_settle_seconds = 0.0
+    hints = ProviderHints()
 
     __slots__ = ("_target", "_client")
 
