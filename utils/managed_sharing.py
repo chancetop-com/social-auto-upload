@@ -35,6 +35,60 @@ def _digest(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
 
 
+def _stop_settle_seconds(provider) -> float:
+    """Return the provider's required quiet period after a stop ACK."""
+    value = getattr(provider, "stop_settle_seconds", 0.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return 0.0
+    return float(value)
+
+
+def _stop_settle_until(provider, record, now):
+    """When a pending stop may be followed by a cold start at the earliest.
+
+    BitBrowser acknowledges ``/browser/close`` before the process exits and
+    requires at least five seconds before the same ID is opened again.  The
+    acknowledgement time and the closed instance's endpoint digest are stored
+    in the shared record so a later command can enforce both conditions.
+    """
+    settle = _stop_settle_seconds(provider)
+    if settle <= 0 or record is None:
+        return None
+    base = None
+    if record.get("phase") == "stop_acknowledged":
+        base = record.get("stop_acknowledged_at")
+        if base is None:
+            base = record.get("stop_requested_at")
+    elif record.get("phase") == "stopping":
+        base = record.get("stop_requested_at")
+    if isinstance(base, bool) or not isinstance(base, (int, float)):
+        # An older record has no timestamp.  Waiting from now is conservative.
+        base = now
+    return float(base) + settle
+
+
+def _stop_timeout_message(provider, reason):
+    if _stop_settle_seconds(provider) <= 0:
+        return f"{provider.mode} Profile 上次停止尚未确认，等待超时。"
+    if reason == "process-alive":
+        return (
+            f"{provider.mode} Profile 上次停止未完成：关闭请求已获回应，"
+            "但旧窗口进程仍在运行，等待超时；"
+            "请先在比特浏览器桌面端关闭该窗口后重试。"
+        )
+    if reason == "settle":
+        return (
+            f"{provider.mode} Profile 上次停止未完成：关闭请求已获回应，"
+            f"但关闭后尚未满 {_stop_settle_seconds(provider):g} 秒，等待超时；"
+            "请稍后重试。"
+        )
+    return (
+        f"{provider.mode} Profile 上次停止尚未确认：关闭请求已获回应，"
+        "但无法确认旧窗口进程已退出，等待超时；"
+        "请检查比特浏览器 Local API 与窗口状态后重试。"
+    )
+
+
 def _provider_request(provider, operation, *args):
     """Provider errors can carry authorization headers and complete CDP URLs."""
     try:
@@ -74,11 +128,12 @@ def _stop_finished(state, acknowledged_record):
     )
 
 
-async def _wait_for_stopped(provider, deadline, acknowledged_record=None):
+async def _wait_for_stopped(provider, deadline, acknowledged_record=None, settle_until=None):
     # Only read operations may outlive the deadline. asyncio.run joins its
     # default executor on exit, so a stalled HTTP read needs a daemon thread.
     outcome = Future()
     outcome.set_running_or_notify_cancel()
+    failure = {"reason": "unconfirmed"}
 
     def observe():
         try:
@@ -87,11 +142,21 @@ async def _wait_for_stopped(provider, deadline, acknowledged_record=None):
                 try:
                     state = _provider_request(provider, "observe")
                 except ProfileConnectionUnavailableError:
-                    pass  # CDP can disappear before Launcher changes its status.
+                    # A missing port/CDP endpoint is not proof the process
+                    # exited; keep polling until the admission deadline.
+                    failure["reason"] = "unconfirmed"
                 else:
                     if _stop_finished(state, acknowledged_record):
-                        outcome.set_result(state)
-                        return
+                        now = monotonic()
+                        if settle_until is None or now >= settle_until:
+                            outcome.set_result(state)
+                            return
+                        failure["reason"] = "settle"
+                        sleep(min(0.5, max(0.0, min(settle_until - now,
+                                                        deadline - now))))
+                        continue
+                    if state.active:
+                        failure["reason"] = "process-alive"
                 sleep(min(0.5, max(0, deadline - monotonic())))
             raise asyncio.TimeoutError
         except Exception as exc:
@@ -104,7 +169,7 @@ async def _wait_for_stopped(provider, deadline, acknowledged_record=None):
             return await asyncio.wait_for(asyncio.wrap_future(outcome), remaining)
         except asyncio.TimeoutError:
             pass
-    raise RuntimeError(f"{provider.mode} Profile 上次停止尚未确认，等待超时。")
+    raise RuntimeError(_stop_timeout_message(provider, failure["reason"]))
 
 
 class ManagedCommand:
@@ -153,10 +218,21 @@ class ManagedCommand:
 
         if record and record["phase"] in {"stopping", "stop_acknowledged"}:
             acknowledged = record if record["phase"] == "stop_acknowledged" else None
-            state = await _wait_for_stopped(provider, deadline, acknowledged)
+            settle_until = _stop_settle_until(provider, record, monotonic())
+            state = await _wait_for_stopped(provider, deadline, acknowledged, settle_until)
         else:
             await _provider_call(provider, "probe")
-            state = await _provider_call(provider, "observe")
+            try:
+                state = await _provider_call(provider, "observe")
+            except ProfileConnectionUnavailableError as exc:
+                if self.mode == "bitbrowser" and record and record.get("phase") == "starting":
+                    # The previous /browser/open reply was lost and the current
+                    # port/CDP state cannot prove that it finished.  Keep the
+                    # starting record and scene; never retry open or close.
+                    raise RuntimeError(
+                        f"{self.mode} Profile 上次启动结果未明，无法确认当前实例：{exc}"
+                    ) from None
+                raise
         launch_time = state.launched_at_ns
         if state.active:
             if not state.endpoint:
@@ -278,14 +354,36 @@ class ManagedCommand:
                 self.reservation.close()
 
     def stop(self, record):
-        self.store.write_record({**record, "phase": "stopping"})
+        settle = _stop_settle_seconds(self.provider)
+        stopping = {**record, "phase": "stopping"}
+        if settle > 0:
+            stopping["stop_requested_at"] = monotonic()
+        self.store.write_record(stopping)
         try:
             _provider_request(self.provider, "stop")
         except (RateLimitedError, ProviderRequestRejected):
             self.store.clear_record()
             raise
         if self.provider.asynchronous_stop:
-            self.store.write_record({**record, "phase": "stop_acknowledged"})
+            acknowledged = {**record, "phase": "stop_acknowledged"}
+            if settle > 0:
+                # BitBrowser acknowledges Close before the process exits.  Keep
+                # the acknowledged instance digest and timestamp so the next
+                # cold start can require both a confirmed exit and the client's
+                # five-second quiet period.  Closing by ID means an old last
+                # leaver may close a same-ID window reopened from the desktop
+                # while this command was still running; the specification
+                # accepts that consequence.
+                acknowledged["stop_requested_at"] = stopping["stop_requested_at"]
+                acknowledged["stop_acknowledged_at"] = monotonic()
+                self.store.write_record(acknowledged)
+                # Keep the record even when this observation already sees the
+                # process gone: the next cold start still owes the settle
+                # interval.  The read also preserves the existing failure
+                # diagnostics if the client cannot answer at all.
+                _provider_request(self.provider, "observe")
+                return
+            self.store.write_record(acknowledged)
             state = _provider_request(self.provider, "observe")
             if not _stop_finished(state, record):
                 return

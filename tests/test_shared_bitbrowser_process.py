@@ -59,6 +59,13 @@ class BitBrowserProfile(OfflineProfile):
         self.closes = []
         self.requests = []
         self.port_override = None
+        # Recovery tests replace one route at a time without copying the whole
+        # Local API shape. Hooks receive the handler, so they can drop the
+        # connection, send an error, or acknowledge without closing the window.
+        self.start_hook = None
+        self.stop_hook = None
+        self.ports_hook = None
+        self.alive_hook = None
         profile = self
 
         class Provider(Handler):
@@ -81,11 +88,15 @@ class BitBrowserProfile(OfflineProfile):
                 if self.path == '/browser/pids/alive':
                     ids = [str(item) for item in body.get('ids', [])]
                     profile.requests.append(('alive', ids))
+                    if profile.alive_hook is not None:
+                        return profile.alive_hook(self, ids)
                     return self.respond_json([
                         window_id for window_id in ids
                         if self.target_for(window_id).active])
                 if self.path == '/browser/ports':
                     profile.requests.append(('ports', None))
+                    if profile.ports_hook is not None:
+                        return profile.ports_hook(self)
                     data = {}
                     for window_id, candidate in profile.profiles.items():
                         if candidate.active:
@@ -102,6 +113,8 @@ class BitBrowserProfile(OfflineProfile):
                     profile.requests.append(('open', {**body, 'id': window_id}))
                     profile.opens.append(dict(body, id=window_id))
                     target.starts.append(window_id)
+                    if target.start_hook is not None:
+                        return target.start_hook(self, target)
                     target.active = True
                     return self.respond_json({'ws': target.endpoint,
                                               'http': f'127.0.0.1:{_port(target.endpoint)}'})
@@ -111,6 +124,8 @@ class BitBrowserProfile(OfflineProfile):
                     profile.requests.append(('close', window_id))
                     profile.closes.append(window_id)
                     target.stops.append(window_id)
+                    if target.stop_hook is not None:
+                        return target.stop_hook(self, target)
                     target.close_browser()
                     target.active = False
                     return self.respond_json({})

@@ -4,6 +4,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -64,6 +65,13 @@ def _valid_record(record: object) -> bool:
         value = record.get(key)
         return isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) is not None
 
+    def timestamp(key):
+        value = record.get(key)
+        return (not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                and value >= 0)
+
     if not digest("resource"):
         return False
     phase = record.get("phase")
@@ -71,6 +79,12 @@ def _valid_record(record: object) -> bool:
         return record.keys() == {"phase", "resource"}
     if "launched_at_ns" in record and (type(record["launched_at_ns"]) is not int or record["launched_at_ns"] <= 0):
         return False
+    if "stop_requested_at" in record:
+        if phase not in ("stopping", "stop_acknowledged") or not timestamp("stop_requested_at"):
+            return False
+    if "stop_acknowledged_at" in record:
+        if phase != "stop_acknowledged" or not timestamp("stop_acknowledged_at"):
+            return False
     return (phase in ("active", "stopping", "stop_acknowledged")
             and digest("endpoint") and "headless" in record
             and (record["headless"] is None or type(record["headless"]) is bool))
