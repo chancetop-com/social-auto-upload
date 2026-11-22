@@ -298,6 +298,12 @@ class ManagedCommand:
                     browser = await connect(playwright, provider, endpoint)
                     contexts = browser.contexts
                 except Exception:
+                    if self.mode == "bitbrowser":
+                        raise RuntimeError(
+                            f"{self.mode} 无法通过 CDP 连接当前 Profile。"
+                            "请检查窗口的调试连接：确认窗口仍在运行，"
+                            "且 Local API 返回的调试端口可从本机访问。"
+                        ) from None
                     raise RuntimeError(f"{self.mode} 无法通过 CDP 连接当前 Profile。") from None
                 if len(contexts) != 1:
                     raise RuntimeError(f"{self.mode} Profile 的浏览器上下文数量异常。")

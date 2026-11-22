@@ -260,8 +260,15 @@ class BitBrowserClient:
                 json={},
                 timeout=PROBE_TIMEOUT_SECONDS,
             )
+        except _TIMEOUTS as exc:
+            raise ProviderDiagnosticError(
+                f"{PROBE_ACTION}失败：请求超时（{PROBE_TIMEOUT_SECONDS} 秒）。"
+                f"{_unreachable_message(self._base)}"
+            ) from exc
         except Exception as exc:
-            raise RuntimeError(_unreachable_message(self._base)) from exc
+            raise ProviderDiagnosticError(
+                f"{PROBE_ACTION}失败：{_unreachable_message(self._base)}"
+            ) from exc
 
         self._raise_if_rate_limited(PROBE_ACTION, response)
         if not self._is_success(response):
