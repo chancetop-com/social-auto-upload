@@ -13,7 +13,8 @@ from loguru import logger
 
 from utils.base_social_media import get_supported_social_media
 from utils.errors import (
-    ProfileConnectionUnavailableError, ProfileStartingError, ProviderRequestRejected, RateLimitedError,
+    ProfileConnectionUnavailableError, ProfileStartingError, ProviderDiagnosticError,
+    ProviderRequestRejected, RateLimitedError,
 )
 from utils.managed_browser import SharedBrowserProvider
 from utils.managed_pages import managed_pages
@@ -40,6 +41,10 @@ def _provider_request(provider, operation, *args):
         return getattr(provider, operation)(*args)
     except RateLimitedError:
         raise RateLimitedError(f"{provider.mode} {operation} 请求过于频繁（HTTP 429）。") from None
+    except ProviderDiagnosticError:
+        # Already redacted and actionable; the generic replacements below would
+        # hide which operation/status failed and how to fix it.
+        raise
     except ProviderRequestRejected:
         raise ProviderRequestRejected(f"{provider.mode} {operation} 请求被拒绝。") from None
     except ProfileStartingError:

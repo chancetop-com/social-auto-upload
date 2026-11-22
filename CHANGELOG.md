@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 托管浏览器（比特浏览器）
+
+- 新增 `BITBROWSER_API_KEY` / `BITBROWSER_API_BASE`：`BITBROWSER_API_KEY` strip 后非空时进入比特浏览器模式，默认 Local API 地址 `http://127.0.0.1:54345`；`BITBROWSER_API_BASE` 只在已激活时生效并沿用 AdsPower 的地址校验/归一化规则。
+- `--profile-id` 接受桌面端“复制 ID”得到的字符串窗口 ID，strip 首尾空白后原样作为 API `id`；`--folder-id` 与 `--account` 沿用托管规则静默忽略，`--debug` 保持上传器语义。缺少或空白窗口 ID 退出 `2`，不接触窗口。
+- 新增 `utils/bitbrowser.py`：POST JSON、`x-api-key`、`success`/`data`/`msg` 信封、`/health`、`/browser/open`、`/browser/close`、`/browser/pids/alive`、`/browser/ports` 与 CDP `/json/version`。有头冷启动只传窗口 ID；无头另传 `args=["--headless"]`、`ignoreDefaultUrls=true` 并省略 `newPageUrl`。已开窗口按进程、调试端口和 CDP 版本加入现有上下文。
+- 三种托管凭据（`BITBROWSER_API_KEY` / `ADSPOWER_API_KEY` / `MLX_API_TOKEN`）任意两种或三种同时非空时，在参数解析后、命令分发前退出 `1`，只列出冲突变量名，零桌面请求；MLX + AdsPower 的既有固定文案保持不变。
+- `/browser/ports` 的 HTTP 404 与查询超时分别给出操作、状态/步骤与可执行的地址/客户端能力提示；HTTP 200 + `success=false` 或不可识别信封退出 `1`，实际 HTTP 429 退出 `11`。诊断与对象 `repr` 不含 Token。
+- 离线契约覆盖客户端、CLI、共享会话组合；**真机冒烟未执行**（截至 2026-11-22 暂无比特浏览器账号），客户端版本、回包形状、端口/进程收敛时间与限流形态待实测。
+
 ### 发布配文话题与 `--tags` 移除
 
 - **破坏性变更（CLI）**：`xiaohongshu upload-video|upload-note`、`rednote upload-video|upload-note`、`instagram upload-video|upload-note`、`tiktok upload-video|upload-note`、`facebook upload-video|upload-note`、`facebook-page upload-video|upload-note` 和 `youtube upload-video` 共 13 条命令移除 `--tags`。旧脚本继续传该参数会在参数解析阶段退出 `2`，不会启动浏览器或上传素材。

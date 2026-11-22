@@ -376,6 +376,87 @@ class FakeAdspowerClient:
         self.active = False
 
 
+class FakeBitBrowserClient:
+    """Synchronous ``BitBrowserClient`` double used by BitBrowser tests.
+
+    Mirrors the real client's public primitives but never touches HTTP.  The
+    provider is asynchronous-stop, so tests also exercise the post-stop
+    observation through the same ``active`` flag.
+    """
+
+    resource_identity = "http://localhost:54345"
+    asynchronous_stop = True
+
+    def __init__(
+        self,
+        *,
+        ws_url: str = "ws://127.0.0.1:9222/devtools/browser/ticket07",
+        active: bool = False,
+        probe_error: BaseException | None = None,
+        start_error: BaseException | None = None,
+        observe_error: BaseException | None = None,
+        status_error: BaseException | None = None,
+        status_value: str = "running",
+        stop_error: BaseException | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.ws_url = ws_url
+        self.active = active
+        self.probe_error = probe_error
+        self.start_error = start_error
+        self.observe_error = observe_error
+        self.status_error = status_error
+        self.status_value = status_value
+        self.stop_error = stop_error
+        self.events = events if events is not None else []
+        self.calls: list[str] = []
+        self.probe_calls = 0
+        self.start_calls: list[tuple[str, bool]] = []
+        self.observe_calls: list[str] = []
+        self.status_calls: list[str] = []
+        self.stop_calls: list[str] = []
+
+    def probe(self) -> None:
+        self.probe_calls += 1
+        self.calls.append("probe")
+        self.events.append("probe")
+        if self.probe_error is not None:
+            raise self.probe_error
+
+    def start(self, profile_id: str, headless: bool) -> str:
+        self.calls.append("start")
+        self.events.append("start")
+        self.start_calls.append((profile_id, headless))
+        if self.start_error is not None:
+            raise self.start_error
+        self.active = True
+        return self.ws_url
+
+    def observe(self, profile_id: str) -> ProfileObservation:  # type: ignore[no-redef]
+        self.calls.append("observe")
+        self.events.append("observe")
+        self.observe_calls.append(profile_id)
+        if self.observe_error is not None:
+            raise self.observe_error
+        return ProfileObservation(self.active, self.ws_url if self.active else None)
+
+    def status(self, profile_id: str) -> str:
+        self.calls.append("status")
+        self.events.append("status")
+        self.status_calls.append(profile_id)
+        if self.status_error is not None:
+            raise self.status_error
+        return self.status_value
+
+    def stop(self, profile_id: str) -> None:
+        self.calls.append("stop")
+        self.events.append("stop")
+        self.stop_calls.append(profile_id)
+        if self.stop_error is not None:
+            raise self.stop_error
+        self.active = False
+
+
 class FakeMultiloginClient:
     """Synchronous ``MultiloginClient`` double used by browser-session tests."""
 

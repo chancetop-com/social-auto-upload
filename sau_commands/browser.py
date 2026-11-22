@@ -5,9 +5,9 @@ This module never talks to a desktop app and never stores an API token.  The
 environment only decides which provider (if any) is active; the provider itself
 is constructed here and owns the credential for its lifetime.
 
-Both managed providers (Multilogin X and AdsPower) are selected here by
-environment variable alone; platform modules only ever receive a provider and
-never branch on the product name.
+All managed providers (Multilogin X, AdsPower and BitBrowser) are selected
+here by environment variable alone; platform modules only ever receive a
+provider and never branch on the product name.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from utils.adspower import AdspowerClient, AdspowerProvider, AdspowerTarget
+from utils.bitbrowser import BitBrowserClient, BitBrowserProvider, BitBrowserTarget
 from utils.errors import LoginRequiredError, UsageError
 from utils.managed_browser import ManagedBrowserProvider, ProviderMode
 from utils.managed_sharing import current_command
@@ -26,8 +27,11 @@ from utils.multilogin import MultiloginClient, MultiloginProvider, MultiloginTar
 MLX_TOKEN_ENV = "MLX_API_TOKEN"
 ADSPOWER_KEY_ENV = "ADSPOWER_API_KEY"
 ADSPOWER_BASE_ENV = "ADSPOWER_API_BASE"
+BITBROWSER_KEY_ENV = "BITBROWSER_API_KEY"
+BITBROWSER_BASE_ENV = "BITBROWSER_API_BASE"
 
 DEFAULT_ADSPOWER_BASE = "http://127.0.0.1:50325"
+DEFAULT_BITBROWSER_BASE = "http://127.0.0.1:54345"
 
 DUAL_CREDENTIALS_MESSAGE = (
     "MLX_API_TOKEN 与 ADSPOWER_API_KEY 不能同时设置；请只保留一个。"
@@ -37,8 +41,14 @@ MISSING_MLX_TARGET_MESSAGE = (
 )
 MISSING_MLX_TOKEN_MESSAGE = "未设置 MLX_API_TOKEN，无法使用 Multilogin 模式。"
 MISSING_ADSPOWER_PROFILE_MESSAGE = "AdsPower 模式需要提供 --profile-id。"
+MISSING_BITBROWSER_PROFILE_MESSAGE = "比特浏览器模式需要提供 --profile-id。"
 INVALID_ADSPOWER_BASE_MESSAGE = (
     "ADSPOWER_API_BASE 不合法。"
+    "仅支持 http/https、主机名与可选端口，"
+    "且不得包含用户信息、路径、查询或片段。"
+)
+INVALID_BITBROWSER_BASE_MESSAGE = (
+    "BITBROWSER_API_BASE 不合法。"
     "仅支持 http/https、主机名与可选端口，"
     "且不得包含用户信息、路径、查询或片段。"
 )
@@ -77,6 +87,17 @@ _PROVIDER_WORDINGS = {
             "请在本地模式（不设置 ADSPOWER_API_KEY）下重试。"
         ),
     ),
+    "bitbrowser": _ProviderWording(
+        label="比特浏览器",
+        login_rejected=(
+            "比特浏览器模式不支持 CLI 登录；"
+            "请在比特浏览器中登录 {profile} 后重试。"
+        ),
+        platform_rejected=(
+            "比特浏览器模式不支持 {platform}；"
+            "请在本地模式（不设置 BITBROWSER_API_KEY）下重试。"
+        ),
+    ),
 }
 
 
@@ -88,29 +109,63 @@ def _adspower_key() -> str:
     return os.environ.get(ADSPOWER_KEY_ENV, "").strip()
 
 
+def _bitbrowser_key() -> str:
+    return os.environ.get(BITBROWSER_KEY_ENV, "").strip()
+
+
 def active_mode() -> ProviderMode | None:
     """Return the active managed provider mode, or ``None`` for local mode.
 
     Only the credential environment variables participate: a non-empty
     ``MLX_API_TOKEN`` activates Multilogin, otherwise a non-empty
-    ``ADSPOWER_API_KEY`` activates AdsPower.  ``ADSPOWER_API_BASE`` never
-    activates anything and is only validated once AdsPower is active.
+    ``ADSPOWER_API_KEY`` activates AdsPower, otherwise a non-empty
+    ``BITBROWSER_API_KEY`` activates BitBrowser.  The ``*_API_BASE`` variables
+    never activate anything and are only validated once their provider is
+    active.  Conflicting credentials are rejected before dispatch, so this
+    precedence only affects direct callers.
     """
     if _mlx_token():
         return "multilogin"
     if _adspower_key():
         return "adspower"
+    if _bitbrowser_key():
+        return "bitbrowser"
     return None
 
 
+def credentials_conflict_message() -> str | None:
+    """Return the conflict message, or ``None`` when at most one key is set.
+
+    The three credentials are stripped before comparison.  Messages name only
+    the conflicting environment variables; values never appear.  The original
+    MLX + AdsPower text is preserved byte for byte.
+    """
+    configured = [
+        name
+        for name, value in (
+            (MLX_TOKEN_ENV, _mlx_token()),
+            (ADSPOWER_KEY_ENV, _adspower_key()),
+            (BITBROWSER_KEY_ENV, _bitbrowser_key()),
+        )
+        if value
+    ]
+    if len(configured) < 2:
+        return None
+    if configured == [MLX_TOKEN_ENV, ADSPOWER_KEY_ENV]:
+        return DUAL_CREDENTIALS_MESSAGE
+    if len(configured) == 2:
+        return f"{configured[0]} 与 {configured[1]} 不能同时设置；请只保留一个。"
+    return f"{configured[0]}、{configured[1]} 与 {configured[2]} 不能同时设置；请只保留一个。"
+
+
 def credentials_conflict() -> bool:
-    """Return ``True`` when both managed credentials are set.
+    """Return ``True`` when two or three managed credentials are set.
 
     ``sau_cli.main`` turns this into a runtime error (exit code 1) after
     argument parsing and before dispatch, so argparse semantics for ``--help``
     and unknown subcommands are preserved.
     """
-    return bool(_mlx_token() and _adspower_key())
+    return credentials_conflict_message() is not None
 
 
 def managed_enabled() -> bool:
@@ -128,12 +183,12 @@ def add_browser_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--folder-id",
         default=None,
-        help="MLX 模式必填；AdsPower 模式忽略",
+        help="MLX 模式必填；AdsPower / 比特浏览器模式忽略",
     )
     parser.add_argument(
         "--profile-id",
         default=None,
-        help="MLX / AdsPower 模式必填",
+        help="MLX / AdsPower / 比特浏览器模式必填",
     )
 
 
@@ -159,15 +214,15 @@ def resolve_multilogin_target(
     return _resolve_mlx_target(args)
 
 
-def _resolve_adspower_base() -> str:
-    """Validate and normalise ``ADSPOWER_API_BASE`` for the active AdsPower mode.
+def _resolve_api_base(env_name: str, default: str, message: str) -> str:
+    """Validate and normalise a provider's local API base URL.
 
-    Called only from the AdsPower provider branch, so an invalid value never
-    affects local or Multilogin runs and never issues an HTTP request.
+    Called only from the matching provider branch, so an invalid value never
+    affects other modes and never issues an HTTP request.
     """
-    raw = os.environ.get(ADSPOWER_BASE_ENV, "").strip()
+    raw = os.environ.get(env_name, "").strip()
     if not raw:
-        return DEFAULT_ADSPOWER_BASE
+        return default
 
     try:
         parts = urlsplit(raw)
@@ -175,7 +230,7 @@ def _resolve_adspower_base() -> str:
         # ports; that is exactly the rejection we want.
         parts.port
     except ValueError:
-        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE) from None
+        raise UsageError(message) from None
 
     invalid = (
         parts.scheme not in ("http", "https")
@@ -188,11 +243,29 @@ def _resolve_adspower_base() -> str:
         or parts.netloc.endswith(":")
     )
     if invalid:
-        raise UsageError(INVALID_ADSPOWER_BASE_MESSAGE)
+        raise UsageError(message)
 
     # Rebuild from the validated pieces so a single trailing ``/`` is dropped
     # without touching the host or port spelling.
     return f"{parts.scheme}://{parts.netloc}"
+
+
+def _resolve_adspower_base() -> str:
+    """Validate and normalise ``ADSPOWER_API_BASE`` for the active AdsPower mode."""
+    return _resolve_api_base(
+        ADSPOWER_BASE_ENV,
+        DEFAULT_ADSPOWER_BASE,
+        INVALID_ADSPOWER_BASE_MESSAGE,
+    )
+
+
+def _resolve_bitbrowser_base() -> str:
+    """Validate and normalise ``BITBROWSER_API_BASE`` for the active BitBrowser mode."""
+    return _resolve_api_base(
+        BITBROWSER_BASE_ENV,
+        DEFAULT_BITBROWSER_BASE,
+        INVALID_BITBROWSER_BASE_MESSAGE,
+    )
 
 
 def _resolve_adspower_target(args: argparse.Namespace) -> AdspowerTarget:
@@ -200,6 +273,14 @@ def _resolve_adspower_target(args: argparse.Namespace) -> AdspowerTarget:
     if not profile_id:
         raise UsageError(MISSING_ADSPOWER_PROFILE_MESSAGE)
     return AdspowerTarget(profile_id=profile_id)
+
+
+def _resolve_bitbrowser_target(args: argparse.Namespace) -> BitBrowserTarget:
+    """Use the copied window ID verbatim after trimming outer whitespace."""
+    profile_id = str(getattr(args, "profile_id", None) or "").strip()
+    if not profile_id:
+        raise UsageError(MISSING_BITBROWSER_PROFILE_MESSAGE)
+    return BitBrowserTarget(profile_id=profile_id)
 
 
 def resolve_managed_provider(
@@ -229,6 +310,14 @@ def resolve_managed_provider(
         target = _resolve_adspower_target(args)
         base = _resolve_adspower_base()
         return AdspowerProvider(target, AdspowerClient(key, base))
+
+    if mode == "bitbrowser":
+        key = _bitbrowser_key()
+        if not key:
+            raise RuntimeError("未设置 BITBROWSER_API_KEY，无法使用比特浏览器模式。")
+        target = _resolve_bitbrowser_target(args)
+        base = _resolve_bitbrowser_base()
+        return BitBrowserProvider(target, BitBrowserClient(key, base))
 
     raise RuntimeError(f"Unsupported managed browser provider: {mode}")
 
@@ -373,7 +462,11 @@ __all__ = [
     "add_browser_flags",
     "add_multilogin_flags",
     "active_mode",
+    "BITBROWSER_KEY_ENV",
+    "BITBROWSER_BASE_ENV",
+    "DEFAULT_BITBROWSER_BASE",
     "credentials_conflict",
+    "credentials_conflict_message",
     "identity_unverified_format",
     "login_required_error",
     "managed_app_label",

@@ -4,7 +4,7 @@
 
 - `xiaohongshu`
 - `rednote`：小红书国际版的独立适配，保留当前浏览器与站点语言；见 [Rednote 使用说明](./rednote.md)
-- `tiktok`：本地持久化 Profile 或托管浏览器模式（MLX / AdsPower）
+- `tiktok`：本地持久化 Profile 或托管浏览器模式（MLX / AdsPower / 比特浏览器）
 - `youtube`
 - `instagram`：独立网页发布视频/Reels、单图与轮播
 - `facebook`：Facebook 个人主页视频/图文立即发布、查询和删除
@@ -12,7 +12,7 @@
 
 文章本地处理命令为 `sau article`，支持主题列表、环境准备和 Markdown/HTML 文件渲染，见 [文章文件与主题渲染](./article.md)。
 
-面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地持久化 Profile 模式；设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 后走[托管浏览器模式](#托管浏览器模式通用)（[Multilogin X 模式](#multilogin-x-模式) / [AdsPower 模式](#adspower-模式)）。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
+面向 Agent 的 Skills 包括一个跨平台总入口和各已支持平台的独立入口，完整清单见 [README 的 AI Agent 区域](../README.md#ai-agent)。TikTok 使用 `sau tiktok`，默认走本地持久化 Profile 模式；设置 `MLX_API_TOKEN`、`ADSPOWER_API_KEY` 或 `BITBROWSER_API_KEY` 后走[托管浏览器模式](#托管浏览器模式通用)（[Multilogin X 模式](#multilogin-x-模式) / [AdsPower 模式](#adspower-模式) / [比特浏览器模式](#比特浏览器模式)）。见 [TikTok Skill](../skills/tiktok-upload/SKILL.md)。
 
 实现说明：
 
@@ -97,7 +97,7 @@ sau xiaohongshu reset-profile --account "creator" --browser-kind chrome
 
 同一 Profile 被项目进程占用时立即失败；不同别名和同别名的两种浏览器可以并行。目录归属缺失、损坏、冲突、越界/链接，或浏览器 singleton 状态表明占用或无法安全确认时退出 `1`。项目不会自动删 singleton、终止外部浏览器或接管外部会话。归属记录、锁与重建标记位于账号数据外的 `.guards/<kind>/<platform>/<原始别名>/`；账号目录下没有项目必需的内部文件，`.sau-owner.json`、`profile.lock` 等也可作为合法别名。项目锁文件里的 PID/时间只用于诊断，残留文件本身不会阻止使用。
 
-部分删除失败返回 `1` 并标记重建未完成，后续会话拒绝使用残缺资料；修复权限等实际故障后重跑同一显式命令。用法错误返回 `2`。设置 `MLX_API_TOKEN` 或 `ADSPOWER_API_KEY` 时拒绝重建，不调用 provider；两种凭据同时设置仍按原冲突规则返回 `1`。
+部分删除失败返回 `1` 并标记重建未完成，后续会话拒绝使用残缺资料；修复权限等实际故障后重跑同一显式命令。用法错误返回 `2`。设置 `MLX_API_TOKEN`、`ADSPOWER_API_KEY` 或 `BITBROWSER_API_KEY` 时拒绝重建，不调用 provider；任意两种或三种托管凭据同时设置仍按原冲突规则返回 `1`。
 
 ## 客户端发布闸门（`--not-before`）
 
@@ -167,8 +167,8 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
   停顿收缩到 `0`，暂停本身不抛超时。超时判据仍只在就绪锚点与发布点击。
 - **验收口径**：真机验收一律 `--no-publish`，停在发布按钮 / Share 就绪前，不点真实发布、
   不上真实帖子；发布点击与提交后行为不在本轮真机验收范围（规格 §9-28）。
-- **托管模式未验证**：Multilogin X / AdsPower 下的人类化交互只做过离线验证，真机行为
-  **未验证**。
+- **托管模式未验证**：Multilogin X / AdsPower / 比特浏览器下的人类化交互只做过离线验证，
+  真机行为**未验证**。
 - 完整契约（公开面、三种清空形态、长期限制、未验证清单）见
   [`.scratch/humanize-rollout/spec.md`](../.scratch/humanize-rollout/spec.md) §2 与 §6.4；
   本节只是对外投影，不存规格副本。
@@ -231,44 +231,49 @@ YouTube 的旧 `--tags` 写的是 **Studio 后台关键词，不是公开配文*
 
 ## 托管浏览器模式（通用）
 
-设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用打开或加入指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。两个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式) 与 [AdsPower 模式](#adspower-模式)。
+设置任一托管模式凭据后，`sau` 进入托管浏览器模式：CLI 通过本机桌面应用打开或加入指定 Profile，经 CDP 接管该 Profile 的浏览器上下文，并复用其中的登录态；不再读写 `cookies/*.json`。三个 provider 子模式是 [Multilogin X 模式](#multilogin-x-模式)、[AdsPower 模式](#adspower-模式) 与 [比特浏览器模式](#比特浏览器模式)。
 
 未设置任一凭据时仍为本地模式；`verify` / `delete` / `article` 在托管模式下仍然本地执行，不受 Profile 影响。
 
 ### 激活与优先级
 
-独立的 `sau media predownload`、`sau media delete` 和 `sau media cleanup` 直接管理素材，忽略两种浏览器凭据。其余命令按下表处理，包括接收网络素材的 `upload-video` 和 `upload-note`。
+独立的 `sau media predownload`、`sau media delete` 和 `sau media cleanup` 直接管理素材，忽略三种托管凭据。其余命令按下表处理，包括接收网络素材的 `upload-video` 和 `upload-note`。
 
-| `MLX_API_TOKEN`（strip 后） | `ADSPOWER_API_KEY`（strip 后） | 模式 |
-| --- | --- | --- |
-| 空 / 未设置 | 空 / 未设置 | 本地模式 |
-| 非空 | 空 / 未设置 | Multilogin X 模式（MLX） |
-| 空 / 未设置 | 非空 | AdsPower 模式 |
-| 非空 | 非空 | 冲突：退出 `1` |
+| `MLX_API_TOKEN`（strip 后） | `ADSPOWER_API_KEY`（strip 后） | `BITBROWSER_API_KEY`（strip 后） | 模式 |
+| --- | --- | --- | --- |
+| 空 / 未设置 | 空 / 未设置 | 空 / 未设置 | 本地模式 |
+| 非空 | 空 / 未设置 | 空 / 未设置 | Multilogin X 模式（MLX） |
+| 空 / 未设置 | 非空 | 空 / 未设置 | AdsPower 模式 |
+| 空 / 未设置 | 空 / 未设置 | 非空 | 比特浏览器模式 |
+| 非空 | 非空 | 空 / 未设置 | 冲突：退出 `1` |
+| 非空 | 空 / 未设置 | 非空 | 冲突：退出 `1` |
+| 空 / 未设置 | 非空 | 非空 | 冲突：退出 `1` |
+| 非空 | 非空 | 非空 | 冲突：退出 `1` |
 
 - 只按环境变量选择，没有 `--browser-provider` 之类的新 flag；空串、纯空白和未设置都视为未激活。
-- `ADSPOWER_API_BASE` **不参与激活**；单独设置不会改变模式，也不会告警。
-- 同时设置两个凭据时，固定输出 `MLX_API_TOKEN 与 ADSPOWER_API_KEY 不能同时设置；请只保留一个。` 并退出 `1`（不是用法错误 `2`）。该检查在参数解析之后、命令分发之前执行；`--help`、未知子命令和缺参仍保持 argparse 的原有语义。
-- 没有 key 的 AdsPower 安装不会被探测或警告，仍按本地 / MLX 的原有逻辑运行。
+- `ADSPOWER_API_BASE` 与 `BITBROWSER_API_BASE` **不参与激活**；单独设置不会改变模式，也不会告警。
+- 任意两种或三种凭据同时生效时退出 `1`（不是用法错误 `2`），提示只列出冲突的变量名，不包含凭据值。MLX + AdsPower 的固定文案保持不变：`MLX_API_TOKEN 与 ADSPOWER_API_KEY 不能同时设置；请只保留一个。` 其他组合按 `变量 A 与 变量 B 不能同时设置；请只保留一个。` 或三项并列的形式输出。
+- 冲突检查在参数解析之后、命令分发之前执行；`--help`、未知子命令和缺参仍保持 argparse 的原有语义，且冲突时不会向桌面 API 发送任何请求。
+- 没有 key 的 AdsPower 安装不会被探测或警告，仍按本地 / MLX / 比特浏览器的原有逻辑运行。
 
 ### 参数矩阵
 
-| 参数 / 行为 | 本地 | MLX | AdsPower |
-| --- | --- | --- | --- |
-| `--account` | `login` / `check` / `upload-*` 必填；`verify` / `delete` 必填 | 忽略；身份由 `--profile-id` 决定（仅兼容占位） | 忽略；身份由 `--profile-id` 决定（仅兼容占位） |
-| `--folder-id` | 静默忽略 | 必填 | 注册但静默忽略；传值不报错、不告警 |
-| `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） |
-| 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` |
-| 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 |
-| `--headless` | 读取 LOCAL_CHROME_HEADLESS，缺省 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 |
-| `--headed` | False（等价默认） | False（等价默认） | False（等价默认），V2 编码 `"0"` |
-| `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower |
-| `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` |
-| `verify` / `delete` | 本地执行 | 本地执行 | 本地执行 |
-| `check` 未登录 | 退出 `10` | 退出 `10` | 退出 `10` |
-| `article` | 本地工具 | 本地工具 | 本地工具 |
+| 参数 / 行为 | 本地 | MLX | AdsPower | 比特浏览器 |
+| --- | --- | --- | --- | --- |
+| `--account` | `login` / `check` / `upload-*` 必填；`verify` / `delete` 必填 | 忽略；身份由 `--profile-id` 决定（仅兼容占位） | 忽略；身份由 `--profile-id` 决定（仅兼容占位） | 忽略；身份由 `--profile-id` 决定（仅兼容占位） |
+| `--folder-id` | 静默忽略 | 必填 | 注册但静默忽略；传值不报错、不告警 | 注册但静默忽略；传值不报错、不告警 |
+| `--profile-id` | 静默忽略 | 必填 | 必填；strip 后映射 AdsPower `user_id`（V2 请求体字段 `profile_id`） | 必填；strip 后把复制的窗口 ID 原样作为请求 `id` |
+| 缺 `--profile-id` | 不适用 | 退出 `2` | 退出 `2` | 退出 `2` |
+| 缺 `--folder-id` | 不适用 | 退出 `2` | 不适用 | 不适用 |
+| `--headless` | 读取 LOCAL_CHROME_HEADLESS，缺省 False | 同平台解析结果传给 Launcher | 同平台解析结果，V2 以 `"0"`/`"1"` 编码 | 同平台解析结果；有头只传 ID，无头另传 `args=["--headless"]`、`ignoreDefaultUrls=true`，省略 `newPageUrl` |
+| `--headed` | False（等价默认） | False（等价默认） | False（等价默认），V2 编码 `"0"` | False（等价默认），只传 ID |
+| `--debug` | 上传器调试行为 | 上传器调试行为 | 上传器调试行为；不传给 AdsPower | 上传器调试行为；不传给比特浏览器 |
+| `login` | 允许 | 拒绝，退出 `1` | 拒绝，退出 `1` | 拒绝，退出 `1` |
+| `verify` / `delete` | 本地执行 | 本地执行 | 本地执行 | 本地执行 |
+| `check` 未登录 | 退出 `10` | 退出 `10` | 退出 `10` | 退出 `10` |
+| `article` | 本地工具 | 本地工具 | 本地工具 | 本地工具 |
 
-- `--profile-id` 会去除首尾空白并检查非空；同一 Profile 上本平台已被占用、Profile 不存在或内核未就绪时退出 `1`。
+- `--profile-id` 会去除首尾空白并检查非空；同一 Profile 上本平台已被占用、Profile 不存在或内核未就绪时退出 `1`。比特浏览器另按 `seq`、窗口名称查找不生效：`seq` 只是展示序号，身份始终取自复制的字符串 ID。
 - 托管模式下 `--account` **被忽略**：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；身份由 `profile_id` 决定。传了非空 `--account` 只会出现在启动日志的 `ignored=` 列表里。
 - 例外不变：`login`、`verify`、`delete` 仍必须 `--account`（`verify` / `delete` 始终本地执行）。
 - 注册范围：七个平台的 `check` 与 `upload-*` 都接受 `--profile-id` / `--folder-id`；`login`、`verify`、`delete`、`article` 不注册这组参数。
@@ -282,24 +287,24 @@ YouTube 的旧 `--tags` 写的是 **Studio 后台关键词，不是公开配文*
 | 码 | 含义 | 典型场景 | 调用方动作 |
 | --- | --- | --- | --- |
 | `0` | 成功 | 发布已提交；`--no-publish` 已准备完成；`check` 已登录；Stop 失败但主操作成功（仅 warning） | 计数 +1、记录时刻 |
-| `1` | 运行失败（**确定未发布**） | Local API / Launcher 不可达、key/token 无效、Profile 不存在/被占用、CDP 连不上；双凭证冲突；登录探针结构异常或网络 5xx；ARM 就绪窗/预算耗尽；素材上传失败；话题插错/多插；元数据或定时回读失败；`login` 与平台拒绝 | 修正后可无条件重跑（冷却另议） |
-| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` 非法、本地缺 `--account`、静态参数冲突、未知子命令（包括已移除的平台，本地及托管均在解析时退出） | 修正参数 |
+| `1` | 运行失败（**确定未发布**） | Local API / Launcher 不可达、key/token 无效、Profile/窗口不存在或被占用、CDP 连不上；两种或三种托管凭据冲突；登录探针结构异常或网络 5xx；ARM 就绪窗/预算耗尽；素材上传失败；话题插错/多插；元数据或定时回读失败；`login` 与平台拒绝 | 修正后可无条件重跑（冷却另议） |
+| `2` | 用法错误 | 缺 `--profile-id`、`ADSPOWER_API_BASE` / `BITBROWSER_API_BASE` 非法、本地缺 `--account`、静态参数冲突、未知子命令（包括已移除的平台，本地及托管均在解析时退出） | 修正参数 |
 | `9` | 发布结果未知 | 发布点击已发出（FIRE 后）但未在观察窗内确认离开发布页，或派发后异常；**帖子可能已存在** | **禁止自动重发**；先到平台后台按标题/素材/时间核对 |
 | `10` | 需要登录 / 人机验证 | 登录页、登录表单、验证码、2FA；本地运行前预检失败（本地 Profile 缺失或登录失效）；`check` 确定未登录 | 点击前：排人工登录，登录后可直接重跑。点击后（stderr 另有 `publish_attempted=true`）：**先核对笔记是否存在** |
-| `11` | 请求过于频繁（429） | Launcher 或 AdsPower Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
+| `11` | 请求过于频繁（429） | Launcher、AdsPower Local API 或比特浏览器 Local API 返回 HTTP 429 | 退避重试；CLI 自身不等待 |
 | `130` | 用户中断 | `Ctrl-C`，退出时按共享规则释放平台资格 | — |
 
 七个平台的本地持久化路径不写 JSON、正常关闭 persistent context 即关闭浏览器；关闭失败不覆盖成功、结果未知或主异常。用户中断仍按 `130` 处理。
 
 **stderr 机器信号**：仅当退出码为 `10`、且本次运行**已越过不可回退点**（`publish_attempted=true`，即已派发发布点击）时，CLI 额外向 stderr 打**单独一行** `publish_attempted=true`；固定 token，无前缀、无本地化、无时间戳。点击前的 `10`、以及 `0/1/2/9/11/130` 都**不会**打这一行。该行只证明「可能已提交」，不证明发布成功。
 
-- `11` 是 MLX 与 AdsPower 共用契约。**MLX 的 429 已由 `1` 改为 `11`**；调度层需要同步改为退避重试。
+- `11` 是 MLX、AdsPower 与比特浏览器共用契约。**MLX 的 429 已由 `1` 改为 `11`**；调度层需要同步改为退避重试。
 - CLI 不 sleep、不自动重试；429 由调度层处理。已成功的操作仅在 stop 阶段遇到 429 时只 warning，保持原退出码（通常 `0`）。
-- HTTP 200 + 业务 `code` 表示限流的情况官方未定义，暂按 `1`；待真实 AdsPower 冒烟（ticket 09）确认后再扩展。
+- HTTP 200 + 业务 `code`（AdsPower）或 `success=false`（比特浏览器）表示限流的情况官方未定义，一律按 `1`；即使文案含“请求频繁”也不触发 `11`。待真实客户端冒烟确认后再扩展。
 
 ### 平台支持范围
 
-两种托管模式使用同一张平台表。示例中的 `PROFILE_ID` 和 `FOLDER_ID` 须替换为桌面应用中的标识。
+三种托管模式使用同一张平台表。示例中的 `PROFILE_ID`、`FOLDER_ID` 和 `WINDOW_ID` 须替换为桌面应用中的标识。
 
 | 平台 | 托管模式可用的 action | 说明 |
 | --- | --- | --- |
@@ -312,7 +317,7 @@ YouTube 的旧 `--tags` 写的是 **Studio 后台关键词，不是公开配文*
 
 ### 共享托管 Profile
 
-同机、同一操作系统用户的兼容 CLI 默认共享同一托管 Profile。不同平台可以同时执行，各自在新标签页工作。同一平台的检查和发布合计限一条命令，冲突者立即退出 `1`。**最后一条已加入的命令离开时会关闭整个 Profile，包括用户从桌面打开的标签页。**
+同机、同一操作系统用户的兼容 CLI 默认共享同一托管 Profile；MLX、AdsPower 与比特浏览器遵守同一套共享规则。不同平台可以同时执行，各自在新标签页工作。同一平台的检查和发布合计限一条命令，冲突者立即退出 `1`。**最后一条已加入的命令离开时会关闭整个 Profile / 窗口，包括用户从桌面打开的标签页。**
 
 - 从不同目录或虚拟环境运行时也按 provider、Profile 和 CLI 平台判定占用。不同 Profile 可并行运行同一平台。大陆版小红书与 Rednote 分开计数，Facebook 个人与 Page 也分开计数。两条 `facebook-page` 命令即使指定不同 `--page` 也互斥。
 - 一条命令在 `--not-before` 等待时，另一平台仍能检查或发布。先离开者清理自己的页面和连接，其他命令继续编辑原页。退出后分别读取各自的退出码和结果。Instagram 与 Facebook Page 默认按命令生成带 UUID 的结果文件。显式传 `--result` 时，为每条命令分配不同路径；使用相同路径时后写入的结果覆盖先前的结果。
@@ -329,27 +334,30 @@ YouTube 的旧 `--tags` 写的是 **Studio 后台关键词，不是公开配文*
   - stderr **无**该行：点击前登录失效或运行前预检失败，**没有发布**；排人工登录，完成后可直接重跑。
 - 收到 `11`（429）：退避重试；CLI 自身不等待。
 - 托管模式不提供 CLI 登录。`--not-before` 不是节流手段：禁止用它制造发布间隔，节流/冷却/排程由调度 App 负责。
-- Stop 失败只 warning；主操作成功仍返回 `0`，调度侧负责清理可能残留的 Profile。
+- Stop 失败只 warning；主操作成功仍返回 `0`，调度侧负责清理可能残留的 Profile。比特浏览器的关闭请求先回包、进程随后退出；需要再次冷启动时，先确认旧进程已退出，并遵守客户端要求的至少 5 秒间隔。
 - 跨机调度应在“桌面应用所在的那台机器”上远程执行 CLI，而不是把 CLI 指向远程 Local API / Launcher。
 
 ### 账号一致性风险
 
 托管模式只验证平台页面“已登录”，**Profile 即身份**。本地原作品验证仍会核对历史作者证据；托管发布模式跳过账号一致性比对，CLI 仅打印一条 INFO 说明“账号一致性未校验”。请确保 `profile_id` 与目标账号匹配。
 
-已知限制：命令级 `check` / 上传前登录检测已经是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留，不代表 AdsPower 模式需要 Multilogin。
+已知限制：命令级 `check` / 上传前登录检测已经是 provider-aware 文案；但部分平台在**上传过程中**遇到登录页、验证码或 2FA 时，uploader 内部错误仍可能提到 Multilogin。这是后续统一文案的已知遗留，不代表 AdsPower 或比特浏览器模式需要 Multilogin。
 
 ### 安全
 
-- API key / token 只从环境变量读取；不写入命令行、日志、异常文本、`repr` 或测试输出。文档示例只使用 `ADSPOWER_API_KEY="$KEY"`，不把 key 放进命令。
-- `Authorization` 永不记录；`AdspowerClient.__repr__` 只输出 `token=<redacted>`。
-- `ADSPOWER_API_BASE` 只允许 `http` / `https` + host + 可选端口；禁止 userinfo、path、query、fragment；末尾 `/` 归一化去掉；非法值退出 `2` 且不发出任何请求。
-- 默认只连本机；禁止远程/跨机 base。`delete_cache`、`cdp_mask`、`launch_args` 等危险参数不由用户传入，由 provider 固定为安全值。
-- 失败诊断脱敏：不含 API key，也不含真实账号或 Profile 名称。
+- API key / token 只从环境变量读取；不写入命令行、日志、异常文本、`repr` 或测试输出。文档示例只使用 `ADSPOWER_API_KEY="$KEY"`、`BITBROWSER_API_KEY="$KEY"`，不把 key 放进命令。
+- `Authorization` / `x-api-key` 永不记录；`AdspowerClient.__repr__` 与 `BitBrowserClient.__repr__` 只输出 `token=<redacted>`。
+- `ADSPOWER_API_BASE` / `BITBROWSER_API_BASE` 只允许 `http` / `https` + host + 可选端口；禁止 userinfo、path、query、fragment；末尾 `/` 归一化去掉；非法值退出 `2` 且不发出任何请求。
+- 默认只连本机；禁止远程/跨机 base。`delete_cache`、`cdp_mask`、`launch_args` 等危险参数不由用户传入，由 provider 固定为安全值。比特浏览器无头启动固定传 `args=["--headless"]`、`ignoreDefaultUrls=true` 并省略 `newPageUrl`。
+- 失败诊断脱敏：不含 API key，也不含真实账号、Profile 名称或完整 CDP 地址；比特浏览器的端口/CDP 诊断只保留操作、HTTP 状态和客户端地址提示。
 
 ### 明确不支持
 
 - AdsPower 无 key 安装（关闭 API 安全校验）、V1 Local API、旧客户端 fallback / 双栈 / 运行时版本探测。
-- AdsPower Firefox Profile；Playwright/CDP 只支持 Chromium。
+- 比特浏览器关闭 Token 鉴权的 Local API；首版只支持已开启 Token 鉴权并通过 `BITBROWSER_API_KEY` 提交 `x-api-key` 的配置。
+- AdsPower / 比特浏览器的 Firefox Profile；Playwright/CDP 只支持 Chromium。
+- 不支持按展示序号 `seq` 或窗口名称查找比特浏览器窗口；只使用复制的字符串窗口 ID。
+- 比特浏览器窗口创建、批量管理、代理与指纹配置，以及不支持按 ID 查询进程/调试端口的旧客户端。
 - Docker、跨机、无桌面 Linux 部署。
 - 通过 CLI 在托管模式登录；登录必须在对应桌面应用中完成。
 - 在桌面应用中创建/修改 Profile、管理代理或导入/导出 Cookie。
@@ -492,6 +500,102 @@ ADSPOWER_API_KEY="$KEY" ADSPOWER_API_BASE="http://127.0.0.1:50326" \
 - V2 在旧客户端上的真实状态码（404 还是 200 + `code != 0`）。
 - `/status` 是否要求鉴权、是否返回版本字段。
 - V2 最低可用版本；`active` 在 Inactive / 多设备模式下的 `data` 形状。
+
+## 比特浏览器模式
+
+设置非空环境变量 `BITBROWSER_API_KEY` 后，`sau` 进入比特浏览器模式。CLI 通过比特浏览器 Local API（默认 `http://127.0.0.1:54345`）打开或加入窗口，经窗口的 CDP WebSocket 接管现有 Chromium 上下文，并复用 Profile 登录态；不再读写 `cookies/*.json`。
+
+窗口由桌面端“复制 ID”得到的字符串指定。把该值传给 `--profile-id`：
+
+```bash
+export BITBROWSER_API_KEY="$KEY"
+
+# check：0=已登录，10=需要人工登录
+sau tiktok check --profile-id "$WINDOW_ID"
+
+# 上传：--account / --folder-id 均被忽略；身份由窗口 ID 决定
+sau tiktok upload-video \
+  --profile-id "$WINDOW_ID" \
+  --file videos/demo.mp4 --title "示例标题 #示例话题"
+
+# 需要人工处理验证码时使用有头模式
+sau tiktok upload-video --headed \
+  --profile-id "$WINDOW_ID" \
+  --file videos/demo.mp4 --title "示例标题"
+
+# 客户端改过端口时覆盖 Local API 地址
+BITBROWSER_API_KEY="$KEY" BITBROWSER_API_BASE="http://127.0.0.1:54346" \
+  sau tiktok check --profile-id "$WINDOW_ID"
+
+# login 拒绝（退出 1）
+sau tiktok login --account creator
+```
+
+### 激活与 `BITBROWSER_API_BASE`
+
+- 仅当 `BITBROWSER_API_KEY` strip 后非空时激活；`BITBROWSER_API_BASE` 不激活模式。
+- 默认 `http://127.0.0.1:54345`；未设、空串或纯空白使用默认值。仅在客户端改过端口时设置，并与桌面端显示的地址一致。
+- 合法值：`http` / `https`、必须有 host、端口可选；禁止 userinfo、path、query、fragment；末尾 `/` 归一化。非法值退出 `2`，且不发出任何请求；合法但连不上属于运行期 `1`。
+- 与 `ADSPOWER_API_KEY`、`MLX_API_TOKEN` 的任意组合冲突都在参数解析后、命令分发前退出 `1`；只设置地址仍按原模式处理。
+- 首版只支持开启 Token 鉴权的 Local API；关闭鉴权的配置不提供“无 key”激活方式。
+
+### 比特浏览器参数
+
+- `--profile-id` 必填；strip 首尾空白后按原字符串传给 API 的 `id`。缺少或空白退出 `2`。展示序号 `seq` 和窗口名称不参与查找。
+- `--folder-id` 注册但静默忽略；传值不报错、不告警。
+- `--account` 被忽略：不读取、不校验、不参与日志/结果标签，也不决定 cookie 文件；传了非空值只会出现在启动日志的 `ignored=` 列表里。
+- `--headless` / `--headed` 的解析结果传给窗口打开请求；未传时读取 `LOCAL_CHROME_HEADLESS`（缺省 False）。有头请求只发送窗口 ID；无头请求另发 `args=["--headless"]`、`ignoreDefaultUrls=true`，并省略 `newPageUrl`。窗口预设可能让有头请求实际不可见，CLI 记录的是本次请求的模式。
+- `--debug` 保持上传器原有含义，不传给比特浏览器。
+- `login` 拒绝：`比特浏览器模式不支持 CLI 登录；请在比特浏览器中登录 Profile {profile} 后重试。`
+- `verify` / `delete` 始终本地执行，因此仍必须提供 `--account`（缺少时退出 `2`）。
+
+### 打开、加入与关闭
+
+- 窗口未开：先探活，再按 `--profile-id` 调用一次 `/browser/open`，从回包的 `data.ws` 取得浏览器级连接，并记录本次请求的模式。
+- 窗口已开：先用 `/browser/pids/alive` 按窗口 ID 核对存活进程，再用 `/browser/ports` 取该 ID 的调试端口，最后读取 CDP `/json/version` 的 `webSocketDebuggerUrl`。加入成功复用唯一现有上下文，每条命令另开新页，不发送 `/browser/open`。
+- 进程、端口或 CDP 连接无法确认时，在打开平台页面前退出 `1` 并保留窗口；不会把“查不到端口”误判成“进程已经退出”。
+- `/browser/ports` 返回 HTTP 404 时，诊断会指出该操作、状态码，并提示检查 `BITBROWSER_API_BASE` 是否指向本机客户端，以及客户端是否支持按窗口 ID 查询调试端口。查询超时时会明确写出超时的步骤和秒数。两种情况都退出 `1`，不启动新窗口。
+- 最后一条已加入的命令离开时，按原窗口 ID 调用一次 `/browser/close`。关闭请求先回包、浏览器进程随后退出，属于异步关闭。共享层会在下一次冷启动前等待旧进程退出；客户端另要求关闭后至少相隔 5 秒再打开同一窗口，调度方不应早于该时间重试。
+- 同平台的检查和发布共享一条平台占用；不同平台、不同窗口可以并行。共享规则与 MLX / AdsPower 相同。
+
+### 结果与诊断
+
+| 场景 | 退出码 |
+| --- | --- |
+| 窗口已登录并完成检查 | `0`，stdout 仅有 `valid` |
+| Token 被拒、窗口不存在、Local API 不可达、发布前 CDP 连接失败 | `1` |
+| HTTP 200 且 `success=false`，或业务响应无法识别 | `1`；即使 `msg` 含“请求频繁”也不按 429 处理 |
+| 缺少有效 `--profile-id` 或 `BITBROWSER_API_BASE` 非法 | `2`，不接触窗口 |
+| 探活、查询或启动实际收到 HTTP 429 | `11`；CLI 不自动重试或等待 |
+| 平台要求登录或人机验证 | `10`，沿用平台分类与 `publish_attempted` 规则 |
+| 发布动作已派发但结果无法确认 | `9`，先核对作品，禁止自动重发 |
+
+清理页面、断开 CDP 或关闭窗口失败只记 warning，保留已取得的主结果和退出码，包括关闭时收到 429。
+
+### 比特浏览器部署前提
+
+1. 比特浏览器桌面应用与 CLI 在**同一台 macOS/Windows 机器**上；应用已启动，Local API 已开启，`54345`（或自定义端口）未被占用。
+2. `BITBROWSER_API_KEY` 是桌面端生成的 Local API Token，不是登录密码；请求头为 `x-api-key`。Token 在客户端重置后旧值立即失效，需要停服务、替换环境变量并重启。
+3. 窗口使用 **Chromium 内核**；Firefox 不支持。
+4. 窗口已**人工登录**目标平台，且没有待处理验证码/2FA；TikTok Profile 界面须为 **English (US)**，小红书 Profile 界面须为**中文**。
+5. 客户端须支持按窗口 ID 查询进程与调试端口（`/browser/pids/alive`、`/browser/ports`）以及打开/关闭窗口。CLI 不做最低版本探测，操作失败时按实际响应报告能力或地址问题。
+
+### 连不上时排查
+
+依次检查：1) 比特浏览器桌面应用是否启动；2) Local API 与 Token 鉴权是否开启；3) `BITBROWSER_API_KEY` 是否与客户端当前 Token 一致；4) `BITBROWSER_API_BASE` 是否指向本机客户端；5) 客户端是否支持按窗口 ID 查询进程和调试端口；6) 复制的窗口 ID 是否仍存在。
+
+### 比特浏览器未知项（真实冒烟未执行）
+
+截至 2026-11-22，用户暂无比特浏览器账号，以下均为**待验证**：
+
+- 真实 `/browser/open` 回包中 `data.ws` 的稳定性，以及再次查询时调试端口是否沿用。
+- 桌面预开窗口的 `/browser/pids/alive` 与 `/browser/ports` 真实返回形状；进程存活但端口暂时缺失的持续时间。
+- 关闭后进程与调试端口消失的时间点，以及 5 秒等待的真实下限。
+- 实际限流时的 HTTP 状态、业务响应与 `Retry-After`。
+- 窗口预设无头参数对普通打开可见性的影响。
+- 旧客户端上各端点的真实状态码（404 还是 200 + `success=false`）。
+
+离线契约已通过；以上各项须在取得账号和实测记录后分别标记。
 
 ## 小红书 CLI 子命令
 
@@ -661,7 +765,7 @@ sau youtube check --account creator --local-browser chromium --headless
 sau youtube reset-profile --account creator --browser-kind chrome
 ```
 
-重建精确清空指定种类，保留另一种类和历史结果，无需浏览器安装；占用或删除故障退出 `1`。上传保留封面、播放列表、可见性、人类化交互和 `--not-before`，没有新增 `--no-publish`。退出 `9` 或 `publish_attempted=true` 时先核查作品，禁止自动重发。MLX/AdsPower 仅采用相同 headless 优先级，继续忽略本地来源和代理，拒绝 CLI login/reset-profile。
+重建精确清空指定种类，保留另一种类和历史结果，无需浏览器安装；占用或删除故障退出 `1`。上传保留封面、播放列表、可见性、人类化交互和 `--not-before`，没有新增 `--no-publish`。退出 `9` 或 `publish_attempted=true` 时先核查作品，禁止自动重发。MLX/AdsPower/比特浏览器仅采用相同 headless 优先级，继续忽略本地来源和代理，拒绝 CLI login/reset-profile。
 
 ## Facebook CLI 子命令
 
@@ -796,7 +900,7 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 - 结果 JSON 顶层兼容追加 `topics` 数组，每项 `{index, text, name, start, end, status, reason}`；`platform`、`title`、`status`、`options` 不删除、不改名。stdout、默认 `.local/instagram-results/<uuid>.json` 与 `--result PATH` 三处内容一致。`--no-publish` 成功仍为 `prepared`，正常发布仍为 `published`。
 - 证据阶段：2026-11-20 简体中文 Creator Reel 与两图轮播在 `--no-publish` 分享前正文含 `#color #study`，该批记录未逐词回读话题；2026-11-21 使用简体中文 Creator 实机 `--no-publish` 复跑通过（`status=prepared`，地点与 AI 开关均回读）。重复词、URL `#片段`、空行、紧邻标点、中英混排、吞字/错位/多余追加与整帖硬限制由受控真实 Chrome 页离线验收。
 
-本地模式保持浏览器/Profile/站点原有语言，不设置 locale、请求头、固定 viewport 或最大化；托管模式不应用该设置，MLX / AdsPower 的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
+本地模式保持浏览器/Profile/站点原有语言，不设置 locale、请求头、固定 viewport 或最大化；托管模式不应用该设置，MLX / AdsPower / 比特浏览器的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
 
 > 选择器证据主要来自 **English 界面 + Personal 账号**；中文标签与专业账号的其余选项尚未全部验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。AI 开关另有 2026-11-20 简体中文 Creator 分享前证据。
 >
@@ -824,17 +928,18 @@ sau instagram verify --account creator --post-url "https://www.instagram.com/p/�
 sau instagram delete --account creator --post-url "https://www.instagram.com/reel/作品编号/" --expected-text "原作品中的准确文字" --result .local/instagram-delete.json
 ```
 
-`verify` / `delete` 在 MLX/AdsPower 环境下仍走本地路径，要求原始 `--account`，保留本地来源/headless/代理。接受 `/p/编号/`、`/reel/编号/` 以及带作者名的原作品链接。操作前读取当前会话用户并核对原作品作者、作品编号和正文，换号后仍拒绝删除其他作者的作品。`delete` 将作品移至 Instagram 的“最近删除”，最终返回 `deleted`；不实现批量删除或提前永久清空。“最近删除”的保留规则由平台决定，本地素材不会被删除。
+`verify` / `delete` 在 MLX/AdsPower/比特浏览器环境下仍走本地路径，要求原始 `--account`，保留本地来源/headless/代理。接受 `/p/编号/`、`/reel/编号/` 以及带作者名的原作品链接。操作前读取当前会话用户并核对原作品作者、作品编号和正文，换号后仍拒绝删除其他作者的作品。`delete` 将作品移至 Instagram 的“最近删除”，最终返回 `deleted`；不实现批量删除或提前永久清空。“最近删除”的保留规则由平台决定，本地素材不会被删除。
 
 结果未知且没有链接时，先在同一账号主页按配文、素材和发布时间查找原作品，复制原作品链接再运行 `verify`；找不到不能证明提交失败，也不要直接重发。删除出现 `deletion_unknown` 时同样先查原作品和“最近删除”，不要重复删除。失败结果会包含阶段/错误和本地证据目录；账号状态、截图及页面记录均放在 Git 忽略目录，不应提交到仓库。
 
 ## TikTok CLI 子命令（本地模式或托管浏览器模式）
 
-TikTok 支持本地与两种托管子模式：
+TikTok 支持本地与三种托管子模式：
 
 - **本地模式**（默认）：不设置托管凭据，使用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>` 的专用持久化 Profile；`--account` 必填，`--folder-id` / `--profile-id` 忽略。默认系统 Chrome、有头，保留当前语言与自然窗口尺寸。
 - **Multilogin X 模式**：设置非空 `MLX_API_TOKEN`，并要求 `--folder-id` / `--profile-id`；Profile 界面须为 **English (US)**（小红书须为中文）。
 - **AdsPower 模式**：设置非空 `ADSPOWER_API_KEY`，只要求 `--profile-id`；`--folder-id` 忽略；Profile 界面须为 **English (US)**（小红书须为中文）。
+- **比特浏览器模式**：设置非空 `BITBROWSER_API_KEY`，只要求 `--profile-id`（桌面端复制的窗口 ID）；`--folder-id` 忽略；Profile 界面须为 **English (US)**（小红书须为中文）。详见[比特浏览器模式](#比特浏览器模式)。
 
 ```bash
 # 本地模式：先交互式登录一次（打开有头浏览器，登录后回终端按 Enter）
@@ -874,6 +979,17 @@ sau tiktok upload-video \
   --profile-id "PROFILE_ID" \
   --file videos/demo.mp4 --title "示例标题 #示例话题" \
   --privacy public --no-comments --schedule "2026-10-21T02:30:00Z"
+
+# 比特浏览器模式（--folder-id 可省略；--profile-id 是桌面端复制的窗口 ID）
+unset MLX_API_TOKEN ADSPOWER_API_KEY
+export BITBROWSER_API_KEY="$KEY"
+
+sau tiktok check --profile-id "$WINDOW_ID"
+
+sau tiktok upload-video \
+  --profile-id "$WINDOW_ID" \
+  --file videos/demo.mp4 --title "示例标题 #示例话题" \
+  --privacy public --no-comments
 ```
 
 配文话题直接写在视频标题或图片帖正文里，CLI 按出现顺序原位关联；旧 `--tags` 已移除，传入时在参数解析阶段退出 `2`，不会追加到配文：
@@ -951,7 +1067,7 @@ sau tiktok upload-note --account creator \
 - 对可操作本地文件的 agent 来说，不要只把图片路径告诉用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户
 - YouTube 当前不走这套本地二维码图片托管链路，登录按上面的平台说明处理即可
-- 托管浏览器模式不提供 CLI 登录链路，也不会生成登录二维码；请在对应桌面应用（Multilogin / AdsPower）中登录 Profile，收到退出码 `10` 时转人工处理
+- 托管浏览器模式不提供 CLI 登录链路，也不会生成登录二维码；请在对应桌面应用（Multilogin / AdsPower / 比特浏览器）中登录 Profile，收到退出码 `10` 时转人工处理
 
 ## 定时发布
 
