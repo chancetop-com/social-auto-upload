@@ -35,6 +35,9 @@ from utils.managed_browser import ProfileObservation, ProviderMode
 PROBE_TIMEOUT_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 30
 CDP_TIMEOUT_SECONDS = 3
+# The desktop client requires at least 5 seconds after a close acknowledgement
+# before the same window ID may be opened again.
+STOP_SETTLE_SECONDS = 5.0
 
 PROBE_ACTION = "探活比特浏览器 Local API"
 START_ACTION = "启动比特浏览器窗口"
@@ -489,6 +492,7 @@ class BitBrowserProvider:
 
     mode: ProviderMode = "bitbrowser"
     asynchronous_stop = True
+    stop_settle_seconds = STOP_SETTLE_SECONDS
 
     __slots__ = ("_target", "_client")
 
@@ -539,4 +543,5 @@ __all__ = [
     "CDP_TIMEOUT_SECONDS",
     "PROBE_TIMEOUT_SECONDS",
     "REQUEST_TIMEOUT_SECONDS",
+    "STOP_SETTLE_SECONDS",
 ]
