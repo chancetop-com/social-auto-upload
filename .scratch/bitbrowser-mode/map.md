@@ -9,7 +9,7 @@ Label: wayfinder:map
 ## Notes
 
 - 本轮交付决策地图。用户已确认沿用 AdsPower 和 Multilogin X 的使用方式：用户在桌面端建好窗口、配置并登录，调用方把窗口 ID 传给 CLI。
-- 截至 2026-11-21，用户暂无可用于真机验证的比特浏览器账号。当前 API 结论来自官方资料，窗口共享和关闭行为等真机验收项待账号可用后核验。[哪些证据足以验收比特浏览器托管模式](issues/05-acceptance.md)
+- 截至 2026-11-22，用户暂无比特浏览器账号。当前 API 结论来自官方资料，真机验收项均待验证。[哪些证据足以验收比特浏览器托管模式](issues/05-acceptance.md)
 - 对齐现有 20 个入口：七个平台均支持登录检查和视频发布，除 YouTube 外的六个平台另有图文发布。两个小红书平台、Facebook 个人与 Facebook Page 分别计数。[命令矩阵](../../docs/CLI.md#平台支持范围)
 - 共享行为以现行契约为准：同一窗口允许不同平台并行，同平台同时限一条命令。每条命令清理自己的页面，最后离开的命令关闭整个窗口，包括用户从桌面打开的窗口。[共享托管 Profile](../../docs/CLI.md#共享托管-profile)
 - 延用本地模式及两种现有托管模式的参数和退出码。调度方需要区分调用错误、登录失效、API 限流和发布结果未知。[CLI 契约](../../docs/CLI.md#托管浏览器模式通用) · [领域术语](../../GLOSSARY.md)
@@ -24,6 +24,11 @@ Label: wayfinder:map
 ## Decisions so far
 
 - [比特浏览器本机 API 能为既有窗口提供哪些能力](issues/01-local-api.md) — 已有窗口可按 ID 打开、查调试端口和关闭。普通 Local API 的 Token 可选。
+- [调用方怎样选中比特浏览器并定位已有窗口](issues/02-activation.md) — 首版通过非空 `BITBROWSER_API_KEY` 选中比特浏览器，`--profile-id` 使用桌面端复制的窗口 ID。
+- [冷启动、加入和最后退出时怎样识别同一个窗口](issues/03-shared-window.md) — 沿用 AdsPower 的规则，加入时核对浏览器实例，最后一条命令直接按窗口 ID 关闭。
+- [窗口启动选项和 API 错误怎样映射到 CLI 契约](issues/04-failure-contract.md) — 沿用 AdsPower 的启动、加入和退出码规则。冷启动信任启动请求，加入时核对显式模式，清理失败保留主结果。
+- [哪些客户端版本和配置属于首版支持范围](issues/06-client-compatibility.md) — 首版按所需 Local API 能力界定兼容性，不设最低版本号。CLI 按失败的操作和实际响应给出诊断。
+- [哪些证据足以验收比特浏览器托管模式](issues/05-acceptance.md) — 20 个入口离线通过即可交付实现。有账号后实测七个平台的登录检查，以及 TikTok 视频和 Instagram 图文的发布前停止与窗口共享。
 
 ## Not yet specified
 

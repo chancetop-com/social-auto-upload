@@ -18,6 +18,10 @@
 
 浏览器身份容器：独立的 Cookie、localStorage、指纹，以及可选的代理配置。一个 Profile 可同时保存多个平台的登录态。Profile 是托管模式下 Cookie 的唯一真相源。定位方式因 provider 而异：MLX 用 `folder_id + profile_id`，AdsPower 用 `user_id`（V2 请求体字段为 `profile_id`）。
 
+## 窗口 ID（比特浏览器）
+
+比特浏览器为一个 Profile 分配的字符串标识，在桌面端可通过“复制 ID”取得。窗口列表另有用于展示的序号（`seq`）。
+
 ## 本地模式（Local 模式）
 
 未设置托管凭据时，由项目启动并关闭浏览器。七个平台均使用独立的持久化本地 Profile 保存登录态。Instagram、Facebook 和 Facebook Page 的 `verify` / `delete` 始终使用本地 Profile。通用文章工具 `sau article` 只处理本地文件。
