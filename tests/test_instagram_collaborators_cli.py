@@ -347,7 +347,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
 
     def test_failure_matrix_exits_1_with_zero_share_clicks(self):
         restricted = (
-            '<div id="collaborator-restriction" role="alert">'
+            '<div role="alert">'
             "Cannot add collaborators to this account."
             "</div>"
         )

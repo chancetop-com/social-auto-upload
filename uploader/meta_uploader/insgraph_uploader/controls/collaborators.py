@@ -17,10 +17,12 @@
 
 真机 2026-11-24 补充：候选面板是**创建弹窗之外的兄弟 ``role="dialog"``**
 （portal 定位在入口附近），不是 ``el.closest('[role="dialog"]')`` 的后代。
-面板解析规则：创建弹窗自身含可见的非 switch checkbox 行时用创建弹窗
-（既有受控 DOM 形态）；否则在所有可见 ``role="dialog"`` 里取同样含可见
-非 switch checkbox 行、且与协作者入口几何最近的兄弟弹窗。Done/完成、
-候选行与 Reels checkbox 回读都限定在这个解析出的面板内。
+入口与资格提示锚定在**包含可见协作者入口的创建弹窗**；面板解析规则：创建
+弹窗自身含可见的非 switch checkbox 行时用创建弹窗（既有受控 DOM 形态）；
+否则在所有可见 ``role="dialog"`` 里取同样含可见非 switch checkbox 行或
+可见按钮、且与协作者入口几何最近的兄弟弹窗。Done/完成、候选行与 Reels
+checkbox 回读都限定在这个解析出的面板内。面板解析只检查 dialog/checkbox/
+button 结构，不扫描全页文案，也不使用 hash 类名。
 """
 from __future__ import annotations
 
@@ -31,10 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from patchright.async_api import (
-    Locator,
-    TimeoutError as BrowserTimeoutError,
-)
+from patchright.async_api import Locator
 
 from utils.humanize import Humanizer
 
@@ -63,7 +62,8 @@ if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchri
     from uploader.publish_timeout import PublishTimeoutBudget
 
 # 入口选择器：结构属性优先，然后英文/中文 placeholder 与 aria-label，最后更宽
-# 的中英文回退。定位始终限定在创建弹窗内，绝不使用全页 locator。
+# 的中英文回退。定位限定在包含可见入口的创建弹窗内；没有弹窗祖先的输入框
+# 不参与解析，也不做全页 locator。
 ENTRY_SELECTORS = (
     'input[name="creation-collaborator-input"]',
     'input[placeholder="Add collaborators"]',
@@ -89,6 +89,12 @@ MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 _ROW_ATTR = 'data-instagram-collaborator-row'
 _PANEL_ATTR = 'data-instagram-collaborator-panel'
+_ENTRY_SELECTOR_UNION = ', '.join(ENTRY_SELECTORS)
+# 面板与 chip 的 JS 共用同一个空白归一化实现；只声明一次，避免两份漂移。
+_JS_NORM_HELPER = (
+    "  const norm = (value) => "
+    "String(value || '').replace(/\\s+/g, ' ').trim();\n"
+)
 
 # 只有页面明确说明账号/地区不具备协作者资格时才使用 account_ineligible；
 # 单纯 disabled 记 control_disabled。
@@ -119,10 +125,9 @@ _COLLABORATOR_RESTRICTION_PATTERNS = (
 
 # 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
 # 先认创建弹窗自身（既有受控 DOM 把结果列表嵌在弹窗内）；否则在所有可见
-# role=dialog 中取“含可见非 switch checkbox 行”且与协作者入口几何最近的
-# 弹窗。只检查 dialog/checkbox 结构，不扫描页面文案，也不使用 hash 类名。
-_PANEL_HELPERS_JS = """
-  const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+# role=dialog 中取“含可见非 switch checkbox 行或可见按钮”且与协作者入口
+# 几何最近的弹窗。可见按钮让“查询无候选但面板仍有 Done”也能被识别。
+_PANEL_HELPERS_JS = _JS_NORM_HELPER + """
   const visible = (node) => {
     if (!node || !node.getClientRects().length) return false;
     const style = getComputedStyle(node);
@@ -151,6 +156,16 @@ _PANEL_HELPERS_JS = """
     }
     return false;
   };
+  const hasVisibleButton = (dialog) => {
+    if (!dialog || !visible(dialog)) return false;
+    for (const node of dialog.querySelectorAll('button, [role="button"]')) {
+      if (!visible(node)) continue;
+      if (norm(node.innerText || node.textContent || '')) return true;
+    }
+    return false;
+  };
+  const isPanelDialog = (dialog) =>
+    hasCandidateRows(dialog) || hasVisibleButton(dialog);
   const entryRect = el.getBoundingClientRect();
   const distanceTo = (node) => {
     const rect = node.getBoundingClientRect();
@@ -165,7 +180,7 @@ _PANEL_HELPERS_JS = """
     let best = null;
     let bestDistance = Infinity;
     for (const dialog of document.querySelectorAll('[role="dialog"]')) {
-      if (dialog === composer || !hasCandidateRows(dialog)) continue;
+      if (dialog === composer || !isPanelDialog(dialog)) continue;
       const distance = distanceTo(dialog);
       if (best === null || distance < bestDistance) {
         best = dialog;
@@ -229,8 +244,9 @@ _PANEL_JS = """(el, stamp) => {""" + _PANEL_HELPERS_JS + """
 # 图文预览图 chip：带 Close/关闭 svg 的 role=button，最近的 span 祖先里
 # 有一个 username span。只认这个结构，不读取输入框里的 “5 people” 摘要。
 _CHIPS_JS = """(el) => {
-  const dialog = el.closest('[role="dialog"]') || document;
-  const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const dialog = el.closest('[role="dialog"]');
+  if (!dialog) return [];
+""" + _JS_NORM_HELPER + """
   const labels = new Set(['close', '关闭']);
   const names = [];
   const seen = new Set();
@@ -312,9 +328,6 @@ class CollaboratorsControl:
             self._humanizer = Humanizer(self._page)
         return self._humanizer
 
-    def _dialog(self) -> Locator:
-        return self._page.get_by_role('dialog')
-
     def _timeout(self, default_ms: int) -> int:
         return clamp_wait(self._budget, default_ms)
 
@@ -322,28 +335,97 @@ class CollaboratorsControl:
         if self._budget is not None:
             self._budget.check_pre_click()
 
-    async def _entry(self, timeout_ms: int) -> Locator | None:
-        """按回退顺序返回第一个可见入口；全部缺席返回 None。"""
-        dialog = self._dialog()
-        union = dialog.locator(', '.join(ENTRY_SELECTORS))
+    async def _visible_dialogs(self, selector: str) -> list[Locator]:
+        """返回 ``selector`` 命中的可见 ``role=dialog``；异常时视为不可见。"""
+        nodes = self._page.locator(selector)
+        visible: list[Locator] = []
         try:
-            await union.first.wait_for(state='visible', timeout=timeout_ms)
-        except BrowserTimeoutError:
-            return None
-        for selector in ENTRY_SELECTORS:
-            candidate = dialog.locator(selector).first
-            if await candidate.count() and await candidate.is_visible():
-                return candidate
-        return None
+            count = await nodes.count()
+        except Exception:
+            return visible
+        for index in range(count):
+            node = nodes.nth(index)
+            try:
+                if await node.is_visible():
+                    visible.append(node)
+            except Exception:
+                continue
+        return visible
 
-    async def _restriction(self) -> str | None:
-        if self._page is None:
+    async def _composer(self, entry: Locator | None = None) -> Locator | None:
+        """包含协作者入口的可见创建弹窗。
+
+        真机同一页面还有 Collaborators 面板这个兄弟 ``role=dialog``；资格
+        提示只能读创建弹窗，不能读兄弟面板或全页文案。有入口时用其最近的
+        ``role=dialog`` 祖先；入口缺失（例如账号不合格）时退回含配文编辑器
+        的可见弹窗，再退回唯一可见弹窗。
+        """
+        if entry is not None:
+            try:
+                ancestor = entry.locator(
+                    'xpath=ancestor::*[@role="dialog"][1]'
+                )
+                if await ancestor.count() and await ancestor.first.is_visible():
+                    return ancestor.first
+            except Exception:
+                return None
+            return None
+        for dialog in await self._visible_dialogs(
+            '[role="dialog"]:has([data-lexical-editor="true"])'
+        ):
+            return dialog
+        for dialog in await self._visible_dialogs('[role="dialog"]'):
+            for selector in ENTRY_SELECTORS:
+                candidate = dialog.locator(selector).first
+                try:
+                    if await candidate.count() and await candidate.is_visible():
+                        return dialog
+                except Exception:
+                    continue
+        visible = await self._visible_dialogs('[role="dialog"]')
+        return visible[0] if len(visible) == 1 else None
+
+    async def _entry(self, timeout_ms: int) -> Locator | None:
+        """返回创建弹窗内第一个可见入口；全部缺席返回 None。"""
+        candidates = self._page.locator(
+            f'[role="dialog"]:has({_ENTRY_SELECTOR_UNION})'
+        )
+        deadline = time.monotonic() + max(int(timeout_ms), 0) / 1000
+        while True:
+            try:
+                count = await candidates.count()
+            except Exception:
+                count = 0
+            for index in range(count):
+                dialog = candidates.nth(index)
+                try:
+                    if not await dialog.is_visible():
+                        continue
+                except Exception:
+                    continue
+                for selector in ENTRY_SELECTORS:
+                    candidate = dialog.locator(selector).first
+                    try:
+                        if (
+                            await candidate.count()
+                            and await candidate.is_visible()
+                        ):
+                            return candidate
+                    except Exception:
+                        continue
+            if time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(_POLL_SECONDS)
+
+    async def _restriction(self, entry: Locator | None = None) -> str | None:
+        composer = await self._composer(entry)
+        if composer is None:
             return None
         try:
-            notices = await self._dialog().locator(
-                '#collaborator-restriction:visible, '
-                '[data-testid*="collaborator"] '
-                ':is([role="alert"],[aria-live="assertive"]):visible'
+            notices = await composer.locator(
+                '[role="alert"]:visible, '
+                '[aria-live="assertive"]:visible, '
+                '[aria-live="polite"]:visible'
             ).all_inner_texts()
         except Exception:
             return None
@@ -369,7 +451,7 @@ class CollaboratorsControl:
                 )
         # 页面明确写出账号/地区不具备协作者资格时，即使入口仍可聚焦也要
         # 归因为 account_ineligible；单纯禁用且无说明才是 control_disabled。
-        restriction = await self._restriction()
+        restriction = await self._restriction(entry)
         if restriction:
             self.last_detail = restriction
             return INELIGIBLE

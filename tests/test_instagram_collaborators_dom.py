@@ -20,6 +20,9 @@ from patchright.async_api import async_playwright
 from uploader.meta_uploader.insgraph_uploader.controls import (
     collaborators as collaborators_control_module,
 )
+from uploader.meta_uploader.insgraph_uploader.controls.collaborators import (
+    CollaboratorsControl,
+)
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
@@ -31,6 +34,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     MISMATCH,
     NO_CANDIDATES,
     NO_SAME_USERNAME,
+    PRESENT,
     SELECTION_FAILED,
     SET,
     UNSUPPORTED,
@@ -355,25 +359,37 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertEqual(outcome.share_clicks, 0)
 
     def test_explicit_account_restriction_is_account_ineligible(self):
-        outcome = self._apply(
-            collaborator_page_html(
-                [("alice", "Alice")],
-                entry="missing",
-                restriction=(
-                    '<div id="collaborator-restriction" role="alert">'
-                    "Cannot add collaborators to this account."
-                    "</div>"
-                ),
-            ),
-            options=InstagramPublishOptions(collaborators=("alice",)),
+        notices = (
+            '<div role="alert">'
+            "Cannot add collaborators to this account."
+            "</div>",
+            '<div aria-live="polite">'
+            "Cannot add collaborators to this account."
+            "</div>",
+            '<div aria-live="assertive">'
+            "Cannot add collaborators to this account."
+            "</div>",
         )
-        self.assertIn(
-            "collaborators=unsupported(account_ineligible)", str(outcome.error)
-        )
-        record = outcome.saved["options"]["collaborators"]
-        self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
-        self.assertIn("Cannot add collaborators", record["detail"])
-        self.assertEqual(outcome.share_clicks, 0)
+        for notice in notices:
+            with self.subTest(notice=notice):
+                outcome = self._apply(
+                    collaborator_page_html(
+                        [("alice", "Alice")],
+                        entry="missing",
+                        restriction=notice,
+                    ),
+                    options=InstagramPublishOptions(
+                        collaborators=("alice",)
+                    ),
+                )
+                self.assertIn(
+                    "collaborators=unsupported(account_ineligible)",
+                    str(outcome.error),
+                )
+                record = outcome.saved["options"]["collaborators"]
+                self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
+                self.assertIn("Cannot add collaborators", record["detail"])
+                self.assertEqual(outcome.share_clicks, 0)
 
     def test_missing_done_is_list_not_collapsed_not_entry_missing(self):
         outcome = self._apply(
@@ -466,6 +482,44 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertIn("遮挡", record["detail"])
         self.assertEqual(outcome.entry_clicks, 0)
         self.assertEqual(outcome.share_clicks, 0)
+
+
+class InstagramCollaboratorComposerScopeDomTests(unittest.TestCase):
+    """C 层：资格提示只读包含协作者入口的创建弹窗，不读兄弟弹窗。"""
+
+    def _resolve(self, html):
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    channel="chrome", headless=True
+                )
+                page = await browser.new_page()
+                try:
+                    await page.set_content(html)
+                    control = CollaboratorsControl(page, image_count=0)
+                    return await control.resolve()
+                finally:
+                    await browser.close()
+
+        patches = list(timeout_patches())
+        for item in patches:
+            item.start()
+        try:
+            with patch.dict(os.environ, {"HUMANIZE": "0"}):
+                return asyncio.run(scenario())
+        finally:
+            for item in patches:
+                item.stop()
+
+    def test_sibling_dialog_alert_does_not_make_the_composer_ineligible(self):
+        html = collaborator_page_html(
+            [("alice", "Alice")], render_chips=False
+        ) + (
+            '<div role="dialog" id="sibling-alert">'
+            '<div role="alert">Cannot add collaborators to this account.'
+            "</div></div>"
+        )
+        self.assertEqual(self._resolve(html), PRESENT)
 
 
 class InstagramReelsCollaboratorDomTests(unittest.TestCase):
@@ -745,6 +799,31 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
             outcome.saved["options"]["collaborators"]["reason"], ENTRY_MISSING
         )
         self.assertEqual(outcome.entry_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_hidden_duplicate_entry_dialog_does_not_shadow_the_composer(self):
+        # 同页两个 role=dialog 都含协作者入口；第一个入口不可见。控件必须
+        # 选中包含可见入口的创建弹窗，而不是 DOM 顺序第一个。
+        duplicate = (
+            '<div role="dialog" id="empty-compose">'
+            '<input name="creation-collaborator-input" '
+            'placeholder="Add collaborators" style="display: none">'
+            "</div>"
+        )
+        html = collaborator_page_html(
+            [("alice", "Alice")], render_chips=False
+        ).replace('<div role="dialog" id="compose">', duplicate + '<div role="dialog" id="compose">', 1)
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {"requested": ["alice"], "applied": ["alice"], "status": SET},
+        )
+        self.assertEqual(outcome.entry_clicks, 0)
+        self.assertEqual(outcome.row_clicks, 1)
         self.assertEqual(outcome.share_clicks, 0)
 
     def test_nike_never_selects_a_substring_candidate(self):
@@ -1047,7 +1126,7 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
             collaborator_page_html(
                 [("alice", "Alice")],
                 restriction=(
-                    '<div id="collaborator-restriction" role="alert">'
+                    '<div role="alert">'
                     "Cannot add collaborators to this account."
                     "</div>"
                 ),
