@@ -1153,7 +1153,10 @@ class InstagramUploader:
                         key, requested, controls.get(key), budget=budget
                     )
                 except OptionMismatchError as error:
-                    budget.check_pre_click()
+                    # 先落盘：控制器可能在确认了部分 username 后耗尽预算，
+                    # 记录必须保留已确认前缀（applied）。这里不立即再查预算，
+                    # 避免预算错误被外层 except 覆盖成 applied=None；下一项
+                    # 开始前的检查会停止后续选项，最后仍以退出码 1 结束。
                     self._record_option(
                         key,
                         requested,
@@ -1175,10 +1178,11 @@ class InstagramUploader:
                     f'Instagram 发布选项未生效: {key}: {error}'
                 ) from error
             except Exception as error:
-                # 预算耗尽同样必须中止（§7.2 B12）：check_pre_click 会在耗尽时抛错。
-                budget.check_pre_click()
+                # 先记录可核对的结果，再按预算决定是否立即中止；预算耗尽时
+                # check_pre_click 会在点击前抛普通 RuntimeError（退出 1）。
                 self._record_option(key, requested, None, MISMATCH)
                 details.append(f'{key}: {error}' if str(error) else f'{key}: {type(error).__name__}')
+                budget.check_pre_click()
             finally:
                 self._write_result()
         failures = option_failures(self.result['options']) + details

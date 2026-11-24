@@ -35,7 +35,6 @@ from ..options import (
     ACCOUNT_INELIGIBLE,
     CONTROL_DISABLED,
     ENTRY_MISSING,
-    FINAL_EMPTY,
     FINAL_MISMATCH,
     INELIGIBLE,
     LIST_NOT_COLLAPSED,
@@ -295,23 +294,25 @@ class CollaboratorsControl:
         """``present`` / ``missing`` / ``ineligible`` / ``unavailable``。"""
         self.last_detail = None
         entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
+        disabled = False
+        if entry is not None:
+            disabled = await entry.is_disabled()
+            if not disabled:
+                disabled = (
+                    (await entry.get_attribute('aria-disabled') or '')
+                    .strip()
+                    .lower()
+                    == 'true'
+                )
+        # 页面明确写出账号/地区不具备协作者资格时，即使入口仍可聚焦也要
+        # 归因为 account_ineligible；单纯禁用且无说明才是 control_disabled。
+        restriction = await self._restriction()
+        if restriction:
+            self.last_detail = restriction
+            return INELIGIBLE
         if entry is None:
-            restriction = await self._restriction()
-            if restriction:
-                self.last_detail = restriction
-                return INELIGIBLE
             return MISSING
-        disabled = await entry.is_disabled()
-        if not disabled:
-            disabled = (
-                (await entry.get_attribute('aria-disabled') or '').strip().lower()
-                == 'true'
-            )
         if disabled:
-            restriction = await self._restriction()
-            if restriction:
-                self.last_detail = restriction
-                return INELIGIBLE
             return UNAVAILABLE
         return PRESENT
 
@@ -331,6 +332,27 @@ class CollaboratorsControl:
         checked = await self._checked_usernames(entry)
         return checked
 
+    def _stop_with_prefix(
+        self,
+        confirmed: list[str],
+        stage: str,
+        error: BaseException,
+        *,
+        readable: bool = True,
+    ) -> OptionMismatchError:
+        """预算/面板等待在中途归零：保留已确认前缀，按普通 mismatch 停止。
+
+        不新增 reason 值：这里只说明“协作者没能在点击前完成”，由聚合错误
+        文案带上原始预算错误和已确认 username。面板尚未打开时无法读取已选
+        状态，``applied=None``；已经逐个回读过的前缀按请求顺序保留。
+        """
+        names = '、'.join(f'「{name}」' for name in confirmed) or '无'
+        return OptionMismatchError(
+            f'Instagram 协作者在{stage}中止（可能发布预算耗尽）：{error}；'
+            f'失败前已确认：{names}',
+            applied=list(confirmed) if readable else None,
+        )
+
     async def set(self, requested) -> None:
         """按请求顺序逐个选中；首个失败立即停止并保留已确认前缀。"""
         self.last_evidence = {}
@@ -339,17 +361,35 @@ class CollaboratorsControl:
         if isinstance(requested, str):
             requested = (requested,)
         names = [normalize_collaborator_name(value) for value in requested]
-        entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
+        try:
+            entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
+        except RuntimeError as error:
+            self._confirmed = None
+            raise self._stop_with_prefix(
+                [], '定位入口时', error, readable=False
+            ) from error
         if entry is None:
             raise OptionMismatchError(
                 'Instagram 协作者入口不可用',
                 applied=[],
                 reason=ENTRY_MISSING,
             )
-        await self._open_panel(entry)
+        try:
+            await self._open_panel(entry)
+        except RuntimeError as error:
+            self._confirmed = None
+            raise self._stop_with_prefix(
+                [], '打开面板时', error, readable=False
+            ) from error
         confirmed: list[str] = []
         for name in names:
-            self._check_budget()
+            try:
+                self._check_budget()
+            except RuntimeError as error:
+                self._confirmed = list(confirmed)
+                raise self._stop_with_prefix(
+                    confirmed, f'添加「{name}」前', error
+                ) from error
             try:
                 if await self._is_selected(entry, name):
                     # 已经是选中状态：再点一次会取消勾选，绝不能重复点击。
@@ -391,11 +431,26 @@ class CollaboratorsControl:
             except OptionMismatchError:
                 self._confirmed = list(confirmed)
                 raise
+            except RuntimeError as error:
+                # 单个 username 处理中预算被 clamp 收紧到零：同样停止列表，
+                # 不能丢掉失败前已确认的前缀。
+                self._confirmed = list(confirmed)
+                raise self._stop_with_prefix(
+                    confirmed, f'添加「{name}」时', error
+                ) from error
             confirmed.append(name)
-        if not await self._close_panel(entry):
+        try:
+            collapsed = await self._close_panel(entry)
+        except RuntimeError as error:
+            self._confirmed = list(confirmed)
+            raise self._stop_with_prefix(
+                confirmed, '收起面板时', error
+            ) from error
+        if not collapsed:
             self._confirmed = list(confirmed)
             raise OptionMismatchError(
-                'Instagram 协作者面板未收起（Done/完成 后仍可见）',
+                'Instagram 协作者候选列表或面板未收起'
+                '（Done/完成 后仍可见，或找不到 Done/完成）',
                 applied=list(confirmed),
                 reason=LIST_NOT_COLLAPSED,
             )
@@ -573,11 +628,11 @@ class CollaboratorsControl:
             None,
         )
         detail = f'；候选「{selected.username}」' if selected else ''
-        if reason == FINAL_EMPTY:
-            return f'Instagram 协作者回读为空：请求「{requested}」{detail}'
         if reason == SELECTION_FAILED:
             return f'Instagram 协作者点击后未选中：请求「{requested}」{detail}'
-        return f'Instagram 协作者回读不一致：请求「{requested}」{detail}'
+        return (
+            f'Instagram 协作者回读不一致或读不到：请求「{requested}」{detail}'
+        )
 
     # -- readback ---------------------------------------------------------
     async def _is_selected(self, entry: Locator, username: str) -> bool:
@@ -591,7 +646,13 @@ class CollaboratorsControl:
     async def _wait_selected(
         self, entry: Locator, username: str
     ) -> tuple[str | None, bool]:
-        """立即回读当前 username；返回 ``(失败原因或 None, 是否可读)``。"""
+        """立即回读当前 username；返回 ``(失败原因或 None, 是否可读)``。
+
+        只使用 spec 表里的 ``selection_failed`` / ``final_mismatch``：
+        checkbox 可读但未勾选是点击未生效；chip 已渲染却没有目标 chip，或
+        回读通道不可读，是回读不一致。``final_empty`` 是地点控件的契约，
+        协作者不新增该原因。
+        """
         deadline = time.monotonic() + self._timeout(READBACK_TIMEOUT_MS) / 1000
         if self._image_count > 0:
             chips: list[str] | None = None
@@ -604,13 +665,15 @@ class CollaboratorsControl:
                 await asyncio.sleep(_POLL_SECONDS)
             checked = await self._checked_usernames(entry)
             readable = chips is not None or checked is not None
-            if checked is not None and username not in checked:
-                return SELECTION_FAILED, readable
-            if chips is None:
+            if checked is not None:
+                if username not in checked:
+                    return SELECTION_FAILED, readable
+                # 面板 checkbox 已勾选，但预览 chip 仍未出现：回读证据不一致。
                 return FINAL_MISMATCH, readable
-            if not chips:
-                return FINAL_EMPTY, readable
-            return FINAL_MISMATCH, readable
+            if chips:
+                return FINAL_MISMATCH, readable
+            # chip 可读但为空且面板读不到：按“点击后未选中”归类。
+            return (FINAL_MISMATCH if chips is None else SELECTION_FAILED), readable
         checked = None
         while True:
             checked = await self._checked_usernames(entry)
