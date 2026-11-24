@@ -25,26 +25,29 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 安装保留项目固定 Patchright。系统 Chrome 由用户按官方方式安装；需要配套 Chromium 时运行 `uv run patchright install --no-shell chromium` 并传 `--local-browser chromium`。`conf.py` 中非空 `LOCAL_CHROME_PATH` 优先于命令行种类与 `LOCAL_BROWSER`；只要求选定来源，失败不回退。浏览器保留原生窗口和语言。重建明确指定一个种类：`sau instagram reset-profile --account creator --browser-kind chrome`；无需 binary，保留另一种类、历史结果与旧文件，之后重新 login。
 
-视频/图文验收显式传 `--no-publish`，上传素材、编辑和检查就绪后停在 Share 前，结果为 `prepared`；可能留下草稿，不证明真实发布成功。上传流程会自动跳过首次通知提示、确认 Reels 介绍，没有提示则继续。登录验证仍由用户完成；未知弹窗或提示关闭失败须报告，不能宣称上传成功。
+视频/图文验收显式传 `--no-publish`，上传素材、编辑和全部发布选项（含协作者的逐个选中与回读）完成、检查就绪后停在 Share 前，结果为 `prepared`；可能留下草稿，不证明真实发布成功。上传流程会自动跳过首次通知提示、确认 Reels 介绍，没有提示则继续。登录验证仍由用户完成；未知弹窗或提示关闭失败须报告，不能宣称上传成功。
 
 视频支持 MP4/MOV，照片支持 JPG/JPEG/PNG/AVIF/HEIC/HEIF，实际处理取决于平台。多图按输入顺序发布轮播，单图和两图轮播已实测。标题与正文（含正文中的 `#话题`）合计最多 2200 字符；超过时退出 `2`，且静态校验都在启动浏览器前完成。公开话题直接写在正文或标题里；旧 `--tags` 已移除，传入会退出 `2`。当前账号独立网页版的照片/Reels 表单及高级设置没有定时入口，当前 CLI 仅支持立即发布；不能把定时任务转换成立即发布。
 
-已接入四项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，不传即完全不动页面默认：
+已接入五项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，不传即完全不动页面默认：
 
 - `--location TEXT`：按联想列表忽略大小写与多余空白的精确匹配；无精确匹配退出 `1`、不发布，错误信息列出候选。
+- `--collaborator USERNAME`：可重复，每次一个 username；归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个，空值/重复/超过 5 个在上传前退出 `2`。打开 Collaborators 面板，按候选行首 token 的 username 精确匹配（不用显示名或包含关系，`nike` 不会选中 `_nikeza5`），每次点击后立即回读（图文/轮播 chip，Reels checkbox）；首个失败即停且不发布；没有移除 flag。`status=set` 只表示创建页已选中。
 - `--no-comments`：请求关闭评论；入口缺失或不可用视为已满足（`default_off`，退出 `0`）。没有 `--comments`。
 - `--ai-generated` / `--no-ai-generated`：互斥，同传退出 `2`；开启时入口缺失退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
 - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于图片张数，每条 1–1000 字符，不截断。
 
 ```powershell
-sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-images.json
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --collaborator alice --collaborator bob --result .local/instagram-images.json
 ```
 
-协作者、Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。四项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 记录 `location`、`alt_text`、`comments`、`ai_generated` 的 `requested` / `applied` / `status`（必要时含 `reason`）。
+Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。五项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 固定记录 `location`、`alt_text`、`comments`、`ai_generated`、`collaborators` 的 `requested` / `applied` / `status`（必要时含 `reason`）；协作者的 `requested`/`applied` 是数组或 `null`，失败原因包括 `no_same_username_candidate`，`list_not_collapsed` 也涵盖协作者面板未收起。
+
+协作者上限 5 来自 2026-11-24 网页实测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均 5）；Meta Content Publishing API 文档写 3，本 CLI 自动化网页创建页，按网页能力执行，上限可能随账号/地区/灰度漂移。已知限制：图文/轮播在预览图渲染协作者 chip，Reels 只在面板打开时可读已选 username；未来 user tags 必须与协作者 chip 区分。本能力不查询、不验证邀请接受状态，`status=set` 只表示创建页已选中。退出码保持静态错误 `2`、分享前失败 `1`、登录 `10`、托管限流 `11`、点击后未知 `9`；协作者失败发生在点击前，不会退化为 `9`。
 
 创建流程按当次页面状态兼容普通账号的直接编辑器与 creator 的“创建 → 帖子”子菜单，视频、图文及本地/托管会话共用业务选择器；账号别名不绑定账号类型。入口使用链接与图标 aria-label，目标须唯一且可交互；未知/歧义页面停止并保留证据。裁剪/编辑主按钮没有稳定专用属性时，限定当前 dialog 的 button role 与已观察的完整 Next/下一步/继续名称，最终 Share/分享/发布动作单独识别。所有可见点击和配文保留 Humanizer，HUMANIZE=0 沿用原生快速路径。
 
-历史真实发布验收仅覆盖 2026-11-10 的 English UI / Personal / 本地 cookie：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags`（旧版 `--tags` 行为，现已移除）发布后回读一致，均已删除。2026-11-17 的真实中文 creator 验收只到视频/图文 no-publish 停止点；普通账号本次仅复验受控 DOM，没有另一个真实 Profile。它们不证明 creator 四项高级选项、实际发布、`--not-before`、`--proxy`、`--headless` 或托管真实账号验收。界面语言由 Profile 和站点决定，未观察的语言/菜单结构可能安全失败。
+历史真实发布验收仅覆盖 2026-11-10 的 English UI / Personal / 本地 cookie：图片轮播与 Reel 各发一条，地点、替代文字、关闭评论、AI 标识与 `--tags`（旧版 `--tags` 行为，现已移除）发布后回读一致，均已删除。2026-11-17 的真实中文 creator 验收只到视频/图文 no-publish 停止点；普通账号本次仅复验受控 DOM，没有另一个真实 Profile。它们不证明 creator 高级选项（2026-11-10 历史验收为四项，不含协作者）、实际发布、`--not-before`、`--proxy`、`--headless` 或托管真实账号验收。2026-11-24 的协作者探测只到网页创建页 Share 前，不证明邀请已送达或已被接受。界面语言由 Profile 和站点决定，本地模式保留 Profile/站点语言，托管 Profile 须人工保持 English；协作者选择器结构优先并提供 en/zh 回退，未观察的语言/菜单结构可能安全失败。
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 

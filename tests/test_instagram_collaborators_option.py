@@ -1061,6 +1061,273 @@ def _collaborator_page_html(
     )
 
 
+_SIBLING_PANEL_PAGE = """
+<style>
+  #collab-panel[hidden] { display: none; }
+</style>
+<div role="dialog" id="compose" aria-label="Create new post" aria-modal="true"
+     style="margin: 120px 160px; width: 640px; height: 420px;">
+  <div role="heading" aria-level="1">Create new post</div>
+  <div data-share-clicks="0"></div>
+  <label style="display:block;">
+    <input id="collab-entry" name="creation-collaborator-input"
+           placeholder="Add collaborators" autocomplete="off">
+  </label>
+  <div id="chips"></div>
+  <div role="textbox" contenteditable="true" data-lexical-editor="true"></div>
+  <div role="button" id="share"
+       onclick="const holder=document.querySelector('[data-share-clicks]');
+                holder.dataset.shareClicks=String(Number(holder.dataset.shareClicks||0)+1);">Share</div>
+</div>
+__DECOY__
+<div style="position: fixed; left: 120px; top: 330px;
+            transform: translate(0, -100%); z-index: 5;">
+  <div role="dialog" id="collab-panel" hidden>
+    <div id="collab-results"></div>
+    <div role="button" id="collab-done">__DONE_LABEL__</div>
+  </div>
+</div>
+<script>
+  const candidates = __CANDIDATES__;
+  const selected = __PRESELECT__;
+  const rowClick = __ROW_CLICK__;
+  const doneCollapses = __DONE_COLLAPSES__;
+  const renderChipNodes = __RENDER_CHIPS__;
+  const checkboxDelayMs = __CHECKBOX_DELAY_MS__;
+  const entry = document.getElementById('collab-entry');
+  const panel = document.getElementById('collab-panel');
+  const results = document.getElementById('collab-results');
+  const chips = document.getElementById('chips');
+  const done = document.getElementById('collab-done');
+  function checkedNames() {
+    const names = [];
+    for (const candidate of candidates) {
+      if (selected.includes(candidate.username) &&
+          !names.includes(candidate.username)) {
+        names.push(candidate.username);
+      }
+    }
+    return names;
+  }
+  function recordSelection() {
+    document.body.dataset.selected = JSON.stringify(selected);
+  }
+  function renderChips() {
+    if (!chips) return;
+    chips.innerHTML = '';
+    if (!renderChipNodes) return;
+    for (const username of selected) {
+      const outer = document.createElement('span');
+      const name = document.createElement('span');
+      name.textContent = username;
+      const closeWrap = document.createElement('div');
+      const close = document.createElement('div');
+      close.setAttribute('role', 'button');
+      close.innerHTML = '<svg aria-label="Close" width="10" height="10"></svg>';
+      closeWrap.appendChild(close);
+      outer.appendChild(name);
+      outer.appendChild(closeWrap);
+      chips.appendChild(outer);
+    }
+  }
+  function openPanel() {
+    if (!panel) return;
+    panel.hidden = false;
+    for (const decoy of document.querySelectorAll('[data-decoy]')) {
+      decoy.hidden = false;
+    }
+    renderResults();
+  }
+  function setBoxState(box, username) {
+    const checked = selected.includes(username);
+    box.checked = checked;
+    box.setAttribute('aria-checked', String(checked));
+    box.setAttribute(
+      'aria-label',
+      checked ? 'Checkmark filled icon' : 'Checkmark outline icon');
+  }
+  function renderResults() {
+    if (!results) return;
+    results.innerHTML = '';
+    const query = String(entry && entry.value || '').trim().toLowerCase();
+    for (const candidate of candidates) {
+      if (!candidate.username.toLowerCase().includes(query)) continue;
+      const row = document.createElement('button');
+      row.className = '_acmy _acmz';
+      row.dataset.username = candidate.username;
+      row.style.cssText =
+        'display:flex;height:48px;width:560px;align-items:center;gap:8px';
+      const avatar = document.createElement('span');
+      avatar.style.cssText =
+        'display:inline-block;height:44px;width:44px;background:#ddd';
+      avatar.setAttribute('role', 'link');
+      avatar.setAttribute('aria-label', candidate.username + ' profile');
+      const name = document.createElement('div');
+      name.className = '_acmu';
+      name.textContent = candidate.username;
+      const badge = document.createElement('div');
+      badge.className = '_acmv _9ys8';
+      name.appendChild(badge);
+      const display = document.createElement('span');
+      display.className = '_acmw';
+      display.textContent = candidate.display;
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.name = 'checkbox';
+      box.setAttribute('aria-label', 'Checkmark outline icon');
+      setBoxState(box, candidate.username);
+      label.appendChild(box);
+      row.appendChild(avatar);
+      row.appendChild(name);
+      row.appendChild(display);
+      row.appendChild(label);
+      row.addEventListener('click', () => {
+        document.body.dataset.rowClicks = String(
+          Number(document.body.dataset.rowClicks || 0) + 1);
+        document.body.dataset.clickedUsername = candidate.username;
+        document.body.dataset.clickedIndex = String(candidates.indexOf(candidate));
+        if (rowClick === 'detach-entry') {
+          if (entry) entry.remove();
+          return;
+        }
+        if (rowClick !== 'select') return;
+        const toggle = () => {
+          const index = selected.indexOf(candidate.username);
+          if (index >= 0) {
+            selected.splice(index, 1);
+          } else if (selected.length < 5) {
+            selected.push(candidate.username);
+          }
+          setBoxState(box, candidate.username);
+          document.body.dataset.checkedRowCount = String(
+            results.querySelectorAll('input[type="checkbox"]:checked').length);
+          const states = JSON.parse(
+            document.body.dataset.checkboxStates || '[]');
+          states.push({
+            username: candidate.username,
+            checked: box.checked,
+            aria: box.getAttribute('aria-checked'),
+          });
+          document.body.dataset.checkboxStates = JSON.stringify(states);
+          renderChips();
+          recordSelection();
+        };
+        if (checkboxDelayMs > 0) {
+          setTimeout(toggle, checkboxDelayMs);
+        } else {
+          toggle();
+        }
+      });
+      results.appendChild(row);
+    }
+  }
+  document.addEventListener('focusin', (event) => {
+    if (event.target && event.target.id) {
+      document.body.dataset.focusedEntry = event.target.id;
+    }
+  });
+  if (entry) {
+    entry.addEventListener('click', () => {
+      document.body.dataset.entryClicks = String(
+        Number(document.body.dataset.entryClicks || 0) + 1);
+      openPanel();
+    });
+    entry.addEventListener('focus', openPanel);
+    entry.addEventListener('input', () => {
+      const progress = JSON.parse(document.body.dataset.progress || '[]');
+      if (!progress.length ||
+          progress[progress.length - 1].query !== entry.value) {
+        progress.push({query: entry.value, checked: checkedNames()});
+        document.body.dataset.progress = JSON.stringify(progress);
+      }
+      const queries = JSON.parse(document.body.dataset.queries || '[]');
+      queries.push(entry.value);
+      document.body.dataset.queries = JSON.stringify(queries);
+      renderResults();
+    });
+  }
+  if (done) {
+    done.addEventListener('click', () => {
+      document.body.dataset.doneClicks = String(
+        Number(document.body.dataset.doneClicks || 0) + 1);
+      if (doneCollapses) panel.hidden = true;
+    });
+  }
+  renderChips();
+  recordSelection();
+</script>
+"""
+
+_DECOY_DIALOGS = """
+<div role="dialog" id="decoy-text" hidden data-decoy
+     style="position: fixed; left: 1000px; top: 500px; width: 220px;
+            height: 90px; background: #f5f5f5;">
+  <button id="decoy-row"
+          style="display: flex; height: 44px; width: 200px; align-items: center;
+                 gap: 6px;">
+    <div>decoyuser</div>
+    <span>Decoy User</span>
+    <input type="checkbox" aria-checked="false"
+           aria-label="Checkmark outline icon">
+  </button>
+</div>
+<div role="dialog" id="decoy-switch" hidden data-decoy
+     style="position: fixed; left: 180px; top: 160px; width: 220px;
+            height: 60px; background: #eef;">
+  <span>Add AI label</span>
+  <input type="checkbox" role="switch" aria-checked="false">
+</div>
+<script>
+  const decoyRow = document.getElementById('decoy-row');
+  if (decoyRow) {
+    decoyRow.addEventListener('click', () => {
+      document.body.dataset.decoyRowClicks = String(
+        Number(document.body.dataset.decoyRowClicks || 0) + 1);
+    });
+  }
+</script>
+"""
+
+
+def _sibling_panel_page_html(
+    candidates=(),
+    *,
+    preselect=(),
+    done_label="Done",
+    done_collapses=True,
+    row_click="select",
+    render_chips=True,
+    checkbox_delay_ms=0,
+    decoy=False,
+) -> str:
+    """真机结构（2026-11-24）：面板是创建弹窗之外的兄弟 ``role=dialog``。
+
+    候选行是 ``<button>``（username div + 显示名 span + label/checkbox），
+    Done 是面板内的 ``div[role=button]``；入口仍在创建弹窗内。
+    """
+    return (
+        _SIBLING_PANEL_PAGE
+        .replace("__DECOY__", _DECOY_DIALOGS if decoy else "")
+        .replace(
+            "__CANDIDATES__",
+            json.dumps(
+                [
+                    {"username": username, "display": display}
+                    for username, display in candidates
+                ],
+                ensure_ascii=False,
+            ),
+        )
+        .replace("__PRESELECT__", json.dumps(list(preselect)))
+        .replace("__ROW_CLICK__", json.dumps(row_click))
+        .replace("__DONE_COLLAPSES__", "true" if done_collapses else "false")
+        .replace("__RENDER_CHIPS__", "true" if render_chips else "false")
+        .replace("__CHECKBOX_DELAY_MS__", str(int(checkbox_delay_ms)))
+        .replace("__DONE_LABEL__", done_label)
+    )
+
+
 def _timeout_patches():
     """把控件等待收紧到测试尺度；不改变生产默认值。"""
     return (
@@ -2126,6 +2393,351 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         self.assertEqual(record["reason"], EDITOR_OBSCURED)
         self.assertIn("遮挡", record["detail"])
         self.assertEqual(outcome.entry_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+
+class InstagramCollaboratorSiblingPanelDomTests(unittest.TestCase):
+    """C 层（真机结构）：协作者面板是创建弹窗之外的兄弟 ``role=dialog``。
+
+    2026-11-24 真机证据：入口在创建弹窗内，候选行与 Done 在独立 portal 的
+    兄弟 dialog 里，按钮/username/显示名/checkbox 结构见 fixture。``_apply``
+    与既有受控 DOM 用例同构，只把页面观察面扩展到兄弟面板。
+    """
+
+    def _apply(
+        self,
+        html,
+        *,
+        options,
+        image_count=1,
+        readback_timeout_ms=None,
+    ):
+        holder: dict[str, object] = {}
+
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel="chrome", headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content(html)
+                    with tempfile.TemporaryDirectory() as folder:
+                        images = [
+                            str(Path(folder) / f"image-{index}.png")
+                            for index in range(image_count)
+                        ]
+                        video = (
+                            None
+                            if image_count
+                            else Path(folder) / "video.mp4"
+                        )
+                        if video is not None:
+                            video.touch()
+                        result_file = Path(folder) / "result.json"
+                        app = InstagramUploader(
+                            "unused.json",
+                            title="caption",
+                            image_files=images,
+                            video_file=video,
+                            options=options,
+                            result_file=result_file,
+                        )
+                        budget = app.start_publish_budget()
+                        error = None
+                        try:
+                            await app._apply_options(page, budget=budget)
+                        except Exception as wrapped:
+                            error = wrapped
+                        holder["app"] = app
+                        holder["error"] = error
+                        holder["saved"] = (
+                            json.loads(result_file.read_text(encoding="utf-8"))
+                            if result_file.exists()
+                            else app.result
+                        )
+                        holder["share_clicks"] = int(
+                            await page.locator("[data-share-clicks]")
+                            .get_attribute("data-share-clicks") or 0
+                        )
+                        holder["chips"] = await page.evaluate(
+                            """() => [...document.querySelectorAll('#chips > span')]
+                                .map(node => {
+                                  const name = node.querySelector('span');
+                                  return name ? name.textContent : '';
+                                }).filter(Boolean)"""
+                        )
+                        body = page.locator("body")
+
+                        async def data(name):
+                            return await body.get_attribute(name)
+
+                        queries = await data("data-queries")
+                        progress = await data("data-progress")
+                        selected = await data("data-selected")
+                        states = await data("data-checkbox-states")
+                        holder["queries"] = (
+                            json.loads(queries) if queries else []
+                        )
+                        holder["progress"] = (
+                            json.loads(progress) if progress else []
+                        )
+                        holder["selected"] = (
+                            json.loads(selected) if selected else []
+                        )
+                        holder["checkbox_states"] = (
+                            json.loads(states) if states else []
+                        )
+                        holder["entry_clicks"] = int(
+                            await data("data-entry-clicks") or 0
+                        )
+                        holder["row_clicks"] = int(
+                            await data("data-row-clicks") or 0
+                        )
+                        holder["done_clicks"] = int(
+                            await data("data-done-clicks") or 0
+                        )
+                        holder["decoy_row_clicks"] = int(
+                            await data("data-decoy-row-clicks") or 0
+                        )
+                        holder["clicked_username"] = await data(
+                            "data-clicked-username"
+                        )
+                        holder["clicked_index"] = await data("data-clicked-index")
+                        holder["panel_hidden"] = bool(
+                            await page.locator("#collab-panel").evaluate(
+                                "el => el.hidden"
+                            )
+                        )
+                        # Done 收起兄弟面板后清空查询并重开，确认勾选仍在。
+                        await page.evaluate(
+                            """() => {
+                              const entry = document.getElementById('collab-entry');
+                              if (entry) {
+                                entry.value = '';
+                                entry.dispatchEvent(
+                                  new Event('input', {bubbles: true}));
+                              }
+                              const panel = document.getElementById(
+                                'collab-panel');
+                              if (panel) panel.hidden = false;
+                            }"""
+                        )
+                        holder["reopened_checked"] = await page.evaluate(
+                            """() => [...document.querySelectorAll(
+                                 '#collab-results [data-username]')]
+                               .filter(row => row.querySelector(
+                                 'input[type="checkbox"]').checked)
+                               .map(row => row.dataset.username)"""
+                        )
+                finally:
+                    await browser.close()
+
+        patches = list(_timeout_patches())
+        if readback_timeout_ms is not None:
+            patches.append(
+                patch.object(
+                    collaborators_control_module,
+                    "READBACK_TIMEOUT_MS",
+                    readback_timeout_ms,
+                )
+            )
+        for item in patches:
+            item.start()
+        try:
+            with patch.dict(os.environ, {"HUMANIZE": "0"}):
+                asyncio.run(scenario())
+        finally:
+            for item in patches:
+                item.stop()
+        return SimpleNamespace(**holder)
+
+    def test_note_sibling_panel_exact_match_chip_readback_and_done(self):
+        html = _sibling_panel_page_html(
+            [
+                ("_nikeza5", "nikeza"),
+                ("nike", "Nike"),
+                ("natgeo", "National Geographic"),
+            ]
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(collaborators=("nike",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {"requested": ["nike"], "applied": ["nike"], "status": SET},
+        )
+        self.assertEqual(outcome.chips, ["nike"])
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.clicked_username, "nike")
+        self.assertEqual(outcome.clicked_index, "1")
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(outcome.selected, ["nike"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_note_sibling_panel_reads_composer_chips_in_request_order(self):
+        outcome = self._apply(
+            _sibling_panel_page_html(
+                [
+                    ("alice", "Alice A"),
+                    ("bob", "Bob B"),
+                    ("carol", "Carol C"),
+                ]
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "carol")
+            ),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "carol"],
+                "applied": ["alice", "carol"],
+                "status": SET,
+            },
+        )
+        self.assertEqual(outcome.chips, ["alice", "carol"])
+        self.assertEqual(
+            [query for query in outcome.queries if query], ["alice", "carol"]
+        )
+        self.assertEqual(outcome.row_clicks, 2)
+        self.assertEqual(outcome.clicked_username, "carol")
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_reels_sibling_panel_checkbox_is_read_back_before_next_query(self):
+        outcome = self._apply(
+            _sibling_panel_page_html(
+                [
+                    ("alice", "Alice"),
+                    ("bob", "Bob"),
+                    ("carol", "Carol"),
+                ],
+                render_chips=False,
+                checkbox_delay_ms=700,
+            ),
+            image_count=0,
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+            readback_timeout_ms=2_000,
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob", "carol"],
+                "applied": ["alice", "bob", "carol"],
+                "status": SET,
+            },
+        )
+        by_query = {
+            item["query"]: item["checked"] for item in outcome.progress
+        }
+        self.assertEqual(by_query.get("alice"), [])
+        self.assertEqual(by_query.get("bob"), ["alice"])
+        self.assertEqual(by_query.get("carol"), ["alice", "bob"])
+        self.assertEqual(
+            outcome.checkbox_states,
+            [
+                {"username": "alice", "checked": True, "aria": "true"},
+                {"username": "bob", "checked": True, "aria": "true"},
+                {"username": "carol", "checked": True, "aria": "true"},
+            ],
+        )
+        self.assertEqual(outcome.selected, ["alice", "bob", "carol"])
+        self.assertEqual(outcome.row_clicks, 3)
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(
+            outcome.reopened_checked, ["alice", "bob", "carol"]
+        )
+        self.assertEqual(outcome.chips, [])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_switch_and_far_decoy_dialogs_are_not_the_collaborator_panel(self):
+        outcome = self._apply(
+            _sibling_panel_page_html(
+                [("alice", "Alice"), ("bob", "Bob")], decoy=True
+            ),
+            options=InstagramPublishOptions(collaborators=("alice", "bob")),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"]["applied"],
+            ["alice", "bob"],
+        )
+        self.assertEqual(outcome.chips, ["alice", "bob"])
+        self.assertEqual(outcome.row_clicks, 2)
+        self.assertEqual(outcome.clicked_username, "bob")
+        self.assertEqual(outcome.decoy_row_clicks, 0)
+        self.assertEqual(outcome.selected, ["alice", "bob"])
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_sibling_panel_done_that_does_not_collapse_is_list_not_collapsed(self):
+        outcome = self._apply(
+            _sibling_panel_page_html(
+                [("alice", "Alice"), ("bob", "Bob")], done_collapses=False
+            ),
+            options=InstagramPublishOptions(collaborators=("alice", "bob")),
+        )
+        self.assertIn(
+            "collaborators=mismatch(list_not_collapsed)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob"],
+                "applied": ["alice", "bob"],
+                "status": MISMATCH,
+                "reason": LIST_NOT_COLLAPSED,
+            },
+        )
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertFalse(outcome.panel_hidden)
+        self.assertEqual(outcome.chips, ["alice", "bob"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_sibling_panel_click_without_selection_is_selection_failed(self):
+        outcome = self._apply(
+            _sibling_panel_page_html(
+                [("alice", "Alice")], row_click="ignore"
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(selection_failed)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": SELECTION_FAILED,
+            },
+        )
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.done_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_sibling_panel_unreadable_readback_is_final_mismatch(self):
+        outcome = self._apply(
+            _sibling_panel_page_html(
+                [("alice", "Alice")], row_click="detach-entry"
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(final_mismatch)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertIsNone(record["applied"])
+        self.assertEqual(record["reason"], FINAL_MISMATCH)
         self.assertEqual(outcome.share_clicks, 0)
 
 
