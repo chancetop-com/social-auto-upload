@@ -95,6 +95,22 @@ class CollaboratorCandidate:
     checked: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _SelectionState:
+    """某 username 在点击前对当前帖型证据的可见状态。"""
+
+    confirmed: bool
+    checked: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ReadbackResult:
+    """单次逐个回读结果：``failure=None`` 表示确认选中。"""
+
+    failure: str | None
+    readable: bool
+
+
 class CollaboratorsControl:
     """创建页协作者入口；``set()`` 逐个选中并立即回读。"""
 
@@ -128,9 +144,32 @@ class CollaboratorsControl:
     def _timeout(self, default_ms: int) -> int:
         return clamp_wait(self._budget, default_ms)
 
+    def _probe_timeout(self, default_ms: int) -> int:
+        """按剩余发布预算收紧单次探针超时；预算已耗尽时用短超时而不打断清理。"""
+        try:
+            return max(1, self._timeout(default_ms))
+        except RuntimeError:
+            return max(1, min(default_ms, 500))
+
     def _check_budget(self) -> None:
         if self._budget is not None:
             self._budget.check_pre_click()
+
+    async def _eval(
+        self,
+        locator: Locator,
+        script: str,
+        arg: object = None,
+        *,
+        timeout_ms: int,
+    ) -> object:
+        """在已收紧的超时内执行 DOM 探针；已卸载节点立即失败不拖 30s。"""
+        if await locator.count() == 0:
+            raise LookupError('locator detached')
+        wait_ms = max(1, int(timeout_ms))
+        if arg is None:
+            return await locator.evaluate(script, timeout=wait_ms)
+        return await locator.evaluate(script, arg, timeout=wait_ms)
 
     async def _visible_dialogs(self, selector: str) -> list[Locator]:
         """返回 ``selector`` 命中的可见 ``role=dialog``；异常时视为不可见。"""
@@ -237,7 +276,9 @@ class CollaboratorsControl:
         composer = await self._composer(entry)
         if composer is not None:
             bodies.extend(await self._notice_texts(composer))
-        panel = await self._panel(entry)
+        panel = await self._panel(
+            entry, timeout_ms=self._probe_timeout(READBACK_TIMEOUT_MS)
+        )
         if panel is not None:
             bodies.extend(await self._notice_texts(panel))
         for body in dict.fromkeys(bodies):
@@ -247,8 +288,15 @@ class CollaboratorsControl:
                     f'页面拒绝第 {position} 个协作者'
                     f'（可能达到该账号的协作者上限）：{notice}'
                 )
+        summary = ''
         try:
-            summary = str(await entry.input_value() or '')
+            if await entry.count():
+                summary = str(
+                    await entry.input_value(
+                        timeout=self._probe_timeout(READBACK_TIMEOUT_MS)
+                    )
+                    or ''
+                )
         except Exception:
             summary = ''
         shown = collaborator_count_summary(summary, query=username)
@@ -386,15 +434,13 @@ class CollaboratorsControl:
                     confirmed, f'添加「{name}」前', error
                 ) from error
             try:
-                confirmed_already, already_checked = (
-                    await self._existing_selection_state(entry, name)
-                )
-                if confirmed_already:
+                state = await self._existing_selection_state(entry, name)
+                if state.confirmed:
                     # 已有目标证据（图文 chip / Reels checkbox）：不再点击，避免取消勾选。
                     confirmed.append(name)
                     continue
                 chosen: CollaboratorCandidate | None = None
-                if not already_checked:
+                if not state.checked:
                     candidates = await self._type_and_wait(entry, name)
                     if not candidates:
                         raise OptionMismatchError(
@@ -410,17 +456,20 @@ class CollaboratorsControl:
                             applied=list(confirmed),
                             reason=NO_SAME_USERNAME,
                         )
-                    if not await self._click_candidate(entry, chosen):
-                        raise OptionMismatchError(
-                            'Instagram 协作者候选点击失败：'
-                            f'请求「{name}」',
-                            applied=list(confirmed),
-                            reason=SELECTION_FAILED,
-                        )
-                failure, readable = await self._wait_selected(entry, name)
-                if failure is not None:
+                    # 上一条搜索词可能把已预选行过滤掉了；搜出后若已勾选绝不反勾。
+                    if not chosen.checked:
+                        if not await self._click_candidate(entry, chosen):
+                            raise OptionMismatchError(
+                                'Instagram 协作者候选点击失败：'
+                                f'请求「{name}」',
+                                applied=list(confirmed),
+                                reason=SELECTION_FAILED,
+                            )
+                readback = await self._wait_selected(entry, name)
+                if readback.failure is not None:
+                    failure = readback.failure
                     applied = list(confirmed)
-                    if not applied and not readable:
+                    if not applied and not readback.readable:
                         # 回读本身不可读：区分“确认了 0 个”与“读不到”。
                         applied = None
                     message = self._readback_message(name, failure, chosen)
@@ -475,7 +524,9 @@ class CollaboratorsControl:
         self._confirmed = list(confirmed)
 
     # -- panel ------------------------------------------------------------
-    async def _panel(self, entry: Locator) -> Locator | None:
+    async def _panel(
+        self, entry: Locator, *, timeout_ms: int | None = None
+    ) -> Locator | None:
         """解析当前活动的协作者面板并返回一次性定位器。
 
         真机面板是入口所在创建弹窗之外的兄弟 ``role="dialog"``；这里用入口
@@ -483,8 +534,15 @@ class CollaboratorsControl:
         戳定位刚选中的节点。面板不存在/已收起时返回 ``None``。
         """
         token = uuid4().hex
+        wait_ms = (
+            timeout_ms
+            if timeout_ms is not None
+            else self._probe_timeout(PANEL_TIMEOUT_MS)
+        )
         try:
-            stamped = await entry.evaluate(_PANEL_JS, token)
+            stamped = await self._eval(
+                entry, _PANEL_JS, token, timeout_ms=wait_ms
+            )
         except Exception:
             return None
         if not stamped:
@@ -515,10 +573,11 @@ class CollaboratorsControl:
         """聚焦优先；只有面板仍未出现时才点击入口。返回是否确认打开。"""
         if await self._panel(entry) is not None:
             return True
-        await entry.focus()
+        await entry.focus(timeout=max(1, self._timeout(PANEL_TIMEOUT_MS)))
         if await self._wait_panel_open(entry):
             return True
-        await self._behavior().click(entry)
+        humanizer = self._behavior()
+        await humanizer.click(entry)
         return await self._wait_panel_open(entry)
 
     async def _close_panel(self, entry: Locator) -> bool:
@@ -529,13 +588,16 @@ class CollaboratorsControl:
         if done is None:
             return False
         self._check_budget()
-        await self._behavior().click(done)
+        humanizer = self._behavior()
+        await humanizer.click(done)
         return await self._wait_panel_closed(panel)
 
     async def _wait_panel_open(self, entry: Locator) -> bool:
-        deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
+        window_ms = self._timeout(PANEL_TIMEOUT_MS)
+        deadline = time.monotonic() + window_ms / 1000
+        wait_ms = max(1, window_ms)
         while True:
-            if await self._panel(entry) is not None:
+            if await self._panel(entry, timeout_ms=wait_ms) is not None:
                 return True
             if time.monotonic() >= deadline:
                 return False
@@ -543,13 +605,23 @@ class CollaboratorsControl:
 
     async def _wait_panel_closed(self, panel: Locator) -> bool:
         """确认刚点过 Done 的具体面板节点不再可见或不再包含候选行/Done。"""
-        deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
+        window_ms = self._timeout(PANEL_TIMEOUT_MS)
+        deadline = time.monotonic() + window_ms / 1000
+        wait_ms = max(1, window_ms)
         while True:
             try:
                 if await panel.count() == 0 or not await panel.is_visible():
                     return True
-                still_open = bool(await panel.evaluate(_PANEL_OPEN_JS))
+                still_open = bool(
+                    await self._eval(panel, _PANEL_OPEN_JS, timeout_ms=wait_ms)
+                )
             except Exception:
+                # 面板可能在 is_visible() 与 evaluate() 之间刚好卸载。
+                try:
+                    if await panel.count() == 0 or not await panel.is_visible():
+                        return True
+                except Exception:
+                    pass
                 still_open = True
             if not still_open:
                 return True
@@ -563,7 +635,7 @@ class CollaboratorsControl:
     ) -> list[CollaboratorCandidate]:
         """清空输入框、逐字符输入并等待候选；空列表时清空重输一次。"""
         humanizer = self._behavior()
-        await entry.focus()
+        await entry.focus(timeout=max(1, self._timeout(ENTRY_TIMEOUT_MS)))
         for _attempt in range(2):
             await humanizer.press('ControlOrMeta+A')
             await humanizer.press('Backspace')
@@ -576,23 +648,33 @@ class CollaboratorsControl:
     async def _wait_for_candidates(
         self, entry: Locator
     ) -> list[CollaboratorCandidate]:
-        deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
+        window_ms = self._timeout(SUGGESTION_TIMEOUT_MS)
+        deadline = time.monotonic() + window_ms / 1000
+        wait_ms = max(1, window_ms)
         while True:
-            candidates = await self._candidates(entry)
+            candidates = await self._candidates(entry, timeout_ms=wait_ms)
             if candidates:
                 await self._page.wait_for_timeout(
                     self._timeout(SUGGESTION_SETTLE_MS)
                 )
-                return await self._candidates(entry) or candidates
+                return (
+                    await self._candidates(entry, timeout_ms=wait_ms)
+                    or candidates
+                )
             if time.monotonic() >= deadline:
                 return []
             await asyncio.sleep(_POLL_SECONDS)
 
     async def _candidates(
-        self, entry: Locator
+        self, entry: Locator, *, timeout_ms: int | None = None
     ) -> list[CollaboratorCandidate]:
+        wait_ms = (
+            timeout_ms
+            if timeout_ms is not None
+            else self._probe_timeout(SUGGESTION_TIMEOUT_MS)
+        )
         try:
-            rows = await entry.evaluate(_ROWS_JS)
+            rows = await self._eval(entry, _ROWS_JS, timeout_ms=wait_ms)
         except Exception:
             return []
         candidates: list[CollaboratorCandidate] = []
@@ -619,7 +701,8 @@ class CollaboratorsControl:
         """给命中的行打一次性属性戳，再由共享 Humanizer 坐标点击。"""
         token = uuid4().hex
         try:
-            stamped = await entry.evaluate(
+            stamped = await self._eval(
+                entry,
                 _ROWS_JS,
                 {
                     'action': 'stamp',
@@ -627,6 +710,7 @@ class CollaboratorsControl:
                     'username': candidate.username,
                     'stamp': token,
                 },
+                timeout_ms=self._probe_timeout(SUGGESTION_TIMEOUT_MS),
             )
         except Exception:
             return False
@@ -638,7 +722,8 @@ class CollaboratorsControl:
                 return False
         except Exception:
             return False
-        await self._behavior().click(node)
+        humanizer = self._behavior()
+        await humanizer.click(node)
         return True
 
     @staticmethod
@@ -690,8 +775,8 @@ class CollaboratorsControl:
     # -- readback ---------------------------------------------------------
     async def _existing_selection_state(
         self, entry: Locator, username: str
-    ) -> tuple[bool, bool]:
-        """返回 ``(是否已按本帖型证据确认, 面板 checkbox 是否已勾选)``。
+    ) -> _SelectionState:
+        """返回某 username 在当前帖型证据下是否已确认，以及面板是否已勾选。
 
         图文/轮播必须见到预览 chip 才算确认；若 checkbox 已勾选但无 chip，
         绝不再次点击（避免取消勾选），而是交由 ``_wait_selected`` 走 chip 回读。
@@ -699,58 +784,74 @@ class CollaboratorsControl:
         if self._uses_preview_chips:
             chips = await self._read_chips(entry)
             if chips is not None and username in chips:
-                return True, True
+                return _SelectionState(confirmed=True, checked=True)
             checked = await self._checked_usernames(entry)
-            return False, bool(checked and username in checked)
+            return _SelectionState(
+                confirmed=False, checked=bool(checked and username in checked)
+            )
         checked = await self._checked_usernames(entry)
         is_checked = bool(checked and username in checked)
-        return is_checked, is_checked
+        return _SelectionState(confirmed=is_checked, checked=is_checked)
 
     async def _wait_selected(
         self, entry: Locator, username: str
-    ) -> tuple[str | None, bool]:
-        """立即回读当前 username；返回 ``(失败原因或 None, 是否可读)``。
+    ) -> _ReadbackResult:
+        """立即回读当前 username；返回失败原因（或 None）及通道是否可读。
 
         只使用 spec 表里的 ``selection_failed`` / ``final_mismatch``：
         checkbox 可读但未勾选是点击未生效；chip 已渲染却没有目标 chip，或
         回读通道不可读，是回读不一致。``final_empty`` 是地点控件的契约，
         协作者不新增该原因。
         """
-        deadline = time.monotonic() + self._timeout(READBACK_TIMEOUT_MS) / 1000
+        window_ms = self._timeout(READBACK_TIMEOUT_MS)
+        deadline = time.monotonic() + window_ms / 1000
+        wait_ms = max(1, window_ms)
         if self._uses_preview_chips:
             chips: list[str] | None = None
             while True:
-                chips = await self._read_chips(entry)
+                chips = await self._read_chips(entry, timeout_ms=wait_ms)
                 if chips is not None and username in chips:
-                    return None, True
+                    return _ReadbackResult(failure=None, readable=True)
                 if time.monotonic() >= deadline:
                     break
                 await asyncio.sleep(_POLL_SECONDS)
-            checked = await self._checked_usernames(entry)
+            checked = await self._checked_usernames(entry, timeout_ms=wait_ms)
             readable = chips is not None or checked is not None
             if checked is not None:
                 if username not in checked:
-                    return SELECTION_FAILED, readable
+                    return _ReadbackResult(SELECTION_FAILED, readable)
                 # 面板 checkbox 已勾选，但预览 chip 仍未出现：回读证据不一致。
-                return FINAL_MISMATCH, readable
+                return _ReadbackResult(FINAL_MISMATCH, readable)
             if chips:
-                return FINAL_MISMATCH, readable
+                return _ReadbackResult(FINAL_MISMATCH, readable)
             # chip 可读但为空且面板读不到：按“点击后未选中”归类。
-            return (FINAL_MISMATCH if chips is None else SELECTION_FAILED), readable
+            return _ReadbackResult(
+                FINAL_MISMATCH if chips is None else SELECTION_FAILED,
+                readable,
+            )
         checked = None
         while True:
-            checked = await self._checked_usernames(entry)
+            checked = await self._checked_usernames(entry, timeout_ms=wait_ms)
             if checked is not None and username in checked:
-                return None, True
+                return _ReadbackResult(failure=None, readable=True)
             if time.monotonic() >= deadline:
                 break
             await asyncio.sleep(_POLL_SECONDS)
         readable = checked is not None
-        return (SELECTION_FAILED if readable else FINAL_MISMATCH), readable
+        return _ReadbackResult(
+            SELECTION_FAILED if readable else FINAL_MISMATCH, readable
+        )
 
-    async def _read_chips(self, entry: Locator) -> list[str] | None:
+    async def _read_chips(
+        self, entry: Locator, *, timeout_ms: int | None = None
+    ) -> list[str] | None:
+        wait_ms = (
+            timeout_ms
+            if timeout_ms is not None
+            else self._probe_timeout(READBACK_TIMEOUT_MS)
+        )
         try:
-            chips = await entry.evaluate(_CHIPS_JS)
+            chips = await self._eval(entry, _CHIPS_JS, timeout_ms=wait_ms)
         except Exception:
             return None
         if not isinstance(chips, list):
@@ -762,9 +863,16 @@ class CollaboratorsControl:
                 names.append(name)
         return names
 
-    async def _checked_usernames(self, entry: Locator) -> list[str] | None:
+    async def _checked_usernames(
+        self, entry: Locator, *, timeout_ms: int | None = None
+    ) -> list[str] | None:
+        wait_ms = (
+            timeout_ms
+            if timeout_ms is not None
+            else self._probe_timeout(READBACK_TIMEOUT_MS)
+        )
         try:
-            rows = await entry.evaluate(_ROWS_JS)
+            rows = await self._eval(entry, _ROWS_JS, timeout_ms=wait_ms)
         except Exception:
             return None
         if not isinstance(rows, list):

@@ -93,12 +93,10 @@ class InstagramOptionControl(Protocol):
         ...
 
 
-class OptionMismatchError(RuntimeError):
-    """控件已能判断请求无法表达；``applied`` 是失败时页面实际可读到的值。
+class _OptionControlError(RuntimeError):
+    """控件明确归类的选项失败基类；由 ``status`` 区分 ``mismatch`` 与 ``unsupported``。"""
 
-    与普通异常不同：它只代表“这一项没生效”，管线记录 ``mismatch`` 后继续处理
-    后续选项，并把错误文案并入最终的聚合错误（例如地点无精确匹配时的候选列表）。
-    """
+    status: str = MISMATCH
 
     def __init__(
         self,
@@ -115,8 +113,20 @@ class OptionMismatchError(RuntimeError):
         self.detail = detail
 
 
-class OptionUnsupportedError(RuntimeError):
+class OptionMismatchError(_OptionControlError):
+    """控件已能判断请求无法表达；``applied`` 是失败时页面实际可读到的值。
+
+    与普通异常不同：它只代表“这一项没生效”，管线记录 ``mismatch`` 后继续处理
+    后续选项，并把错误文案并入最终的聚合错误（例如地点无精确匹配时的候选列表）。
+    """
+
+    status = MISMATCH
+
+
+class OptionUnsupportedError(_OptionControlError):
     """控件在执行阶段确认入口缺失或账号不可用，应记录为 ``unsupported``。"""
+
+    status = UNSUPPORTED
 
     def __init__(
         self,
@@ -126,10 +136,7 @@ class OptionUnsupportedError(RuntimeError):
         applied: object = None,
         detail: str | None = None,
     ) -> None:
-        super().__init__(message)
-        self.reason = reason
-        self.applied = applied
-        self.detail = detail
+        super().__init__(message, applied=applied, reason=reason, detail=detail)
 
 
 def normalize_text(text: str) -> str:

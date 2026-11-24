@@ -114,20 +114,33 @@ _PANEL_PREDICATES_JS = _JS_NORM_HELPER + """
     }
     return row && row !== dialog ? row : null;
   };
-  const hasCandidateRows = (dialog) => {
-    if (!dialog || !visible(dialog)) return false;
+  const collectCandidateRows = (dialog) => {
+    if (!dialog || !visible(dialog)) return [];
+    const seen = new Set();
+    const rows = [];
     for (const input of dialog.querySelectorAll('input[type="checkbox"]')) {
       if ((input.getAttribute('role') || '').toLowerCase() === 'switch') {
         continue;
       }
       if (!visible(input)) continue;
       const row = rowForInput(input, dialog);
-      if (!row || !visible(row)) continue;
-      if (!norm(row.innerText || row.textContent || '')) continue;
-      return true;
+      if (!row || !visible(row) || seen.has(row)) continue;
+      seen.add(row);
+      const text = norm(row.innerText || row.textContent || '');
+      if (!text) continue;
+      const username = text.split(/\\s+/)[0];
+      if (!username) continue;
+      rows.push({
+        node: row,
+        username: username,
+        display: text.slice(username.length).trim(),
+        checked: Boolean(input.checked) ||
+          (input.getAttribute('aria-checked') || '').toLowerCase() === 'true',
+      });
     }
-    return false;
+    return rows;
   };
+  const hasCandidateRows = (dialog) => collectCandidateRows(dialog).length > 0;
   const doneLabels = new Set([__DONE_LABELS__]);
   const hasDoneButton = (dialog) => {
     if (!dialog || !visible(dialog)) return false;
@@ -185,28 +198,9 @@ _PANEL_OPEN_JS = """(dialog) => {""" + _PANEL_PREDICATES_JS + """
 # username 首 token。AI/评论开关是 role=switch，明确排除。
 _ROWS_JS = """(el, action) => {""" + _PANEL_HELPERS_JS + """
   const panel = resolvePanel();
-  if (!panel) return (action && action.action === 'list') ? [] : null;
-  const seen = new Set();
-  const rows = [];
-  for (const input of panel.querySelectorAll('input[type="checkbox"]')) {
-    if ((input.getAttribute('role') || '').toLowerCase() === 'switch') continue;
-    if (!visible(input)) continue;
-    const row = rowForInput(input, panel);
-    if (!row || seen.has(row)) continue;
-    seen.add(row);
-    const text = norm(row.innerText || row.textContent || '');
-    if (!text) continue;
-    const username = text.split(/\\s+/)[0];
-    if (!username) continue;
-    rows.push({
-      node: row,
-      username: username,
-      display: text.slice(username.length).trim(),
-      checked: Boolean(input.checked) ||
-        (input.getAttribute('aria-checked') || '').toLowerCase() === 'true',
-    });
-  }
-  if (!action || action.action === 'list') {
+  if (!panel) return null;
+  const rows = collectCandidateRows(panel);
+  if (!action) {
     return rows.map((row, index) => ({
       index: index,
       username: row.username,

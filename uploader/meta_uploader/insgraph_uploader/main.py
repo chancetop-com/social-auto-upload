@@ -1157,23 +1157,7 @@ class InstagramUploader:
                     await self._apply_one_option(
                         key, requested, controls.get(key), budget=budget
                     )
-                except OptionUnsupportedError as error:
-                    self._record_option(
-                        key,
-                        requested,
-                        error.applied,
-                        UNSUPPORTED,
-                        reason=error.reason,
-                        detail=(
-                            error.detail
-                            if error.detail is not None
-                            else getattr(
-                                controls.get(key), 'last_detail', None
-                            )
-                        ),
-                    )
-                    details.append(f'{key}: {str(error) or type(error).__name__}')
-                except OptionMismatchError as error:
+                except (OptionUnsupportedError, OptionMismatchError) as error:
                     # 先落盘：控制器可能在确认了部分 username 后耗尽预算，
                     # 记录必须保留已确认前缀（applied）。这里不立即再查预算，
                     # 避免预算错误被外层 except 覆盖成 applied=None；下一项
@@ -1183,7 +1167,7 @@ class InstagramUploader:
                         key,
                         requested,
                         error.applied,
-                        MISMATCH,
+                        error.status,
                         reason=error.reason,
                         detail=(
                             error.detail
@@ -1192,8 +1176,10 @@ class InstagramUploader:
                                 controls.get(key), 'last_detail', None
                             )
                         ),
-                        extra=getattr(
-                            controls.get(key), 'last_evidence', None
+                        extra=(
+                            getattr(controls.get(key), 'last_evidence', None)
+                            if error.status == MISMATCH
+                            else None
                         ),
                     )
                     details.append(f'{key}: {str(error) or type(error).__name__}')

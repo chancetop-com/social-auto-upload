@@ -270,12 +270,12 @@ class _FakeReadEntry:
     async def is_visible(self):
         return True
 
-    async def focus(self):
+    async def focus(self, **kwargs):
         if self.focus_error is not None:
             raise self.focus_error
         return None
 
-    async def evaluate(self, script, arg=None):
+    async def evaluate(self, script, arg=None, **kwargs):
         if self.error is not None:
             raise self.error
         return self.rows
@@ -449,6 +449,75 @@ class InstagramCollaboratorControlReadTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(summary=value):
                 self.assertEqual(collaborator_count_summary(value, query="bob"), expected)
+
+    async def test_wait_panel_closed_treats_unmounted_panel_as_collapsed(self):
+        class _UnmountingPanel:
+            def __init__(self):
+                self.mounted = True
+                self.timeouts = []
+
+            async def count(self):
+                return 1 if self.mounted else 0
+
+            async def is_visible(self):
+                return self.mounted
+
+            async def evaluate(self, script, arg=None, *, timeout=None):
+                self.timeouts.append(timeout)
+                self.mounted = False
+                raise TimeoutError("panel detached mid-evaluate")
+
+        class _Budget:
+            def clamp_ms(self, default_ms):
+                return min(default_ms, 250)
+
+            def check_pre_click(self):
+                return None
+
+        panel = _UnmountingPanel()
+        control = CollaboratorsControl(
+            _FakeReadPage(_FakeReadEntry()), image_count=0, budget=_Budget()
+        )
+        self.assertTrue(await control._wait_panel_closed(panel))
+        self.assertEqual(len(panel.timeouts), 1)
+        self.assertIsNotNone(panel.timeouts[0])
+        self.assertLessEqual(panel.timeouts[0], 250)
+
+    async def test_locator_calls_clamp_timeout_to_remaining_budget(self):
+        class _RecordingEntry(_FakeReadEntry):
+            def __init__(self):
+                super().__init__(rows=[])
+                self.timeouts = []
+
+            async def evaluate(self, script, arg=None, *, timeout=None):
+                self.timeouts.append(("evaluate", timeout))
+                return []
+
+            async def focus(self, *, timeout=None):
+                self.timeouts.append(("focus", timeout))
+
+            async def input_value(self, *, timeout=None):
+                self.timeouts.append(("input_value", timeout))
+                return ""
+
+        class _Budget:
+            def clamp_ms(self, default_ms):
+                return min(default_ms, 180)
+
+            def check_pre_click(self):
+                return None
+
+        entry = _RecordingEntry()
+        control = CollaboratorsControl(
+            _FakeReadPage(entry), image_count=0, budget=_Budget()
+        )
+        self.assertEqual(await control.read(), [])
+        await control._limit_refusal(entry, 2, username="bob")
+        self.assertTrue(entry.timeouts)
+        for kind, timeout in entry.timeouts:
+            with self.subTest(kind=kind):
+                self.assertIsNotNone(timeout)
+                self.assertLessEqual(timeout, 180)
 
 
 

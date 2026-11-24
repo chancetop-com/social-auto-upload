@@ -325,7 +325,7 @@ class Field:
     async def text_content(self) -> str:
         return self._text
 
-    async def input_value(self) -> str:
+    async def input_value(self, **kwargs) -> str:
         return self.value
 
     async def evaluate_all(self, script) -> list[str]:
@@ -373,7 +373,7 @@ class Field:
         if self.on_real_click is not None:
             self.on_real_click()
 
-    async def evaluate(self, expression, arg=None):
+    async def evaluate(self, expression, arg=None, **kwargs):
         self.evaluate_calls.append((expression, arg))
         if isinstance(expression, str):
             if "elementFromPoint" in expression:
@@ -447,7 +447,7 @@ class HumanizePage:
         self.wait_calls.append(milliseconds)
         self.timeline.add("wait_for_timeout", milliseconds)
 
-    async def evaluate(self, expression, arg=None):
+    async def evaluate(self, expression, arg=None, **kwargs):
         raise UnscriptedEvaluationError(f"page.evaluate({expression!r}) not scripted")
 
     def on(self, event: str, callback) -> None:
@@ -1201,7 +1201,7 @@ class _HiddenSwitch(Field):
         super().__init__(name, **kwargs)
         self.attributes_read: list[str] = []
 
-    async def evaluate(self, expression, arg=None):
+    async def evaluate(self, expression, arg=None, **kwargs):
         if isinstance(expression, str) and "ancestorAriaHidden" in expression:
             self.evaluate_calls.append((expression, arg))
             return {**FACTS, "tag": "input", "opacity": 0.0}
@@ -1876,10 +1876,9 @@ def _collaborators_scene(
             )
             return True
         if not state["open"]:
-            return [] if isinstance(arg, dict) else None
-        if isinstance(arg, dict) and arg.get("action") == "list":
-            if field.value != requested:
-                return []
+            return None
+        if field.value != requested:
+            return []
         return [
             {
                 "index": 0,

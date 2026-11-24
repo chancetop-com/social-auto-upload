@@ -1048,6 +1048,35 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         self.assertEqual(by_query.get("bob"), ["alice"])
         self.assertEqual(outcome.share_clicks, 0)
 
+    def test_preselected_second_collaborator_after_filter_is_not_unchecked(
+        self,
+    ):
+        outcome = self._apply(
+            collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob")],
+                preselect=("bob",),
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob")
+            ),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob"],
+                "applied": ["alice", "bob"],
+                "status": SET,
+            },
+        )
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.clicked_username, "alice")
+        self.assertEqual(set(outcome.selected), {"alice", "bob"})
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(outcome.share_clicks, 0)
+
     def test_done_closes_the_panel_and_preserves_selection(self):
         outcome = self._apply(
             collaborator_page_html(
