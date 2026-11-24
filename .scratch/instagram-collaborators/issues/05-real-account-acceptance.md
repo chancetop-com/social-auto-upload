@@ -109,10 +109,19 @@
 
 - 代码审查修复（含面板识别、失败映射与 applied 前缀）已合并；验收通过后由编排方标记 `Resolution: completed`。
 
-### 2026-11-24 — 有头图文回归，真实账号待复验
+### 2026-11-24 — 有头图文回归与修复
 
 22:57 和 22:59 的真实账号图文干跑均在输入用户名之前退出 `1`，结果为 `mismatch/list_not_collapsed`、`applied=null`。两个现场的兄弟弹窗均已显示与入口同名的说明图标，尚无候选行或 Done。
 
 修复后的本地受控页面已使用系统 Chrome 可见窗口和 `HUMANIZE=1` 验证。图文运行退出 `0`，结果为 `prepared`、`collaborators.status=set`、`applied=["natgeo"]`，页面记录 Share 点击数为零。
 
-本轮尚未在已登录的 `luke` Profile 上重跑。真实账号验收需要上传 `demo1.png` 到 Instagram 并在编辑器中选择 `natgeo`，当前等待该操作的明确授权。
+### 2026-11-24 23:27–23:28 — 单人和三人真实账号复验通过
+
+在修复提交 `cf6419a` 上，使用已登录的本地 `luke` Profile、系统 Chrome 可见窗口和 `HUMANIZE=1`，分别执行两次 `instagram upload-note --headed --no-publish`。两次均上传一张 `videos/demo1.png`。
+
+| Share 前停止时间（北京时间） | 请求顺序 | 实际回读顺序（`applied`） | 本地结果文件 |
+|---|---|---|---|
+| 23:27:49 | `natgeo` | `natgeo` | `single.json` |
+| 23:28:38 | `natgeo`、`natgeotravel`、`natgeobooks` | `natgeo`、`natgeotravel`、`natgeobooks` | `multiple.json` |
+
+两次均退出 `0`，结果为 `status=prepared`、`options.collaborators.status=set`。stdout JSON 与各自的结果文件逐字段一致。两份日志都记录了在 Share 前停止，帖子和协作者邀请均未发出。结果文件保存在集成工作树的 `.local/instagram-results/2026-11-24-headed-collaborators/`。
