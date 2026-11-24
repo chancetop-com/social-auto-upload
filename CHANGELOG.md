@@ -165,20 +165,30 @@ chooser 事件没到时不再重复点击，而是重新解析 input 后直接�
 ### Instagram
 
 - **破坏性变更**：配文（标题、正文、标签合计）超过 2200 字符的退出码由 `1`（`ValueError`）改为 `2`（`UsageError`），与 TikTok、小红书对齐；调度层若按 `1` 判断需改用 `2`。
-- 新增四项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，**不传即完全不动页面默认、也不读取相关控件**：
+- 新增五项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，**不传即完全不动页面默认、也不读取相关控件**：
   - `--location TEXT`：按 Instagram 联想列表忽略大小写与多余空白的精确匹配；无精确匹配退出 `1`、不发布，错误信息列出观察到的候选。
   - `--no-comments`：请求关闭评论；入口缺失或不可用视为已满足（`default_off`，退出 `0`）。没有 `--comments`。
   - `--ai-generated` / `--no-ai-generated`：互斥，同传由 argparse 退出 `2`；开启时入口缺失或不可用退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
   - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于 `--images` 张数，每条 1–1000 字符，不截断；`upload-video --alt-text` 由 argparse 退出 `2`。
-- 所有静态校验（配文超长、视频与图片互斥、`--thumbnail` 与图片同传、替代文字条数/长度、空 `--location`）在启动浏览器或托管 Profile 前完成并退出 `2`。
+  - `--collaborator USERNAME`：可重复，每次一个 username；归一化后 1–5 个，逐个选中并回读，失败即停；详见下节「Instagram 协作者」。
+- 所有静态校验（配文超长、视频与图片互斥、`--thumbnail` 与图片同传、替代文字条数/长度、空 `--location`、协作者空值/重复/超过 5 个）在启动浏览器或托管 Profile 前完成并退出 `2`。
 - 本地模式固定 `locale=en-US` 与 `Accept-Language: en-US`（`INSTAGRAM_CONTEXT_KWARGS`，此前为空表），界面语言不再随操作系统的浏览器语言漂移；登录窗口同样固定。托管模式不应用该设置，Profile 界面必须人工保持 English。选项入口缺失时会打印页面 `html[lang]`，便于区分“选择器漂移”与“账号语言不是英文”。
 - 选项设置与回读在点击 Share **之前**完成：任一项未生效退出 `1`、不点击发布，不会退化为 `9`；结果文件仍写入失败证据。既有退出码 `0/1/9/10/11` 含义不变。
-- 结果 JSON 新增顶层 `options`，固定含 `location`、`alt_text`、`comments`、`ai_generated`，每项 `{requested, applied, status[, reason]}`；`status` ∈ `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` ∈ `entry_missing` / `account_ineligible`。字段为新增，旧消费方可忽略。
+- 结果 JSON 新增顶层 `options`，固定含 `location`、`alt_text`、`comments`、`ai_generated`、`collaborators`，每项 `{requested, applied, status[, reason]}`；`status` ∈ `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`；`reason` 按失败现场记录（协作者的完整取值见下节）。字段为新增，旧消费方可忽略。
 - 验证范围：离线 A/B/C/D 测试与真实 Chrome DOM 哨兵通过；2026-11-10 完成真实账号真发验收（English UI、Personal、本地 cookie）：两图轮播同时设置地点/两条替代文字/关闭评论/AI 标识，发布后 `img[alt]`、地点、`AI content` 与无评论输入框均回读一致；同日再发一条 Reel 验证 `--file` / `--thumbnail` / `--desc` / `--tags` 与两项开关，两条帖子随后均由 `delete` 确认删除。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。`--not-before`、`--proxy`、`--headless`、中文界面、专业账号与托管模式仍未验收。
 - 真机验收中发现的问题：Instagram 可能在点击创建后弹出 `Turn on Notifications`，已改为在等待素材入口期间主动关闭并在整个上传流程注册 handler；作品菜单新增项导致删帖下标漂移，已改为精确匹配 `Delete` 项。
-- 已知限制：选择器仅在 **English 界面 + Personal 账号**观察，中文标签为未验证回退，专业账号未验证；协作者、Stories、定时、配乐、选帧封面、用户标签、滤镜、隐藏点赞等仍保留页面默认且不在本轮范围。
+- 已知限制：选择器仅在 **English 界面 + Personal 账号**观察，中文标签为未验证回退，专业账号未验证；Stories、定时、配乐、选帧封面、用户标签、滤镜、隐藏点赞等仍保留页面默认且不在本轮范围。
 - 发布超时与 TikTok 对齐：整条上传/发布流程使用 15 分钟总预算；打开首页、身份核验、素材上传、裁剪/编辑、配文、封面与点击发布共享同一 deadline，关键等待按剩余预算收紧。未点击发布前超时退出 `1`（确定未发布）；点击发布后等待最终创建响应超时退出 `9`（结果未知，禁止自动重发）。
 - `--not-before` 的主动等待不计入预算，等待时长会从 deadline 中顺延；超时错误的现场证据仍写入本地结果目录。
+
+### Instagram 协作者（Collaborators）
+
+- `upload-video` / `upload-note` 新增可重复的 `--collaborator USERNAME`：每次一个 username，归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个；空值、归一化后重复（`alice` 与 `@Alice` 视为同一个）或超过 5 个在启动浏览器前退出 `2`，不会静默去重；不提供逗号分隔形态，也没有移除协作者的 flag。
+- 在点击 Share 前打开 Collaborators 面板，按候选行首 token 的 username 精确匹配（显示名、前缀、包含与模糊匹配均不参与，请求 `nike` 不会选中 `_nikeza5`）；每选中一个立即回读（图文/轮播预览 chip；Reels 面板 checkbox），首个失败即停止列表并保留 `applied` 前缀，全部完成后点 `Done`/「完成」并确认面板收起；任何失败都不点击 Share、退出 `1`。退出码保持静态错误 `2`、分享前失败 `1`、登录 `10`、托管限流 `11`、点击后未知 `9`，协作者失败不会退化为 `9`。
+- 结果 `options` 新增第五个键 `collaborators`：`requested` 为归一化数组或 `null`，`applied` 为按请求顺序的已确认数组（无确认项 `[]`、无法读取 `null`）。`status=set` 只表示创建页已选中，不代表邀请已发送、待接受或已被接受；不新增 `invite_state`。新增失败原因 `no_same_username_candidate`（有候选但无同 username）；`list_not_collapsed` 的描述拓宽为「候选列表或协作者面板未收起」；协作者不使用 `final_empty`，添加中途预算耗尽按无 `reason` 的 `mismatch` 记录并保留前缀。
+- 网页上限 5 来自 2026-11-24 真实账号探测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均为 5）；Meta Content Publishing API 文档写 3，本 CLI 自动化网页创建页，按网页能力执行。上限可能随账号、地区或灰度漂移；页面实际允许更少时，第 N 个会在回读时失败并停止。
+- 语言与选择器：本地模式保留 Profile/站点语言，不固定 en-US；托管 Profile 必须人工保持 English。协作者入口结构优先（`input[name="creation-collaborator-input"]`），回退英文 `Add collaborators` / 中文「添加合作者」，不依赖单一界面语言。
+- 已知限制：图文/轮播在预览图渲染协作者 chip，Reels 只在面板打开时可读已选 username；未来 `user_tags` 实现必须区分协作者 chip 与用户标签。本次不验证邀请接受状态，也不做发布后协作者回读或增删；验收停在 Share 前不证明邀请被接受。
 
 ### 依赖
 
