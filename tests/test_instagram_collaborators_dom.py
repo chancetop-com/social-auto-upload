@@ -357,6 +357,33 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertNotIn("carol", outcome.queries)
         self.assertEqual(outcome.share_clicks, 0)
 
+    def test_page_limit_refusal_is_final_mismatch_with_detail(self):
+        outcome = self._apply(
+            collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob"), ("carol", "Carol")],
+                page_limit=2,
+                limit_notice=(
+                    "You can only add up to 2 collaborators."
+                ),
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+        )
+        message = str(outcome.error)
+        self.assertIn("collaborators=mismatch(final_mismatch)", message)
+        self.assertNotIn("selection_failed", message)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["requested"], ["alice", "bob", "carol"])
+        self.assertEqual(record["applied"], ["alice", "bob"])
+        self.assertEqual(record["status"], MISMATCH)
+        self.assertEqual(record["reason"], FINAL_MISMATCH)
+        self.assertIn("第 3 个", record["detail"])
+        self.assertIn("上限", record["detail"])
+        self.assertEqual(outcome.chips, ["alice", "bob"])
+        self.assertEqual(outcome.done_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
     def test_click_without_selection_is_selection_failed(self):
         outcome = self._apply(
             collaborator_page_html(
@@ -367,11 +394,10 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertIn(
             "collaborators=mismatch(selection_failed)", str(outcome.error)
         )
-        self.assertEqual(
-            outcome.saved["options"]["collaborators"]["reason"],
-            SELECTION_FAILED,
-        )
-        self.assertEqual(outcome.saved["options"]["collaborators"]["applied"], [])
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["reason"], SELECTION_FAILED)
+        self.assertEqual(record["applied"], [])
+        self.assertNotIn("detail", record)
         self.assertEqual(outcome.share_clicks, 0)
 
     def test_missing_chip_readback_is_final_mismatch(self):

@@ -62,6 +62,7 @@ _COLLABORATOR_PAGE = """
   __RESTRICTION__
   <div id="chips"></div>
   <div id="collab-panel" hidden>
+    <div id="collab-limit" role="alert" hidden></div>
     <div id="collab-results"></div>
     <div role="button" id="collab-done">__DONE_LABEL__</div>
   </div>
@@ -81,6 +82,8 @@ _COLLABORATOR_PAGE = """
   const confirmDelayMs = __CONFIRM_DELAY_MS__;
   const panelOpens = __PANEL_OPENS__;
   const hideStampedAfter = __HIDE_STAMPED_AFTER__;
+  const pageLimit = __PAGE_LIMIT__;
+  const limitNotice = __LIMIT_NOTICE__;
   let hideStamps = false;
   const entry = document.getElementById('collab-entry');
   const panel = document.getElementById('collab-panel');
@@ -157,6 +160,15 @@ _COLLABORATOR_PAGE = """
         if (rowClick !== 'select') return;
         const toggle = () => {
           const index = selected.indexOf(candidate.username);
+          if (index < 0 && pageLimit !== null &&
+              selected.length >= pageLimit) {
+            const notice = document.getElementById('collab-limit');
+            if (notice) {
+              notice.textContent = limitNotice;
+              notice.hidden = false;
+            }
+            return;
+          }
           if (index >= 0) {
             selected.splice(index, 1);
           } else if (selected.length < 5) {
@@ -286,6 +298,8 @@ def collaborator_page_html(
     confirm_delay_ms=0,
     panel_opens=True,
     hide_stamped_after=None,
+    page_limit=None,
+    limit_notice="You can only add up to 2 collaborators.",
     restriction="",
     obscured=False,
 ) -> str:
@@ -313,6 +327,8 @@ def collaborator_page_html(
         .replace("__CONFIRM_DELAY_MS__", str(int(confirm_delay_ms)))
         .replace("__PANEL_OPENS__", "true" if panel_opens else "false")
         .replace("__HIDE_STAMPED_AFTER__", json.dumps(hide_stamped_after))
+        .replace("__PAGE_LIMIT__", json.dumps(page_limit))
+        .replace("__LIMIT_NOTICE__", json.dumps(limit_notice))
         .replace("__DONE_LABEL__", done_label)
     )
     if not obscured:
@@ -350,6 +366,7 @@ __DECOY__
 <div style="position: fixed; left: 120px; top: 330px;
             transform: translate(0, -100%); z-index: 5;">
   <div role="dialog" id="collab-panel" hidden>
+    <div id="collab-limit" role="alert" hidden></div>
     <div id="collab-results"></div>
     <div role="button" id="collab-done">__DONE_LABEL__</div>
   </div>
@@ -364,6 +381,8 @@ __DECOY__
   const confirmDelayMs = __CONFIRM_DELAY_MS__;
   const panelOpens = __PANEL_OPENS__;
   const hideStampedAfter = __HIDE_STAMPED_AFTER__;
+  const pageLimit = __PAGE_LIMIT__;
+  const limitNotice = __LIMIT_NOTICE__;
   let hideStamps = false;
   const entry = document.getElementById('collab-entry');
   const panel = document.getElementById('collab-panel');
@@ -465,6 +484,15 @@ __DECOY__
         if (rowClick !== 'select') return;
         const toggle = () => {
           const index = selected.indexOf(candidate.username);
+          if (index < 0 && pageLimit !== null &&
+              selected.length >= pageLimit) {
+            const notice = document.getElementById('collab-limit');
+            if (notice) {
+              notice.textContent = limitNotice;
+              notice.hidden = false;
+            }
+            return;
+          }
           if (index >= 0) {
             selected.splice(index, 1);
           } else if (selected.length < 5) {
@@ -595,6 +623,8 @@ def sibling_panel_page_html(
     confirm_delay_ms=0,
     panel_opens=True,
     hide_stamped_after=None,
+    page_limit=None,
+    limit_notice="You can only add up to 2 collaborators.",
     decoy=False,
 ) -> str:
     """真机结构（2026-11-24）：面板是创建弹窗之外的兄弟 ``role=dialog``。
@@ -623,6 +653,8 @@ def sibling_panel_page_html(
         .replace("__CONFIRM_DELAY_MS__", str(int(confirm_delay_ms)))
         .replace("__PANEL_OPENS__", "true" if panel_opens else "false")
         .replace("__HIDE_STAMPED_AFTER__", json.dumps(hide_stamped_after))
+        .replace("__PAGE_LIMIT__", json.dumps(page_limit))
+        .replace("__LIMIT_NOTICE__", json.dumps(limit_notice))
         .replace("__DONE_LABEL__", done_label)
     )
 
@@ -635,7 +667,6 @@ def timeout_patches():
         patch.object(collaborators_control_module, "SUGGESTION_TIMEOUT_MS", 250),
         patch.object(collaborators_control_module, "SUGGESTION_SETTLE_MS", 20),
         patch.object(collaborators_control_module, "READBACK_TIMEOUT_MS", 400),
-        patch.object(collaborators_control_module, "DONE_TIMEOUT_MS", 300),
     )
 
 

@@ -32,7 +32,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 已接入五项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，不传即完全不动页面默认：
 
 - `--location TEXT`：按联想列表忽略大小写与多余空白的精确匹配；无精确匹配退出 `1`、不发布，错误信息列出候选。
-- `--collaborator USERNAME`：可重复，每次一个 username；归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个，空值/重复/超过 5 个在上传前退出 `2`。打开 Collaborators 面板，按候选行首 token 的 username 精确匹配（不用显示名或包含关系，`nike` 不会选中 `_nikeza5`），每次点击后立即回读（图文/轮播 chip，Reels checkbox）；首个失败即停且不发布；没有移除 flag。`status=set` 只表示创建页已选中。
+- `--collaborator USERNAME`：可重复，每次一个 username；归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个，空值/重复/超过 5 个在上传前退出 `2`。在包含入口的创建弹窗内打开 Collaborators 面板（真机面板是入口附近的兄弟 `role=dialog`），按候选行首 token 的 username 精确匹配（不用显示名或包含关系，`nike` 不会选中 `_nikeza5`），每次点击后立即回读（图文/轮播 chip，Reels checkbox）；首个失败即停且不发布；没有移除 flag。页面若明确拒绝第 N 个（上限/只能/无法再添加等），记 `final_mismatch` 并在 `detail` 说明；没有拒绝信号时仍是 `selection_failed`。`status=set` 只表示创建页已选中。
 - `--no-comments`：请求关闭评论；入口缺失或不可用视为已满足（`default_off`，退出 `0`）。没有 `--comments`。
 - `--ai-generated` / `--no-ai-generated`：互斥，同传退出 `2`；开启时入口缺失退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
 - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于图片张数，每条 1–1000 字符，不截断。
@@ -41,7 +41,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --collaborator alice --collaborator bob --result .local/instagram-images.json
 ```
 
-Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。五项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 固定记录 `location`、`alt_text`、`comments`、`ai_generated`、`collaborators` 的 `requested` / `applied` / `status`（必要时含 `reason`）；协作者的 `requested`/`applied` 是数组或 `null`，失败原因包括 `no_same_username_candidate`，`list_not_collapsed` 也涵盖协作者面板未收起。
+Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏点赞/播放数和声音设置仍未接入，沿用页面默认。五项新选项在点击 Share 前完成设置与回读，任一项未生效即退出 `1` 且不发布。结果 JSON 的顶层 `options` 固定记录 `location`、`alt_text`、`comments`、`ai_generated`、`collaborators` 的 `requested` / `applied` / `status`（必要时含 `reason` 与明确现场文案 `detail`）；协作者的 `requested`/`applied` 是数组或 `null`，失败原因包括 `no_same_username_candidate`，`list_not_collapsed` 也涵盖协作者面板未打开或未收起。
 
 协作者上限 5 来自 2026-11-24 网页实测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均 5）；Meta Content Publishing API 文档写 3，本 CLI 自动化网页创建页，按网页能力执行，上限可能随账号/地区/灰度漂移。已知限制：图文/轮播在预览图渲染协作者 chip，Reels 只在面板打开时可读已选 username；未来 user tags 必须与协作者 chip 区分。本能力不查询、不验证邀请接受状态，`status=set` 只表示创建页已选中。退出码保持静态错误 `2`、分享前失败 `1`、登录 `10`、托管限流 `11`、点击后未知 `9`；协作者失败发生在点击前，不会退化为 `9`。
 

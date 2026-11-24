@@ -85,7 +85,6 @@ SUGGESTION_TIMEOUT_MS = 10_000
 SUGGESTION_SETTLE_MS = 250
 # 点击后立即回读该 username；chip/checkbox 通常是同步渲染，给一个小窗口。
 READBACK_TIMEOUT_MS = 3_000
-DONE_TIMEOUT_MS = 5_000
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 _ROW_ATTR = 'data-instagram-collaborator-row'
@@ -122,6 +121,33 @@ _COLLABORATOR_RESTRICTION_PATTERNS = (
         r"[^.\n]{0,20}(?:collaborator|合作者|协作者)",
         re.IGNORECASE,
     ),
+)
+
+# 页面可能把账号/地区的协作者上限设得低于静态 5。点击后 checkbox 仍未勾选
+# 时，只有页面明确给出“上限/只能/最多/无法再添加”等拒绝信号，才归因为页面
+# 拒绝（final_mismatch）；否则仍是点击未生效（selection_failed）。
+_COLLABORATOR_LIMIT_PATTERNS = (
+    re.compile(
+        r"(?:collaborator|collaborators|合作者|协作者)"
+        r"[^.\n]{0,60}"
+        r"(?:up\s+to|more\s+than|limit(?:ed)?|maximum|max\.?|reached|"
+        r"最多|上限|只能|不能再|已达到|达到|"
+        r"cannot\s+add|can['’]?t\s+add|unable\s+to\s+add|"
+        r"无法添加|无法邀请)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:up\s+to|more\s+than|limit(?:ed)?|maximum|max\.?|reached|"
+        r"最多|上限|只能|不能再|已达到|达到|"
+        r"cannot\s+add|can['’]?t\s+add|unable\s+to\s+add|"
+        r"无法添加|无法邀请)"
+        r"[^.\n]{0,60}"
+        r"(?:collaborator|collaborators|合作者|协作者)",
+        re.IGNORECASE,
+    ),
+)
+_COLLABORATOR_COUNT_SUMMARY = re.compile(
+    r"(\d+)\s*(?:people|person|位用户|位|人)", re.IGNORECASE
 )
 
 # 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
@@ -306,6 +332,28 @@ def collaborator_restriction_message(body: str | None) -> str | None:
     return None
 
 
+def collaborator_limit_message(body: str | None) -> str | None:
+    """返回页面明确写出的协作者上限/拒绝句；没有则返回 ``None``。"""
+    if not body:
+        return None
+    text = ' '.join(str(body).split())
+    for pattern in _COLLABORATOR_LIMIT_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            endings = [
+                index for index in (
+                    text.find('.', match.end()),
+                    text.find('。', match.end()),
+                )
+                if index != -1
+            ]
+            end = min(endings) if endings else min(
+                len(text), match.end() + 120
+            )
+            return text[match.start():end + 1].strip()
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class CollaboratorCandidate:
     """一条联想候选：首个 token 是 username，其余是显示名。"""
@@ -341,6 +389,11 @@ class CollaboratorsControl:
         if self._humanizer is None:
             self._humanizer = Humanizer(self._page)
         return self._humanizer
+
+    @property
+    def _uses_preview_chips(self) -> bool:
+        """图文/轮播用预览 chip 回读；Reels 只能读面板 checkbox。"""
+        return self._image_count > 0
 
     def _timeout(self, default_ms: int) -> int:
         return clamp_wait(self._budget, default_ms)
@@ -431,22 +484,61 @@ class CollaboratorsControl:
                 return None
             await asyncio.sleep(_POLL_SECONDS)
 
-    async def _restriction(self, entry: Locator | None = None) -> str | None:
-        composer = await self._composer(entry)
-        if composer is None:
-            return None
+    async def _notice_texts(self, dialog: Locator) -> list[str]:
+        """结构化读取弹窗内的可见提示（alert / aria-live），不扫全页文案。"""
         try:
-            notices = await composer.locator(
+            return await dialog.locator(
                 '[role="alert"]:visible, '
                 '[aria-live="assertive"]:visible, '
                 '[aria-live="polite"]:visible'
             ).all_inner_texts()
         except Exception:
+            return []
+
+    async def _restriction(self, entry: Locator | None = None) -> str | None:
+        composer = await self._composer(entry)
+        if composer is None:
             return None
-        for notice in notices:
+        for notice in await self._notice_texts(composer):
             reason = collaborator_restriction_message(notice)
             if reason:
                 return reason
+        return None
+
+    async def _limit_refusal(
+        self, entry: Locator, position: int
+    ) -> str | None:
+        """点击后仍未选中时，判断页面是否明确以“上限”拒绝了第 N 个。
+
+        只读创建弹窗/已解析面板内的结构化提示，以及入口上的 ``N people``
+        摘要；没有明确拒绝信号时返回 ``None``，保持 ``selection_failed``。
+        """
+        bodies: list[str] = []
+        composer = await self._composer(entry)
+        if composer is not None:
+            bodies.extend(await self._notice_texts(composer))
+        panel = await self._panel(entry)
+        if panel is not None:
+            bodies.extend(await self._notice_texts(panel))
+        for body in dict.fromkeys(bodies):
+            notice = collaborator_limit_message(body)
+            if notice:
+                return (
+                    f'页面拒绝第 {position} 个协作者'
+                    f'（可能达到该账号的协作者上限）：{notice}'
+                )
+        try:
+            summary = str(await entry.input_value() or '')
+        except Exception:
+            summary = ''
+        match = _COLLABORATOR_COUNT_SUMMARY.search(summary)
+        if match:
+            shown = int(match.group(1))
+            if shown < position:
+                return (
+                    f'页面显示已选 {shown} 人，第 {position} 个协作者未被接受'
+                    '（可能达到该账号的协作者上限）'
+                )
         return None
 
     async def resolve(self) -> str:
@@ -486,7 +578,7 @@ class CollaboratorsControl:
         entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
         if entry is None:
             return None
-        if self._image_count > 0:
+        if self._uses_preview_chips:
             return await self._read_chips(entry)
         checked = await self._checked_usernames(entry)
         return checked
@@ -596,10 +688,22 @@ class CollaboratorsControl:
                     if not applied and not readable:
                         # 回读本身不可读：区分“确认了 0 个”与“读不到”。
                         applied = None
+                    message = self._readback_message(
+                        name, failure, candidates
+                    )
+                    detail = None
+                    if failure == SELECTION_FAILED:
+                        detail = await self._limit_refusal(
+                            entry, len(confirmed) + 1
+                        )
+                        if detail:
+                            failure = FINAL_MISMATCH
+                            message = f'{message}；{detail}'
                     raise OptionMismatchError(
-                        self._readback_message(name, failure, candidates),
+                        message,
                         applied=applied,
                         reason=failure,
+                        detail=detail,
                     )
             except OptionMismatchError:
                 self._confirmed = list(confirmed)
@@ -846,7 +950,7 @@ class CollaboratorsControl:
 
     # -- readback ---------------------------------------------------------
     async def _is_selected(self, entry: Locator, username: str) -> bool:
-        if self._image_count > 0:
+        if self._uses_preview_chips:
             chips = await self._read_chips(entry)
             if chips is not None and username in chips:
                 return True
@@ -864,7 +968,7 @@ class CollaboratorsControl:
         协作者不新增该原因。
         """
         deadline = time.monotonic() + self._timeout(READBACK_TIMEOUT_MS) / 1000
-        if self._image_count > 0:
+        if self._uses_preview_chips:
             chips: list[str] | None = None
             while True:
                 chips = await self._read_chips(entry)

@@ -113,7 +113,9 @@ sau instagram upload-video --account creator --file demo.mp4 --title "标题" \
 3. 中文「添加合作者」的 placeholder / aria-label。
 4. 更宽的中英文回退。
 
-- 控件限定在当前创建弹窗内，不得全页定位。
+- 入口（entry）限定在**包含可见协作者入口的创建弹窗**内，不做全页 locator；同一页面若有多个 `role="dialog"`，只选含可见入口的那个。
+- Collaborators 面板可能是 portal 渲染的**兄弟 `role="dialog"`**（2026-11-24 真机），不是入口弹窗的后代。面板只按结构信号识别：可见的非 switch checkbox 行，或可见的 Done/完成 按钮，加上与入口的几何距离；不扫描全页文案。
+- 资格提示（`role="alert"` / `aria-live`）只读入口所在创建弹窗，不读兄弟面板或页面其它区域。
 - 禁止 hash 类名。
 - 所有可见交互走现有 `Humanizer` 行为层；`HUMANIZE=0` 时保留原生快速路径。
 
@@ -185,11 +187,11 @@ sau instagram upload-video --account creator --file demo.mp4 --title "标题" \
 | 搜索无任何候选 | `mismatch` | `no_candidates` | 1 |
 | 有候选但无同 username | `mismatch` | **`no_same_username_candidate`**（新增） | 1 |
 | 点击后未选中 / 回读不到 | `mismatch` | `selection_failed` / `final_mismatch` | 1 |
-| Collaborators 面板未收起 | `mismatch` | `list_not_collapsed` | 1 |
+| Collaborators 面板未打开或候选列表/面板未收起 | `mismatch` | `list_not_collapsed` | 1 |
 | 创建页被遮挡 | `mismatch` | `editor_obscured` | 1 |
 
-- 若页面实际上限低于 5，逐个回读会在第 N 个失败，按 `final_mismatch` 记录，并在 `detail` 说明页面拒绝。
-- `list_not_collapsed` 的文档描述拓宽为「候选列表或协作者面板未收起」，不新增原因值。
+- 若页面实际上限低于 5，逐个回读会在第 N 个失败，按 `final_mismatch` 记录，并在 `detail` 说明页面拒绝（例如「页面拒绝第 N 个协作者（可能达到该账号的协作者上限）」）。点击后未选中但页面没有拒绝/上限信号时仍是 `selection_failed`。
+- `list_not_collapsed` 的文档描述拓宽为「候选列表或协作者面板未打开/未收起」，不新增原因值。
 - 任何 `unsupported` / `mismatch` 都不点击 Share，抛出聚合错误（退出 `1`）。
 - 选项失败发生在点击前，绝不映射为退出 `9`。
 - 退出码：静态错误 `2`；运行时失败 `1`；登录 `10`；限流 `11`；发布结果未知 `9` 保持不变。
@@ -281,3 +283,4 @@ sau instagram upload-video --account creator --file demo.mp4 --title "标题" \
   - 图文面板的 Done 未单独点击；面板与 Reels 是同一组件，Done 行为由 Reels 探测确认。
 - 术语已写入 [GLOSSARY.md](../../GLOSSARY.md)：`协作者（collaborator）`、`协作者邀请（collaborator invite）`。
 - 已解决的评审点：Reels 面板收不起来复用 `list_not_collapsed`；证据已清理为 4 张关键截图。
+- 2026-11-24 真机复验补充：入口与资格提示在创建弹窗内，但 Collaborators 面板是**兄弟 `role="dialog"`**（portal 定位在入口附近）。因此选择器契约改为「入口/提示锚定创建弹窗；面板按可见非 switch checkbox 行或可见 Done 按钮 + 几何邻近识别」，不做全页面文案扫描；本文件 §UI 交互已同步。
