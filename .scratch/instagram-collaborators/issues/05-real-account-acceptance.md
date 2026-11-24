@@ -59,3 +59,46 @@
 ```
 
 - 验收结论：**未通过**。不是 `blocked: login required`；登录有效。`Resolution: completed` 未设置，交由编排方处理。
+
+### 2026-11-24 16:33–16:37 — 修复后复测（通过）
+
+- 前置失败原因：`controls/collaborators.py::_ROWS_JS` 以 `el.closest('[role="dialog"]')` 限定扫描范围，只看到 `Create new post` 创建弹窗，漏掉作为兄弟 `role="dialog"` 的候选浮层，导致候选已渲染仍报 `no_candidates`。
+- 修复提交：`dcd1b31 fix(instagram): find collaborator panel in sibling dialog`（集成分支 tip `706fbca`）；已 `git merge feat/instagram-collaborators` 到本验收分支，保留此前失败记录 `f657c52`。
+- 账号别名：`luke`（`lukechen918`），Profile：`browser_profiles/chrome/instagram/luke`。
+- 登录检查：`sau instagram check --account luke` → `valid`，退出码 `0`，未登录。
+- 界面语言：`en`（沿用同一 Profile 当天的只读 `document.documentElement.lang=en` 探测；`navigator.language=en`）。
+- 真实公开账号取自既有证据：`natgeo`、`natgeotravel`、`natgeobooks`；全部一次选中，无替换、无账号不合格。
+- 所有运行均为 `--no-publish`，`status=prepared`，`options.collaborators.status=set`，`applied == requested` 且顺序一致；退出码均为 `0`。
+
+| # | 帖型 | 请求 / 已选 | 结果文件 | 停止点 | 结果 |
+|---|---|---|---|---|---|
+| 1 | 图文/轮播（1 张） | `["natgeo"]` / `["natgeo"]` | `.local/acceptance/instagram-collaborators/after-fix/note-1.json` | Share 前，`--no-publish` 就绪点 | 通过 |
+| 2 | 图文/轮播（3 张） | `["natgeo","natgeotravel","natgeobooks"]` / 同序 | `.local/acceptance/instagram-collaborators/after-fix/note-3.json` | Share 前，`--no-publish` 就绪点 | 通过 |
+| 3 | Reels | `["natgeo"]` / `["natgeo"]` | `.local/acceptance/instagram-collaborators/after-fix/reel-1.json` | Share 前，`--no-publish` 就绪点 | 通过 |
+| 4 | Reels | `["natgeo","natgeotravel","natgeobooks"]` / 同序 | `.local/acceptance/instagram-collaborators/after-fix/reel-3.json` | Share 前，`--no-publish` 就绪点 | 通过 |
+
+- Share 零点击证据：四条日志均含 `Instagram 发布就绪，--no-publish 停在 Share 前（未点击发布）`（`note-1.log` 16:34:17、`note-3.log` 16:35:13、`reel-1.log` 16:36:08、`reel-3.log` 16:37:04）；结果均为 `prepared`，无 `content_id` / `post_id` / `post_url`，未发布、未发出邀请。
+- stdout 与结果文件一致性：四条运行均解析 stdout JSON 并与 `--result` 文件逐字段比较，全部相等（包括 `prepared`、五个 `options` 键与协作者顺序）。
+- 代表性结果（`note-3.json`，stdout 与文件相同）：
+
+```json
+{
+  "platform": "instagram",
+  "title": "验收：图文协作者 3 人（修复后）",
+  "status": "prepared",
+  "options": {
+    "location": {"requested": null, "applied": null, "status": "not_requested"},
+    "alt_text": {"requested": null, "applied": null, "status": "not_requested"},
+    "comments": {"requested": null, "applied": null, "status": "not_requested"},
+    "ai_generated": {"requested": null, "applied": null, "status": "not_requested"},
+    "collaborators": {
+      "requested": ["natgeo", "natgeotravel", "natgeobooks"],
+      "applied": ["natgeo", "natgeotravel", "natgeobooks"],
+      "status": "set"
+    }
+  },
+  "topics": []
+}
+```
+
+- 复测结论：**通过**。验收条件（两帖型、1 人与多人、逐项回读、Share 前停止）均满足；未发现残余 DOM/行为问题。`Resolution: completed` 未设置，交由编排方处理。
