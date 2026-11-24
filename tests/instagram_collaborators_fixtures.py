@@ -502,13 +502,12 @@ def sibling_panel_page_html(
     )
 
 
-def timeout_patches():
+def timeout_patches(*, suggestion_timeout_ms=250):
     """把控件等待收紧到测试尺度；不改变生产默认值。"""
     return (
         patch.object(collaborators_control_module, "ENTRY_TIMEOUT_MS", 300),
         patch.object(collaborators_control_module, "PANEL_TIMEOUT_MS", 600),
-        patch.object(collaborators_control_module, "SUGGESTION_TIMEOUT_MS", 250),
-        patch.object(collaborators_control_module, "SUGGESTION_SETTLE_MS", 20),
+        patch.object(collaborators_control_module, "SUGGESTION_TIMEOUT_MS", suggestion_timeout_ms),
         patch.object(collaborators_control_module, "READBACK_TIMEOUT_MS", 400),
     )
 

@@ -67,6 +67,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         action="upload-note",
         expire_after_selection=None,
         extra_args=(),
+        suggestion_timeout_ms=250,
     ):
         holder: dict[str, object] = {}
         result_file = self.folder / f"result-{uuid4().hex}.json"
@@ -155,7 +156,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         if no_publish:
             argv.append("--no-publish")
         stdout, stderr = io.StringIO(), io.StringIO()
-        patches = timeout_patches()
+        patches = timeout_patches(suggestion_timeout_ms=suggestion_timeout_ms)
         for item in patches:
             item.start()
         try:
@@ -202,6 +203,85 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         self.assertEqual(saved["options"]["collaborators"], expected)
         self.assertEqual(holder["share_clicks"], 0)
         self.assertEqual(json.loads(stdout), saved)
+
+    def test_hidden_preview_chip_does_not_skip_selecting_the_account(self):
+        html = collaborator_page_html([("alice", "Alice")]) + """
+        <script>
+          document.querySelector('#chips').innerHTML =
+            '<span style="display:inline-block;transform:scale(0)"><span>alice</span>' +
+            '<button><svg aria-label="Close"></svg></button></span>';
+        </script>"""
+        code, saved, holder, _, stderr = self._run(
+            html=html, collaborator_args=("--collaborator", "alice")
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(holder["row_clicks"], 1)
+        self.assertEqual(saved["options"]["collaborators"]["applied"], ["alice"])
+        self.assertEqual(holder["share_clicks"], 0)
+
+    def test_note_selection_lost_on_done_records_only_remaining_accounts(self):
+        html = collaborator_page_html([("alice", "Alice"), ("bob", "Bob")]) + """
+        <script>
+          // The initial preview still has both chips. Share becomes ready on the next render.
+          const share = document.querySelector('#share');
+          share.setAttribute('aria-disabled', 'true');
+          done.addEventListener('click', () => setTimeout(() => {
+            selected.splice(selected.indexOf('alice'), 1);
+            renderChips();
+            share.removeAttribute('aria-disabled');
+          }, 650));
+        </script>"""
+        code, saved, holder, _, _ = self._run(
+            html=html, collaborator_args=("--collaborator", "alice", "--collaborator", "bob"),
+            no_publish=False,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(saved["options"]["collaborators"], {
+            "requested": ["alice", "bob"], "applied": ["bob"],
+            "status": MISMATCH, "reason": FINAL_MISMATCH,
+        })
+        self.assertEqual(holder["share_clicks"], 0)
+
+    def test_search_waits_for_current_username_while_previous_rows_are_visible(self):
+        html = collaborator_page_html([("alice", "Alice")]) + """
+        <script>
+          entry.addEventListener('input', event => {
+            if (entry.value !== 'bob') return;
+            event.stopImmediatePropagation();
+            setTimeout(() => {
+              candidates.push({username: 'bob', display: 'Bob'});
+              renderResults();
+            }, DELAY_MS);
+          }, true);
+        </script>"""
+        for delay, window in ((700, 3000), (235, 250)):
+            with self.subTest(delay=delay):
+                code, saved, holder, _, stderr = self._run(
+                    html=html.replace("DELAY_MS", str(delay)),
+                    collaborator_args=("--collaborator", "bob"), suggestion_timeout_ms=window,
+                )
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(saved["options"]["collaborators"]["applied"], ["bob"])
+                self.assertEqual(holder["row_clicks"], 1)
+                self.assertEqual(holder["share_clicks"], 0)
+
+    def test_busy_note_preview_is_not_final_evidence_even_with_share_enabled(self):
+        html = collaborator_page_html([("alice", "Alice")]) + """
+        <script>
+          done.addEventListener('click', () => {
+            chips.setAttribute('aria-busy', 'true');
+            setTimeout(() => {
+              selected.length = 0;
+              renderChips();
+              chips.removeAttribute('aria-busy');
+            }, 300);
+          });
+        </script>"""
+        code, saved, holder, _, _ = self._run(html=html, collaborator_args=("--collaborator", "alice"))
+        self.assertEqual(code, 1)
+        self.assertEqual(saved["options"]["collaborators"]["reason"], FINAL_MISMATCH)
+        self.assertEqual(saved["options"]["collaborators"]["applied"], [])
+        self.assertEqual(holder["share_clicks"], 0)
 
     def test_controlled_page_failure_exits_1_with_zero_share_clicks(self):
         html = collaborator_page_html([("_nikeza5", "nikeza")])

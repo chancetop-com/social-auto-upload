@@ -1921,8 +1921,6 @@ class InstagramCollaboratorsHumanizeTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(
             collaborators_control_module, "PANEL_TIMEOUT_MS", 0
-        ), patch.object(
-            collaborators_control_module, "SUGGESTION_SETTLE_MS", 0
         ):
             await control.set(("alice",))
 
@@ -1959,8 +1957,6 @@ class InstagramCollaboratorsHumanizeTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(
             collaborators_control_module, "PANEL_TIMEOUT_MS", 0
-        ), patch.object(
-            collaborators_control_module, "SUGGESTION_SETTLE_MS", 0
         ):
             await control.set(("alice",))
 

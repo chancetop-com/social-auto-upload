@@ -76,10 +76,9 @@ if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchri
 ENTRY_TIMEOUT_MS = 5_000
 PANEL_TIMEOUT_MS = 5_000
 SUGGESTION_TIMEOUT_MS = 10_000
-# 联想列表可能分批挂载：出现后短暂静置再重扫，避免只看到第一条。
-SUGGESTION_SETTLE_MS = 250
 # 点击后立即回读该 username；chip/checkbox 通常是同步渲染，给一个小窗口。
 READBACK_TIMEOUT_MS = 3_000
+_PREVIEW_STABLE_SECONDS = 0.2
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 
@@ -88,7 +87,6 @@ _POLL_SECONDS = 0.1
 class CollaboratorCandidate:
     """一条联想候选：首个 token 是 username，其余是显示名。"""
 
-    index: int
     username: str
     display: str | None = None
     checked: bool = False
@@ -521,6 +519,8 @@ class CollaboratorsControl:
                 applied=list(confirmed),
                 reason=LIST_NOT_COLLAPSED,
             )
+        if self._uses_preview_chips:
+            await self._verify_preview(entry, confirmed, stable_seconds=0)
         self._confirmed = list(confirmed)
 
     # -- panel ------------------------------------------------------------
@@ -640,30 +640,24 @@ class CollaboratorsControl:
             await humanizer.press('ControlOrMeta+A')
             await humanizer.press('Backspace')
             await humanizer.type_text(username)
-            candidates = await self._wait_for_candidates(entry)
+            candidates = await self._wait_for_candidates(entry, username)
             if candidates:
                 return candidates
         return []
 
     async def _wait_for_candidates(
-        self, entry: Locator
+        self, entry: Locator, username: str
     ) -> list[CollaboratorCandidate]:
-        window_ms = self._timeout(SUGGESTION_TIMEOUT_MS)
-        deadline = time.monotonic() + window_ms / 1000
-        wait_ms = max(1, window_ms)
+        """结果更新期间可能保留上一批候选；只在精确命中时提前结束。"""
+        deadline = time.monotonic() + self._timeout(SUGGESTION_TIMEOUT_MS) / 1000
         while True:
-            candidates = await self._candidates(entry, timeout_ms=wait_ms)
-            if candidates:
-                await self._page.wait_for_timeout(
-                    self._timeout(SUGGESTION_SETTLE_MS)
-                )
-                return (
-                    await self._candidates(entry, timeout_ms=wait_ms)
-                    or candidates
-                )
-            if time.monotonic() >= deadline:
-                return []
-            await asyncio.sleep(_POLL_SECONDS)
+            candidates = await self._candidates(
+                entry, timeout_ms=self._timeout(int(_POLL_SECONDS * 1000))
+            )
+            remaining = deadline - time.monotonic()
+            if self._exact_candidate(username, candidates) is not None or remaining <= 0:
+                return candidates
+            await asyncio.sleep(min(_POLL_SECONDS, remaining))
 
     async def _candidates(
         self, entry: Locator, *, timeout_ms: int | None = None
@@ -687,7 +681,6 @@ class CollaboratorsControl:
             display = str(row.get('display') or '').strip() or None
             candidates.append(
                 CollaboratorCandidate(
-                    int(row.get('index', len(candidates))),
                     username,
                     display,
                     bool(row.get('checked')),
@@ -706,7 +699,6 @@ class CollaboratorsControl:
                 _ROWS_JS,
                 {
                     'action': 'stamp',
-                    'index': candidate.index,
                     'username': candidate.username,
                     'stamp': token,
                 },
@@ -714,6 +706,8 @@ class CollaboratorsControl:
             )
         except Exception:
             return False
+        if stamped == 'already_checked':
+            return True
         if not stamped:
             return False
         node = self._page.locator(f'[{_ROW_ATTR}="{token}"]')
@@ -773,6 +767,38 @@ class CollaboratorsControl:
         )
 
     # -- readback ---------------------------------------------------------
+    async def verify_share_preview(self, requested: list[str]) -> None:
+        """Share 就绪后核对图文预览；Done 的异步重绘结束前不采信旧标签。"""
+        entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
+        await self._verify_preview(entry, requested, stable_seconds=_PREVIEW_STABLE_SECONDS)
+
+    async def _verify_preview(
+        self, entry: Locator | None, requested: list[str], *, stable_seconds: float
+    ) -> None:
+        deadline = time.monotonic() + self._timeout(READBACK_TIMEOUT_MS) / 1000
+        expected = set(requested)
+        matched_since = None
+        while True:
+            chips = await self._read_chips(
+                entry, timeout_ms=self._timeout(int(_POLL_SECONDS * 1000))
+            ) if entry is not None else None
+            now = time.monotonic()
+            if chips is not None and set(chips) == expected:
+                if matched_since is None:
+                    matched_since = now
+                if now - matched_since >= stable_seconds:
+                    return
+            else:
+                matched_since = None
+            if entry is None or now >= deadline:
+                break
+            await asyncio.sleep(min(_POLL_SECONDS, deadline - now))
+        raise OptionMismatchError(
+            f'Instagram 协作者面板收起后预览标签不符：请求 {requested}，回读 {chips}',
+            applied=None if chips is None else [name for name in requested if name in chips],
+            reason=FINAL_MISMATCH,
+        )
+
     async def _existing_selection_state(
         self, entry: Locator, username: str
     ) -> _SelectionState:

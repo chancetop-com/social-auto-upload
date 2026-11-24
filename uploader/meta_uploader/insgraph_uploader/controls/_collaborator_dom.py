@@ -199,17 +199,15 @@ _ROWS_JS = """(el, action) => {""" + _PANEL_HELPERS_JS + """
   if (!panel) return null;
   const rows = collectCandidateRows(panel);
   if (!action) {
-    return rows.map((row, index) => ({
-      index: index,
+    return rows.map(row => ({
       username: row.username,
       display: row.display,
       checked: row.checked,
     }));
   }
-  const target = rows[action.index];
+  const target = rows.find(row => row.username.toLowerCase() === action.username.toLowerCase());
   if (!target) return null;
-  if (norm(target.username).toLowerCase() !==
-      norm(action.username).toLowerCase()) return null;
+  if (target.checked) return 'already_checked';
   target.node.setAttribute('data-instagram-collaborator-row', action.stamp);
   return true;
 }"""
@@ -240,8 +238,11 @@ _CHIPS_JS = """(el) => {
     const chip = button.closest('span');
     if (!chip) continue;
     const name = chip.querySelector('span');
-    if (!name) continue;
-    const text = norm(name.innerText || name.textContent || '');
+    if (!name?.checkVisibility({visibilityProperty: true, opacityProperty: true})) continue;
+    const rect = name.getBoundingClientRect();
+    if (!rect.width || !rect.height) continue;
+    if (name.closest('[aria-busy="true"]')) return null;
+    const text = norm(name.innerText);
     if (!text) continue;
     const key = text.toLowerCase();
     if (seen.has(key)) continue;

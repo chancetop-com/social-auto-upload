@@ -868,7 +868,8 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 - 没有 `--comments`：评论只有“请求关闭”一个方向，想保持开启就不传 `--no-comments`。
 - `--alt-text` 按 `--images` 顺序逐张填写；`upload-video --alt-text` 由 argparse 拒绝，退出 `2`。
 - `--collaborator USERNAME` 可重复，每个值只接受一个 username；不提供 `--collaborators a,b` 逗号分隔形态，也没有移除协作者的 flag。处理前依次去掉首尾空白、去掉一个前导 `@`、转小写；归一化后为空、重复（`alice` 与 `@Alice` 视为同一个）或超过 5 个，都在启动浏览器前退出 `2`，不会静默去重。不传 `--collaborator` 时不解析、不读取协作者控件，结果记 `not_requested`。
-- 候选行文本为 `username display name`，只取首个 token 按 username 精确匹配；显示名、前缀、包含关系与模糊匹配都不参与（请求 `nike` 不会选中 `_nikeza5`）。每选中一个 username 立即回读：图文/轮播确认预览图 chip，Reels 确认面板 checkbox；全部完成后点 `Done`/「完成」并确认面板收起。首个失败即停止列表，`applied` 保留失败前已确认的前缀，且不点击 Share。
+- 候选行只按首个 token（username）精确匹配；请求 `nike` 不会选中 `_nikeza5`。搜索期间若仍显示旧候选，会继续等待当前 username。每选中一个账号立即回读：图文/轮播确认可见的预览标签，Reels 确认面板内的勾选状态。添加中途失败时立即停止，`applied` 保留已确认的前缀。
+- 全部选中后点击 `Done`/「完成」并确认面板收起。图文/轮播会再核对可见预览标签；若与请求不符，命令在 Share 前退出 `1`，记 `final_mismatch`，`applied` 按请求顺序列出仍可见的请求账号（读不到时为 `null`）。Reels 收起后不再显示已选账号，使用面板内逐个确认的结果。
 - 网页上限 5 来自 2026-11-24 的真实账号探测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均为 5）。Meta Content Publishing API 文档写 3，但本 CLI 自动化的是网页创建页，因此按网页能力执行；上限可能随账号、地区或灰度变化，若页面实际允许更少，第 N 个会在回读时失败并停止。
 - `status=set` 只表示创建页已选中该 username，不代表邀请已发送、待接受或已接受。本 CLI 不查询、不验证接受状态，也不提供发布后增删协作者；验收停在 Share 前不能证明任何邀请被接受。
 - 协作者的退出码与既有约定一致：静态错误（空值/重复/超过 5 个等）`2`；点击 Share 前的入口、匹配、回读或面板失败 `1`；登录/验证 `10`；托管限流 `11`；只有已经点击 Share 后的结果未知才是 `9`。协作者失败发生在点击前，因此不会退化为 `9`。

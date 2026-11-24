@@ -24,6 +24,7 @@ from patchright.async_api import (
 
 from uploader.meta_uploader.insgraph_uploader.controls import (
     AltTextControl,
+    CollaboratorsControl,
     resolve_instagram_option_controls,
 )
 from uploader.meta_uploader.insgraph_uploader.controls._rows import (
@@ -1271,20 +1272,35 @@ class InstagramUploader:
             # 干跑：上传、配文与全部选项已完成后停在 Share 前；跳过
             # --not-before，不注册响应监听，也不进入结果观察循环。
             self.stage = 'publish'
-            await self._wait_until_publish_ready(action, budget=budget)
+        await self._wait_until_publish_ready(action, budget=budget)
+        if not self.no_publish:
+            await budget.wait_until_allowed(
+                getattr(self, "publish_not_before", None), logger=logger, label="Instagram 发布"
+            )
+        if self.image_files and self.options and self.options.collaborators:
+            requested = list(self.options.collaborators)
+            preview = CollaboratorsControl(page, image_count=len(self.image_files), budget=budget)
+            try:
+                await preview.verify_share_preview(requested)
+            except OptionMismatchError as error:
+                self.stage = 'options'
+                self._record_option('collaborators', requested, error.applied, MISMATCH, error.reason)
+                self._write_result()
+                raise
+            except RuntimeError:
+                # 预算先于最终回读用尽；不能保留之前的 set 证据。
+                self.stage = 'options'
+                self._record_option('collaborators', requested, None, MISMATCH)
+                self._write_result()
+                raise
+        budget.check_pre_click()
+        if self.no_publish:
             self.result['status'] = 'prepared'
             self._write_result()
             logger.info(
                 "Instagram 发布就绪，--no-publish 停在 Share 前（未点击发布）"
             )
             return
-        await self._wait_until_publish_ready(action, budget=budget)
-        await budget.wait_until_allowed(
-            getattr(self, "publish_not_before", None),
-            logger=logger,
-            label="Instagram 发布",
-        )
-        budget.check_pre_click()
         if not getattr(self, '_managed', False):
             _raise_if_login_required(page, managed=False)
         # status 只是结果记录；点击是否派发由独立的 publish_clicked 标记。
