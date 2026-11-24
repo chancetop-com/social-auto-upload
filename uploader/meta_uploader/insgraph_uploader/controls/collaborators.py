@@ -152,8 +152,9 @@ _COLLABORATOR_COUNT_SUMMARY = re.compile(
 
 # 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
 # 先认创建弹窗自身（既有受控 DOM 把结果列表嵌在弹窗内）；否则在所有可见
-# role=dialog 中取“含可见非 switch checkbox 行或可见按钮”且与协作者入口
-# 几何最近的弹窗。可见按钮让“查询无候选但面板仍有 Done”也能被识别。
+# role=dialog 中取“含可见非 switch checkbox 行或可见 Done/完成 按钮”且与
+# 协作者入口几何最近的弹窗。普通按钮不算面板信号，避免把通知/放弃弹窗
+# 误认成已打开的候选面板。
 _PANEL_HELPERS_JS = _JS_NORM_HELPER + """
   const visible = (node) => {
     if (!node || !node.getClientRects().length) return false;
@@ -183,26 +184,21 @@ _PANEL_HELPERS_JS = _JS_NORM_HELPER + """
     }
     return false;
   };
-  const hasVisibleButton = (dialog) => {
-    if (!dialog || !visible(dialog)) return false;
-    for (const node of dialog.querySelectorAll('button, [role="button"]')) {
-      if (!visible(node)) continue;
-      if (norm(node.innerText || node.textContent || '')) return true;
-    }
-    return false;
-  };
   const doneLabels = new Set([__DONE_LABELS__]);
   const hasDoneButton = (dialog) => {
     if (!dialog || !visible(dialog)) return false;
     for (const node of dialog.querySelectorAll('button, [role="button"]')) {
       if (!visible(node)) continue;
-      const text = norm(node.innerText || node.textContent || '').toLowerCase();
-      if (doneLabels.has(text)) return true;
+      const text = norm(
+        node.innerText || node.textContent || ''
+      ).toLowerCase();
+      const label = norm(node.getAttribute('aria-label') || '').toLowerCase();
+      if (doneLabels.has(text) || doneLabels.has(label)) return true;
     }
     return false;
   };
   const isPanelDialog = (dialog) =>
-    hasCandidateRows(dialog) || hasVisibleButton(dialog);
+    hasCandidateRows(dialog) || hasDoneButton(dialog);
   const entryRect = el.getBoundingClientRect();
   const distanceTo = (node) => {
     const rect = node.getBoundingClientRect();
@@ -509,10 +505,11 @@ class CollaboratorsControl:
     async def _limit_refusal(
         self, entry: Locator, position: int
     ) -> str | None:
-        """点击后仍未选中时，判断页面是否明确以“上限”拒绝了第 N 个。
+        """逐个回读失败时，判断页面是否明确以“上限”拒绝了第 N 个。
 
         只读创建弹窗/已解析面板内的结构化提示，以及入口上的 ``N people``
-        摘要；没有明确拒绝信号时返回 ``None``，保持 ``selection_failed``。
+        摘要；没有明确拒绝信号时返回 ``None``，保留原回读原因
+        （``selection_failed`` / ``final_mismatch``）。
         """
         bodies: list[str] = []
         composer = await self._composer(entry)
@@ -607,6 +604,24 @@ class CollaboratorsControl:
             applied=list(confirmed) if readable else None,
         )
 
+    @staticmethod
+    def _panel_not_open(
+        error: BaseException | None = None,
+    ) -> OptionMismatchError:
+        """面板没能打开：统一按 ``list_not_collapsed`` 停止，尚未输入任何词。"""
+        if error is None:
+            suffix = '（聚焦/点击入口后仍看不到候选列表或 Done/完成）'
+            detail = None
+        else:
+            suffix = f'（聚焦/点击入口时失败：{error}）'
+            detail = f'{type(error).__name__}: {error}'
+        return OptionMismatchError(
+            f'Instagram 协作者面板未能打开{suffix}',
+            applied=None,
+            reason=LIST_NOT_COLLAPSED,
+            detail=detail,
+        )
+
     async def set(self, requested) -> None:
         """按请求顺序逐个选中；首个失败立即停止并保留已确认前缀。"""
         self.last_evidence = {}
@@ -635,18 +650,13 @@ class CollaboratorsControl:
         except (LoginRequiredError, PublishResultUnknownError):
             raise
         except Exception as error:
+            # 面板打开阶段的浏览器错误同样意味着“面板未打开”，按 spec 的
+            # list_not_collapsed 记录；此时尚未输入任何 username。
             self._confirmed = None
-            raise self._stop_with_prefix(
-                [], '打开面板时', error, readable=False
-            ) from error
+            raise self._panel_not_open(error) from error
         if not opened:
             self._confirmed = None
-            raise OptionMismatchError(
-                'Instagram 协作者面板未能打开'
-                '（聚焦/点击入口后仍看不到候选列表或 Done/完成）',
-                applied=None,
-                reason=LIST_NOT_COLLAPSED,
-            )
+            raise self._panel_not_open()
         confirmed: list[str] = []
         for name in names:
             try:
@@ -692,14 +702,16 @@ class CollaboratorsControl:
                     message = self._readback_message(
                         name, failure, candidates
                     )
-                    detail = None
-                    if failure == SELECTION_FAILED:
-                        detail = await self._limit_refusal(
-                            entry, len(confirmed) + 1
-                        )
-                        if detail:
+                    # 不论回读判成 selection_failed 还是 final_mismatch，
+                    # 页面明确写出上限/拒绝时都要带上 detail；只有
+                    # selection_failed 才因“页面拒绝”升级为 final_mismatch。
+                    detail = await self._limit_refusal(
+                        entry, len(confirmed) + 1
+                    )
+                    if detail:
+                        if failure == SELECTION_FAILED:
                             failure = FINAL_MISMATCH
-                            message = f'{message}；{detail}'
+                        message = f'{message}；{detail}'
                     raise OptionMismatchError(
                         message,
                         applied=applied,

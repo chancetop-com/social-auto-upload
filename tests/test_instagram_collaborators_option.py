@@ -255,9 +255,10 @@ class InstagramCollaboratorValidationTests(unittest.TestCase):
 class _FakeReadEntry:
     """最小入口 locator：只回答 ``read()`` 的探测需要。"""
 
-    def __init__(self, rows=None, *, error=None):
+    def __init__(self, rows=None, *, error=None, focus_error=None):
         self.rows = rows
         self.error = error
+        self.focus_error = focus_error
 
     async def wait_for(self, *, state, timeout):
         return None
@@ -267,6 +268,11 @@ class _FakeReadEntry:
 
     async def is_visible(self):
         return True
+
+    async def focus(self):
+        if self.focus_error is not None:
+            raise self.focus_error
+        return None
 
     async def evaluate(self, script, arg=None):
         if self.error is not None:
@@ -328,6 +334,21 @@ class InstagramCollaboratorControlReadTests(unittest.IsolatedAsyncioTestCase):
     async def test_readable_panel_without_selected_rows_is_an_empty_list(self):
         control = self._control(_FakeReadEntry(rows=[]))
         self.assertEqual(await control.read(), [])
+
+    async def test_open_panel_browser_error_maps_to_list_not_collapsed(self):
+        control = self._control(
+            _FakeReadEntry(
+                rows=False,
+                focus_error=TimeoutError("focus timed out"),
+            )
+        )
+        with self.assertRaises(OptionMismatchError) as ctx:
+            await control.set(("alice",))
+        error = ctx.exception
+        self.assertEqual(error.reason, LIST_NOT_COLLAPSED)
+        self.assertIsNone(error.applied)
+        self.assertIn("面板未能打开", str(error))
+        self.assertIn("focus timed out", error.detail)
 
 
 

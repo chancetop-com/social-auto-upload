@@ -190,7 +190,7 @@ sau instagram upload-video --account creator --file demo.mp4 --title "标题" \
 | Collaborators 面板未打开或候选列表/面板未收起 | `mismatch` | `list_not_collapsed` | 1 |
 | 创建页被遮挡 | `mismatch` | `editor_obscured` | 1 |
 
-- 若页面实际上限低于 5，逐个回读会在第 N 个失败，按 `final_mismatch` 记录，并在 `detail` 说明页面拒绝（例如「页面拒绝第 N 个协作者（可能达到该账号的协作者上限）」）。点击后未选中但页面没有拒绝/上限信号时仍是 `selection_failed`。
+- 若页面实际上限低于 5，逐个回读会在第 N 个失败（未勾选或回读不一致）；只要页面明确拒绝/达到上限，就按 `final_mismatch` 记录，并在 `detail` 说明页面拒绝（例如「页面拒绝第 N 个协作者（可能达到该账号的协作者上限）」）。没有拒绝/上限信号时保留原回读原因（`selection_failed` / `final_mismatch`），不写 `detail`。
 - `list_not_collapsed` 的文档描述拓宽为「候选列表或协作者面板未打开/未收起」，不新增原因值。
 - 任何 `unsupported` / `mismatch` 都不点击 Share，抛出聚合错误（退出 `1`）。
 - 选项失败发生在点击前，绝不映射为退出 `9`。
