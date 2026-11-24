@@ -1157,12 +1157,20 @@ class InstagramUploader:
                     # 记录必须保留已确认前缀（applied）。这里不立即再查预算，
                     # 避免预算错误被外层 except 覆盖成 applied=None；下一项
                     # 开始前的检查会停止后续选项，最后仍以退出码 1 结束。
+                    # detail 只在控件给出明确现场文案时写入（页面拒绝、资格限制）。
                     self._record_option(
                         key,
                         requested,
                         error.applied,
                         MISMATCH,
                         reason=error.reason,
+                        detail=(
+                            error.detail
+                            if error.detail is not None
+                            else getattr(
+                                controls.get(key), 'last_detail', None
+                            )
+                        ),
                         extra=getattr(
                             controls.get(key), 'last_evidence', None
                         ),

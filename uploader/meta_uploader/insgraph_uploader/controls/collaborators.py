@@ -17,10 +17,12 @@
 
 真机 2026-11-24 补充：候选面板是**创建弹窗之外的兄弟 ``role="dialog"``**
 （portal 定位在入口附近），不是 ``el.closest('[role="dialog"]')`` 的后代。
-面板解析规则：创建弹窗自身含可见的非 switch checkbox 行时用创建弹窗
-（既有受控 DOM 形态）；否则在所有可见 ``role="dialog"`` 里取同样含可见
-非 switch checkbox 行、且与协作者入口几何最近的兄弟弹窗。Done/完成、
-候选行与 Reels checkbox 回读都限定在这个解析出的面板内。
+入口与资格提示锚定在**包含可见协作者入口的创建弹窗**；面板解析规则：创建
+弹窗自身含可见的非 switch checkbox 行时用创建弹窗（既有受控 DOM 形态）；
+否则在所有可见 ``role="dialog"`` 里取同样含可见非 switch checkbox 行或
+可见按钮、且与协作者入口几何最近的兄弟弹窗。Done/完成、候选行与 Reels
+checkbox 回读都限定在这个解析出的面板内。面板解析只检查 dialog/checkbox/
+button 结构，不扫描全页文案，也不使用 hash 类名。
 """
 from __future__ import annotations
 
@@ -31,11 +33,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from patchright.async_api import (
-    Locator,
-    TimeoutError as BrowserTimeoutError,
-)
+from patchright.async_api import Locator
 
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 
 from ..options import (
@@ -63,7 +63,8 @@ if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchri
     from uploader.publish_timeout import PublishTimeoutBudget
 
 # 入口选择器：结构属性优先，然后英文/中文 placeholder 与 aria-label，最后更宽
-# 的中英文回退。定位始终限定在创建弹窗内，绝不使用全页 locator。
+# 的中英文回退。定位限定在包含可见入口的创建弹窗内；没有弹窗祖先的输入框
+# 不参与解析，也不做全页 locator。
 ENTRY_SELECTORS = (
     'input[name="creation-collaborator-input"]',
     'input[placeholder="Add collaborators"]',
@@ -84,11 +85,16 @@ SUGGESTION_TIMEOUT_MS = 10_000
 SUGGESTION_SETTLE_MS = 250
 # 点击后立即回读该 username；chip/checkbox 通常是同步渲染，给一个小窗口。
 READBACK_TIMEOUT_MS = 3_000
-DONE_TIMEOUT_MS = 5_000
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 _ROW_ATTR = 'data-instagram-collaborator-row'
 _PANEL_ATTR = 'data-instagram-collaborator-panel'
+_ENTRY_SELECTOR_UNION = ', '.join(ENTRY_SELECTORS)
+# 面板与 chip 的 JS 共用同一个空白归一化实现；只声明一次，避免两份漂移。
+_JS_NORM_HELPER = (
+    "  const norm = (value) => "
+    "String(value || '').replace(/\\s+/g, ' ').trim();\n"
+)
 
 # 只有页面明确说明账号/地区不具备协作者资格时才使用 account_ineligible；
 # 单纯 disabled 记 control_disabled。
@@ -117,12 +123,38 @@ _COLLABORATOR_RESTRICTION_PATTERNS = (
     ),
 )
 
+# 页面可能把账号/地区的协作者上限设得低于静态 5。点击后 checkbox 仍未勾选
+# 时，只有页面明确给出“上限/只能/最多/无法再添加”等拒绝信号，才归因为页面
+# 拒绝（final_mismatch）；否则仍是点击未生效（selection_failed）。
+_COLLABORATOR_LIMIT_PATTERNS = (
+    re.compile(
+        r"(?:collaborator|collaborators|合作者|协作者)"
+        r"[^.\n]{0,60}"
+        r"(?:up\s+to|more\s+than|limit(?:ed)?|maximum|max\.?|reached|"
+        r"最多|上限|只能|不能再|已达到|达到|"
+        r"cannot\s+add|can['’]?t\s+add|unable\s+to\s+add|"
+        r"无法添加|无法邀请)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:up\s+to|more\s+than|limit(?:ed)?|maximum|max\.?|reached|"
+        r"最多|上限|只能|不能再|已达到|达到|"
+        r"cannot\s+add|can['’]?t\s+add|unable\s+to\s+add|"
+        r"无法添加|无法邀请)"
+        r"[^.\n]{0,60}"
+        r"(?:collaborator|collaborators|合作者|协作者)",
+        re.IGNORECASE,
+    ),
+)
+_COLLABORATOR_COUNT_SUMMARY = re.compile(
+    r"(\d+)\s*(?:people|person|位用户|位|人)", re.IGNORECASE
+)
+
 # 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
 # 先认创建弹窗自身（既有受控 DOM 把结果列表嵌在弹窗内）；否则在所有可见
-# role=dialog 中取“含可见非 switch checkbox 行”且与协作者入口几何最近的
-# 弹窗。只检查 dialog/checkbox 结构，不扫描页面文案，也不使用 hash 类名。
-_PANEL_HELPERS_JS = """
-  const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+# role=dialog 中取“含可见非 switch checkbox 行或可见按钮”且与协作者入口
+# 几何最近的弹窗。可见按钮让“查询无候选但面板仍有 Done”也能被识别。
+_PANEL_HELPERS_JS = _JS_NORM_HELPER + """
   const visible = (node) => {
     if (!node || !node.getClientRects().length) return false;
     const style = getComputedStyle(node);
@@ -151,6 +183,26 @@ _PANEL_HELPERS_JS = """
     }
     return false;
   };
+  const hasVisibleButton = (dialog) => {
+    if (!dialog || !visible(dialog)) return false;
+    for (const node of dialog.querySelectorAll('button, [role="button"]')) {
+      if (!visible(node)) continue;
+      if (norm(node.innerText || node.textContent || '')) return true;
+    }
+    return false;
+  };
+  const doneLabels = new Set([__DONE_LABELS__]);
+  const hasDoneButton = (dialog) => {
+    if (!dialog || !visible(dialog)) return false;
+    for (const node of dialog.querySelectorAll('button, [role="button"]')) {
+      if (!visible(node)) continue;
+      const text = norm(node.innerText || node.textContent || '').toLowerCase();
+      if (doneLabels.has(text)) return true;
+    }
+    return false;
+  };
+  const isPanelDialog = (dialog) =>
+    hasCandidateRows(dialog) || hasVisibleButton(dialog);
   const entryRect = el.getBoundingClientRect();
   const distanceTo = (node) => {
     const rect = node.getBoundingClientRect();
@@ -161,11 +213,11 @@ _PANEL_HELPERS_JS = """
     return Math.hypot(dx, dy);
   };
   const resolvePanel = () => {
-    if (hasCandidateRows(composer)) return composer;
+    if (hasCandidateRows(composer) || hasDoneButton(composer)) return composer;
     let best = null;
     let bestDistance = Infinity;
     for (const dialog of document.querySelectorAll('[role="dialog"]')) {
-      if (dialog === composer || !hasCandidateRows(dialog)) continue;
+      if (dialog === composer || !isPanelDialog(dialog)) continue;
       const distance = distanceTo(dialog);
       if (best === null || distance < bestDistance) {
         best = dialog;
@@ -174,7 +226,10 @@ _PANEL_HELPERS_JS = """
     }
     return best;
   };
-"""
+""".replace(
+    "__DONE_LABELS__",
+    ', '.join(f"'{label.lower()}'" for label in DONE_LABELS),
+)
 
 # 候选行：从 checkbox 出发找最近的 role=button/button/li/label 行；只读取
 # username 首 token。AI/评论开关是 role=switch，明确排除。
@@ -229,8 +284,9 @@ _PANEL_JS = """(el, stamp) => {""" + _PANEL_HELPERS_JS + """
 # 图文预览图 chip：带 Close/关闭 svg 的 role=button，最近的 span 祖先里
 # 有一个 username span。只认这个结构，不读取输入框里的 “5 people” 摘要。
 _CHIPS_JS = """(el) => {
-  const dialog = el.closest('[role="dialog"]') || document;
-  const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+  const dialog = el.closest('[role="dialog"]');
+  if (!dialog) return [];
+""" + _JS_NORM_HELPER + """
   const labels = new Set(['close', '关闭']);
   const names = [];
   const seen = new Set();
@@ -260,6 +316,28 @@ def collaborator_restriction_message(body: str | None) -> str | None:
         return None
     text = ' '.join(str(body).split())
     for pattern in _COLLABORATOR_RESTRICTION_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            endings = [
+                index for index in (
+                    text.find('.', match.end()),
+                    text.find('。', match.end()),
+                )
+                if index != -1
+            ]
+            end = min(endings) if endings else min(
+                len(text), match.end() + 120
+            )
+            return text[match.start():end + 1].strip()
+    return None
+
+
+def collaborator_limit_message(body: str | None) -> str | None:
+    """返回页面明确写出的协作者上限/拒绝句；没有则返回 ``None``。"""
+    if not body:
+        return None
+    text = ' '.join(str(body).split())
+    for pattern in _COLLABORATOR_LIMIT_PATTERNS:
         match = pattern.search(text)
         if match:
             endings = [
@@ -312,8 +390,10 @@ class CollaboratorsControl:
             self._humanizer = Humanizer(self._page)
         return self._humanizer
 
-    def _dialog(self) -> Locator:
-        return self._page.get_by_role('dialog')
+    @property
+    def _uses_preview_chips(self) -> bool:
+        """图文/轮播用预览 chip 回读；Reels 只能读面板 checkbox。"""
+        return self._image_count > 0
 
     def _timeout(self, default_ms: int) -> int:
         return clamp_wait(self._budget, default_ms)
@@ -322,35 +402,144 @@ class CollaboratorsControl:
         if self._budget is not None:
             self._budget.check_pre_click()
 
-    async def _entry(self, timeout_ms: int) -> Locator | None:
-        """按回退顺序返回第一个可见入口；全部缺席返回 None。"""
-        dialog = self._dialog()
-        union = dialog.locator(', '.join(ENTRY_SELECTORS))
+    async def _visible_dialogs(self, selector: str) -> list[Locator]:
+        """返回 ``selector`` 命中的可见 ``role=dialog``；异常时视为不可见。"""
+        nodes = self._page.locator(selector)
+        visible: list[Locator] = []
         try:
-            await union.first.wait_for(state='visible', timeout=timeout_ms)
-        except BrowserTimeoutError:
-            return None
-        for selector in ENTRY_SELECTORS:
-            candidate = dialog.locator(selector).first
-            if await candidate.count() and await candidate.is_visible():
-                return candidate
-        return None
+            count = await nodes.count()
+        except Exception:
+            return visible
+        for index in range(count):
+            node = nodes.nth(index)
+            try:
+                if await node.is_visible():
+                    visible.append(node)
+            except Exception:
+                continue
+        return visible
 
-    async def _restriction(self) -> str | None:
-        if self._page is None:
+    async def _composer(self, entry: Locator | None = None) -> Locator | None:
+        """包含协作者入口的可见创建弹窗。
+
+        真机同一页面还有 Collaborators 面板这个兄弟 ``role=dialog``；资格
+        提示只能读创建弹窗，不能读兄弟面板或全页文案。有入口时用其最近的
+        ``role=dialog`` 祖先；入口缺失（例如账号不合格）时退回含配文编辑器
+        的可见弹窗，再退回唯一可见弹窗。
+        """
+        if entry is not None:
+            try:
+                ancestor = entry.locator(
+                    'xpath=ancestor::*[@role="dialog"][1]'
+                )
+                if await ancestor.count() and await ancestor.first.is_visible():
+                    return ancestor.first
+            except Exception:
+                return None
             return None
+        editors = await self._visible_dialogs(
+            '[role="dialog"]:has([data-lexical-editor="true"])'
+        )
+        if editors:
+            return editors[0]
+        visible = await self._visible_dialogs('[role="dialog"]')
+        for dialog in visible:
+            for selector in ENTRY_SELECTORS:
+                candidate = dialog.locator(selector).first
+                try:
+                    if await candidate.count() and await candidate.is_visible():
+                        return dialog
+                except Exception:
+                    continue
+        return visible[0] if len(visible) == 1 else None
+
+    async def _entry(self, timeout_ms: int) -> Locator | None:
+        """返回创建弹窗内第一个可见入口；全部缺席返回 None。"""
+        candidates = self._page.locator(
+            f'[role="dialog"]:has({_ENTRY_SELECTOR_UNION})'
+        )
+        deadline = time.monotonic() + max(int(timeout_ms), 0) / 1000
+        while True:
+            try:
+                count = await candidates.count()
+            except Exception:
+                count = 0
+            for index in range(count):
+                dialog = candidates.nth(index)
+                try:
+                    if not await dialog.is_visible():
+                        continue
+                except Exception:
+                    continue
+                for selector in ENTRY_SELECTORS:
+                    candidate = dialog.locator(selector).first
+                    try:
+                        if (
+                            await candidate.count()
+                            and await candidate.is_visible()
+                        ):
+                            return candidate
+                    except Exception:
+                        continue
+            if time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(_POLL_SECONDS)
+
+    async def _notice_texts(self, dialog: Locator) -> list[str]:
+        """结构化读取弹窗内的可见提示（alert / aria-live），不扫全页文案。"""
         try:
-            notices = await self._dialog().locator(
-                '#collaborator-restriction:visible, '
-                '[data-testid*="collaborator"] '
-                ':is([role="alert"],[aria-live="assertive"]):visible'
+            return await dialog.locator(
+                '[role="alert"]:visible, '
+                '[aria-live="assertive"]:visible, '
+                '[aria-live="polite"]:visible'
             ).all_inner_texts()
         except Exception:
+            return []
+
+    async def _restriction(self, entry: Locator | None = None) -> str | None:
+        composer = await self._composer(entry)
+        if composer is None:
             return None
-        for notice in notices:
+        for notice in await self._notice_texts(composer):
             reason = collaborator_restriction_message(notice)
             if reason:
                 return reason
+        return None
+
+    async def _limit_refusal(
+        self, entry: Locator, position: int
+    ) -> str | None:
+        """点击后仍未选中时，判断页面是否明确以“上限”拒绝了第 N 个。
+
+        只读创建弹窗/已解析面板内的结构化提示，以及入口上的 ``N people``
+        摘要；没有明确拒绝信号时返回 ``None``，保持 ``selection_failed``。
+        """
+        bodies: list[str] = []
+        composer = await self._composer(entry)
+        if composer is not None:
+            bodies.extend(await self._notice_texts(composer))
+        panel = await self._panel(entry)
+        if panel is not None:
+            bodies.extend(await self._notice_texts(panel))
+        for body in dict.fromkeys(bodies):
+            notice = collaborator_limit_message(body)
+            if notice:
+                return (
+                    f'页面拒绝第 {position} 个协作者'
+                    f'（可能达到该账号的协作者上限）：{notice}'
+                )
+        try:
+            summary = str(await entry.input_value() or '')
+        except Exception:
+            summary = ''
+        match = _COLLABORATOR_COUNT_SUMMARY.search(summary)
+        if match:
+            shown = int(match.group(1))
+            if shown < position:
+                return (
+                    f'页面显示已选 {shown} 人，第 {position} 个协作者未被接受'
+                    '（可能达到该账号的协作者上限）'
+                )
         return None
 
     async def resolve(self) -> str:
@@ -369,7 +558,7 @@ class CollaboratorsControl:
                 )
         # 页面明确写出账号/地区不具备协作者资格时，即使入口仍可聚焦也要
         # 归因为 account_ineligible；单纯禁用且无说明才是 control_disabled。
-        restriction = await self._restriction()
+        restriction = await self._restriction(entry)
         if restriction:
             self.last_detail = restriction
             return INELIGIBLE
@@ -390,7 +579,7 @@ class CollaboratorsControl:
         entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
         if entry is None:
             return None
-        if self._image_count > 0:
+        if self._uses_preview_chips:
             return await self._read_chips(entry)
         checked = await self._checked_usernames(entry)
         return checked
@@ -403,15 +592,17 @@ class CollaboratorsControl:
         *,
         readable: bool = True,
     ) -> OptionMismatchError:
-        """预算/面板等待在中途归零：保留已确认前缀，按普通 mismatch 停止。
+        """中途失败：保留已确认前缀，按普通 mismatch 停止。
 
         不新增 reason 值：这里只说明“协作者没能在点击前完成”，由聚合错误
-        文案带上原始预算错误和已确认 username。面板尚未打开时无法读取已选
-        状态，``applied=None``；已经逐个回读过的前缀按请求顺序保留。
+        文案带上原始错误和已确认 username。面板尚未打开时无法读取已选状态，
+        ``applied=None``；已经逐个回读过的前缀按请求顺序保留。原始错误可能
+        是发布预算耗尽、Playwright 定位/点击超时或面板动作失败，按原样附在
+        文案里，不猜测未验证的原因。
         """
         names = '、'.join(f'「{name}」' for name in confirmed) or '无'
         return OptionMismatchError(
-            f'Instagram 协作者在{stage}中止（可能发布预算耗尽）：{error}；'
+            f'Instagram 协作者在{stage}中止：{error}；'
             f'失败前已确认：{names}',
             applied=list(confirmed) if readable else None,
         )
@@ -426,7 +617,9 @@ class CollaboratorsControl:
         names = [normalize_collaborator_name(value) for value in requested]
         try:
             entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
-        except RuntimeError as error:
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
             self._confirmed = None
             raise self._stop_with_prefix(
                 [], '定位入口时', error, readable=False
@@ -438,12 +631,22 @@ class CollaboratorsControl:
                 reason=ENTRY_MISSING,
             )
         try:
-            await self._open_panel(entry)
-        except RuntimeError as error:
+            opened = await self._open_panel(entry)
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
             self._confirmed = None
             raise self._stop_with_prefix(
                 [], '打开面板时', error, readable=False
             ) from error
+        if not opened:
+            self._confirmed = None
+            raise OptionMismatchError(
+                'Instagram 协作者面板未能打开'
+                '（聚焦/点击入口后仍看不到候选列表或 Done/完成）',
+                applied=None,
+                reason=LIST_NOT_COLLAPSED,
+            )
         confirmed: list[str] = []
         for name in names:
             try:
@@ -486,17 +689,33 @@ class CollaboratorsControl:
                     if not applied and not readable:
                         # 回读本身不可读：区分“确认了 0 个”与“读不到”。
                         applied = None
+                    message = self._readback_message(
+                        name, failure, candidates
+                    )
+                    detail = None
+                    if failure == SELECTION_FAILED:
+                        detail = await self._limit_refusal(
+                            entry, len(confirmed) + 1
+                        )
+                        if detail:
+                            failure = FINAL_MISMATCH
+                            message = f'{message}；{detail}'
                     raise OptionMismatchError(
-                        self._readback_message(name, failure, candidates),
+                        message,
                         applied=applied,
                         reason=failure,
+                        detail=detail,
                     )
             except OptionMismatchError:
                 self._confirmed = list(confirmed)
                 raise
-            except RuntimeError as error:
-                # 单个 username 处理中预算被 clamp 收紧到零：同样停止列表，
-                # 不能丢掉失败前已确认的前缀。
+            except (LoginRequiredError, PublishResultUnknownError):
+                # 登录/结果未知必须按原类型上抛，不能折叠成普通 mismatch。
+                raise
+            except Exception as error:
+                # 单个 username 处理中的任意浏览器错误（Playwright
+                # Error/TimeoutError）或预算收紧都停止列表；不能丢掉失败前
+                # 已确认的前缀，也不能让 generic 管线把 applied 记成 None。
                 self._confirmed = list(confirmed)
                 raise self._stop_with_prefix(
                     confirmed, f'添加「{name}」时', error
@@ -504,7 +723,9 @@ class CollaboratorsControl:
             confirmed.append(name)
         try:
             collapsed = await self._close_panel(entry)
-        except RuntimeError as error:
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
             self._confirmed = list(confirmed)
             raise self._stop_with_prefix(
                 confirmed, '收起面板时', error
@@ -558,15 +779,15 @@ class CollaboratorsControl:
                 continue
         return await row_for(panel, DONE_LABELS)
 
-    async def _open_panel(self, entry: Locator) -> None:
-        """聚焦优先；只有面板仍未出现时才点击入口。"""
+    async def _open_panel(self, entry: Locator) -> bool:
+        """聚焦优先；只有面板仍未出现时才点击入口。返回是否确认打开。"""
         if await self._done(entry) is not None:
-            return
+            return True
         await entry.focus()
         if await self._wait_panel(entry, open_=True):
-            return
+            return True
         await self._behavior().click(entry)
-        await self._wait_panel(entry, open_=True)
+        return await self._wait_panel(entry, open_=True)
 
     async def _close_panel(self, entry: Locator) -> bool:
         done = await self._done(entry)
@@ -579,7 +800,12 @@ class CollaboratorsControl:
     async def _wait_panel(self, entry: Locator, *, open_: bool) -> bool:
         deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
         while True:
-            is_open = await self._done(entry) is not None
+            if open_:
+                # 面板打开的结构证据：可解析的候选行/可见按钮（Done）。不能
+                # 只认 Done 文案，否则本地化标签缺失会被误判为“没打开”。
+                is_open = await self._panel(entry) is not None
+            else:
+                is_open = await self._done(entry) is not None
             if is_open is open_:
                 return True
             if time.monotonic() >= deadline:
@@ -725,7 +951,7 @@ class CollaboratorsControl:
 
     # -- readback ---------------------------------------------------------
     async def _is_selected(self, entry: Locator, username: str) -> bool:
-        if self._image_count > 0:
+        if self._uses_preview_chips:
             chips = await self._read_chips(entry)
             if chips is not None and username in chips:
                 return True
@@ -743,7 +969,7 @@ class CollaboratorsControl:
         协作者不新增该原因。
         """
         deadline = time.monotonic() + self._timeout(READBACK_TIMEOUT_MS) / 1000
-        if self._image_count > 0:
+        if self._uses_preview_chips:
             chips: list[str] | None = None
             while True:
                 chips = await self._read_chips(entry)

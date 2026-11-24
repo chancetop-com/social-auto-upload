@@ -101,11 +101,18 @@ class OptionMismatchError(RuntimeError):
     """
 
     def __init__(
-        self, message: str, *, applied: object = None, reason: str | None = None
+        self,
+        message: str,
+        *,
+        applied: object = None,
+        reason: str | None = None,
+        detail: str | None = None,
     ) -> None:
         super().__init__(message)
         self.applied = applied
         self.reason = reason
+        # 页面明确写出的现场文案（资格限制、协作者上限拒绝等）；没有则 None。
+        self.detail = detail
 
 
 def normalize_text(text: str) -> str:
@@ -202,7 +209,11 @@ def alt_texts_match(requested: object, applied: object) -> bool:
 
 
 def _value_matches(requested: object, applied: object) -> bool:
-    """按请求类型分派：地点是字符串，替代文字是有序序列。"""
+    """按请求类型分派：地点是字符串，替代文字与协作者 username 是有序序列。
+
+    替代文字和协作者都要求顺序与逐项完全一致；协作者只比较归一化后的
+    username，不比较显示名或候选顺序。
+    """
     if isinstance(requested, str):
         return location_matches(requested, applied)
     return alt_texts_match(requested, applied)
