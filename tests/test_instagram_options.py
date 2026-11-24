@@ -83,12 +83,16 @@ class _ExplodingControl:
 class InstagramOptionLogicTests(unittest.TestCase):
     """A3/A4/A6：记录骨架、三态保留与 5 个状态映射。"""
 
-    def test_record_has_all_four_keys_and_not_requested_defaults(self):
+    def test_record_has_all_five_keys_and_not_requested_defaults(self):
         record = empty_option_record(None)
         self.assertEqual(tuple(record), OPTION_KEYS)
-        self.assertEqual(OPTION_KEYS, ('location', 'alt_text', 'comments', 'ai_generated'))
         self.assertEqual(
-            APPLY_ORDER, ('alt_text', 'location', 'ai_generated', 'comments')
+            OPTION_KEYS,
+            ('location', 'alt_text', 'comments', 'ai_generated', 'collaborators'),
+        )
+        self.assertEqual(
+            APPLY_ORDER,
+            ('alt_text', 'location', 'collaborators', 'ai_generated', 'comments'),
         )
         for key in OPTION_KEYS:
             self.assertEqual(
@@ -103,6 +107,7 @@ class InstagramOptionLogicTests(unittest.TestCase):
                 alt_texts=('第一张', '第二张'),
                 comments=False,
                 ai_generated=True,
+                collaborators=('alice', 'bob'),
             )
         )
         self.assertEqual(record['location']['requested'], 'Shanghai')
@@ -110,6 +115,7 @@ class InstagramOptionLogicTests(unittest.TestCase):
         # False 不能被压缩成 None，True 也不能被当成默认。
         self.assertIs(record['comments']['requested'], False)
         self.assertIs(record['ai_generated']['requested'], True)
+        self.assertEqual(record['collaborators']['requested'], ['alice', 'bob'])
         for key in OPTION_KEYS:
             self.assertEqual(record[key]['status'], NOT_REQUESTED)
             self.assertNotIn('reason', record[key])
@@ -414,7 +420,7 @@ class InstagramOptionPipelineTests(unittest.TestCase):
             app = self._app(
                 InstagramPublishOptions(
                     location='Shanghai', alt_texts=('a',), comments=False,
-                    ai_generated=False,
+                    ai_generated=False, collaborators=('alice',),
                 ),
                 folder=folder,
             )
@@ -423,12 +429,15 @@ class InstagramOptionPipelineTests(unittest.TestCase):
                 'alt_text': _FakeControl([['a']], name='alt_text', order=order),
                 'comments': _FakeControl([False], name='comments', order=order),
                 'ai_generated': _FakeControl([False], name='ai_generated', order=order),
+                'collaborators': _FakeControl(
+                    [['alice']], name='collaborators', order=order
+                ),
             }
             self._apply(app, controls)
             self.assertEqual(tuple(order), APPLY_ORDER)
             for key in OPTION_KEYS:
                 self.assertEqual(app.result['options'][key]['status'], SET if key in {
-                    'location', 'alt_text'
+                    'location', 'alt_text', 'collaborators'
                 } else DEFAULT_OFF)
 
     def test_unavailable_location_is_unsupported_and_blocks_publish(self):
