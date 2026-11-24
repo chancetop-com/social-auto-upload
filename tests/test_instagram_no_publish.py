@@ -286,6 +286,8 @@ class InstagramTopicResultOutputTests(unittest.TestCase):
                              "status": "not_requested"},
                 "ai_generated": {"requested": None, "applied": None,
                                  "status": "not_requested"},
+                "collaborators": {"requested": None, "applied": None,
+                                  "status": "not_requested"},
             },
             "topics": [{
                 "index": 1, "text": "#咖啡", "name": "咖啡",

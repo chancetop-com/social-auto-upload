@@ -19,6 +19,7 @@ from uploader.meta_uploader.insgraph_uploader.main import (
 from uploader.meta_uploader.insgraph_uploader.options import (
     InstagramPublishOptions,
     instagram_caption,
+    normalize_publish_options,
     validate_publish_options,
 )
 from uploader.meta_uploader.insgraph_uploader.posts import instagram_post_action
@@ -122,6 +123,7 @@ def _add_instagram_option_flags(parser, *, include_alt_text: bool) -> None:
     _add_location_flag(parser)
     _add_comments_flag(parser)
     _add_ai_generated_flags(parser)
+    _add_collaborator_flag(parser)
     if include_alt_text:
         _add_alt_text_flag(parser)
 
@@ -172,6 +174,17 @@ def _add_alt_text_flag(parser) -> None:
     )
 
 
+def _add_collaborator_flag(parser) -> None:
+    """协作者（可重复）：单个 username，不提供逗号分隔或移除形态。"""
+    parser.add_argument(
+        '--collaborator',
+        action='append',
+        metavar='USERNAME',
+        default=None,
+        help='协作者 username（可重复，最多 5 个；去空白/一个前导 @/小写）',
+    )
+
+
 @dataclass(slots=True)
 class InstagramUploadRequest:
     account_name: str
@@ -195,20 +208,32 @@ def _build_publish_options(args) -> InstagramPublishOptions | None:
 
     与 TikTok 的 ``_build_publish_options`` 同构：``None`` 表示不动页面默认，
     显式 ``False``（``--no-comments`` / ``--no-ai-generated``）不能被压缩。
-    四个 flag 全部未传时返回 ``None``，上传器保持 legacy 路径。
-    ``--location ""`` 保留空串（不折叠成 ``None``），交给静态校验退出 2。
+    五个 flag 全部未传时返回 ``None``，上传器保持 legacy 路径。
+    ``--location ""`` / ``--collaborator ""`` 保留原值，交给静态校验退出 2。
     """
     location = getattr(args, "location", None)
     alt_texts = getattr(args, "alt_text", None) or None
     comments = False if getattr(args, "no_comments", False) else None
     ai_generated = getattr(args, "ai_generated", None)
-    if location is None and alt_texts is None and comments is None and ai_generated is None:
+    collaborators = getattr(args, "collaborator", None) or None
+    if (
+        location is None
+        and alt_texts is None
+        and comments is None
+        and ai_generated is None
+        and collaborators is None
+    ):
         return None
-    return InstagramPublishOptions(
-        location=location,
-        alt_texts=tuple(alt_texts) if alt_texts is not None else None,
-        comments=comments,
-        ai_generated=ai_generated,
+    return normalize_publish_options(
+        InstagramPublishOptions(
+            location=location,
+            alt_texts=tuple(alt_texts) if alt_texts is not None else None,
+            comments=comments,
+            ai_generated=ai_generated,
+            collaborators=(
+                tuple(collaborators) if collaborators is not None else None
+            ),
+        )
     )
 
 
