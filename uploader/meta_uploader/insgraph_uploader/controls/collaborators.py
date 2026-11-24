@@ -329,7 +329,7 @@ class CollaboratorsControl:
         if self._image_count > 0:
             return await self._read_chips(entry)
         checked = await self._checked_usernames(entry)
-        return checked if checked is not None else []
+        return checked
 
     async def set(self, requested) -> None:
         """按请求顺序逐个选中；首个失败立即停止并保留已确认前缀。"""

@@ -32,13 +32,18 @@ from sau_commands import instagram as instagram_command
 from uploader.meta_uploader.insgraph_uploader.controls import (
     collaborators as collaborators_control_module,
 )
+from uploader.meta_uploader.insgraph_uploader.controls.collaborators import (
+    CollaboratorsControl,
+)
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
     APPLY_ORDER,
     CONTROL_DISABLED,
+    EDITOR_OBSCURED,
     ENTRY_MISSING,
     FINAL_EMPTY,
+    FINAL_MISMATCH,
     LIST_NOT_COLLAPSED,
     MISMATCH,
     NO_CANDIDATES,
@@ -248,6 +253,70 @@ class InstagramCollaboratorValidationTests(unittest.TestCase):
             )
 
 
+class _FakeReadEntry:
+    """最小入口 locator：只回答 ``read()`` 的探测需要。"""
+
+    def __init__(self, rows=None, *, error=None):
+        self.rows = rows
+        self.error = error
+
+    async def wait_for(self, *, state, timeout):
+        return None
+
+    async def count(self):
+        return 1
+
+    async def is_visible(self):
+        return True
+
+    async def evaluate(self, script, arg=None):
+        if self.error is not None:
+            raise self.error
+        return self.rows
+
+
+class _FakeReadLocator:
+    def __init__(self, entry):
+        self._entry = entry
+
+    @property
+    def first(self):
+        return self._entry
+
+
+class _FakeReadDialog:
+    def __init__(self, entry):
+        self._entry = entry
+
+    def locator(self, selector):
+        return _FakeReadLocator(self._entry)
+
+
+class _FakeReadPage:
+    def __init__(self, entry):
+        self._entry = entry
+
+    def get_by_role(self, role):
+        return _FakeReadDialog(self._entry)
+
+
+class InstagramCollaboratorControlReadTests(unittest.IsolatedAsyncioTestCase):
+    """Reels 的 ``read()`` 必须区分“可读且为空”和“读不到”。"""
+
+    def _control(self, entry):
+        return CollaboratorsControl(_FakeReadPage(entry), image_count=0)
+
+    async def test_unreadable_checkbox_state_is_none_not_an_empty_list(self):
+        control = self._control(
+            _FakeReadEntry(error=RuntimeError("checkbox query failed"))
+        )
+        self.assertIsNone(await control.read())
+
+    async def test_readable_panel_without_selected_rows_is_an_empty_list(self):
+        control = self._control(_FakeReadEntry(rows=[]))
+        self.assertEqual(await control.read(), [])
+
+
 class _FakeCollaboratorControl:
     """最小协作者控制件替身：预置 read 序列，可选在 set 时抛错。"""
 
@@ -444,6 +513,161 @@ class InstagramCollaboratorPipelineTests(unittest.TestCase):
             self.assertFalse(Path(app.result_file).exists())
 
 
+class InstagramReelsCollaboratorPipelineTests(unittest.TestCase):
+    """B 层（Reels/视频）：选项管线记录逐个回读结果、失败前缀且不点 Share。"""
+
+    def _app(self, options, *, folder):
+        video = Path(folder) / "video.mp4"
+        video.touch()
+        return InstagramUploader(
+            "unused.json",
+            title="caption",
+            video_file=video,
+            options=options,
+            result_file=Path(folder) / "result.json",
+        )
+
+    def _apply(self, app, control, *, budget=None):
+        return asyncio.run(
+            app._apply_options(
+                page=None,
+                budget=budget or app.start_publish_budget(),
+                controls={"collaborators": control},
+            )
+        )
+
+    def test_reels_checkbox_readback_list_is_recorded_in_request_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(collaborators=("alice", "bob")),
+                folder=folder,
+            )
+            control = _FakeCollaboratorControl([[], ["alice", "bob"]])
+            self._apply(app, control)
+            self.assertEqual(
+                app.result["options"]["collaborators"],
+                {
+                    "requested": ["alice", "bob"],
+                    "applied": ["alice", "bob"],
+                    "status": SET,
+                },
+            )
+            self.assertEqual(
+                control.interactions,
+                ["resolve", "read", ("set", ["alice", "bob"]), "read"],
+            )
+            saved = json.loads(
+                Path(app.result_file).read_text(encoding="utf-8")
+            )
+            self.assertEqual(saved["options"]["collaborators"]["applied"],
+                             ["alice", "bob"])
+            self.assertFalse(app.publish_clicked)
+
+    def test_reels_selection_failure_stops_and_preserves_the_prefix(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(
+                    collaborators=("alice", "bob", "carol")
+                ),
+                folder=folder,
+            )
+            control = _FakeCollaboratorControl(
+                [[]],
+                failure=OptionMismatchError(
+                    "Instagram 协作者点击后未选中：请求「bob」",
+                    applied=["alice"],
+                    reason=SELECTION_FAILED,
+                ),
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                self._apply(app, control)
+            self.assertIn(
+                "collaborators=mismatch(selection_failed)",
+                str(ctx.exception),
+            )
+            self.assertEqual(
+                app.result["options"]["collaborators"],
+                {
+                    "requested": ["alice", "bob", "carol"],
+                    "applied": ["alice"],
+                    "status": MISMATCH,
+                    "reason": SELECTION_FAILED,
+                },
+            )
+            self.assertEqual(
+                control.interactions,
+                ["resolve", "read", ("set", ["alice", "bob", "carol"])],
+            )
+            self.assertFalse(app.publish_clicked)
+
+    def test_reels_unreadable_readback_records_final_mismatch_with_null_applied(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(collaborators=("alice",)),
+                folder=folder,
+            )
+            control = _FakeCollaboratorControl(
+                [[]],
+                failure=OptionMismatchError(
+                    "Instagram 协作者回读不一致：请求「alice」",
+                    applied=None,
+                    reason=FINAL_MISMATCH,
+                ),
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "collaborators=mismatch\\(final_mismatch\\)"
+            ):
+                self._apply(app, control)
+            self.assertEqual(
+                app.result["options"]["collaborators"],
+                {
+                    "requested": ["alice"],
+                    "applied": None,
+                    "status": MISMATCH,
+                    "reason": FINAL_MISMATCH,
+                },
+            )
+            self.assertFalse(app.publish_clicked)
+
+    def test_reels_done_failure_keeps_all_confirmed_names(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(collaborators=("alice", "bob")),
+                folder=folder,
+            )
+            control = _FakeCollaboratorControl(
+                [[]],
+                failure=OptionMismatchError(
+                    "Instagram 协作者面板未收起",
+                    applied=["alice", "bob"],
+                    reason=LIST_NOT_COLLAPSED,
+                ),
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "collaborators=mismatch\\(list_not_collapsed\\)"
+            ):
+                self._apply(app, control)
+            self.assertEqual(
+                app.result["options"]["collaborators"]["applied"],
+                ["alice", "bob"],
+            )
+            self.assertFalse(app.publish_clicked)
+
+    def test_reels_budget_exhausted_before_the_option_touches_no_control(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(collaborators=("alice",)),
+                folder=folder,
+            )
+            budget = app.start_publish_budget()
+            budget.deadline = time.monotonic() - 1
+            control = _FakeCollaboratorControl([[]])
+            with self.assertRaisesRegex(RuntimeError, "15 分钟"):
+                self._apply(app, control, budget=budget)
+            self.assertEqual(control.interactions, [])
+            self.assertFalse(app.publish_clicked)
+
+
 class InstagramCollaboratorParserTests(unittest.TestCase):
     """CLI：两个上传命令都可重复注册；核对/删除命令不暴露该参数。"""
 
@@ -549,6 +773,7 @@ _COLLABORATOR_PAGE = """
   <div role="heading" aria-level="1">Create new post</div>
   <div data-share-clicks="0"></div>
   __ENTRY__
+  __RESTRICTION__
   <div id="chips"></div>
   <div id="collab-panel" hidden>
     <div id="collab-results"></div>
@@ -566,11 +791,25 @@ _COLLABORATOR_PAGE = """
   const doneCollapses = __DONE_COLLAPSES__;
   const renderChipNodes = __RENDER_CHIPS__;
   const valueAfterFive = __VALUE_AFTER_FIVE__;
+  const checkboxDelayMs = __CHECKBOX_DELAY_MS__;
   const entry = document.getElementById('collab-entry');
   const panel = document.getElementById('collab-panel');
   const results = document.getElementById('collab-results');
   const chips = document.getElementById('chips');
   const done = document.getElementById('collab-done');
+  function checkedNames() {
+    const names = [];
+    for (const candidate of candidates) {
+      if (selected.includes(candidate.username) &&
+          !names.includes(candidate.username)) {
+        names.push(candidate.username);
+      }
+    }
+    return names;
+  }
+  function recordSelection() {
+    document.body.dataset.selected = JSON.stringify(selected);
+  }
   function openPanel() {
     if (!panel) return;
     panel.hidden = false;
@@ -618,21 +857,46 @@ _COLLABORATOR_PAGE = """
       row.addEventListener('click', () => {
         document.body.dataset.rowClicks = String(
           Number(document.body.dataset.rowClicks || 0) + 1);
+        document.body.dataset.clickedUsername = candidate.username;
+        document.body.dataset.clickedIndex = String(candidates.indexOf(candidate));
         if (rowClick !== 'select') return;
-        const index = selected.indexOf(candidate.username);
-        if (index >= 0) {
-          selected.splice(index, 1);
-        } else if (selected.length < 5) {
-          selected.push(candidate.username);
+        const toggle = () => {
+          const index = selected.indexOf(candidate.username);
+          if (index >= 0) {
+            selected.splice(index, 1);
+          } else if (selected.length < 5) {
+            selected.push(candidate.username);
+          }
+          box.checked = selected.includes(candidate.username);
+          box.setAttribute('aria-checked', String(box.checked));
+          document.body.dataset.checkedRowCount = String(
+            results.querySelectorAll('input[type="checkbox"]:checked').length);
+          const states = JSON.parse(
+            document.body.dataset.checkboxStates || '[]');
+          states.push({
+            username: candidate.username,
+            checked: box.checked,
+            aria: box.getAttribute('aria-checked'),
+          });
+          document.body.dataset.checkboxStates = JSON.stringify(states);
+          renderChips();
+          recordSelection();
+          if (selected.length >= 5 && entry) entry.value = valueAfterFive;
+        };
+        if (checkboxDelayMs > 0) {
+          setTimeout(toggle, checkboxDelayMs);
+        } else {
+          toggle();
         }
-        box.checked = selected.includes(candidate.username);
-        box.setAttribute('aria-checked', String(box.checked));
-        renderChips();
-        if (selected.length >= 5 && entry) entry.value = valueAfterFive;
       });
       results.appendChild(row);
     }
   }
+  document.addEventListener('focusin', (event) => {
+    if (event.target && event.target.id) {
+      document.body.dataset.focusedEntry = event.target.id;
+    }
+  });
   if (entry) {
     entry.addEventListener('click', () => {
       document.body.dataset.entryClicks = String(
@@ -641,6 +905,12 @@ _COLLABORATOR_PAGE = """
     });
     entry.addEventListener('focus', openPanel);
     entry.addEventListener('input', () => {
+      const progress = JSON.parse(document.body.dataset.progress || '[]');
+      if (!progress.length ||
+          progress[progress.length - 1].query !== entry.value) {
+        progress.push({query: entry.value, checked: checkedNames()});
+        document.body.dataset.progress = JSON.stringify(progress);
+      }
       const queries = JSON.parse(document.body.dataset.queries || '[]');
       queries.push(entry.value);
       document.body.dataset.queries = JSON.stringify(queries);
@@ -655,6 +925,7 @@ _COLLABORATOR_PAGE = """
     });
   }
   renderChips();
+  recordSelection();
 </script>
 """
 
@@ -669,6 +940,10 @@ _ENTRY_HTML = {
     ),
     "zh": (
         '<input id="collab-entry" placeholder="添加合作者" '
+        'autocomplete="off">'
+    ),
+    "broad": (
+        '<input id="collab-entry" placeholder="Search for collaborators" '
         'autocomplete="off">'
     ),
     "disabled": (
@@ -689,12 +964,15 @@ def _collaborator_page_html(
     row_click="select",
     render_chips=True,
     value_after_five="5 people",
+    checkbox_delay_ms=0,
+    restriction="",
     obscured=False,
 ) -> str:
     """受控配文页：结构/中英文入口、勾选面板、预览 chip、Done 与 Share 计数。"""
     html = (
         _COLLABORATOR_PAGE
         .replace("__ENTRY__", _ENTRY_HTML[entry])
+        .replace("__RESTRICTION__", restriction)
         .replace(
             "__CANDIDATES__",
             json.dumps(
@@ -710,6 +988,7 @@ def _collaborator_page_html(
         .replace("__DONE_COLLAPSES__", "true" if done_collapses else "false")
         .replace("__RENDER_CHIPS__", "true" if render_chips else "false")
         .replace("__VALUE_AFTER_FIVE__", json.dumps(value_after_five))
+        .replace("__CHECKBOX_DELAY_MS__", str(int(checkbox_delay_ms)))
         .replace("__DONE_LABEL__", done_label)
     )
     if not obscured:
@@ -1053,6 +1332,542 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertEqual(outcome.share_clicks, 0)
 
 
+class InstagramReelsCollaboratorDomTests(unittest.TestCase):
+    """C 层（Reels）：真实 Chrome 受控页；``image_count == 0`` 只读面板 checkbox。
+
+    Reels 没有预览图 chip，已选 username 只在面板打开时可读。因此这里刻意
+    让 checkbox 延迟生效，并用页面记录的“下一个查询开始时的已勾选集合”证明
+    控件在继续下一个 username 前确实等待并回读了上一个 checkbox。
+    """
+
+    def _apply(self, html, *, options, readback_timeout_ms=None):
+        holder: dict[str, object] = {}
+
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(channel="chrome", headless=True)
+                page = await browser.new_page()
+                try:
+                    await page.set_content(html)
+                    with tempfile.TemporaryDirectory() as folder:
+                        video = Path(folder) / "video.mp4"
+                        video.touch()
+                        result_file = Path(folder) / "result.json"
+                        app = InstagramUploader(
+                            "unused.json",
+                            title="caption",
+                            video_file=video,
+                            options=options,
+                            result_file=result_file,
+                        )
+                        budget = app.start_publish_budget()
+                        error = None
+                        try:
+                            await app._apply_options(page, budget=budget)
+                        except Exception as wrapped:
+                            error = wrapped
+                        holder["app"] = app
+                        holder["error"] = error
+                        holder["saved"] = (
+                            json.loads(result_file.read_text(encoding="utf-8"))
+                            if result_file.exists()
+                            else app.result
+                        )
+                        holder["share_clicks"] = int(
+                            await page.locator("[data-share-clicks]")
+                            .get_attribute("data-share-clicks") or 0
+                        )
+                        body = page.locator("body")
+
+                        async def data(name):
+                            return await body.get_attribute(name)
+
+                        queries = await data("data-queries")
+                        progress = await data("data-progress")
+                        selected = await data("data-selected")
+                        states = await data("data-checkbox-states")
+                        holder["queries"] = json.loads(queries) if queries else []
+                        holder["progress"] = (
+                            json.loads(progress) if progress else []
+                        )
+                        holder["selected"] = (
+                            json.loads(selected) if selected else []
+                        )
+                        holder["checkbox_states"] = (
+                            json.loads(states) if states else []
+                        )
+                        holder["entry_clicks"] = int(
+                            await data("data-entry-clicks") or 0
+                        )
+                        holder["row_clicks"] = int(
+                            await data("data-row-clicks") or 0
+                        )
+                        holder["done_clicks"] = int(
+                            await data("data-done-clicks") or 0
+                        )
+                        holder["clicked_username"] = await data(
+                            "data-clicked-username"
+                        )
+                        holder["clicked_index"] = await data("data-clicked-index")
+                        holder["focused_entry"] = await data(
+                            "data-focused-entry"
+                        )
+                        holder["panel_hidden"] = bool(
+                            await page.locator("#collab-panel").evaluate(
+                                "el => el.hidden"
+                            )
+                        )
+                        holder["chips"] = await page.evaluate(
+                            """() => [...document.querySelectorAll('#chips > span')]
+                                .map(node => {
+                                  const name = node.querySelector('span');
+                                  return name ? name.textContent : '';
+                                }).filter(Boolean)"""
+                        )
+                        # Done 后重开面板（清空查询以显示全部行）观察勾选是否保留。
+                        await page.evaluate(
+                            """() => {
+                              const entry = document.getElementById('collab-entry');
+                              if (entry) {
+                                entry.value = '';
+                                entry.dispatchEvent(
+                                  new Event('input', {bubbles: true}));
+                              }
+                              const panel = document.getElementById(
+                                'collab-panel');
+                              if (panel) panel.hidden = false;
+                            }"""
+                        )
+                        holder["reopened_checked"] = await page.evaluate(
+                            """() => [...document.querySelectorAll(
+                                 '#collab-results [data-username]')]
+                               .filter(row => row.querySelector(
+                                 'input[type="checkbox"]').checked)
+                               .map(row => row.dataset.username)"""
+                        )
+                finally:
+                    await browser.close()
+
+        patches = list(_timeout_patches())
+        if readback_timeout_ms is not None:
+            patches.append(
+                patch.object(
+                    collaborators_control_module,
+                    "READBACK_TIMEOUT_MS",
+                    readback_timeout_ms,
+                )
+            )
+        for item in patches:
+            item.start()
+        try:
+            with patch.dict(os.environ, {"HUMANIZE": "0"}):
+                asyncio.run(scenario())
+        finally:
+            for item in patches:
+                item.stop()
+        return SimpleNamespace(**holder)
+
+    def test_checkbox_is_read_back_before_the_next_username_is_typed(self):
+        html = _collaborator_page_html(
+            [("alice", "Alice"), ("bob", "Bob"), ("carol", "Carol")],
+            render_chips=False,
+            checkbox_delay_ms=700,
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+            readback_timeout_ms=2_000,
+        )
+        self.assertIsNone(outcome.error)
+        expected = {
+            "requested": ["alice", "bob", "carol"],
+            "applied": ["alice", "bob", "carol"],
+            "status": SET,
+        }
+        self.assertEqual(outcome.saved["options"]["collaborators"], expected)
+        # 输入下一个 username 时，上一个 checkbox 必须已经勾选（逐个回读）。
+        by_query = {
+            item["query"]: item["checked"] for item in outcome.progress
+        }
+        self.assertEqual(by_query.get("alice"), [])
+        self.assertEqual(by_query.get("bob"), ["alice"])
+        self.assertEqual(by_query.get("carol"), ["alice", "bob"])
+        self.assertEqual(
+            outcome.checkbox_states,
+            [
+                {"username": "alice", "checked": True, "aria": "true"},
+                {"username": "bob", "checked": True, "aria": "true"},
+                {"username": "carol", "checked": True, "aria": "true"},
+            ],
+        )
+        self.assertEqual(outcome.selected, ["alice", "bob", "carol"])
+        self.assertEqual(outcome.row_clicks, 3)
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertEqual(outcome.share_clicks, 0)
+        self.assertEqual(outcome.chips, [])
+
+    def test_one_and_five_collaborators_complete(self):
+        for count in (1, 5):
+            with self.subTest(count=count):
+                candidates = [
+                    (f"user{index}", f"User {index}") for index in range(count)
+                ]
+                requested = tuple(
+                    username for username, _display in candidates
+                )
+                outcome = self._apply(
+                    _collaborator_page_html(
+                        candidates, render_chips=False
+                    ),
+                    options=InstagramPublishOptions(
+                        collaborators=requested
+                    ),
+                )
+                self.assertIsNone(outcome.error)
+                self.assertEqual(
+                    outcome.saved["options"]["collaborators"],
+                    {
+                        "requested": list(requested),
+                        "applied": list(requested),
+                        "status": SET,
+                    },
+                )
+                self.assertEqual(outcome.selected, list(requested))
+                self.assertEqual(outcome.row_clicks, count)
+                self.assertEqual(outcome.done_clicks, 1)
+                self.assertEqual(outcome.share_clicks, 0)
+                self.assertEqual(outcome.chips, [])
+
+    def test_english_chinese_and_broad_entry_fallbacks(self):
+        for entry in ("en", "zh", "broad"):
+            with self.subTest(entry=entry):
+                outcome = self._apply(
+                    _collaborator_page_html(
+                        [("alice", "Alice")],
+                        entry=entry,
+                        render_chips=False,
+                    ),
+                    options=InstagramPublishOptions(
+                        collaborators=("alice",)
+                    ),
+                )
+                self.assertIsNone(outcome.error)
+                self.assertEqual(outcome.selected, ["alice"])
+                self.assertEqual(outcome.saved["options"]["collaborators"]["applied"], ["alice"])
+
+    def test_structural_entry_wins_over_an_english_placeholder_decoy(self):
+        html = _collaborator_page_html(
+            [("alice", "Alice")], render_chips=False
+        ).replace(
+            '<input id="collab-entry" name="creation-collaborator-input"',
+            '<input id="decoy-entry" placeholder="Add collaborators">'
+            '<input id="collab-entry" name="creation-collaborator-input"',
+            1,
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(outcome.focused_entry, "collab-entry")
+        self.assertEqual(outcome.selected, ["alice"])
+
+    def test_entry_outside_the_composer_dialog_is_not_used(self):
+        html = _collaborator_page_html(
+            [("alice", "Alice")], entry="missing", render_chips=False
+        ).replace(
+            "</div>\n<script>",
+            '</div>\n<input name="creation-collaborator-input" '
+            'placeholder="Add collaborators">\n<script>',
+            1,
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=unsupported(entry_missing)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"]["reason"], ENTRY_MISSING
+        )
+        self.assertEqual(outcome.entry_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_nike_never_selects_a_substring_candidate(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("_nikeza5", "nikeza"), ("nike", "Nike")],
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("nike",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"]["applied"], ["nike"]
+        )
+        self.assertEqual(outcome.selected, ["nike"])
+        self.assertEqual(outcome.clicked_username, "nike")
+        self.assertEqual(outcome.clicked_index, "1")
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_duplicate_identical_rows_choose_the_first(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("nike", "Nike One"), ("nike", "Nike Two")],
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("nike",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(outcome.clicked_index, "0")
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.selected, ["nike"])
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"]["applied"], ["nike"]
+        )
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_already_selected_checkbox_is_not_clicked_again(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob")],
+                preselect=("alice",),
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob")
+            ),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(outcome.selected, ["alice", "bob"])
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.clicked_username, "bob")
+        by_query = {
+            item["query"]: item["checked"] for item in outcome.progress
+        }
+        self.assertEqual(by_query.get("bob"), ["alice"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_done_closes_the_panel_and_preserves_selection(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob")],
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob")
+            ),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertEqual(outcome.selected, ["alice", "bob"])
+        self.assertEqual(outcome.reopened_checked, ["alice", "bob"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_no_candidates_stops_before_later_usernames(self):
+        outcome = self._apply(
+            _collaborator_page_html([], render_chips=False),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob")
+            ),
+        )
+        self.assertIn(
+            "collaborators=mismatch(no_candidates)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": NO_CANDIDATES,
+            },
+        )
+        self.assertIn("alice", outcome.queries)
+        self.assertNotIn("bob", outcome.queries)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_no_same_username_keeps_the_confirmed_prefix(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("_bobby", "Bobby")],
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+        )
+        self.assertIn(
+            "collaborators=mismatch(no_same_username_candidate)",
+            str(outcome.error),
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob", "carol"],
+                "applied": ["alice"],
+                "status": MISMATCH,
+                "reason": NO_SAME_USERNAME,
+            },
+        )
+        self.assertEqual(outcome.selected, ["alice"])
+        self.assertIn("bob", outcome.queries)
+        self.assertNotIn("carol", outcome.queries)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_click_without_selection_is_selection_failed(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                row_click="ignore",
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(selection_failed)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": SELECTION_FAILED,
+            },
+        )
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.selected, [])
+        self.assertEqual(outcome.done_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_first_click_failure_stops_before_the_next_username(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob"), ("carol", "Carol")],
+                row_click="ignore",
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+        )
+        self.assertIn(
+            "collaborators=mismatch(selection_failed)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"]["applied"], []
+        )
+        self.assertIn("alice", outcome.queries)
+        self.assertNotIn("bob", outcome.queries)
+        self.assertNotIn("carol", outcome.queries)
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_done_that_does_not_collapse_is_list_not_collapsed(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob")],
+                done_collapses=False,
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob")
+            ),
+        )
+        self.assertIn(
+            "collaborators=mismatch(list_not_collapsed)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob"],
+                "applied": ["alice", "bob"],
+                "status": MISMATCH,
+                "reason": LIST_NOT_COLLAPSED,
+            },
+        )
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertFalse(outcome.panel_hidden)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_chinese_done_label_collapses_the_panel(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                done_label="完成",
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertTrue(outcome.panel_hidden)
+
+    def test_disabled_entry_is_control_disabled(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                entry="disabled",
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=unsupported(control_disabled)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"]["reason"],
+            CONTROL_DISABLED,
+        )
+        self.assertEqual(outcome.entry_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_explicit_account_restriction_is_account_ineligible(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                entry="missing",
+                restriction=(
+                    '<div id="collaborator-restriction" role="alert">'
+                    "Cannot add collaborators to this account."
+                    "</div>"
+                ),
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=unsupported(account_ineligible)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
+        self.assertIn("Cannot add collaborators", record["detail"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_obscured_composer_records_editor_obscured_without_control(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                obscured=True,
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn("遮挡", str(outcome.error))
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["status"], MISMATCH)
+        self.assertEqual(record["reason"], EDITOR_OBSCURED)
+        self.assertIn("遮挡", record["detail"])
+        self.assertEqual(outcome.entry_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
+
 class InstagramCollaboratorControlledCliTests(unittest.TestCase):
     """CLI 边界：真实 Chrome 受控页 + ``sau`` 解析/校验/打印/落盘。"""
 
@@ -1062,8 +1877,17 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         self.folder = Path(folder.name)
         self.image = self.folder / "image.png"
         self.image.touch()
+        self.video = self.folder / "video.mp4"
+        self.video.touch()
 
-    def _run(self, *, html, collaborator_args=(), no_publish=True):
+    def _run(
+        self,
+        *,
+        html,
+        collaborator_args=(),
+        no_publish=True,
+        action="upload-note",
+    ):
         holder: dict[str, object] = {}
         result_file = self.folder / f"result-{uuid4().hex}.json"
 
@@ -1078,9 +1902,11 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
                         title=request.title,
                         description=request.description,
                         tags=request.tags,
+                        video_file=request.video_file,
                         image_files=[
                             str(path) for path in (request.image_files or [])
                         ],
+                        thumbnail=request.thumbnail,
                         options=request.options,
                         no_publish=request.no_publish,
                         result_file=request.result_file,
@@ -1108,13 +1934,26 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
                         holder["row_clicks"] = int(
                             await body.get_attribute("data-row-clicks") or 0
                         )
+                        holder["done_clicks"] = int(
+                            await body.get_attribute("data-done-clicks") or 0
+                        )
+                        holder["panel_hidden"] = bool(
+                            await page.locator("#collab-panel").evaluate(
+                                "el => el.hidden"
+                            )
+                        )
                 finally:
                     await browser.close()
             return holder["result"]
 
+        media = (
+            ["--file", str(self.video)]
+            if action == "upload-video"
+            else ["--images", str(self.image)]
+        )
         argv = [
-            "instagram", "upload-note", "--account", "creator",
-            "--title", "caption", "--images", str(self.image),
+            "instagram", action, "--account", "creator",
+            "--title", "caption", *media,
             "--result", str(result_file), *collaborator_args,
         ]
         if no_publish:
@@ -1201,3 +2040,139 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         self.assertEqual(holder["share_clicks"], 0)
         self.assertEqual(holder["entry_clicks"], 0)
         self.assertEqual(holder["row_clicks"], 0)
+
+    def test_upload_video_no_publish_success_prints_and_saves_the_same_payload(self):
+        html = _collaborator_page_html(
+            [("alice", "Alice"), ("bob", "Bob")], render_chips=False
+        )
+        code, saved, holder, stdout, stderr = self._run(
+            action="upload-video",
+            html=html,
+            collaborator_args=(
+                "--collaborator", "alice", "--collaborator", "@Bob"
+            ),
+        )
+        self.assertEqual(code, 0, stderr)
+        expected = {
+            "requested": ["alice", "bob"],
+            "applied": ["alice", "bob"],
+            "status": SET,
+        }
+        self.assertEqual(saved["status"], "prepared")
+        self.assertEqual(saved["options"]["collaborators"], expected)
+        self.assertEqual(holder["share_clicks"], 0)
+        self.assertEqual(holder["row_clicks"], 2)
+        self.assertEqual(holder["done_clicks"], 1)
+        self.assertTrue(holder["panel_hidden"])
+        self.assertEqual(json.loads(stdout), saved)
+        for key in ("content_id", "post_id", "post_url", "schedule", "media_count"):
+            self.assertNotIn(key, saved)
+
+    def test_upload_video_controlled_failure_exits_1_with_zero_share_clicks(self):
+        html = _collaborator_page_html(
+            [("_nikeza5", "nikeza")], render_chips=False
+        )
+        code, saved, holder, stdout, stderr = self._run(
+            action="upload-video",
+            html=html,
+            collaborator_args=("--collaborator", "nike"),
+            no_publish=False,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(holder["share_clicks"], 0)
+        self.assertEqual(saved["status"], "not_submitted")
+        self.assertEqual(
+            saved["options"]["collaborators"],
+            {
+                "requested": ["nike"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": NO_SAME_USERNAME,
+            },
+        )
+        self.assertIn("no_same_username_candidate", stderr)
+
+    def test_upload_video_panel_collapse_failure_exits_1_with_zero_share_clicks(self):
+        html = _collaborator_page_html(
+            [("alice", "Alice"), ("bob", "Bob")],
+            done_collapses=False,
+            render_chips=False,
+        )
+        code, saved, holder, stdout, stderr = self._run(
+            action="upload-video",
+            html=html,
+            collaborator_args=(
+                "--collaborator", "alice", "--collaborator", "bob"
+            ),
+            no_publish=False,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(holder["share_clicks"], 0)
+        self.assertEqual(saved["status"], "not_submitted")
+        self.assertEqual(
+            saved["options"]["collaborators"],
+            {
+                "requested": ["alice", "bob"],
+                "applied": ["alice", "bob"],
+                "status": MISMATCH,
+                "reason": LIST_NOT_COLLAPSED,
+            },
+        )
+        self.assertIn("list_not_collapsed", stderr)
+
+    def test_upload_video_click_without_selection_exits_1_with_zero_share_clicks(self):
+        html = _collaborator_page_html(
+            [("alice", "Alice")],
+            row_click="ignore",
+            render_chips=False,
+        )
+        code, saved, holder, stdout, stderr = self._run(
+            action="upload-video",
+            html=html,
+            collaborator_args=("--collaborator", "alice"),
+            no_publish=False,
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(holder["share_clicks"], 0)
+        self.assertEqual(saved["status"], "not_submitted")
+        self.assertEqual(
+            saved["options"]["collaborators"],
+            {
+                "requested": ["alice"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": SELECTION_FAILED,
+            },
+        )
+        self.assertIn("selection_failed", stderr)
+
+    def test_upload_video_static_errors_exit_2_without_upload(self):
+        cases = (
+            ("empty", ["--collaborator", ""]),
+            (
+                "duplicate",
+                ["--collaborator", "alice", "--collaborator", "@Alice"],
+            ),
+            (
+                "six",
+                ["--collaborator", "a", "--collaborator", "b",
+                 "--collaborator", "c", "--collaborator", "d",
+                 "--collaborator", "e", "--collaborator", "f"],
+            ),
+        )
+        upload = AsyncMock()
+        for case, collaborator_args in cases:
+            with self.subTest(case=case), patch.object(
+                instagram_command, "upload_instagram_content", upload
+            ), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = sau_cli.main([
+                    "instagram", "upload-video", "--account", "creator",
+                    "--title", "caption", "--file", str(self.video),
+                    *collaborator_args,
+                ])
+                self.assertEqual(code, 2)
+        upload.assert_not_awaited()
