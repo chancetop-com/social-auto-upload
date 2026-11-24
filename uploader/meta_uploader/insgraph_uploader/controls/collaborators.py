@@ -437,11 +437,13 @@ class CollaboratorsControl:
             except Exception:
                 return None
             return None
-        for dialog in await self._visible_dialogs(
+        editors = await self._visible_dialogs(
             '[role="dialog"]:has([data-lexical-editor="true"])'
-        ):
-            return dialog
-        for dialog in await self._visible_dialogs('[role="dialog"]'):
+        )
+        if editors:
+            return editors[0]
+        visible = await self._visible_dialogs('[role="dialog"]')
+        for dialog in visible:
             for selector in ENTRY_SELECTORS:
                 candidate = dialog.locator(selector).first
                 try:
@@ -449,7 +451,6 @@ class CollaboratorsControl:
                         return dialog
                 except Exception:
                     continue
-        visible = await self._visible_dialogs('[role="dialog"]')
         return visible[0] if len(visible) == 1 else None
 
     async def _entry(self, timeout_ms: int) -> Locator | None:
@@ -714,7 +715,7 @@ class CollaboratorsControl:
             except Exception as error:
                 # 单个 username 处理中的任意浏览器错误（Playwright
                 # Error/TimeoutError）或预算收紧都停止列表；不能丢掉失败前
-                # 已确认的前缀，也不能让 generic 管線把 applied 记成 None。
+                # 已确认的前缀，也不能让 generic 管线把 applied 记成 None。
                 self._confirmed = list(confirmed)
                 raise self._stop_with_prefix(
                     confirmed, f'添加「{name}」时', error
