@@ -32,7 +32,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 已接入五项网页发布选项，`upload-video` / `upload-note` 均可用，全部可选，不传即完全不动页面默认：
 
 - `--location TEXT`：按联想列表忽略大小写与多余空白的精确匹配；无精确匹配退出 `1`、不发布，错误信息列出候选。
-- `--collaborator USERNAME`：可重复，每次一个 username；归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个，空值/重复/超过 5 个在上传前退出 `2`。在包含入口的创建弹窗内打开 Collaborators 面板（真机面板是入口附近的兄弟 `role=dialog`），按候选行首 token 的 username 精确匹配（不用显示名或包含关系，`nike` 不会选中 `_nikeza5`），每次点击后立即回读（图文/轮播 chip，Reels checkbox）；首个失败即停且不发布；没有移除 flag。页面若明确拒绝第 N 个（上限/只能/无法再添加等），记 `final_mismatch` 并在 `detail` 说明；没有拒绝信号时仍是 `selection_failed`。`status=set` 只表示创建页已选中。
+- `--collaborator USERNAME`：可重复，每次一个 username；归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个，空值/重复/超过 5 个在上传前退出 `2`。在包含入口的创建弹窗内打开 Collaborators 面板（真机面板是入口附近的兄弟 `role=dialog`），按候选行首 token 的 username 精确匹配（不用显示名或包含关系，`nike` 不会选中 `_nikeza5`），每次点击后立即回读（图文/轮播 chip，Reels checkbox）；首个失败即停且不发布；没有移除 flag。页面若明确拒绝第 N 个（上限/只能/无法再添加等），记 `final_mismatch` 并在 `detail` 说明；没有拒绝信号时保留原回读原因（`selection_failed` / `final_mismatch`）。`status=set` 只表示创建页已选中。
 - `--no-comments`：请求关闭评论；入口缺失或不可用视为已满足（`default_off`，退出 `0`）。没有 `--comments`。
 - `--ai-generated` / `--no-ai-generated`：互斥，同传退出 `2`；开启时入口缺失退出 `1`，关闭时已是关闭或入口缺失退出 `0`；没有 `--aigc` 别名。
 - `--alt-text TEXT`（仅 `upload-note`）：可重复，每张图片一条；条数必须为 0 或等于图片张数，每条 1–1000 字符，不截断。

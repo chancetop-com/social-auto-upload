@@ -39,6 +39,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     SET,
     UNSUPPORTED,
     InstagramPublishOptions,
+    OptionMismatchError,
 )
 from tests.instagram_collaborators_fixtures import (
     collaborator_page_html,
@@ -357,6 +358,30 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertNotIn("carol", outcome.queries)
         self.assertEqual(outcome.share_clicks, 0)
 
+    def test_final_mismatch_readback_with_limit_notice_keeps_detail(self):
+        outcome = self._apply(
+            collaborator_page_html(
+                [("alice", "Alice")],
+                render_chips=False,
+                restriction=(
+                    '<div role="alert">'
+                    "You can only add up to 2 collaborators."
+                    "</div>"
+                ),
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        message = str(outcome.error)
+        self.assertIn("collaborators=mismatch(final_mismatch)", message)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["applied"], [])
+        self.assertEqual(record["status"], MISMATCH)
+        self.assertEqual(record["reason"], FINAL_MISMATCH)
+        self.assertIn("第 1 个", record["detail"])
+        self.assertIn("上限", record["detail"])
+        self.assertEqual(outcome.row_clicks, 1)
+        self.assertEqual(outcome.share_clicks, 0)
+
     def test_page_limit_refusal_is_final_mismatch_with_detail(self):
         outcome = self._apply(
             collaborator_page_html(
@@ -592,6 +617,56 @@ class InstagramCollaboratorComposerScopeDomTests(unittest.TestCase):
             "</div></div>"
         )
         self.assertEqual(self._resolve(html), PRESENT)
+
+    def test_unrelated_sibling_dialog_with_button_is_not_the_panel(self):
+        # 最近的兄弟 dialog 只有一个普通按钮，没有候选行/Done。它不能被当成
+        # 已打开的面板；真正面板从未打开时必须报 list_not_collapsed，而不是
+        # 进入输入并因“无候选”报 no_candidates。
+        html = collaborator_page_html(
+            [("alice", "Alice")], panel_opens=False
+        ) + (
+            '<div role="dialog" id="unrelated" '
+            'style="position: fixed; left: 120px; top: 120px;">'
+            "<button>Discard draft</button></div>"
+        )
+        error, queries = self._set(html)
+        self.assertIsNotNone(error)
+        self.assertEqual(error.reason, LIST_NOT_COLLAPSED)
+        self.assertIsNone(error.applied)
+        self.assertIn("面板未能打开", str(error))
+        self.assertFalse(queries)
+
+    def _set(self, html):
+        async def scenario():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    channel="chrome", headless=True
+                )
+                page = await browser.new_page()
+                try:
+                    await page.set_content(html)
+                    control = CollaboratorsControl(page, image_count=1)
+                    error = None
+                    try:
+                        await control.set(("alice",))
+                    except OptionMismatchError as raised:
+                        error = raised
+                    queries = await page.locator("body").get_attribute(
+                        "data-queries"
+                    )
+                    return error, queries
+                finally:
+                    await browser.close()
+
+        patches = list(timeout_patches())
+        for item in patches:
+            item.start()
+        try:
+            with patch.dict(os.environ, {"HUMANIZE": "0"}):
+                return asyncio.run(scenario())
+        finally:
+            for item in patches:
+                item.stop()
 
 
 class InstagramReelsCollaboratorDomTests(unittest.TestCase):
