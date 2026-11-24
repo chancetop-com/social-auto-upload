@@ -42,6 +42,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     UNSUPPORTED,
     InstagramPublishOptions,
     OptionMismatchError,
+    OptionUnsupportedError,
     empty_option_record,
     instagram_caption,
     caption_topic_records,
@@ -1097,8 +1098,12 @@ class InstagramUploader:
                 applied=None,
             )
         status, reason = option_status(requested, current, kind=kind)
-        if key != "location" and status in (SET, DEFAULT_OFF):
+        if (
+            key not in ("location", "collaborators")
+            and status in (SET, DEFAULT_OFF)
+        ):
             # 页面已是目标状态：不点击，直接按状态归类（§4.2 幂等）。
+            # 地点与协作者可能处于展开的候选列表/面板中，仍须交由 set() 确认收起。
             self._record_option(
                 key,
                 requested,
@@ -1152,6 +1157,22 @@ class InstagramUploader:
                     await self._apply_one_option(
                         key, requested, controls.get(key), budget=budget
                     )
+                except OptionUnsupportedError as error:
+                    self._record_option(
+                        key,
+                        requested,
+                        error.applied,
+                        UNSUPPORTED,
+                        reason=error.reason,
+                        detail=(
+                            error.detail
+                            if error.detail is not None
+                            else getattr(
+                                controls.get(key), 'last_detail', None
+                            )
+                        ),
+                    )
+                    details.append(f'{key}: {str(error) or type(error).__name__}')
                 except OptionMismatchError as error:
                     # 先落盘：控制器可能在确认了部分 username 后耗尽预算，
                     # 记录必须保留已确认前缀（applied）。这里不立即再查预算，

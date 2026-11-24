@@ -29,6 +29,7 @@ import sau_cli
 from sau_commands import instagram as instagram_command
 from uploader.meta_uploader.insgraph_uploader.controls.collaborators import (
     CollaboratorsControl,
+    collaborator_count_summary,
 )
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
@@ -348,7 +349,106 @@ class InstagramCollaboratorControlReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.reason, LIST_NOT_COLLAPSED)
         self.assertIsNone(error.applied)
         self.assertIn("面板未能打开", str(error))
-        self.assertIn("focus timed out", error.detail)
+        self.assertIn("focus timed out", str(error))
+        self.assertIsNone(error.detail)
+
+    async def test_disappearing_entry_during_set_reports_unsupported_entry_missing(self):
+        class _VanishingPage:
+            def locator(self, selector):
+                return self
+
+            async def count(self):
+                return 0
+
+        control = CollaboratorsControl(_VanishingPage(), image_count=1)
+
+        async def _present():
+            return PRESENT
+
+        control.resolve = _present  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as folder:
+            app = InstagramUploader(
+                "unused.json",
+                title="caption",
+                image_files=[str(Path(folder) / "image.png")],
+                options=InstagramPublishOptions(collaborators=("alice",)),
+                result_file=Path(folder) / "result.json",
+            )
+            with patch(
+                "uploader.meta_uploader.insgraph_uploader.controls.collaborators.ENTRY_TIMEOUT_MS",
+                10,
+            ), self.assertRaisesRegex(
+                RuntimeError, r"collaborators=unsupported\(entry_missing\)"
+            ):
+                await app._apply_options(
+                    page=None,
+                    budget=app.start_publish_budget(),
+                    controls={"collaborators": control},
+                )
+            self.assertEqual(
+                app.result["options"]["collaborators"],
+                {
+                    "requested": ["alice"],
+                    "applied": None,
+                    "status": UNSUPPORTED,
+                    "reason": ENTRY_MISSING,
+                },
+            )
+            self.assertFalse(app.publish_clicked)
+
+    async def test_open_panel_browser_error_omits_detail_from_result_json(self):
+        control = self._control(
+            _FakeReadEntry(
+                rows=False,
+                focus_error=TimeoutError("focus timed out"),
+            )
+        )
+
+        async def _present():
+            return PRESENT
+
+        control.resolve = _present  # type: ignore[method-assign]
+        with tempfile.TemporaryDirectory() as folder:
+            app = InstagramUploader(
+                "unused.json",
+                title="caption",
+                video_file=Path(folder) / "video.mp4",
+                options=InstagramPublishOptions(collaborators=("alice",)),
+                result_file=Path(folder) / "result.json",
+            )
+            with self.assertRaisesRegex(RuntimeError, "focus timed out"):
+                await app._apply_options(
+                    page=None,
+                    budget=app.start_publish_budget(),
+                    controls={"collaborators": control},
+                )
+            record = app.result["options"]["collaborators"]
+            self.assertEqual(
+                record,
+                {
+                    "requested": ["alice"],
+                    "applied": None,
+                    "status": MISMATCH,
+                    "reason": LIST_NOT_COLLAPSED,
+                },
+            )
+            self.assertNotIn("detail", record)
+
+    def test_count_summary_ignores_plain_usernames_and_matches_real_summaries(self):
+        for value in ("1person", "0people", "alice_1person", "2people_club", ""):
+            with self.subTest(non_summary=value):
+                self.assertIsNone(collaborator_count_summary(value, query=value))
+                self.assertIsNone(collaborator_count_summary(value))
+        for value, expected in (
+            ("1 person", 1),
+            ("2 people", 2),
+            ("5 people", 5),
+            ("2 人", 2),
+            ("3位用户", 3),
+            ("已选 2 人", 2),
+        ):
+            with self.subTest(summary=value):
+                self.assertEqual(collaborator_count_summary(value, query="bob"), expected)
 
 
 

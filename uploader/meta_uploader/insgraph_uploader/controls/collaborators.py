@@ -20,14 +20,13 @@
 入口与资格提示锚定在**包含可见协作者入口的创建弹窗**；面板解析规则：创建
 弹窗自身含可见的非 switch checkbox 行时用创建弹窗（既有受控 DOM 形态）；
 否则在所有可见 ``role="dialog"`` 里取同样含可见非 switch checkbox 行或
-可见按钮、且与协作者入口几何最近的兄弟弹窗。Done/完成、候选行与 Reels
+可见 Done/完成 按钮、且与协作者入口几何最近的兄弟弹窗。Done/完成、候选行与 Reels
 checkbox 回读都限定在这个解析出的面板内。面板解析只检查 dialog/checkbox/
 button 结构，不扫描全页文案，也不使用 hash 类名。
 """
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -39,8 +38,6 @@ from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 
 from ..options import (
-    ACCOUNT_INELIGIBLE,
-    CONTROL_DISABLED,
     ENTRY_MISSING,
     FINAL_MISMATCH,
     INELIGIBLE,
@@ -52,8 +49,23 @@ from ..options import (
     SELECTION_FAILED,
     UNAVAILABLE,
     OptionMismatchError,
+    OptionUnsupportedError,
     clamp_wait,
     normalize_collaborator_name,
+)
+from ._collaborator_dom import (
+    DONE_LABELS,
+    ENTRY_SELECTORS,
+    _CHIPS_JS,
+    _ENTRY_SELECTOR_UNION,
+    _PANEL_ATTR,
+    _PANEL_JS,
+    _PANEL_OPEN_JS,
+    _ROW_ATTR,
+    _ROWS_JS,
+    collaborator_count_summary,
+    collaborator_limit_message,
+    collaborator_restriction_message,
 )
 from ._rows import row_for
 
@@ -61,22 +73,6 @@ if TYPE_CHECKING:  # 运行时只需要 page 的鸭子类型，避免把 patchri
     from patchright.async_api import Page
 
     from uploader.publish_timeout import PublishTimeoutBudget
-
-# 入口选择器：结构属性优先，然后英文/中文 placeholder 与 aria-label，最后更宽
-# 的中英文回退。定位限定在包含可见入口的创建弹窗内；没有弹窗祖先的输入框
-# 不参与解析，也不做全页 locator。
-ENTRY_SELECTORS = (
-    'input[name="creation-collaborator-input"]',
-    'input[placeholder="Add collaborators"]',
-    'input[aria-label="Add collaborators"]',
-    'input[placeholder="添加合作者"]',
-    'input[aria-label="添加合作者"]',
-    'input[placeholder*="collaborator" i]',
-    'input[aria-label*="collaborator" i]',
-    'input[placeholder*="合作者"]',
-    'input[aria-label*="合作者"]',
-)
-DONE_LABELS = ("Done", "完成")
 
 ENTRY_TIMEOUT_MS = 5_000
 PANEL_TIMEOUT_MS = 5_000
@@ -87,267 +83,6 @@ SUGGESTION_SETTLE_MS = 250
 READBACK_TIMEOUT_MS = 3_000
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
-_ROW_ATTR = 'data-instagram-collaborator-row'
-_PANEL_ATTR = 'data-instagram-collaborator-panel'
-_ENTRY_SELECTOR_UNION = ', '.join(ENTRY_SELECTORS)
-# 面板与 chip 的 JS 共用同一个空白归一化实现；只声明一次，避免两份漂移。
-_JS_NORM_HELPER = (
-    "  const norm = (value) => "
-    "String(value || '').replace(/\\s+/g, ' ').trim();\n"
-)
-
-# 只有页面明确说明账号/地区不具备协作者资格时才使用 account_ineligible；
-# 单纯 disabled 记 control_disabled。
-_COLLABORATOR_RESTRICTION_PATTERNS = (
-    re.compile(
-        r"(?:collaborator|合作者|协作者)[^.\n]{0,40}"
-        r"(?:not\s+available|isn['’]t\s+available|unavailable|"
-        r"not\s+supported|isn['’]t\s+supported|"
-        r"不可用|不支持|不符合资格|无法使用|无法邀请|无法添加)"
-        r"[^.\n]{0,40}"
-        r"(?:account|账号|region|country|地区|国家)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:account|账号)[^.\n]{0,40}"
-        r"(?:not\s+eligible|ineligible|不符合资格|无资格)"
-        r"[^.\n]{0,40}(?:collaborator|合作者|协作者)?",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:can['’]?t|cannot|unable\s+to|无法|不能)"
-        r"[^.\n]{0,20}"
-        r"(?:add|invite|select|添加|邀请|选择)"
-        r"[^.\n]{0,20}(?:collaborator|合作者|协作者)",
-        re.IGNORECASE,
-    ),
-)
-
-# 页面可能把账号/地区的协作者上限设得低于静态 5。点击后 checkbox 仍未勾选
-# 时，只有页面明确给出“上限/只能/最多/无法再添加”等拒绝信号，才归因为页面
-# 拒绝（final_mismatch）；否则仍是点击未生效（selection_failed）。
-_COLLABORATOR_LIMIT_PATTERNS = (
-    re.compile(
-        r"(?:collaborator|collaborators|合作者|协作者)"
-        r"[^.\n]{0,60}"
-        r"(?:up\s+to|more\s+than|limit(?:ed)?|maximum|max\.?|reached|"
-        r"最多|上限|只能|不能再|已达到|达到|"
-        r"cannot\s+add|can['’]?t\s+add|unable\s+to\s+add|"
-        r"无法添加|无法邀请)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:up\s+to|more\s+than|limit(?:ed)?|maximum|max\.?|reached|"
-        r"最多|上限|只能|不能再|已达到|达到|"
-        r"cannot\s+add|can['’]?t\s+add|unable\s+to\s+add|"
-        r"无法添加|无法邀请)"
-        r"[^.\n]{0,60}"
-        r"(?:collaborator|collaborators|合作者|协作者)",
-        re.IGNORECASE,
-    ),
-)
-_COLLABORATOR_COUNT_SUMMARY = re.compile(
-    r"(\d+)\s*(?:people|person|位用户|位|人)", re.IGNORECASE
-)
-
-# 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
-# 先认创建弹窗自身（既有受控 DOM 把结果列表嵌在弹窗内）；否则在所有可见
-# role=dialog 中取“含可见非 switch checkbox 行或可见 Done/完成 按钮”且与
-# 协作者入口几何最近的弹窗。普通按钮不算面板信号，避免把通知/放弃弹窗
-# 误认成已打开的候选面板。
-_PANEL_HELPERS_JS = _JS_NORM_HELPER + """
-  const visible = (node) => {
-    if (!node || !node.getClientRects().length) return false;
-    const style = getComputedStyle(node);
-    return style.visibility !== 'hidden' && style.display !== 'none';
-  };
-  const composer = el.closest('[role="dialog"]');
-  const rowForInput = (input, dialog) => {
-    let row = input.closest('button, [role="button"], li, label');
-    if (!row) row = input.parentElement;
-    while (row && row !== dialog && !norm(row.innerText || row.textContent)) {
-      row = row.parentElement;
-    }
-    return row && row !== dialog ? row : null;
-  };
-  const hasCandidateRows = (dialog) => {
-    if (!dialog || !visible(dialog)) return false;
-    for (const input of dialog.querySelectorAll('input[type="checkbox"]')) {
-      if ((input.getAttribute('role') || '').toLowerCase() === 'switch') {
-        continue;
-      }
-      if (!visible(input)) continue;
-      const row = rowForInput(input, dialog);
-      if (!row || !visible(row)) continue;
-      if (!norm(row.innerText || row.textContent || '')) continue;
-      return true;
-    }
-    return false;
-  };
-  const doneLabels = new Set([__DONE_LABELS__]);
-  const hasDoneButton = (dialog) => {
-    if (!dialog || !visible(dialog)) return false;
-    for (const node of dialog.querySelectorAll('button, [role="button"]')) {
-      if (!visible(node)) continue;
-      const text = norm(
-        node.innerText || node.textContent || ''
-      ).toLowerCase();
-      const label = norm(node.getAttribute('aria-label') || '').toLowerCase();
-      if (doneLabels.has(text) || doneLabels.has(label)) return true;
-    }
-    return false;
-  };
-  const isPanelDialog = (dialog) =>
-    hasCandidateRows(dialog) || hasDoneButton(dialog);
-  const entryRect = el.getBoundingClientRect();
-  const distanceTo = (node) => {
-    const rect = node.getBoundingClientRect();
-    const dx = Math.max(
-      0, Math.max(rect.left - entryRect.right, entryRect.left - rect.right));
-    const dy = Math.max(
-      0, Math.max(rect.top - entryRect.bottom, entryRect.top - rect.bottom));
-    return Math.hypot(dx, dy);
-  };
-  const resolvePanel = () => {
-    if (hasCandidateRows(composer) || hasDoneButton(composer)) return composer;
-    let best = null;
-    let bestDistance = Infinity;
-    for (const dialog of document.querySelectorAll('[role="dialog"]')) {
-      if (dialog === composer || !isPanelDialog(dialog)) continue;
-      const distance = distanceTo(dialog);
-      if (best === null || distance < bestDistance) {
-        best = dialog;
-        bestDistance = distance;
-      }
-    }
-    return best;
-  };
-""".replace(
-    "__DONE_LABELS__",
-    ', '.join(f"'{label.lower()}'" for label in DONE_LABELS),
-)
-
-# 候选行：从 checkbox 出发找最近的 role=button/button/li/label 行；只读取
-# username 首 token。AI/评论开关是 role=switch，明确排除。
-_ROWS_JS = """(el, action) => {""" + _PANEL_HELPERS_JS + """
-  const panel = resolvePanel();
-  if (!panel) return (action && action.action === 'list') ? [] : null;
-  const seen = new Set();
-  const rows = [];
-  for (const input of panel.querySelectorAll('input[type="checkbox"]')) {
-    if ((input.getAttribute('role') || '').toLowerCase() === 'switch') continue;
-    if (!visible(input)) continue;
-    const row = rowForInput(input, panel);
-    if (!row || seen.has(row)) continue;
-    seen.add(row);
-    const text = norm(row.innerText || row.textContent || '');
-    if (!text) continue;
-    const username = text.split(/\\s+/)[0];
-    if (!username) continue;
-    rows.push({
-      node: row,
-      username: username,
-      display: text.slice(username.length).trim(),
-      checked: Boolean(input.checked) ||
-        (input.getAttribute('aria-checked') || '').toLowerCase() === 'true',
-    });
-  }
-  if (!action || action.action === 'list') {
-    return rows.map((row, index) => ({
-      index: index,
-      username: row.username,
-      display: row.display,
-      checked: row.checked,
-    }));
-  }
-  const target = rows[action.index];
-  if (!target) return null;
-  if (norm(target.username).toLowerCase() !==
-      norm(action.username).toLowerCase()) return null;
-  target.node.setAttribute('data-instagram-collaborator-row', action.stamp);
-  return true;
-}"""
-
-# 用一次性属性戳把解析出的面板交给 Playwright locator；Done/完成 必须落在
-# 这个面板内（兄弟 portal 或创建弹窗），不能全页搜索。
-_PANEL_JS = """(el, stamp) => {""" + _PANEL_HELPERS_JS + """
-  const panel = resolvePanel();
-  if (!panel) return false;
-  panel.setAttribute('data-instagram-collaborator-panel', stamp);
-  return true;
-}"""
-
-# 图文预览图 chip：带 Close/关闭 svg 的 role=button，最近的 span 祖先里
-# 有一个 username span。只认这个结构，不读取输入框里的 “5 people” 摘要。
-_CHIPS_JS = """(el) => {
-  const dialog = el.closest('[role="dialog"]');
-  if (!dialog) return [];
-""" + _JS_NORM_HELPER + """
-  const labels = new Set(['close', '关闭']);
-  const names = [];
-  const seen = new Set();
-  for (const svg of dialog.querySelectorAll('svg[aria-label]')) {
-    const label = norm(svg.getAttribute('aria-label')).toLowerCase();
-    if (!labels.has(label)) continue;
-    const button = svg.closest('[role="button"], button');
-    if (!button) continue;
-    const chip = button.closest('span');
-    if (!chip) continue;
-    const name = chip.querySelector('span');
-    if (!name) continue;
-    const text = norm(name.innerText || name.textContent || '');
-    if (!text) continue;
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    names.push(text);
-  }
-  return names;
-}"""
-
-
-def collaborator_restriction_message(body: str | None) -> str | None:
-    """返回页面明确写出的协作者资格限制句；没有则返回 ``None``。"""
-    if not body:
-        return None
-    text = ' '.join(str(body).split())
-    for pattern in _COLLABORATOR_RESTRICTION_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            endings = [
-                index for index in (
-                    text.find('.', match.end()),
-                    text.find('。', match.end()),
-                )
-                if index != -1
-            ]
-            end = min(endings) if endings else min(
-                len(text), match.end() + 120
-            )
-            return text[match.start():end + 1].strip()
-    return None
-
-
-def collaborator_limit_message(body: str | None) -> str | None:
-    """返回页面明确写出的协作者上限/拒绝句；没有则返回 ``None``。"""
-    if not body:
-        return None
-    text = ' '.join(str(body).split())
-    for pattern in _COLLABORATOR_LIMIT_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            endings = [
-                index for index in (
-                    text.find('.', match.end()),
-                    text.find('。', match.end()),
-                )
-                if index != -1
-            ]
-            end = min(endings) if endings else min(
-                len(text), match.end() + 120
-            )
-            return text[match.start():end + 1].strip()
-    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,7 +113,6 @@ class CollaboratorsControl:
         # set() 成功后按请求顺序缓存；管线在 Done 之后调用 read() 时不需要
         # 重开面板（Reels 的已选 username 只在面板打开时可读）。
         self._confirmed: list[str] | None = None
-        self.last_evidence: dict = {}
         self.last_detail: str | None = None
 
     def _behavior(self) -> Humanizer:
@@ -415,6 +149,18 @@ class CollaboratorsControl:
                 continue
         return visible
 
+    @staticmethod
+    async def _first_visible_entry(dialog: Locator) -> Locator | None:
+        """返回 ``dialog`` 内第一个按优先级命中的可见协作者入口。"""
+        for selector in ENTRY_SELECTORS:
+            candidate = dialog.locator(selector).first
+            try:
+                if await candidate.count() and await candidate.is_visible():
+                    return candidate
+            except Exception:
+                continue
+        return None
+
     async def _composer(self, entry: Locator | None = None) -> Locator | None:
         """包含协作者入口的可见创建弹窗。
 
@@ -440,43 +186,19 @@ class CollaboratorsControl:
             return editors[0]
         visible = await self._visible_dialogs('[role="dialog"]')
         for dialog in visible:
-            for selector in ENTRY_SELECTORS:
-                candidate = dialog.locator(selector).first
-                try:
-                    if await candidate.count() and await candidate.is_visible():
-                        return dialog
-                except Exception:
-                    continue
+            if await self._first_visible_entry(dialog) is not None:
+                return dialog
         return visible[0] if len(visible) == 1 else None
 
     async def _entry(self, timeout_ms: int) -> Locator | None:
         """返回创建弹窗内第一个可见入口；全部缺席返回 None。"""
-        candidates = self._page.locator(
-            f'[role="dialog"]:has({_ENTRY_SELECTOR_UNION})'
-        )
+        selector = f'[role="dialog"]:has({_ENTRY_SELECTOR_UNION})'
         deadline = time.monotonic() + max(int(timeout_ms), 0) / 1000
         while True:
-            try:
-                count = await candidates.count()
-            except Exception:
-                count = 0
-            for index in range(count):
-                dialog = candidates.nth(index)
-                try:
-                    if not await dialog.is_visible():
-                        continue
-                except Exception:
-                    continue
-                for selector in ENTRY_SELECTORS:
-                    candidate = dialog.locator(selector).first
-                    try:
-                        if (
-                            await candidate.count()
-                            and await candidate.is_visible()
-                        ):
-                            return candidate
-                    except Exception:
-                        continue
+            for dialog in await self._visible_dialogs(selector):
+                candidate = await self._first_visible_entry(dialog)
+                if candidate is not None:
+                    return candidate
             if time.monotonic() >= deadline:
                 return None
             await asyncio.sleep(_POLL_SECONDS)
@@ -503,7 +225,7 @@ class CollaboratorsControl:
         return None
 
     async def _limit_refusal(
-        self, entry: Locator, position: int
+        self, entry: Locator, position: int, *, username: str | None = None
     ) -> str | None:
         """逐个回读失败时，判断页面是否明确以“上限”拒绝了第 N 个。
 
@@ -529,14 +251,12 @@ class CollaboratorsControl:
             summary = str(await entry.input_value() or '')
         except Exception:
             summary = ''
-        match = _COLLABORATOR_COUNT_SUMMARY.search(summary)
-        if match:
-            shown = int(match.group(1))
-            if shown < position:
-                return (
-                    f'页面显示已选 {shown} 人，第 {position} 个协作者未被接受'
-                    '（可能达到该账号的协作者上限）'
-                )
+        shown = collaborator_count_summary(summary, query=username)
+        if shown is not None and shown < position:
+            return (
+                f'页面显示已选 {shown} 人，第 {position} 个协作者未被接受'
+                '（可能达到该账号的协作者上限）'
+            )
         return None
 
     async def resolve(self) -> str:
@@ -608,23 +328,22 @@ class CollaboratorsControl:
     def _panel_not_open(
         error: BaseException | None = None,
     ) -> OptionMismatchError:
-        """面板没能打开：统一按 ``list_not_collapsed`` 停止，尚未输入任何词。"""
+        """面板没能打开：统一按 ``list_not_collapsed`` 停止，尚未输入任何词。
+
+        原始浏览器错误只写入异常文案（聚合错误/stderr），不写入结果 ``detail``。
+        """
         if error is None:
             suffix = '（聚焦/点击入口后仍看不到候选列表或 Done/完成）'
-            detail = None
         else:
             suffix = f'（聚焦/点击入口时失败：{error}）'
-            detail = f'{type(error).__name__}: {error}'
         return OptionMismatchError(
             f'Instagram 协作者面板未能打开{suffix}',
             applied=None,
             reason=LIST_NOT_COLLAPSED,
-            detail=detail,
         )
 
     async def set(self, requested) -> None:
         """按请求顺序逐个选中；首个失败立即停止并保留已确认前缀。"""
-        self.last_evidence = {}
         self.last_detail = None
         self._confirmed = None
         if isinstance(requested, str):
@@ -640,9 +359,9 @@ class CollaboratorsControl:
                 [], '定位入口时', error, readable=False
             ) from error
         if entry is None:
-            raise OptionMismatchError(
+            self._confirmed = None
+            raise OptionUnsupportedError(
                 'Instagram 协作者入口不可用',
-                applied=[],
                 reason=ENTRY_MISSING,
             )
         try:
@@ -667,46 +386,49 @@ class CollaboratorsControl:
                     confirmed, f'添加「{name}」前', error
                 ) from error
             try:
-                if await self._is_selected(entry, name):
-                    # 已经是选中状态：再点一次会取消勾选，绝不能重复点击。
+                confirmed_already, already_checked = (
+                    await self._existing_selection_state(entry, name)
+                )
+                if confirmed_already:
+                    # 已有目标证据（图文 chip / Reels checkbox）：不再点击，避免取消勾选。
                     confirmed.append(name)
                     continue
-                candidates = await self._type_and_wait(entry, name)
-                if not candidates:
-                    raise OptionMismatchError(
-                        'Instagram 协作者搜索未出现任何候选：'
-                        f'请求「{name}」',
-                        applied=list(confirmed),
-                        reason=NO_CANDIDATES,
-                    )
-                chosen = self._exact_candidate(name, candidates)
-                if chosen is None:
-                    raise OptionMismatchError(
-                        self._mismatch_message(name, candidates),
-                        applied=list(confirmed),
-                        reason=NO_SAME_USERNAME,
-                    )
-                if not await self._click_candidate(entry, chosen):
-                    raise OptionMismatchError(
-                        'Instagram 协作者候选点击失败：'
-                        f'请求「{name}」',
-                        applied=list(confirmed),
-                        reason=SELECTION_FAILED,
-                    )
+                chosen: CollaboratorCandidate | None = None
+                if not already_checked:
+                    candidates = await self._type_and_wait(entry, name)
+                    if not candidates:
+                        raise OptionMismatchError(
+                            'Instagram 协作者搜索未出现任何候选：'
+                            f'请求「{name}」',
+                            applied=list(confirmed),
+                            reason=NO_CANDIDATES,
+                        )
+                    chosen = self._exact_candidate(name, candidates)
+                    if chosen is None:
+                        raise OptionMismatchError(
+                            self._mismatch_message(name, candidates),
+                            applied=list(confirmed),
+                            reason=NO_SAME_USERNAME,
+                        )
+                    if not await self._click_candidate(entry, chosen):
+                        raise OptionMismatchError(
+                            'Instagram 协作者候选点击失败：'
+                            f'请求「{name}」',
+                            applied=list(confirmed),
+                            reason=SELECTION_FAILED,
+                        )
                 failure, readable = await self._wait_selected(entry, name)
                 if failure is not None:
                     applied = list(confirmed)
                     if not applied and not readable:
                         # 回读本身不可读：区分“确认了 0 个”与“读不到”。
                         applied = None
-                    message = self._readback_message(
-                        name, failure, candidates
-                    )
+                    message = self._readback_message(name, failure, chosen)
                     # 不论回读判成 selection_failed 还是 final_mismatch，
                     # 页面明确写出上限/拒绝时都要带上 detail；只有
                     # selection_failed 才因“页面拒绝”升级为 final_mismatch。
                     detail = await self._limit_refusal(
-                        entry, len(confirmed) + 1
+                        entry, len(confirmed) + 1, username=name
                     )
                     if detail:
                         if failure == SELECTION_FAILED:
@@ -775,11 +497,9 @@ class CollaboratorsControl:
             return None
         return panel
 
-    async def _done(self, entry: Locator) -> Locator | None:
-        """已解析面板内可见的 Done/完成；角色定位优先，兼容嵌套文本行。"""
-        panel = await self._panel(entry)
-        if panel is None:
-            return None
+    @staticmethod
+    async def _done_in(panel: Locator) -> Locator | None:
+        """在指定面板内定位可见的 Done/完成；角色定位优先，兼容嵌套文本行。"""
         for label in DONE_LABELS:
             button = panel.get_by_role(
                 'button', name=label, exact=True
@@ -793,32 +513,45 @@ class CollaboratorsControl:
 
     async def _open_panel(self, entry: Locator) -> bool:
         """聚焦优先；只有面板仍未出现时才点击入口。返回是否确认打开。"""
-        if await self._done(entry) is not None:
+        if await self._panel(entry) is not None:
             return True
         await entry.focus()
-        if await self._wait_panel(entry, open_=True):
+        if await self._wait_panel_open(entry):
             return True
         await self._behavior().click(entry)
-        return await self._wait_panel(entry, open_=True)
+        return await self._wait_panel_open(entry)
 
     async def _close_panel(self, entry: Locator) -> bool:
-        done = await self._done(entry)
+        panel = await self._panel(entry)
+        if panel is None:
+            return False
+        done = await self._done_in(panel)
         if done is None:
             return False
         self._check_budget()
         await self._behavior().click(done)
-        return await self._wait_panel(entry, open_=False)
+        return await self._wait_panel_closed(panel)
 
-    async def _wait_panel(self, entry: Locator, *, open_: bool) -> bool:
+    async def _wait_panel_open(self, entry: Locator) -> bool:
         deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
         while True:
-            if open_:
-                # 面板打开的结构证据：可解析的候选行/可见按钮（Done）。不能
-                # 只认 Done 文案，否则本地化标签缺失会被误判为“没打开”。
-                is_open = await self._panel(entry) is not None
-            else:
-                is_open = await self._done(entry) is not None
-            if is_open is open_:
+            if await self._panel(entry) is not None:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(_POLL_SECONDS)
+
+    async def _wait_panel_closed(self, panel: Locator) -> bool:
+        """确认刚点过 Done 的具体面板节点不再可见或不再包含候选行/Done。"""
+        deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
+        while True:
+            try:
+                if await panel.count() == 0 or not await panel.is_visible():
+                    return True
+                still_open = bool(await panel.evaluate(_PANEL_OPEN_JS))
+            except Exception:
+                still_open = True
+            if not still_open:
                 return True
             if time.monotonic() >= deadline:
                 return False
@@ -943,18 +676,11 @@ class CollaboratorsControl:
 
     @staticmethod
     def _readback_message(
-        requested: str, reason: str, candidates: list[CollaboratorCandidate]
+        requested: str,
+        reason: str,
+        chosen: CollaboratorCandidate | None,
     ) -> str:
-        selected = next(
-            (
-                candidate
-                for candidate in candidates
-                if normalize_collaborator_name(candidate.username)
-                == normalize_collaborator_name(requested)
-            ),
-            None,
-        )
-        detail = f'；候选「{selected.username}」' if selected else ''
+        detail = f'；候选「{chosen.username}」' if chosen else ''
         if reason == SELECTION_FAILED:
             return f'Instagram 协作者点击后未选中：请求「{requested}」{detail}'
         return (
@@ -962,13 +688,23 @@ class CollaboratorsControl:
         )
 
     # -- readback ---------------------------------------------------------
-    async def _is_selected(self, entry: Locator, username: str) -> bool:
+    async def _existing_selection_state(
+        self, entry: Locator, username: str
+    ) -> tuple[bool, bool]:
+        """返回 ``(是否已按本帖型证据确认, 面板 checkbox 是否已勾选)``。
+
+        图文/轮播必须见到预览 chip 才算确认；若 checkbox 已勾选但无 chip，
+        绝不再次点击（避免取消勾选），而是交由 ``_wait_selected`` 走 chip 回读。
+        """
         if self._uses_preview_chips:
             chips = await self._read_chips(entry)
             if chips is not None and username in chips:
-                return True
+                return True, True
+            checked = await self._checked_usernames(entry)
+            return False, bool(checked and username in checked)
         checked = await self._checked_usernames(entry)
-        return bool(checked and username in checked)
+        is_checked = bool(checked and username in checked)
+        return is_checked, is_checked
 
     async def _wait_selected(
         self, entry: Locator, username: str

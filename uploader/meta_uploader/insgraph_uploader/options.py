@@ -115,6 +115,23 @@ class OptionMismatchError(RuntimeError):
         self.detail = detail
 
 
+class OptionUnsupportedError(RuntimeError):
+    """控件在执行阶段确认入口缺失或账号不可用，应记录为 ``unsupported``。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        applied: object = None,
+        detail: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.applied = applied
+        self.detail = detail
+
+
 def normalize_text(text: str) -> str:
     """空白折叠 + casefold，供地点与替代文字比较。"""
     return _normalize_text(text)
@@ -189,7 +206,7 @@ def location_matches(requested: object, applied: object) -> bool:
     return normalize_text(requested) == normalize_text(applied)
 
 
-def alt_texts_match(requested: object, applied: object) -> bool:
+def text_sequence_matches(requested: object, applied: object) -> bool:
     """长度相等且逐项规范化相等；回读缺失或数量不符不匹配。"""
     if applied is None or isinstance(applied, (str, bytes)):
         return False
@@ -208,6 +225,9 @@ def alt_texts_match(requested: object, applied: object) -> bool:
     )
 
 
+alt_texts_match = text_sequence_matches
+
+
 def _value_matches(requested: object, applied: object) -> bool:
     """按请求类型分派：地点是字符串，替代文字与协作者 username 是有序序列。
 
@@ -216,7 +236,7 @@ def _value_matches(requested: object, applied: object) -> bool:
     """
     if isinstance(requested, str):
         return location_matches(requested, applied)
-    return alt_texts_match(requested, applied)
+    return text_sequence_matches(requested, applied)
 
 
 def option_kind(key: str) -> str:

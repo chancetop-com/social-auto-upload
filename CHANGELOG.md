@@ -185,8 +185,8 @@ chooser 事件没到时不再重复点击，而是重新解析 input 后直接�
 
 - `upload-video` / `upload-note` 新增可重复的 `--collaborator USERNAME`：每次一个 username，归一化（去首尾空白、去掉一个前导 `@`、转小写）后 1–5 个；空值、归一化后重复（`alice` 与 `@Alice` 视为同一个）或超过 5 个在启动浏览器前退出 `2`，不会静默去重；不提供逗号分隔形态，也没有移除协作者的 flag。
 - 在点击 Share 前打开 Collaborators 面板，按候选行首 token 的 username 精确匹配（显示名、前缀、包含与模糊匹配均不参与，请求 `nike` 不会选中 `_nikeza5`）；每选中一个立即回读（图文/轮播预览 chip；Reels 面板 checkbox），首个失败即停止列表并保留 `applied` 前缀，全部完成后点 `Done`/「完成」并确认面板收起；任何失败都不点击 Share、退出 `1`。退出码保持静态错误 `2`、分享前失败 `1`、登录 `10`、托管限流 `11`、点击后未知 `9`，协作者失败不会退化为 `9`。
-- 结果 `options` 新增第五个键 `collaborators`：`requested` 为归一化数组或 `null`，`applied` 为按请求顺序的已确认数组（无确认项 `[]`、无法读取 `null`）。`status=set` 只表示创建页已选中，不代表邀请已发送、待接受或已被接受；不新增 `invite_state`。新增失败原因 `no_same_username_candidate`（有候选但无同 username）；`list_not_collapsed` 的描述拓宽为「候选列表或协作者面板未收起」；协作者不使用 `final_empty`，添加中途预算耗尽按无 `reason` 的 `mismatch` 记录并保留前缀。
-- 网页上限 5 来自 2026-11-24 真实账号探测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均为 5）；Meta Content Publishing API 文档写 3，本 CLI 自动化网页创建页，按网页能力执行。上限可能随账号、地区或灰度漂移；页面实际允许更少时，第 N 个会在回读时失败并停止。
+- 结果 `options` 新增第五个键 `collaborators`：`requested` 为归一化数组或 `null`，`applied` 为按请求顺序的已确认数组（无确认项 `[]`、无法读取 `null`）。`status=set` 只表示创建页已选中，不代表邀请已发送、待接受或已被接受；不新增 `invite_state`。新增失败原因 `no_same_username_candidate`（有候选但无同 username）；`list_not_collapsed` 的描述拓宽为「候选列表或协作者面板未打开/未收起」；协作者不使用 `final_empty`，添加中途预算耗尽按无 `reason` 的 `mismatch` 记录并保留前缀。
+- 网页上限 5 来自 2026-11-24 真实账号探测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均为 5）；Meta Content Publishing API 文档写 3，本 CLI 自动化网页创建页，按网页能力执行。上限可能随账号、地区或灰度漂移；页面实际允许更少时，第 N 个会在回读时失败并停止，页面明确拒绝或提示已达上限时记 `final_mismatch` 并在 `detail` 说明页面拒绝。
 - 语言与选择器：本地模式保留 Profile/站点语言，不固定 en-US；托管 Profile 必须人工保持 English。协作者入口结构优先（`input[name="creation-collaborator-input"]`），回退英文 `Add collaborators` / 中文「添加合作者」，不依赖单一界面语言。
 - 已知限制：图文/轮播在预览图渲染协作者 chip，Reels 只在面板打开时可读已选 username；未来 `user_tags` 实现必须区分协作者 chip 与用户标签。本次不验证邀请接受状态，也不做发布后协作者回读或增删；验收停在 Share 前不证明邀请被接受。
 

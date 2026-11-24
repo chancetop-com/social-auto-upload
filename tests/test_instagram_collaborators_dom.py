@@ -50,6 +50,157 @@ from tests.instagram_collaborators_fixtures import (
 from utils.errors import PublishResultUnknownError
 
 
+def _run_collaborator_dom(
+    html,
+    *,
+    options,
+    image_count=1,
+    expire_after_selection=None,
+    readback_timeout_ms=None,
+    page_timeout_ms=None,
+    reopen_panel=False,
+):
+    """驱动真实系统 Chrome 受控页执行 ``_apply_options`` 并采集页面观察面。"""
+    holder: dict[str, object] = {}
+
+    async def scenario():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(channel="chrome", headless=True)
+            page = await browser.new_page()
+            try:
+                await page.set_content(html)
+                if page_timeout_ms is not None:
+                    page.set_default_timeout(page_timeout_ms)
+                with tempfile.TemporaryDirectory() as folder:
+                    images = [
+                        str(Path(folder) / f"image-{index}.png")
+                        for index in range(image_count)
+                    ]
+                    video = None if image_count else Path(folder) / "video.mp4"
+                    if video is not None:
+                        video.touch()
+                    result_file = Path(folder) / "result.json"
+                    app = InstagramUploader(
+                        "unused.json",
+                        title="caption",
+                        image_files=images,
+                        video_file=video,
+                        options=options,
+                        result_file=result_file,
+                    )
+                    budget = app.start_publish_budget()
+                    monitor = None
+                    if expire_after_selection is not None:
+                        monitor = asyncio.create_task(
+                            expire_budget_after_username(
+                                page, budget, expire_after_selection
+                            )
+                        )
+                    error = None
+                    try:
+                        await app._apply_options(page, budget=budget)
+                    except Exception as wrapped:
+                        error = wrapped
+                    finally:
+                        if monitor is not None:
+                            monitor.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await monitor
+                    holder["app"] = app
+                    holder["error"] = error
+                    holder["saved"] = (
+                        json.loads(result_file.read_text(encoding="utf-8"))
+                        if result_file.exists()
+                        else app.result
+                    )
+                    holder["share_clicks"] = int(
+                        await page.locator("[data-share-clicks]")
+                        .get_attribute("data-share-clicks") or 0
+                    )
+                    holder["chips"] = await page.evaluate(
+                        """() => [...document.querySelectorAll('#chips > span')]
+                            .map(node => {
+                              const name = node.querySelector('span');
+                              return name ? name.textContent : '';
+                            }).filter(Boolean)"""
+                    )
+                    body = page.locator("body")
+
+                    async def data(name):
+                        return await body.get_attribute(name)
+
+                    for field, attr in (
+                        ("queries", "data-queries"),
+                        ("progress", "data-progress"),
+                        ("selected", "data-selected"),
+                        ("checkbox_states", "data-checkbox-states"),
+                    ):
+                        raw = await data(attr)
+                        holder[field] = json.loads(raw) if raw else []
+                    for field, attr in (
+                        ("entry_clicks", "data-entry-clicks"),
+                        ("row_clicks", "data-row-clicks"),
+                        ("done_clicks", "data-done-clicks"),
+                        ("decoy_row_clicks", "data-decoy-row-clicks"),
+                    ):
+                        holder[field] = int(await data(attr) or 0)
+                    holder["clicked_username"] = await data(
+                        "data-clicked-username"
+                    )
+                    holder["clicked_index"] = await data("data-clicked-index")
+                    holder["focused_entry"] = await data("data-focused-entry")
+                    panel = page.locator("#collab-panel")
+                    if await panel.count():
+                        holder["panel_hidden"] = bool(
+                            await panel.evaluate("el => el.hidden")
+                        )
+                    else:
+                        holder["panel_hidden"] = None
+                    if reopen_panel:
+                        # Done 后重开面板（清空查询以显示全部行）观察勾选是否保留。
+                        await page.evaluate(
+                            """() => {
+                              const entry = document.getElementById('collab-entry');
+                              if (entry) {
+                                entry.value = '';
+                                entry.dispatchEvent(
+                                  new Event('input', {bubbles: true}));
+                              }
+                              const panel = document.getElementById(
+                                'collab-panel');
+                              if (panel) panel.hidden = false;
+                            }"""
+                        )
+                        holder["reopened_checked"] = await page.evaluate(
+                            """() => [...document.querySelectorAll(
+                                 '#collab-results [data-username]')]
+                               .filter(row => row.querySelector(
+                                 'input[type="checkbox"]').checked)
+                               .map(row => row.dataset.username)"""
+                        )
+            finally:
+                await browser.close()
+
+    patches = list(timeout_patches())
+    if readback_timeout_ms is not None:
+        patches.append(
+            patch.object(
+                collaborators_control_module,
+                "READBACK_TIMEOUT_MS",
+                readback_timeout_ms,
+            )
+        )
+    for item in patches:
+        item.start()
+    try:
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            asyncio.run(scenario())
+    finally:
+        for item in patches:
+            item.stop()
+    return SimpleNamespace(**holder)
+
+
 class InstagramCollaboratorControlDomTests(unittest.TestCase):
     """C 层：真实 Chrome + 受控页，验证面板/精确匹配/chip 回读/Done。"""
 
@@ -63,98 +214,14 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         readback_timeout_ms=None,
         page_timeout_ms=None,
     ):
-        holder: dict[str, object] = {}
-
-        async def scenario():
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(channel="chrome", headless=True)
-                page = await browser.new_page()
-                try:
-                    await page.set_content(html)
-                    if page_timeout_ms is not None:
-                        page.set_default_timeout(page_timeout_ms)
-                    with tempfile.TemporaryDirectory() as folder:
-                        images = [
-                            str(Path(folder) / f"image-{index}.png")
-                            for index in range(image_count)
-                        ]
-                        result_file = Path(folder) / "result.json"
-                        app = InstagramUploader(
-                            "unused.json",
-                            title="caption",
-                            image_files=images,
-                            options=options,
-                            result_file=result_file,
-                        )
-                        budget = app.start_publish_budget()
-                        monitor = None
-                        if expire_after_selection is not None:
-                            monitor = asyncio.create_task(
-                                expire_budget_after_username(
-                                    page, budget, expire_after_selection
-                                )
-                            )
-                        error = None
-                        try:
-                            await app._apply_options(page, budget=budget)
-                        except Exception as wrapped:
-                            error = wrapped
-                        finally:
-                            if monitor is not None:
-                                monitor.cancel()
-                                with contextlib.suppress(asyncio.CancelledError):
-                                    await monitor
-                        holder["app"] = app
-                        holder["error"] = error
-                        holder["saved"] = (
-                            json.loads(result_file.read_text(encoding="utf-8"))
-                            if result_file.exists()
-                            else app.result
-                        )
-                        holder["share_clicks"] = int(
-                            await page.locator("[data-share-clicks]")
-                            .get_attribute("data-share-clicks") or 0
-                        )
-                        holder["chips"] = await page.evaluate(
-                            """() => [...document.querySelectorAll('#chips > span')]
-                                .map(node => {
-                                  const name = node.querySelector('span');
-                                  return name ? name.textContent : '';
-                                }).filter(Boolean)"""
-                        )
-                        body = page.locator("body")
-                        queries = await body.get_attribute("data-queries")
-                        holder["queries"] = json.loads(queries) if queries else []
-                        holder["entry_clicks"] = int(
-                            await body.get_attribute("data-entry-clicks") or 0
-                        )
-                        holder["row_clicks"] = int(
-                            await body.get_attribute("data-row-clicks") or 0
-                        )
-                        holder["done_clicks"] = int(
-                            await body.get_attribute("data-done-clicks") or 0
-                        )
-                finally:
-                    await browser.close()
-
-        patches = list(timeout_patches())
-        if readback_timeout_ms is not None:
-            patches.append(
-                patch.object(
-                    collaborators_control_module,
-                    "READBACK_TIMEOUT_MS",
-                    readback_timeout_ms,
-                )
-            )
-        for item in patches:
-            item.start()
-        try:
-            with patch.dict(os.environ, {"HUMANIZE": "0"}):
-                asyncio.run(scenario())
-        finally:
-            for item in patches:
-                item.stop()
-        return SimpleNamespace(**holder)
+        return _run_collaborator_dom(
+            html,
+            options=options,
+            image_count=image_count,
+            expire_after_selection=expire_after_selection,
+            readback_timeout_ms=readback_timeout_ms,
+            page_timeout_ms=page_timeout_ms,
+        )
 
     def test_note_selection_follows_request_order_and_reads_chips(self):
         html = collaborator_page_html(
@@ -235,6 +302,87 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertIsNone(outcome.error)
         self.assertEqual(outcome.chips, ["alice", "bob"])
         self.assertEqual(outcome.row_clicks, 1)
+
+    def test_preselected_note_checkbox_without_chip_fails_readback_without_unchecking(
+        self,
+    ):
+        html = collaborator_page_html(
+            [("alice", "Alice")],
+            preselect=("alice",),
+            render_chips=False,
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(final_mismatch)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(
+            record,
+            {
+                "requested": ["alice"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": FINAL_MISMATCH,
+            },
+        )
+        self.assertEqual(outcome.row_clicks, 0)
+        self.assertEqual(outcome.chips, [])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_username_resembling_count_summary_stays_selection_failed(self):
+        html = collaborator_page_html(
+            [("alice", "Alice"), ("1person", "One Person")],
+            preselect=("alice",),
+            row_click="ignore",
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(
+                collaborators=("alice", "1person")
+            ),
+        )
+        self.assertIn(
+            "collaborators=mismatch(selection_failed)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(
+            record,
+            {
+                "requested": ["alice", "1person"],
+                "applied": ["alice"],
+                "status": MISMATCH,
+                "reason": SELECTION_FAILED,
+            },
+        )
+        self.assertNotIn("detail", record)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_done_hidden_while_candidate_rows_remain_is_list_not_collapsed(self):
+        html = collaborator_page_html(
+            [("alice", "Alice")],
+            done_collapses="hide-done-only",
+        )
+        outcome = self._apply(
+            html,
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(list_not_collapsed)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice"],
+                "applied": ["alice"],
+                "status": MISMATCH,
+                "reason": LIST_NOT_COLLAPSED,
+            },
+        )
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertEqual(outcome.share_clicks, 0)
 
     def test_browser_error_after_confirmed_prefix_keeps_applied(self):
         outcome = self._apply(
@@ -681,143 +829,14 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         self, html, *, options, readback_timeout_ms=None,
         expire_after_selection=None,
     ):
-        holder: dict[str, object] = {}
-
-        async def scenario():
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(channel="chrome", headless=True)
-                page = await browser.new_page()
-                try:
-                    await page.set_content(html)
-                    with tempfile.TemporaryDirectory() as folder:
-                        video = Path(folder) / "video.mp4"
-                        video.touch()
-                        result_file = Path(folder) / "result.json"
-                        app = InstagramUploader(
-                            "unused.json",
-                            title="caption",
-                            video_file=video,
-                            options=options,
-                            result_file=result_file,
-                        )
-                        budget = app.start_publish_budget()
-                        monitor = None
-                        if expire_after_selection is not None:
-                            monitor = asyncio.create_task(
-                                expire_budget_after_username(
-                                    page, budget, expire_after_selection
-                                )
-                            )
-                        error = None
-                        try:
-                            await app._apply_options(page, budget=budget)
-                        except Exception as wrapped:
-                            error = wrapped
-                        finally:
-                            if monitor is not None:
-                                monitor.cancel()
-                                with contextlib.suppress(asyncio.CancelledError):
-                                    await monitor
-                        holder["app"] = app
-                        holder["error"] = error
-                        holder["saved"] = (
-                            json.loads(result_file.read_text(encoding="utf-8"))
-                            if result_file.exists()
-                            else app.result
-                        )
-                        holder["share_clicks"] = int(
-                            await page.locator("[data-share-clicks]")
-                            .get_attribute("data-share-clicks") or 0
-                        )
-                        body = page.locator("body")
-
-                        async def data(name):
-                            return await body.get_attribute(name)
-
-                        queries = await data("data-queries")
-                        progress = await data("data-progress")
-                        selected = await data("data-selected")
-                        states = await data("data-checkbox-states")
-                        holder["queries"] = json.loads(queries) if queries else []
-                        holder["progress"] = (
-                            json.loads(progress) if progress else []
-                        )
-                        holder["selected"] = (
-                            json.loads(selected) if selected else []
-                        )
-                        holder["checkbox_states"] = (
-                            json.loads(states) if states else []
-                        )
-                        holder["entry_clicks"] = int(
-                            await data("data-entry-clicks") or 0
-                        )
-                        holder["row_clicks"] = int(
-                            await data("data-row-clicks") or 0
-                        )
-                        holder["done_clicks"] = int(
-                            await data("data-done-clicks") or 0
-                        )
-                        holder["clicked_username"] = await data(
-                            "data-clicked-username"
-                        )
-                        holder["clicked_index"] = await data("data-clicked-index")
-                        holder["focused_entry"] = await data(
-                            "data-focused-entry"
-                        )
-                        holder["panel_hidden"] = bool(
-                            await page.locator("#collab-panel").evaluate(
-                                "el => el.hidden"
-                            )
-                        )
-                        holder["chips"] = await page.evaluate(
-                            """() => [...document.querySelectorAll('#chips > span')]
-                                .map(node => {
-                                  const name = node.querySelector('span');
-                                  return name ? name.textContent : '';
-                                }).filter(Boolean)"""
-                        )
-                        # Done 后重开面板（清空查询以显示全部行）观察勾选是否保留。
-                        await page.evaluate(
-                            """() => {
-                              const entry = document.getElementById('collab-entry');
-                              if (entry) {
-                                entry.value = '';
-                                entry.dispatchEvent(
-                                  new Event('input', {bubbles: true}));
-                              }
-                              const panel = document.getElementById(
-                                'collab-panel');
-                              if (panel) panel.hidden = false;
-                            }"""
-                        )
-                        holder["reopened_checked"] = await page.evaluate(
-                            """() => [...document.querySelectorAll(
-                                 '#collab-results [data-username]')]
-                               .filter(row => row.querySelector(
-                                 'input[type="checkbox"]').checked)
-                               .map(row => row.dataset.username)"""
-                        )
-                finally:
-                    await browser.close()
-
-        patches = list(timeout_patches())
-        if readback_timeout_ms is not None:
-            patches.append(
-                patch.object(
-                    collaborators_control_module,
-                    "READBACK_TIMEOUT_MS",
-                    readback_timeout_ms,
-                )
-            )
-        for item in patches:
-            item.start()
-        try:
-            with patch.dict(os.environ, {"HUMANIZE": "0"}):
-                asyncio.run(scenario())
-        finally:
-            for item in patches:
-                item.stop()
-        return SimpleNamespace(**holder)
+        return _run_collaborator_dom(
+            html,
+            options=options,
+            image_count=0,
+            expire_after_selection=expire_after_selection,
+            readback_timeout_ms=readback_timeout_ms,
+            reopen_panel=True,
+        )
 
     def test_checkbox_is_read_back_before_the_next_username_is_typed(self):
         html = collaborator_page_html(
@@ -1044,6 +1063,34 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         self.assertEqual(outcome.done_clicks, 1)
         self.assertEqual(outcome.selected, ["alice", "bob"])
         self.assertEqual(outcome.reopened_checked, ["alice", "bob"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_preselected_reels_with_open_panel_still_clicks_done_to_collapse(
+        self,
+    ):
+        outcome = self._apply(
+            collaborator_page_html(
+                [("alice", "Alice")],
+                preselect=("alice",),
+                render_chips=False,
+                panel_initially_open=True,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIsNone(outcome.error)
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["alice"],
+                "applied": ["alice"],
+                "status": SET,
+            },
+        )
+        self.assertEqual(outcome.row_clicks, 0)
+        self.assertEqual(outcome.done_clicks, 1)
+        self.assertTrue(outcome.panel_hidden)
+        self.assertEqual(outcome.selected, ["alice"])
+        self.assertEqual(outcome.reopened_checked, ["alice"])
         self.assertEqual(outcome.share_clicks, 0)
 
     def test_no_candidates_stops_before_later_usernames(self):
@@ -1325,143 +1372,13 @@ class InstagramCollaboratorSiblingPanelDomTests(unittest.TestCase):
         image_count=1,
         readback_timeout_ms=None,
     ):
-        holder: dict[str, object] = {}
-
-        async def scenario():
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(channel="chrome", headless=True)
-                page = await browser.new_page()
-                try:
-                    await page.set_content(html)
-                    with tempfile.TemporaryDirectory() as folder:
-                        images = [
-                            str(Path(folder) / f"image-{index}.png")
-                            for index in range(image_count)
-                        ]
-                        video = (
-                            None
-                            if image_count
-                            else Path(folder) / "video.mp4"
-                        )
-                        if video is not None:
-                            video.touch()
-                        result_file = Path(folder) / "result.json"
-                        app = InstagramUploader(
-                            "unused.json",
-                            title="caption",
-                            image_files=images,
-                            video_file=video,
-                            options=options,
-                            result_file=result_file,
-                        )
-                        budget = app.start_publish_budget()
-                        error = None
-                        try:
-                            await app._apply_options(page, budget=budget)
-                        except Exception as wrapped:
-                            error = wrapped
-                        holder["app"] = app
-                        holder["error"] = error
-                        holder["saved"] = (
-                            json.loads(result_file.read_text(encoding="utf-8"))
-                            if result_file.exists()
-                            else app.result
-                        )
-                        holder["share_clicks"] = int(
-                            await page.locator("[data-share-clicks]")
-                            .get_attribute("data-share-clicks") or 0
-                        )
-                        holder["chips"] = await page.evaluate(
-                            """() => [...document.querySelectorAll('#chips > span')]
-                                .map(node => {
-                                  const name = node.querySelector('span');
-                                  return name ? name.textContent : '';
-                                }).filter(Boolean)"""
-                        )
-                        body = page.locator("body")
-
-                        async def data(name):
-                            return await body.get_attribute(name)
-
-                        queries = await data("data-queries")
-                        progress = await data("data-progress")
-                        selected = await data("data-selected")
-                        states = await data("data-checkbox-states")
-                        holder["queries"] = (
-                            json.loads(queries) if queries else []
-                        )
-                        holder["progress"] = (
-                            json.loads(progress) if progress else []
-                        )
-                        holder["selected"] = (
-                            json.loads(selected) if selected else []
-                        )
-                        holder["checkbox_states"] = (
-                            json.loads(states) if states else []
-                        )
-                        holder["entry_clicks"] = int(
-                            await data("data-entry-clicks") or 0
-                        )
-                        holder["row_clicks"] = int(
-                            await data("data-row-clicks") or 0
-                        )
-                        holder["done_clicks"] = int(
-                            await data("data-done-clicks") or 0
-                        )
-                        holder["decoy_row_clicks"] = int(
-                            await data("data-decoy-row-clicks") or 0
-                        )
-                        holder["clicked_username"] = await data(
-                            "data-clicked-username"
-                        )
-                        holder["clicked_index"] = await data("data-clicked-index")
-                        holder["panel_hidden"] = bool(
-                            await page.locator("#collab-panel").evaluate(
-                                "el => el.hidden"
-                            )
-                        )
-                        # Done 收起兄弟面板后清空查询并重开，确认勾选仍在。
-                        await page.evaluate(
-                            """() => {
-                              const entry = document.getElementById('collab-entry');
-                              if (entry) {
-                                entry.value = '';
-                                entry.dispatchEvent(
-                                  new Event('input', {bubbles: true}));
-                              }
-                              const panel = document.getElementById(
-                                'collab-panel');
-                              if (panel) panel.hidden = false;
-                            }"""
-                        )
-                        holder["reopened_checked"] = await page.evaluate(
-                            """() => [...document.querySelectorAll(
-                                 '#collab-results [data-username]')]
-                               .filter(row => row.querySelector(
-                                 'input[type="checkbox"]').checked)
-                               .map(row => row.dataset.username)"""
-                        )
-                finally:
-                    await browser.close()
-
-        patches = list(timeout_patches())
-        if readback_timeout_ms is not None:
-            patches.append(
-                patch.object(
-                    collaborators_control_module,
-                    "READBACK_TIMEOUT_MS",
-                    readback_timeout_ms,
-                )
-            )
-        for item in patches:
-            item.start()
-        try:
-            with patch.dict(os.environ, {"HUMANIZE": "0"}):
-                asyncio.run(scenario())
-        finally:
-            for item in patches:
-                item.stop()
-        return SimpleNamespace(**holder)
+        return _run_collaborator_dom(
+            html,
+            options=options,
+            image_count=image_count,
+            readback_timeout_ms=readback_timeout_ms,
+            reopen_panel=True,
+        )
 
     def test_note_sibling_panel_exact_match_chip_readback_and_done(self):
         html = sibling_panel_page_html(

@@ -46,6 +46,13 @@ from uploader.meta_uploader.insgraph_uploader.controls import (
     resolve_instagram_option_controls,
 )
 from uploader.meta_uploader.insgraph_uploader.controls.alt_text import AltTextControl
+from uploader.meta_uploader.insgraph_uploader.controls import (
+    collaborators as collaborators_control_module,
+)
+from uploader.meta_uploader.insgraph_uploader.controls.collaborators import (
+    CollaboratorsControl,
+    ENTRY_SELECTORS as COLLABORATOR_ENTRY_SELECTORS,
+)
 from uploader.meta_uploader.insgraph_uploader.controls.location import (
     ENTRY_SELECTORS,
     TYPE_DELAY_MS,
@@ -1838,6 +1845,133 @@ def _location_scene(
         page.add(selector, entry)
     page.add(", ".join(ENTRY_SELECTORS), entry)
     return entry, candidate, dialog_heading
+
+
+def _collaborators_scene(
+    page: HumanizePage, requested: str
+) -> tuple[Field, Field, Field]:
+    """Wire the collaborator entry, sibling panel, candidate row and Done button."""
+    entry = Field("collaborator-entry", page=page, value="stale")
+    candidate = Field("collaborator-row", page=page)
+    done = Field("collaborator-done", page=page)
+    panel = Field(
+        "collaborator-panel",
+        page=page,
+        children={"role:button:Done:exact=True": done},
+    )
+    state = {"open": False, "selected": False}
+
+    def on_evaluate(field: Field, expression, arg):
+        if isinstance(arg, str):
+            # ``_PANEL_JS``: stamp panel when open.
+            if not state["open"]:
+                return False
+            page.add(f'[data-instagram-collaborator-panel="{arg}"]', panel)
+            return True
+        if isinstance(arg, dict) and arg.get("action") == "stamp":
+            if not state["open"] or field.value != requested:
+                return None
+            page.add(
+                f'[data-instagram-collaborator-row="{arg["stamp"]}"]', candidate
+            )
+            return True
+        if not state["open"]:
+            return [] if isinstance(arg, dict) else None
+        if isinstance(arg, dict) and arg.get("action") == "list":
+            if field.value != requested:
+                return []
+        return [
+            {
+                "index": 0,
+                "username": requested,
+                "display": requested.title(),
+                "checked": state["selected"],
+            }
+        ]
+
+    entry._evaluate_handler = on_evaluate
+    entry.on_real_click = lambda: state.__setitem__("open", True)
+    candidate.on_real_click = lambda: state.__setitem__("selected", True)
+    done.on_real_click = lambda: (
+        state.__setitem__("open", False),
+        setattr(panel, "_visible", False),
+    )
+
+    def dialog_locator(selector: str) -> Field:
+        if selector in COLLABORATOR_ENTRY_SELECTORS:
+            return entry
+        raise UnscriptedSelectorError(
+            f"collaborators: un-scripted selector {selector!r}"
+        )
+
+    dialog = Field("composer-dialog", page=page, locator_handler=dialog_locator)
+    union = ", ".join(COLLABORATOR_ENTRY_SELECTORS)
+    page.add(f'[role="dialog"]:has({union})', dialog)
+    return entry, candidate, done
+
+
+class InstagramCollaboratorsHumanizeTests(unittest.IsolatedAsyncioTestCase):
+    """``CollaboratorsControl`` routes clicks and search typing through Humanizer."""
+
+    async def test_collaborator_flow_uses_humanizer_clicks_and_keystrokes(self):
+        page = _page()
+        humanizer = RecordingHumanizer(page, page.timeline)
+        entry, candidate, done = _collaborators_scene(page, "alice")
+        control = CollaboratorsControl(
+            page, image_count=0, humanizer=humanizer
+        )
+        with patch.object(
+            collaborators_control_module, "PANEL_TIMEOUT_MS", 0
+        ), patch.object(
+            collaborators_control_module, "SUGGESTION_SETTLE_MS", 0
+        ):
+            await control.set(("alice",))
+
+        self.assertEqual(await control.read(), ["alice"])
+        self.assertEqual(entry.value, "alice")
+        for target in (entry, candidate, done):
+            self.assertEqual(target.click_count, 0)
+            self.assertEqual(target.native_clicks, [])
+            self.assertEqual(target.fills, [])
+        self.assertEqual(
+            page.timeline.payloads("hit-test"),
+            [
+                ("hit-test", "collaborator-entry"),
+                ("hit-test", "collaborator-row"),
+                ("hit-test", "collaborator-done"),
+            ],
+        )
+        self.assertEqual(page.timeline.kinds().count("down"), 3)
+        self.assertEqual(page.timeline.kinds().count("up"), 3)
+        self.assertEqual(
+            page.keyboard.actions[:2],
+            [("press", "ControlOrMeta+A"), ("press", "Backspace")],
+        )
+        self.assertEqual(page.timeline.payloads("pause").count(("pause", "after_type")), 1)
+
+    async def test_collaborator_fast_path_uses_native_clicks_and_zero_pauses(self):
+        page = _page()
+        with patch.dict(os.environ, {"HUMANIZE": "0"}):
+            humanizer = Humanizer(page, sleep=page.timeline.sleep)
+        self.assertFalse(humanizer.enabled)
+        entry, candidate, done = _collaborators_scene(page, "alice")
+        control = CollaboratorsControl(
+            page, image_count=0, humanizer=humanizer
+        )
+        with patch.object(
+            collaborators_control_module, "PANEL_TIMEOUT_MS", 0
+        ), patch.object(
+            collaborators_control_module, "SUGGESTION_SETTLE_MS", 0
+        ):
+            await control.set(("alice",))
+
+        self.assertEqual(await control.read(), ["alice"])
+        self.assertEqual(entry.value, "alice")
+        self.assertEqual(entry.click_count, 1)
+        self.assertEqual(candidate.click_count, 1)
+        self.assertEqual(done.click_count, 1)
+        self.assertNotIn("down", page.timeline.kinds())
+        self.assertEqual(page.timeline.payloads("pause"), [])
 
 
 if __name__ == "__main__":
