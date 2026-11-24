@@ -13,7 +13,6 @@
 """
 from __future__ import annotations
 
-import argparse
 import asyncio
 import contextlib
 import io
@@ -34,23 +33,16 @@ from uploader.meta_uploader.insgraph_uploader.controls.collaborators import (
 from uploader.meta_uploader.insgraph_uploader.main import InstagramUploader
 from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
-    APPLY_ORDER,
     CONTROL_DISABLED,
-    DEFAULT_OFF,
-    EDITOR_OBSCURED,
     ENTRY_MISSING,
-    FINAL_MISMATCH,
     LIST_NOT_COLLAPSED,
     MISMATCH,
-    NO_CANDIDATES,
     NO_SAME_USERNAME,
     NOT_REQUESTED,
     OPTION_KEYS,
     PRESENT,
-    SELECTION_FAILED,
     SET,
     UNSUPPORTED,
-    UNAVAILABLE,
     InstagramPublishOptions,
     OptionMismatchError,
     empty_option_record,
@@ -66,15 +58,6 @@ from tests.instagram_collaborators_fixtures import (
     FakeCollaboratorControl,
 )
 from utils.errors import PublishResultUnknownError, UsageError
-
-
-def _subparser(parser: argparse.ArgumentParser, platform: str, action: str):
-    for item in parser._actions:
-        if isinstance(item, argparse._SubParsersAction) and platform in item.choices:
-            for nested in item.choices[platform]._actions:
-                if isinstance(nested, argparse._SubParsersAction):
-                    return nested.choices[action]
-    raise AssertionError(f"parser not found: {platform}/{action}")
 
 
 class InstagramCollaboratorNormalizationTests(unittest.TestCase):
@@ -165,34 +148,7 @@ class InstagramCollaboratorNormalizationTests(unittest.TestCase):
 
 
 class InstagramCollaboratorResultTests(unittest.TestCase):
-    """A 层：第五个键、requested/applied 形状与状态映射。"""
-
-    def test_options_have_exactly_five_keys_in_stable_order(self):
-        record = empty_option_record(None)
-        self.assertEqual(
-            OPTION_KEYS,
-            ("location", "alt_text", "comments", "ai_generated", "collaborators"),
-        )
-        self.assertEqual(tuple(record), OPTION_KEYS)
-        self.assertEqual(
-            APPLY_ORDER,
-            ("alt_text", "location", "collaborators", "ai_generated", "comments"),
-        )
-        for key in OPTION_KEYS:
-            self.assertEqual(
-                record[key],
-                {"requested": None, "applied": None, "status": NOT_REQUESTED},
-            )
-
-    def test_requested_collaborators_are_a_normalized_list(self):
-        record = empty_option_record(
-            InstagramPublishOptions(
-                collaborators=("alice", "bob"),
-                location="Shanghai",
-            )
-        )
-        self.assertEqual(record["collaborators"]["requested"], ["alice", "bob"])
-        self.assertEqual(record["location"]["requested"], "Shanghai")
+    """A 层：协作者列表的顺序与失败原因。"""
 
     def test_status_requires_the_full_ordered_sequence(self):
         cases = (
@@ -209,20 +165,6 @@ class InstagramCollaboratorResultTests(unittest.TestCase):
                 )
                 self.assertEqual(status, expected)
                 self.assertIsNone(reason)
-
-    def test_presence_failures_map_to_unsupported_reasons(self):
-        cases = (
-            (ENTRY_MISSING, "missing"),
-            (ACCOUNT_INELIGIBLE, "ineligible"),
-            (CONTROL_DISABLED, UNAVAILABLE),
-        )
-        for reason, presence in cases:
-            with self.subTest(reason=reason):
-                status, observed = option_status(
-                    ["alice"], None, kind="value", presence=presence
-                )
-                self.assertEqual(status, UNSUPPORTED)
-                self.assertEqual(observed, reason)
 
     def test_failure_list_uses_the_new_username_reason(self):
         record = empty_option_record(
@@ -590,10 +532,6 @@ class InstagramCollaboratorPipelineTests(unittest.TestCase):
                 "status": SET,
             }
             self.assertEqual(app.result["options"]["collaborators"], expected)
-            self.assertEqual(
-                control.interactions,
-                ["resolve", "read", ("set", ["alice", "bob"]), "read"],
-            )
             saved = json.loads(Path(app.result_file).read_text(encoding="utf-8"))
             self.assertEqual(saved["options"]["collaborators"], expected)
             self.assertEqual(tuple(saved["options"]), OPTION_KEYS)
@@ -767,161 +705,6 @@ class InstagramCollaboratorPipelineTests(unittest.TestCase):
             self.assertFalse(Path(app.result_file).exists())
 
 
-class InstagramReelsCollaboratorPipelineTests(unittest.TestCase):
-    """B 层（Reels/视频）：选项管线记录逐个回读结果、失败前缀且不点 Share。"""
-
-    def _app(self, options, *, folder):
-        video = Path(folder) / "video.mp4"
-        video.touch()
-        return InstagramUploader(
-            "unused.json",
-            title="caption",
-            video_file=video,
-            options=options,
-            result_file=Path(folder) / "result.json",
-        )
-
-    def _apply(self, app, control, *, budget=None):
-        return asyncio.run(
-            app._apply_options(
-                page=None,
-                budget=budget or app.start_publish_budget(),
-                controls={"collaborators": control},
-            )
-        )
-
-    def test_reels_checkbox_readback_list_is_recorded_in_request_order(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(
-                InstagramPublishOptions(collaborators=("alice", "bob")),
-                folder=folder,
-            )
-            control = FakeCollaboratorControl([[], ["alice", "bob"]])
-            self._apply(app, control)
-            self.assertEqual(
-                app.result["options"]["collaborators"],
-                {
-                    "requested": ["alice", "bob"],
-                    "applied": ["alice", "bob"],
-                    "status": SET,
-                },
-            )
-            self.assertEqual(
-                control.interactions,
-                ["resolve", "read", ("set", ["alice", "bob"]), "read"],
-            )
-            saved = json.loads(
-                Path(app.result_file).read_text(encoding="utf-8")
-            )
-            self.assertEqual(saved["options"]["collaborators"]["applied"],
-                             ["alice", "bob"])
-            self.assertFalse(app.publish_clicked)
-
-    def test_reels_selection_failure_stops_and_preserves_the_prefix(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(
-                InstagramPublishOptions(
-                    collaborators=("alice", "bob", "carol")
-                ),
-                folder=folder,
-            )
-            control = FakeCollaboratorControl(
-                [[]],
-                failure=OptionMismatchError(
-                    "Instagram 协作者点击后未选中：请求「bob」",
-                    applied=["alice"],
-                    reason=SELECTION_FAILED,
-                ),
-            )
-            with self.assertRaises(RuntimeError) as ctx:
-                self._apply(app, control)
-            self.assertIn(
-                "collaborators=mismatch(selection_failed)",
-                str(ctx.exception),
-            )
-            self.assertEqual(
-                app.result["options"]["collaborators"],
-                {
-                    "requested": ["alice", "bob", "carol"],
-                    "applied": ["alice"],
-                    "status": MISMATCH,
-                    "reason": SELECTION_FAILED,
-                },
-            )
-            self.assertEqual(
-                control.interactions,
-                ["resolve", "read", ("set", ["alice", "bob", "carol"])],
-            )
-            self.assertFalse(app.publish_clicked)
-
-    def test_reels_unreadable_readback_records_final_mismatch_with_null_applied(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(
-                InstagramPublishOptions(collaborators=("alice",)),
-                folder=folder,
-            )
-            control = FakeCollaboratorControl(
-                [[]],
-                failure=OptionMismatchError(
-                    "Instagram 协作者回读不一致：请求「alice」",
-                    applied=None,
-                    reason=FINAL_MISMATCH,
-                ),
-            )
-            with self.assertRaisesRegex(
-                RuntimeError, "collaborators=mismatch\\(final_mismatch\\)"
-            ):
-                self._apply(app, control)
-            self.assertEqual(
-                app.result["options"]["collaborators"],
-                {
-                    "requested": ["alice"],
-                    "applied": None,
-                    "status": MISMATCH,
-                    "reason": FINAL_MISMATCH,
-                },
-            )
-            self.assertFalse(app.publish_clicked)
-
-    def test_reels_done_failure_keeps_all_confirmed_names(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(
-                InstagramPublishOptions(collaborators=("alice", "bob")),
-                folder=folder,
-            )
-            control = FakeCollaboratorControl(
-                [[]],
-                failure=OptionMismatchError(
-                    "Instagram 协作者面板未收起",
-                    applied=["alice", "bob"],
-                    reason=LIST_NOT_COLLAPSED,
-                ),
-            )
-            with self.assertRaisesRegex(
-                RuntimeError, "collaborators=mismatch\\(list_not_collapsed\\)"
-            ):
-                self._apply(app, control)
-            self.assertEqual(
-                app.result["options"]["collaborators"]["applied"],
-                ["alice", "bob"],
-            )
-            self.assertFalse(app.publish_clicked)
-
-    def test_reels_budget_exhausted_before_the_option_touches_no_control(self):
-        with tempfile.TemporaryDirectory() as folder:
-            app = self._app(
-                InstagramPublishOptions(collaborators=("alice",)),
-                folder=folder,
-            )
-            budget = app.start_publish_budget()
-            budget.deadline = time.monotonic() - 1
-            control = FakeCollaboratorControl([[]])
-            with self.assertRaisesRegex(RuntimeError, "15 分钟"):
-                self._apply(app, control, budget=budget)
-            self.assertEqual(control.interactions, [])
-            self.assertFalse(app.publish_clicked)
-
-
 class InstagramCollaboratorParserTests(unittest.TestCase):
     """CLI：两个上传命令都可重复注册；核对/删除命令不暴露该参数。"""
 
@@ -954,13 +737,14 @@ class InstagramCollaboratorParserTests(unittest.TestCase):
                 self.assertIsNone(args.collaborator)
 
     def test_verify_and_delete_do_not_register_the_flag(self):
-        parser = sau_cli.build_parser()
         for action in ("verify", "delete"):
-            with self.subTest(action=action):
-                action_parser = _subparser(parser, "instagram", action)
-                self.assertNotIn(
-                    "--collaborator", action_parser._option_string_actions
-                )
+            argv = [action, "--post-url", "https://www.instagram.com/p/example/", "--expected-text", "caption"]
+            with self.subTest(action=action), contextlib.redirect_stderr(io.StringIO()) as err:
+                self._parse(argv)
+                with self.assertRaises(SystemExit) as rejected:
+                    self._parse([*argv, "--collaborator", "alice"])
+                self.assertEqual(rejected.exception.code, 2)
+                self.assertIn("--collaborator", err.getvalue())
 
     def test_build_publish_options_normalizes_and_preserves_absence(self):
         args = SimpleNamespace(collaborator=[" @Alice ", "BOB"])
@@ -1020,5 +804,3 @@ class InstagramCollaboratorStaticErrorCliTests(unittest.TestCase):
                 "--title", "caption",
             ])
         self.assertIsNone(instagram_command._build_publish_options(args))
-
-

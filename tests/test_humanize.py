@@ -243,7 +243,6 @@ class ParameterTableTests(unittest.TestCase):
             humanize.DEFAULT_PROFILE.enabled = False
         derived = replace(humanize.DEFAULT_PROFILE, enabled=False)
         self.assertFalse(derived.enabled)
-        self.assertIs(humanize.DEFAULT_PROFILE, humanize.DEFAULT_PROFILE)
         self.assertTrue(humanize.DEFAULT_PROFILE.enabled)
 
     def test_log_normal_is_clamped_and_reproducible(self):

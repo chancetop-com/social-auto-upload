@@ -369,62 +369,6 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         )
         self.assertIn("no_same_username_candidate", stderr)
 
-    def test_upload_video_panel_collapse_failure_exits_1_with_zero_share_clicks(self):
-        html = collaborator_page_html(
-            [("alice", "Alice"), ("bob", "Bob")],
-            done_collapses=False,
-            render_chips=False,
-        )
-        code, saved, holder, stdout, stderr = self._run(
-            action="upload-video",
-            html=html,
-            collaborator_args=(
-                "--collaborator", "alice", "--collaborator", "bob"
-            ),
-            no_publish=False,
-        )
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(holder["share_clicks"], 0)
-        self.assertEqual(saved["status"], "not_submitted")
-        self.assertEqual(
-            saved["options"]["collaborators"],
-            {
-                "requested": ["alice", "bob"],
-                "applied": ["alice", "bob"],
-                "status": MISMATCH,
-                "reason": LIST_NOT_COLLAPSED,
-            },
-        )
-        self.assertIn("list_not_collapsed", stderr)
-
-    def test_upload_video_click_without_selection_exits_1_with_zero_share_clicks(self):
-        html = collaborator_page_html(
-            [("alice", "Alice")],
-            row_click="ignore",
-            render_chips=False,
-        )
-        code, saved, holder, stdout, stderr = self._run(
-            action="upload-video",
-            html=html,
-            collaborator_args=("--collaborator", "alice"),
-            no_publish=False,
-        )
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(holder["share_clicks"], 0)
-        self.assertEqual(saved["status"], "not_submitted")
-        self.assertEqual(
-            saved["options"]["collaborators"],
-            {
-                "requested": ["alice"],
-                "applied": [],
-                "status": MISMATCH,
-                "reason": SELECTION_FAILED,
-            },
-        )
-        self.assertIn("selection_failed", stderr)
-
     def test_failure_matrix_exits_1_with_zero_share_clicks(self):
         restricted = (
             '<div role="alert">'
@@ -434,9 +378,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         cases = (
             dict(
                 name="entry_missing",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], entry="missing"
-                ),
+                page=dict(entry="missing"),
                 requested=("alice",),
                 applied=None,
                 status=UNSUPPORTED,
@@ -447,9 +389,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="control_disabled",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], entry="disabled"
-                ),
+                page=dict(entry="disabled"),
                 requested=("alice",),
                 applied=None,
                 status=UNSUPPORTED,
@@ -460,9 +400,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="account_ineligible",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], restriction=restricted
-                ),
+                page=dict(restriction=restricted),
                 requested=("alice",),
                 applied=None,
                 status=UNSUPPORTED,
@@ -473,7 +411,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="no_candidates",
-                html=collaborator_page_html([]),
+                page=dict(candidates=[]),
                 requested=("alice", "bob"),
                 applied=[],
                 status=MISMATCH,
@@ -484,9 +422,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="no_same_username_prefix",
-                html=collaborator_page_html(
-                    [("alice", "Alice"), ("_bobby", "Bobby")]
-                ),
+                page=dict(candidates=[("alice", "Alice"), ("_bobby", "Bobby")]),
                 requested=("alice", "bob", "carol"),
                 applied=["alice"],
                 status=MISMATCH,
@@ -497,9 +433,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="selection_failed",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], row_click="ignore"
-                ),
+                page=dict(candidates=[("alice", "Alice")], row_click="ignore"),
                 requested=("alice",),
                 applied=[],
                 status=MISMATCH,
@@ -510,9 +444,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="final_mismatch",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], row_click="detach-entry"
-                ),
+                page=dict(candidates=[("alice", "Alice")], row_click="detach-entry"),
                 requested=("alice",),
                 applied=None,
                 status=MISMATCH,
@@ -523,8 +455,8 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="list_not_collapsed",
-                html=collaborator_page_html(
-                    [("alice", "Alice"), ("bob", "Bob")],
+                page=dict(
+                    candidates=[("alice", "Alice"), ("bob", "Bob")],
                     done_collapses=False,
                 ),
                 requested=("alice", "bob"),
@@ -537,9 +469,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="editor_obscured",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], obscured=True
-                ),
+                page=dict(obscured=True),
                 requested=("alice",),
                 applied=None,
                 status=MISMATCH,
@@ -550,9 +480,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             ),
             dict(
                 name="done_missing",
-                html=collaborator_page_html(
-                    [("alice", "Alice")], done_label="Fertig"
-                ),
+                page=dict(candidates=[("alice", "Alice")], done_label="Fertig"),
                 requested=("alice",),
                 applied=["alice"],
                 status=MISMATCH,
@@ -572,11 +500,12 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
                     )
                     code, saved, holder, stdout, stderr = self._run(
                         action=action,
-                        html=case["html"],
+                        html=collaborator_page_html(render_chips=action == "upload-note", **case["page"]),
                         collaborator_args=collaborator_args,
                         no_publish=False,
                     )
                     self.assertEqual(code, 1, stderr)
+                    self.assertIn(case["detail"] or case["reason"], stderr)
                     self.assertEqual(stdout, "")
                     self.assertEqual(holder["share_clicks"], 0)
                     self.assertNotIsInstance(
@@ -598,6 +527,8 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
                     )
                     if case["detail"]:
                         self.assertIn(case["detail"], record["detail"])
+                    else:
+                        self.assertNotIn("detail", record)
                     for username in case["present_queries"]:
                         self.assertIn(username, holder["queries"])
                     for username in case["absent_queries"]:

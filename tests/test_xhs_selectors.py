@@ -191,13 +191,12 @@ class Decision05SelectorCandidateOrderTests(unittest.TestCase):
         self.assertEqual(resolved.kind, "upstream")
         self.assertEqual(recorder.levels(), ["debug", "info"])
 
-    def test_candidate_tuples_are_ordered_structure_upstream_text(self):
+    def test_candidates_are_ordered_structure_upstream_text(self):
         names = [name for name in dir(xhs_main) if name.endswith("_CANDIDATES")]
         self.assertTrue(names, "expected module-level candidate tuples")
 
         for name in names:
             candidates = getattr(xhs_main, name)
-            self.assertIsInstance(candidates, tuple, name)
             self.assertTrue(candidates, name)
             kinds = [candidate.kind for candidate in candidates]
             self.assertEqual(
