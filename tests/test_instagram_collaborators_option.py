@@ -425,38 +425,36 @@ class InstagramCollaboratorControlReadTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(summary=value):
                 self.assertEqual(collaborator_count_summary(value, query="bob"), expected)
 
-    async def test_wait_panel_closed_treats_unmounted_panel_as_collapsed(self):
-        class _UnmountingPanel:
+    async def test_wait_panel_closed_retries_an_unreadable_entry_within_budget(self):
+        class _RerenderingEntry:
             def __init__(self):
-                self.mounted = True
                 self.timeouts = []
 
             async def count(self):
-                return 1 if self.mounted else 0
-
-            async def is_visible(self):
-                return self.mounted
+                return 1
 
             async def evaluate(self, script, arg=None, *, timeout=None):
                 self.timeouts.append(timeout)
-                self.mounted = False
-                raise TimeoutError("panel detached mid-evaluate")
+                if len(self.timeouts) == 1:
+                    raise TimeoutError("entry detached mid-evaluate")
+                return False
 
         class _Budget:
             def clamp_ms(self, default_ms):
-                return min(default_ms, 250)
+                return min(default_ms, 500)
 
             def check_pre_click(self):
                 return None
 
-        panel = _UnmountingPanel()
+        entry = _RerenderingEntry()
         control = CollaboratorsControl(
             _FakeReadPage(_FakeReadEntry()), image_count=0, budget=_Budget()
         )
-        self.assertTrue(await control._wait_panel_closed(panel))
-        self.assertEqual(len(panel.timeouts), 1)
-        self.assertIsNotNone(panel.timeouts[0])
-        self.assertLessEqual(panel.timeouts[0], 250)
+        self.assertTrue(await control._wait_panel_closed(entry, "panel-stamp"))
+        self.assertGreaterEqual(len(entry.timeouts), 2)
+        for timeout in entry.timeouts:
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, 500)
 
     async def test_locator_calls_clamp_timeout_to_remaining_budget(self):
         class _RecordingEntry(_FakeReadEntry):

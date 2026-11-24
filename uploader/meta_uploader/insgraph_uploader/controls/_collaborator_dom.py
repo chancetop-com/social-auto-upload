@@ -95,9 +95,7 @@ _COLLABORATOR_COUNT_SUMMARY = re.compile(
 
 # 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
 # 先认创建弹窗自身（既有受控 DOM 把结果列表嵌在弹窗内）；否则在所有可见
-# role=dialog 中取“含可见非 switch checkbox 行或可见 Done/完成 按钮”且与
-# 协作者入口几何最近的弹窗。普通按钮不算面板信号，避免把通知/放弃弹窗
-# 误认成已打开的候选面板。
+# role=dialog 中取与入口最近的候选面板。空查询说明浮层用入口旁的同名图标识别。
 _PANEL_PREDICATES_JS = _JS_NORM_HELPER + """
   const visible = (node) => {
     if (!node || !node.getClientRects().length) return false;
@@ -152,14 +150,6 @@ _PANEL_PREDICATES_JS = _JS_NORM_HELPER + """
     }
     return false;
   };
-  const isPanelDialog = (dialog) =>
-    hasCandidateRows(dialog) || hasDoneButton(dialog);
-""".replace(
-    "__DONE_LABELS__",
-    ', '.join(f"'{label.lower()}'" for label in DONE_LABELS),
-)
-
-_PANEL_HELPERS_JS = _PANEL_PREDICATES_JS + """
   const composer = el.closest('[role="dialog"]');
   const entryRect = el.getBoundingClientRect();
   const distanceTo = (node) => {
@@ -170,6 +160,30 @@ _PANEL_HELPERS_JS = _PANEL_PREDICATES_JS + """
       0, Math.max(rect.top - entryRect.bottom, entryRect.top - rect.bottom));
     return Math.hypot(dx, dy);
   };
+  const hasIntro = (dialog) => {
+    // The composer also has the entry's icon, even while the popover is closed.
+    if (!visible(dialog) || dialog.contains(el) || composer?.contains(dialog)) return false;
+    const rect = dialog.getBoundingClientRect();
+    const anchor = (el.closest('label') || el).getBoundingClientRect();
+    const gap = Math.min(Math.abs(rect.top - anchor.bottom), Math.abs(anchor.top - rect.bottom));
+    if (gap > anchor.height || rect.right <= anchor.left || rect.left >= anchor.right) return false;
+    const labels = [el.getAttribute('aria-label'), el.placeholder].map(norm).filter(Boolean);
+    return Array.from(dialog.querySelectorAll('svg[role="img"][aria-label]')).some(icon => {
+      const box = icon.getBoundingClientRect();
+      return icon.closest('[role="dialog"]') === dialog &&
+        labels.includes(norm(icon.getAttribute('aria-label'))) &&
+        icon.checkVisibility({visibilityProperty: true, opacityProperty: true}) &&
+        box.width > 0 && box.height > 0 && box.right > anchor.left && box.left < anchor.right;
+    });
+  };
+  const isPanelDialog = (dialog) =>
+    hasCandidateRows(dialog) || hasDoneButton(dialog) || hasIntro(dialog);
+""".replace(
+    "__DONE_LABELS__",
+    ', '.join(f"'{label.lower()}'" for label in DONE_LABELS),
+)
+
+_PANEL_HELPERS_JS = _PANEL_PREDICATES_JS + """
   const resolvePanel = () => {
     if (isPanelDialog(composer)) return composer;
     let best = null;
@@ -186,10 +200,12 @@ _PANEL_HELPERS_JS = _PANEL_PREDICATES_JS + """
   };
 """
 
-# 检查刚点击 Done 的具体面板节点本身是否仍含候选行或 Done 按钮，
-# 避免面板关闭后重新全页扫描时误把其它无关兄弟弹窗当作“未收起”。
-_PANEL_OPEN_JS = """(dialog) => {""" + _PANEL_PREDICATES_JS + """
-  return isPanelDialog(dialog);
+# 兄弟面板可在异步重绘时短暂清空；内嵌面板收起后，创建弹窗本身仍可见。
+# React 也可能换掉已标记节点，在同一入口旁重新挂载说明浮层。
+_PANEL_OPEN_JS = """(el, stamp) => {""" + _PANEL_PREDICATES_JS + """
+  const dialog = stamp && document.querySelector(`[data-instagram-collaborator-panel="${stamp}"]`);
+  if (visible(dialog) && (dialog !== composer || isPanelDialog(composer))) return true;
+  return Array.from(document.querySelectorAll('[role="dialog"]')).some(hasIntro);
 }"""
 
 # 候选行：从 checkbox 出发找最近的 role=button/button/li/label 行；只读取

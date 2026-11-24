@@ -114,14 +114,15 @@ sau instagram upload-video --account creator --file demo.mp4 --title "标题" \
 4. 更宽的中英文回退。
 
 - 入口（entry）限定在**包含可见协作者入口的创建弹窗**内，不做全页 locator；同一页面若有多个 `role="dialog"`，只选含可见入口的那个。
-- Collaborators 面板可能是 portal 渲染的**兄弟 `role="dialog"`**（2026-11-24 真机），不是入口弹窗的后代。面板只按结构信号识别：可见的非 switch checkbox 行，或可见的 Done/完成 按钮，加上与入口的几何距离；不扫描全页文案。
+- Collaborators 面板可由 portal 渲染为**兄弟 `role="dialog"`**。空查询时，入口旁的说明浮层内有一个可见的 `svg[role="img"]`，其 `aria-label` 与入口的 `aria-label` 或 placeholder 相同（2026-11-24 两次有头图文现场）。两者在水平方向重叠，间距不超过一行入口的高度。创建弹窗内常驻的同名图标不能证明面板已打开。
+- 结果态沿用可见的非 switch checkbox 行或可见的 Done/完成 按钮；有多个匹配面板时取距入口最近的兄弟弹窗。Done 后须确认刚操作的兄弟弹窗隐藏或卸载，并等待重绘稳定；内嵌面板收起时创建弹窗本身仍可见。Share 就绪后，两种帖型均复核入口旁是否重现说明浮层。
 - 资格提示（`role="alert"` / `aria-live`）只读入口所在创建弹窗，不读兄弟面板或页面其它区域。
 - 禁止 hash 类名。
 - 所有可见交互走现有 `Humanizer` 行为层；`HUMANIZE=0` 时保留原生快速路径。
 
 #### 图文 / 轮播
 
-1. 聚焦/点击协作者入口，打开 **Collaborators 面板**（勾选列表 + Done）。
+1. 聚焦/点击协作者入口，等待 **Collaborators 面板**显示说明或结果。
 2. 清空输入框，逐字符输入 username。
 3. 等待结果，按 username 首 token 精确匹配候选行。
 4. 用人类化点击选中该行。
@@ -283,4 +284,4 @@ sau instagram upload-video --account creator --file demo.mp4 --title "标题" \
   - 图文面板的 Done 未单独点击；面板与 Reels 是同一组件，Done 行为由 Reels 探测确认。
 - 术语已写入 [GLOSSARY.md](../../GLOSSARY.md)：`协作者（collaborator）`、`协作者邀请（collaborator invite）`。
 - 已解决的评审点：Reels 面板收不起来复用 `list_not_collapsed`；证据已清理为 4 张关键截图。
-- 2026-11-24 真机复验补充：入口与资格提示在创建弹窗内，但 Collaborators 面板是**兄弟 `role="dialog"`**（portal 定位在入口附近）。因此选择器契约改为「入口/提示锚定创建弹窗；面板按可见非 switch checkbox 行或可见 Done 按钮 + 几何邻近识别」，不做全页面文案扫描；本文件 §UI 交互已同步。
+- 2026-11-24 有头图文现场补充了空查询说明态的识别信号，见「UI 交互」。

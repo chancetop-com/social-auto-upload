@@ -797,8 +797,23 @@ class InstagramCollaboratorComposerScopeDomTests(unittest.TestCase):
             [("alice", "Alice")], panel_opens=False
         ) + (
             '<div role="dialog" id="unrelated" '
-            'style="position: fixed; left: 120px; top: 120px;">'
-            "<button>Discard draft</button></div>"
+            'style="position: fixed;">'
+            '<svg role="img" aria-label="Discard draft"></svg>'
+            '<svg role="img" aria-label="Add collaborators" style="display:none"></svg>'
+            '<button>Discard draft</button></div>'
+            '<script>const rect = entry.getBoundingClientRect();'
+            'Object.assign(document.querySelector("#unrelated").style, '
+            '{left: rect.left + "px", top: rect.bottom + "px"});</script>'
+            '<div role="dialog" style="position:fixed;right:0;bottom:0">'
+            '<svg role="img" aria-label="Add collaborators"></svg></div>'
+            '<div role="dialog" style="position:fixed;inset:0;pointer-events:none">'
+            '<svg role="img" aria-label="Add collaborators" '
+            'style="position:absolute;bottom:0;right:0"></svg></div>'
+        )
+        # 真机入口本身也有同名图标；它会在面板收起时继续显示。
+        html = html.replace(
+            '<div id="chips">',
+            '<svg role="img" aria-label="Add collaborators"></svg><div id="chips">',
         )
         error, queries = self._set(html)
         self.assertIsNotNone(error)

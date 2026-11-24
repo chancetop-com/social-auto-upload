@@ -1277,11 +1277,11 @@ class InstagramUploader:
             await budget.wait_until_allowed(
                 getattr(self, "publish_not_before", None), logger=logger, label="Instagram 发布"
             )
-        if self.image_files and self.options and self.options.collaborators:
+        if self.options and self.options.collaborators:
             requested = list(self.options.collaborators)
-            preview = CollaboratorsControl(page, image_count=len(self.image_files), budget=budget)
+            control = CollaboratorsControl(page, image_count=len(self.image_files or []), budget=budget)
             try:
-                await preview.verify_share_preview(requested)
+                await control.verify_share_ready(requested)
             except OptionMismatchError as error:
                 self.stage = 'options'
                 self._record_option('collaborators', requested, error.applied, MISMATCH, error.reason)

@@ -4,8 +4,7 @@
 
 - 创建弹窗内的入口是 ``input[name="creation-collaborator-input"]``；中文
   placeholder 为「添加合作者」，英文为 “Add collaborators”。
-- 聚焦/点击入口打开 Collaborators 面板：勾选行（username + 显示名 + checkbox）
-  和 ``Done`` / 「完成」。
+- 聚焦/点击入口后可先显示说明浮层；输入后出现勾选行与 ``Done`` / 「完成」。
 - 图文/轮播在预览图上渲染 chip：``span`` 文本为 username，同一容器内有带
   ``svg[aria-label="Close"/"关闭"]`` 的 ``role="button"``。
 - 请求 ``nike`` 时联想会同时出现 ``_nikeza5``；只能取候选行首 token 做精确
@@ -19,10 +18,8 @@
 （portal 定位在入口附近），不是 ``el.closest('[role="dialog"]')`` 的后代。
 入口与资格提示锚定在**包含可见协作者入口的创建弹窗**；面板解析规则：创建
 弹窗自身含可见的非 switch checkbox 行时用创建弹窗（既有受控 DOM 形态）；
-否则在所有可见 ``role="dialog"`` 里取同样含可见非 switch checkbox 行或
-可见 Done/完成 按钮、且与协作者入口几何最近的兄弟弹窗。Done/完成、候选行与 Reels
-checkbox 回读都限定在这个解析出的面板内。面板解析只检查 dialog/checkbox/
-button 结构，不扫描全页文案，也不使用 hash 类名。
+否则取最近的兄弟面板。空查询时，入口旁的说明浮层内有与入口同名的可见图标。
+Done/完成、候选行与 Reels checkbox 回读都限定在解析出的面板内。
 """
 from __future__ import annotations
 
@@ -78,7 +75,7 @@ PANEL_TIMEOUT_MS = 5_000
 SUGGESTION_TIMEOUT_MS = 10_000
 # 点击后立即回读该 username；chip/checkbox 通常是同步渲染，给一个小窗口。
 READBACK_TIMEOUT_MS = 3_000
-_PREVIEW_STABLE_SECONDS = 0.2
+_RENDER_STABLE_SECONDS = 0.2
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 
@@ -378,7 +375,7 @@ class CollaboratorsControl:
         原始浏览器错误只写入异常文案（聚合错误/stderr），不写入结果 ``detail``。
         """
         if error is None:
-            suffix = '（聚焦/点击入口后仍看不到候选列表或 Done/完成）'
+            suffix = '（聚焦/点击入口后仍看不到协作者说明、候选列表或 Done/完成）'
         else:
             suffix = f'（聚焦/点击入口时失败：{error}）'
         return OptionMismatchError(
@@ -525,7 +522,7 @@ class CollaboratorsControl:
 
     # -- panel ------------------------------------------------------------
     async def _panel(
-        self, entry: Locator, *, timeout_ms: int | None = None
+        self, entry: Locator, *, timeout_ms: int | None = None, stamp: str | None = None
     ) -> Locator | None:
         """解析当前活动的协作者面板并返回一次性定位器。
 
@@ -533,7 +530,7 @@ class CollaboratorsControl:
         元素做锚点，由 ``_PANEL_JS`` 按结构 + 几何选出面板，再用一次性属性
         戳定位刚选中的节点。面板不存在/已收起时返回 ``None``。
         """
-        token = uuid4().hex
+        token = stamp or uuid4().hex
         wait_ms = (
             timeout_ms
             if timeout_ms is not None
@@ -581,7 +578,8 @@ class CollaboratorsControl:
         return await self._wait_panel_open(entry)
 
     async def _close_panel(self, entry: Locator) -> bool:
-        panel = await self._panel(entry)
+        stamp = uuid4().hex
+        panel = await self._panel(entry, stamp=stamp)
         if panel is None:
             return False
         done = await self._done_in(panel)
@@ -590,7 +588,7 @@ class CollaboratorsControl:
         self._check_budget()
         humanizer = self._behavior()
         await humanizer.click(done)
-        return await self._wait_panel_closed(panel)
+        return await self._wait_panel_closed(entry, stamp)
 
     async def _wait_panel_open(self, entry: Locator) -> bool:
         window_ms = self._timeout(PANEL_TIMEOUT_MS)
@@ -603,31 +601,30 @@ class CollaboratorsControl:
                 return False
             await asyncio.sleep(_POLL_SECONDS)
 
-    async def _wait_panel_closed(self, panel: Locator) -> bool:
-        """确认刚点过 Done 的具体面板节点不再可见或不再包含候选行/Done。"""
+    async def _wait_panel_closed(self, entry: Locator, stamp: str) -> bool:
+        """等待已操作的面板收起，并检查入口旁是否又出现说明浮层。"""
         window_ms = self._timeout(PANEL_TIMEOUT_MS)
         deadline = time.monotonic() + window_ms / 1000
-        wait_ms = max(1, window_ms)
+        closed_since = None
         while True:
             try:
-                if await panel.count() == 0 or not await panel.is_visible():
-                    return True
-                still_open = bool(
-                    await self._eval(panel, _PANEL_OPEN_JS, timeout_ms=wait_ms)
+                still_open = await self._eval(
+                    entry, _PANEL_OPEN_JS, stamp,
+                    timeout_ms=max(1, int((deadline - time.monotonic()) * 1000)),
                 )
             except Exception:
-                # 面板可能在 is_visible() 与 evaluate() 之间刚好卸载。
-                try:
-                    if await panel.count() == 0 or not await panel.is_visible():
-                        return True
-                except Exception:
-                    pass
+                # 重绘期间可能暂时读不到入口，下一次探测再确认。
                 still_open = True
-            if not still_open:
+            now = time.monotonic()
+            if still_open:
+                closed_since = None
+            elif closed_since is None:
+                closed_since = now
+            elif now - closed_since >= _RENDER_STABLE_SECONDS:
                 return True
-            if time.monotonic() >= deadline:
+            if now >= deadline:
                 return False
-            await asyncio.sleep(_POLL_SECONDS)
+            await asyncio.sleep(min(_POLL_SECONDS, deadline - now))
 
     # -- search -----------------------------------------------------------
     async def _type_and_wait(
@@ -767,10 +764,22 @@ class CollaboratorsControl:
         )
 
     # -- readback ---------------------------------------------------------
-    async def verify_share_preview(self, requested: list[str]) -> None:
-        """Share 就绪后核对图文预览；Done 的异步重绘结束前不采信旧标签。"""
+    async def verify_share_ready(self, requested: list[str]) -> None:
+        """Share 就绪后核对图文标签，并确认入口旁没有重现说明浮层。"""
         entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
-        await self._verify_preview(entry, requested, stable_seconds=_PREVIEW_STABLE_SECONDS)
+        if self._uses_preview_chips:
+            await self._verify_preview(entry, requested, stable_seconds=_RENDER_STABLE_SECONDS)
+        wait_ms = self._timeout(PANEL_TIMEOUT_MS)
+        if entry is not None:
+            try:
+                if await self._eval(entry, _PANEL_OPEN_JS, timeout_ms=wait_ms) is False:
+                    return
+            except Exception:
+                pass  # 无法从入口复核时，保留已逐个确认的用户名并停在 Share 前。
+        raise OptionMismatchError(
+            'Instagram 发布前未能确认协作者面板已收起',
+            applied=list(requested), reason=LIST_NOT_COLLAPSED,
+        )
 
     async def _verify_preview(
         self, entry: Locator | None, requested: list[str], *, stable_seconds: float

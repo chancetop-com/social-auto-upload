@@ -41,6 +41,7 @@ from tests.instagram_collaborators_fixtures import (
     FakeCollaboratorControl,
     collaborator_page_html,
     expire_budget_after_username,
+    sibling_panel_page_html,
     timeout_patches,
 )
 from utils.errors import PublishResultUnknownError
@@ -203,6 +204,74 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         self.assertEqual(saved["options"]["collaborators"], expected)
         self.assertEqual(holder["share_clicks"], 0)
         self.assertEqual(json.loads(stdout), saved)
+
+    def test_note_can_search_from_an_intro_only_sibling_panel(self):
+        html = sibling_panel_page_html(
+            [("natgeotravel", "Travel"), ("natgeo", "National Geographic")],
+            intro=True,
+        )
+        for label in ("Add collaborators", "添加合作者"):
+            with self.subTest(label=label):
+                code, saved, holder, _, stderr = self._run(
+                    html=html.replace("Add collaborators", label),
+                    collaborator_args=("--collaborator", "natgeo"),
+                )
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(saved["status"], "prepared")
+                self.assertEqual(saved["options"]["collaborators"], {
+                    "requested": ["natgeo"], "applied": ["natgeo"], "status": SET,
+                })
+                self.assertIn("natgeo", holder["queries"])
+                self.assertEqual(holder["done_clicks"], 1)
+                self.assertTrue(holder["panel_hidden"])
+                self.assertEqual(holder["share_clicks"], 0)
+
+    def test_done_returning_to_intro_stops_before_share(self):
+        html = sibling_panel_page_html([("alice", "Alice")], intro=True) + """
+        <script>
+          const share = document.getElementById('share');
+          share.setAttribute('aria-disabled', 'true');
+          done.addEventListener('click', () => {
+            entry.value = '';
+            openPanel();
+            const replacement = document.createElement('div');
+            replacement.id = panel.id;
+            replacement.setAttribute('role', 'dialog');
+            replacement.append(document.getElementById('collab-intro'));
+            const portal = panel.parentElement;
+            panel.remove();
+            setTimeout(() => {
+              portal.append(replacement);
+              share.removeAttribute('aria-disabled');
+            }, DELAY_MS);
+          });
+        </script>"""
+        for action, delay in (("upload-note", 175), ("upload-video", 650)):
+            with self.subTest(action=action):
+                code, saved, holder, _, _ = self._run(
+                    action=action, html=html.replace("DELAY_MS", str(delay)),
+                    collaborator_args=("--collaborator", "alice"),
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(saved["options"]["collaborators"]["reason"], LIST_NOT_COLLAPSED)
+                self.assertEqual(holder["done_clicks"], 1)
+                self.assertEqual(holder["share_clicks"], 0)
+
+    def test_visible_sibling_panel_with_cleared_contents_is_still_open(self):
+        html = sibling_panel_page_html([("alice", "Alice")], intro=True) + """
+        <script>
+          done.addEventListener('click', () => {
+            panel.hidden = false;
+            panel.replaceChildren('Loading');
+          });
+        </script>"""
+        code, saved, holder, _, _ = self._run(
+            html=html, collaborator_args=("--collaborator", "alice"),
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(saved["options"]["collaborators"]["reason"], LIST_NOT_COLLAPSED)
+        self.assertFalse(holder["panel_hidden"])
+        self.assertEqual(holder["share_clicks"], 0)
 
     def test_hidden_preview_chip_does_not_skip_selecting_the_account(self):
         html = collaborator_page_html([("alice", "Alice")]) + """

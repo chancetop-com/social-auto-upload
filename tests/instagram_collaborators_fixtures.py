@@ -87,6 +87,12 @@ _COLLABORATOR_SCRIPT = """<script>
   }
   function openPanel() {
     if (!panel || !panelOpens) return;
+    if (document.getElementById('collab-intro')) {
+      const anchor = entry.getBoundingClientRect();
+      Object.assign(panel.parentElement.style, {
+        left: anchor.left + 'px', top: anchor.bottom + 'px', transform: 'none',
+      });
+    }
     panel.hidden = false;
     if (siblingMode) {
       for (const decoy of document.querySelectorAll('[data-decoy]')) {
@@ -177,6 +183,15 @@ _COLLABORATOR_SCRIPT = """<script>
     if (!results) return;
     results.innerHTML = '';
     const query = String(entry && entry.value || '').trim().toLowerCase();
+    const intro = document.getElementById('collab-intro');
+    if (intro) {
+      intro.hidden = Boolean(query);
+      if (!query) {
+        done.remove();
+        return;
+      }
+      if (!done.isConnected) results.after(done);
+    }
     for (const candidate of candidates) {
       if (!candidate.username.toLowerCase().includes(query)) continue;
       const {row, box} = buildCandidateRow(candidate);
@@ -363,6 +378,7 @@ __DECOY__
 <div style="position: fixed; left: 120px; top: 330px;
             transform: translate(0, -100%); z-index: 5;">
   <div role="dialog" id="collab-panel" hidden>
+    __INTRO__
     <div id="collab-limit" role="alert" hidden></div>
     <div id="collab-results"></div>
     <div role="button" id="collab-done">__DONE_LABEL__</div>
@@ -486,6 +502,7 @@ def sibling_panel_page_html(
     candidates=(),
     *,
     decoy=False,
+    intro=False,
     **options,
 ) -> str:
     """真机结构（2026-11-24）：面板是创建弹窗之外的兄弟 ``role=dialog``。
@@ -497,7 +514,14 @@ def sibling_panel_page_html(
         _SIBLING_PANEL_PAGE,
         candidates=candidates,
         sibling_mode=True,
-        extras={"__DECOY__": _DECOY_DIALOGS if decoy else ""},
+        extras={
+            "__DECOY__": _DECOY_DIALOGS if decoy else "",
+            "__INTRO__": (
+                '<div id="collab-intro"><svg role="img" aria-label="Add collaborators" '
+                'width="44" height="44"></svg><span>Add collaborators</span>'
+                '<span>Invite someone to share this post.</span></div>'
+            ) if intro else "",
+        },
         **options,
     )
 

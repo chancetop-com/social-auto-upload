@@ -1920,7 +1920,7 @@ class InstagramCollaboratorsHumanizeTests(unittest.IsolatedAsyncioTestCase):
             page, image_count=0, humanizer=humanizer
         )
         with patch.object(
-            collaborators_control_module, "PANEL_TIMEOUT_MS", 0
+            collaborators_control_module, "PANEL_TIMEOUT_MS", 500
         ):
             await control.set(("alice",))
 
@@ -1956,7 +1956,7 @@ class InstagramCollaboratorsHumanizeTests(unittest.IsolatedAsyncioTestCase):
             page, image_count=0, humanizer=humanizer
         )
         with patch.object(
-            collaborators_control_module, "PANEL_TIMEOUT_MS", 0
+            collaborators_control_module, "PANEL_TIMEOUT_MS", 500
         ):
             await control.set(("alice",))
 
