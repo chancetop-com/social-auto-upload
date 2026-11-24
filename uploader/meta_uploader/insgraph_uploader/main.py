@@ -48,6 +48,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     option_failures,
     option_kind,
     option_status,
+    normalize_publish_options,
     requested_option,
     validate_publish_options,
 )
@@ -669,7 +670,8 @@ class InstagramUploader:
         self.video_file = Path(video_file) if video_file else None
         self.image_files = [Path(p) for p in (image_files or [])]
         self.thumbnail = Path(thumbnail) if thumbnail else None
-        self.options = options
+        # 协作者归一化是共享纯函数；直接构造上传器也不能绕过静态校验。
+        self.options = normalize_publish_options(options)
         # 干跑：表单与选项全部完成后停在 Share 前，不点击、不观察结果。
         self.no_publish = bool(no_publish)
         # 发布点击是否真的发出：登录跳转的 publish_attempted 只认这个标志，
@@ -686,7 +688,7 @@ class InstagramUploader:
             'platform': 'instagram',
             'title': self.title,
             'status': 'not_submitted',
-            # 四项始终存在；未请求写 not_requested，任何一次选项处理后落盘。
+            # 五项始终存在；未请求写 not_requested，任何一次选项处理后落盘。
             'options': empty_option_record(self.options),
         }
         self.stage = 'validation'

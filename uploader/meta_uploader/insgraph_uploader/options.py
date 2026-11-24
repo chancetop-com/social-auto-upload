@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from utils.errors import UsageError
@@ -32,6 +32,8 @@ EDITOR_OBSCURED = "editor_obscured"
 CONTROL_DISABLED = "control_disabled"
 NO_CANDIDATES = "no_candidates"
 NO_SAME_NAME = "no_same_name_candidate"
+# 协作者候选行按 username 首 token 精确匹配；与地点的“名称”原因是不同契约。
+NO_SAME_USERNAME = "no_same_username_candidate"
 SELECTION_FAILED = "selection_failed"
 LIST_NOT_COLLAPSED = "list_not_collapsed"
 FINAL_EMPTY = "final_empty"
@@ -44,13 +46,14 @@ INELIGIBLE = "ineligible"
 # 入口存在但被禁用，且页面没有明确说明资格限制：不能归因为账号不可用。
 UNAVAILABLE = "unavailable"
 
-# 结果文件字段顺序。
-OPTION_KEYS = ("location", "alt_text", "comments", "ai_generated")
+# 结果文件字段顺序：新增键一律追加，既有消费方按顺序读取不受影响。
+OPTION_KEYS = ("location", "alt_text", "comments", "ai_generated", "collaborators")
 # 应用顺序（spec §4.2）：先处理会开关模态框的项，最后展开高级设置。
-APPLY_ORDER = ("alt_text", "location", "ai_generated", "comments")
+APPLY_ORDER = ("alt_text", "location", "collaborators", "ai_generated", "comments")
 
 MAX_CAPTION_LENGTH = 2200
 MAX_ALT_TEXT_LENGTH = 1000
+MAX_COLLABORATORS = 5
 
 # 结果键 -> InstagramPublishOptions 字段名。
 _OPTION_FIELDS = {
@@ -58,6 +61,7 @@ _OPTION_FIELDS = {
     "alt_text": "alt_texts",
     "comments": "comments",
     "ai_generated": "ai_generated",
+    "collaborators": "collaborators",
 }
 _TOGGLE_KEYS = ("comments", "ai_generated")
 
@@ -70,6 +74,7 @@ class InstagramPublishOptions:
     alt_texts: tuple[str, ...] | None = None
     comments: bool | None = None          # False = 关闭评论
     ai_generated: bool | None = None
+    collaborators: tuple[str, ...] | None = None
 
 
 class InstagramOptionControl(Protocol):
@@ -105,6 +110,62 @@ class OptionMismatchError(RuntimeError):
 def normalize_text(text: str) -> str:
     """空白折叠 + casefold，供地点与替代文字比较。"""
     return _normalize_text(text)
+
+
+def normalize_collaborator_name(value: str) -> str:
+    """单个协作者 username：去首尾空白、去掉一个前导 ``@``、转小写。
+
+    不做字符集校验：中间的 ``@`` 或非法字符保留到页面搜索阶段，按无候选
+    失败（退出 1）。候选行的首 token 也复用本函数做精确比较。
+    """
+    if not isinstance(value, str):
+        raise UsageError("Instagram 协作者 username 必须是字符串")
+    name = value.strip()
+    if name.startswith("@"):
+        name = name[1:]
+    return name.lower()
+
+
+def normalize_collaborators(
+    values: tuple[str, ...] | list[str] | str | None,
+) -> tuple[str, ...] | None:
+    """归一化并静态校验协作者列表；``None`` 表示未请求（三态不压缩）。
+
+    空 username、归一化后重复、超过 ``MAX_COLLABORATORS`` 个均抛 ``UsageError``
+    （CLI 退出 2，零浏览器）。重复值不会被静默去重，避免掩盖调用方脚本错误。
+    裸字符串按一个 username 处理，绝不拆成字符（防御直接构造上传器的场景）。
+    """
+    if values is None:
+        return None
+    if isinstance(values, str):
+        values = (values,)
+    normalized: list[str] = []
+    for value in values:
+        name = normalize_collaborator_name(value)
+        if not name:
+            raise UsageError("Instagram 协作者 username 不能为空")
+        if name in normalized:
+            raise UsageError(f"Instagram 协作者重复：{name}（不会自动去重）")
+        normalized.append(name)
+    if not normalized:
+        raise UsageError("Instagram 协作者至少需要 1 个 username")
+    if len(normalized) > MAX_COLLABORATORS:
+        raise UsageError(
+            f"Instagram 协作者最多 {MAX_COLLABORATORS} 个，实际 {len(normalized)} 个"
+        )
+    return tuple(normalized)
+
+
+def normalize_publish_options(
+    options: InstagramPublishOptions | None,
+) -> InstagramPublishOptions | None:
+    """返回协作者已归一化的选项副本；CLI 与上传器构造共用同一入口。"""
+    if options is None or options.collaborators is None:
+        return options
+    return replace(
+        options,
+        collaborators=normalize_collaborators(options.collaborators),
+    )
 
 
 def clamp_wait(budget: 'PublishTimeoutBudget | None', default_ms: int) -> int:
@@ -158,13 +219,13 @@ def requested_option(
     if options is None:
         return None
     value = getattr(options, _OPTION_FIELDS[key])
-    if key == "alt_text" and value is not None:
+    if key in ("alt_text", "collaborators") and value is not None:
         return list(value)
     return value
 
 
 def empty_option_record(options: InstagramPublishOptions | None) -> dict:
-    """生成四项 ``not_requested`` 骨架，requested 保留三态原值。"""
+    """生成五项 ``not_requested`` 骨架，requested 保留三态原值。"""
     record: dict = {}
     for key in OPTION_KEYS:
         record[key] = {
@@ -301,3 +362,6 @@ def validate_publish_options(
         not isinstance(location, str) or not location.strip()
     ):
         raise UsageError("Instagram 地点不能为空")
+
+    # 归一化/重复/上限都在共享纯函数里；这里只触发校验，结果由构造方写入。
+    normalize_collaborators(options.collaborators)
