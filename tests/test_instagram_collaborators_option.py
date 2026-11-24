@@ -290,13 +290,27 @@ class _FakeReadDialog:
     def locator(self, selector):
         return _FakeReadLocator(self._entry)
 
+    async def is_visible(self):
+        return True
+
+
+class _FakeReadDialogs:
+    def __init__(self, entry):
+        self._entry = entry
+
+    async def count(self):
+        return 1
+
+    def nth(self, index):
+        return _FakeReadDialog(self._entry)
+
 
 class _FakeReadPage:
     def __init__(self, entry):
         self._entry = entry
 
-    def get_by_role(self, role):
-        return _FakeReadDialog(self._entry)
+    def locator(self, selector):
+        return _FakeReadDialogs(self._entry)
 
 
 class InstagramCollaboratorControlReadTests(unittest.IsolatedAsyncioTestCase):

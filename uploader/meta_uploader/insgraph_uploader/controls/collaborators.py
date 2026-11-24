@@ -35,6 +35,7 @@ from uuid import uuid4
 
 from patchright.async_api import Locator
 
+from utils.errors import LoginRequiredError, PublishResultUnknownError
 from utils.humanize import Humanizer
 
 from ..options import (
@@ -164,6 +165,16 @@ _PANEL_HELPERS_JS = _JS_NORM_HELPER + """
     }
     return false;
   };
+  const doneLabels = new Set([__DONE_LABELS__]);
+  const hasDoneButton = (dialog) => {
+    if (!dialog || !visible(dialog)) return false;
+    for (const node of dialog.querySelectorAll('button, [role="button"]')) {
+      if (!visible(node)) continue;
+      const text = norm(node.innerText || node.textContent || '').toLowerCase();
+      if (doneLabels.has(text)) return true;
+    }
+    return false;
+  };
   const isPanelDialog = (dialog) =>
     hasCandidateRows(dialog) || hasVisibleButton(dialog);
   const entryRect = el.getBoundingClientRect();
@@ -176,7 +187,7 @@ _PANEL_HELPERS_JS = _JS_NORM_HELPER + """
     return Math.hypot(dx, dy);
   };
   const resolvePanel = () => {
-    if (hasCandidateRows(composer)) return composer;
+    if (hasCandidateRows(composer) || hasDoneButton(composer)) return composer;
     let best = null;
     let bestDistance = Infinity;
     for (const dialog of document.querySelectorAll('[role="dialog"]')) {
@@ -189,7 +200,10 @@ _PANEL_HELPERS_JS = _JS_NORM_HELPER + """
     }
     return best;
   };
-"""
+""".replace(
+    "__DONE_LABELS__",
+    ', '.join(f"'{label.lower()}'" for label in DONE_LABELS),
+)
 
 # 候选行：从 checkbox 出发找最近的 role=button/button/li/label 行；只读取
 # username 首 token。AI/评论开关是 role=switch，明确排除。
@@ -485,15 +499,17 @@ class CollaboratorsControl:
         *,
         readable: bool = True,
     ) -> OptionMismatchError:
-        """预算/面板等待在中途归零：保留已确认前缀，按普通 mismatch 停止。
+        """中途失败：保留已确认前缀，按普通 mismatch 停止。
 
         不新增 reason 值：这里只说明“协作者没能在点击前完成”，由聚合错误
-        文案带上原始预算错误和已确认 username。面板尚未打开时无法读取已选
-        状态，``applied=None``；已经逐个回读过的前缀按请求顺序保留。
+        文案带上原始错误和已确认 username。面板尚未打开时无法读取已选状态，
+        ``applied=None``；已经逐个回读过的前缀按请求顺序保留。原始错误可能
+        是发布预算耗尽、Playwright 定位/点击超时或面板动作失败，按原样附在
+        文案里，不猜测未验证的原因。
         """
         names = '、'.join(f'「{name}」' for name in confirmed) or '无'
         return OptionMismatchError(
-            f'Instagram 协作者在{stage}中止（可能发布预算耗尽）：{error}；'
+            f'Instagram 协作者在{stage}中止：{error}；'
             f'失败前已确认：{names}',
             applied=list(confirmed) if readable else None,
         )
@@ -508,7 +524,9 @@ class CollaboratorsControl:
         names = [normalize_collaborator_name(value) for value in requested]
         try:
             entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
-        except RuntimeError as error:
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
             self._confirmed = None
             raise self._stop_with_prefix(
                 [], '定位入口时', error, readable=False
@@ -520,12 +538,22 @@ class CollaboratorsControl:
                 reason=ENTRY_MISSING,
             )
         try:
-            await self._open_panel(entry)
-        except RuntimeError as error:
+            opened = await self._open_panel(entry)
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
             self._confirmed = None
             raise self._stop_with_prefix(
                 [], '打开面板时', error, readable=False
             ) from error
+        if not opened:
+            self._confirmed = None
+            raise OptionMismatchError(
+                'Instagram 协作者面板未能打开'
+                '（聚焦/点击入口后仍看不到候选列表或 Done/完成）',
+                applied=None,
+                reason=LIST_NOT_COLLAPSED,
+            )
         confirmed: list[str] = []
         for name in names:
             try:
@@ -576,9 +604,13 @@ class CollaboratorsControl:
             except OptionMismatchError:
                 self._confirmed = list(confirmed)
                 raise
-            except RuntimeError as error:
-                # 单个 username 处理中预算被 clamp 收紧到零：同样停止列表，
-                # 不能丢掉失败前已确认的前缀。
+            except (LoginRequiredError, PublishResultUnknownError):
+                # 登录/结果未知必须按原类型上抛，不能折叠成普通 mismatch。
+                raise
+            except Exception as error:
+                # 单个 username 处理中的任意浏览器错误（Playwright
+                # Error/TimeoutError）或预算收紧都停止列表；不能丢掉失败前
+                # 已确认的前缀，也不能让 generic 管線把 applied 记成 None。
                 self._confirmed = list(confirmed)
                 raise self._stop_with_prefix(
                     confirmed, f'添加「{name}」时', error
@@ -586,7 +618,9 @@ class CollaboratorsControl:
             confirmed.append(name)
         try:
             collapsed = await self._close_panel(entry)
-        except RuntimeError as error:
+        except (LoginRequiredError, PublishResultUnknownError):
+            raise
+        except Exception as error:
             self._confirmed = list(confirmed)
             raise self._stop_with_prefix(
                 confirmed, '收起面板时', error
@@ -640,15 +674,15 @@ class CollaboratorsControl:
                 continue
         return await row_for(panel, DONE_LABELS)
 
-    async def _open_panel(self, entry: Locator) -> None:
-        """聚焦优先；只有面板仍未出现时才点击入口。"""
+    async def _open_panel(self, entry: Locator) -> bool:
+        """聚焦优先；只有面板仍未出现时才点击入口。返回是否确认打开。"""
         if await self._done(entry) is not None:
-            return
+            return True
         await entry.focus()
         if await self._wait_panel(entry, open_=True):
-            return
+            return True
         await self._behavior().click(entry)
-        await self._wait_panel(entry, open_=True)
+        return await self._wait_panel(entry, open_=True)
 
     async def _close_panel(self, entry: Locator) -> bool:
         done = await self._done(entry)
@@ -661,7 +695,12 @@ class CollaboratorsControl:
     async def _wait_panel(self, entry: Locator, *, open_: bool) -> bool:
         deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
         while True:
-            is_open = await self._done(entry) is not None
+            if open_:
+                # 面板打开的结构证据：可解析的候选行/可见按钮（Done）。不能
+                # 只认 Done 文案，否则本地化标签缺失会被误判为“没打开”。
+                is_open = await self._panel(entry) is not None
+            else:
+                is_open = await self._done(entry) is not None
             if is_open is open_:
                 return True
             if time.monotonic() >= deadline:

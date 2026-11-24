@@ -79,6 +79,9 @@ _COLLABORATOR_PAGE = """
   const valueAfterFive = __VALUE_AFTER_FIVE__;
   const checkboxDelayMs = __CHECKBOX_DELAY_MS__;
   const confirmDelayMs = __CONFIRM_DELAY_MS__;
+  const panelOpens = __PANEL_OPENS__;
+  const hideStampedAfter = __HIDE_STAMPED_AFTER__;
+  let hideStamps = false;
   const entry = document.getElementById('collab-entry');
   const panel = document.getElementById('collab-panel');
   const results = document.getElementById('collab-results');
@@ -98,7 +101,7 @@ _COLLABORATOR_PAGE = """
     document.body.dataset.selected = JSON.stringify(selected);
   }
   function openPanel() {
-    if (!panel) return;
+    if (!panel || !panelOpens) return;
     panel.hidden = false;
     renderResults();
   }
@@ -178,6 +181,10 @@ _COLLABORATOR_PAGE = """
             document.body.dataset.checkboxStates = JSON.stringify(states);
             renderChips();
             if (selected.length >= 5 && entry) entry.value = valueAfterFive;
+            if (hideStampedAfter &&
+                candidate.username === hideStampedAfter) {
+              hideStamps = true;
+            }
           };
           if (confirmDelayMs > 0) {
             setTimeout(confirm, confirmDelayMs);
@@ -194,6 +201,15 @@ _COLLABORATOR_PAGE = """
       results.appendChild(row);
     }
   }
+  new MutationObserver(() => {
+    if (!hideStamps) return;
+    const row = results.querySelector('[data-instagram-collaborator-row]');
+    if (row) row.style.display = 'none';
+  }).observe(results, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-instagram-collaborator-row'],
+  });
   document.addEventListener('focusin', (event) => {
     if (event.target && event.target.id) {
       document.body.dataset.focusedEntry = event.target.id;
@@ -268,6 +284,8 @@ def collaborator_page_html(
     value_after_five="5 people",
     checkbox_delay_ms=0,
     confirm_delay_ms=0,
+    panel_opens=True,
+    hide_stamped_after=None,
     restriction="",
     obscured=False,
 ) -> str:
@@ -293,6 +311,8 @@ def collaborator_page_html(
         .replace("__VALUE_AFTER_FIVE__", json.dumps(value_after_five))
         .replace("__CHECKBOX_DELAY_MS__", str(int(checkbox_delay_ms)))
         .replace("__CONFIRM_DELAY_MS__", str(int(confirm_delay_ms)))
+        .replace("__PANEL_OPENS__", "true" if panel_opens else "false")
+        .replace("__HIDE_STAMPED_AFTER__", json.dumps(hide_stamped_after))
         .replace("__DONE_LABEL__", done_label)
     )
     if not obscured:
@@ -342,6 +362,9 @@ __DECOY__
   const renderChipNodes = __RENDER_CHIPS__;
   const checkboxDelayMs = __CHECKBOX_DELAY_MS__;
   const confirmDelayMs = __CONFIRM_DELAY_MS__;
+  const panelOpens = __PANEL_OPENS__;
+  const hideStampedAfter = __HIDE_STAMPED_AFTER__;
+  let hideStamps = false;
   const entry = document.getElementById('collab-entry');
   const panel = document.getElementById('collab-panel');
   const results = document.getElementById('collab-results');
@@ -379,7 +402,7 @@ __DECOY__
     }
   }
   function openPanel() {
-    if (!panel) return;
+    if (!panel || !panelOpens) return;
     panel.hidden = false;
     for (const decoy of document.querySelectorAll('[data-decoy]')) {
       decoy.hidden = false;
@@ -463,6 +486,10 @@ __DECOY__
             });
             document.body.dataset.checkboxStates = JSON.stringify(states);
             renderChips();
+            if (hideStampedAfter &&
+                candidate.username === hideStampedAfter) {
+              hideStamps = true;
+            }
           };
           if (confirmDelayMs > 0) {
             setTimeout(confirm, confirmDelayMs);
@@ -479,6 +506,15 @@ __DECOY__
       results.appendChild(row);
     }
   }
+  new MutationObserver(() => {
+    if (!hideStamps) return;
+    const row = results.querySelector('[data-instagram-collaborator-row]');
+    if (row) row.style.display = 'none';
+  }).observe(results, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-instagram-collaborator-row'],
+  });
   document.addEventListener('focusin', (event) => {
     if (event.target && event.target.id) {
       document.body.dataset.focusedEntry = event.target.id;
@@ -557,6 +593,8 @@ def sibling_panel_page_html(
     render_chips=True,
     checkbox_delay_ms=0,
     confirm_delay_ms=0,
+    panel_opens=True,
+    hide_stamped_after=None,
     decoy=False,
 ) -> str:
     """真机结构（2026-11-24）：面板是创建弹窗之外的兄弟 ``role=dialog``。
@@ -583,6 +621,8 @@ def sibling_panel_page_html(
         .replace("__RENDER_CHIPS__", "true" if render_chips else "false")
         .replace("__CHECKBOX_DELAY_MS__", str(int(checkbox_delay_ms)))
         .replace("__CONFIRM_DELAY_MS__", str(int(confirm_delay_ms)))
+        .replace("__PANEL_OPENS__", "true" if panel_opens else "false")
+        .replace("__HIDE_STAMPED_AFTER__", json.dumps(hide_stamped_after))
         .replace("__DONE_LABEL__", done_label)
     )
 

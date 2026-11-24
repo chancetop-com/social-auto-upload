@@ -60,6 +60,7 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         image_count=1,
         expire_after_selection=None,
         readback_timeout_ms=None,
+        page_timeout_ms=None,
     ):
         holder: dict[str, object] = {}
 
@@ -69,6 +70,8 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
                 page = await browser.new_page()
                 try:
                     await page.set_content(html)
+                    if page_timeout_ms is not None:
+                        page.set_default_timeout(page_timeout_ms)
                     with tempfile.TemporaryDirectory() as folder:
                         images = [
                             str(Path(folder) / f"image-{index}.png")
@@ -231,6 +234,49 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertIsNone(outcome.error)
         self.assertEqual(outcome.chips, ["alice", "bob"])
         self.assertEqual(outcome.row_clicks, 1)
+
+    def test_browser_error_after_confirmed_prefix_keeps_applied(self):
+        outcome = self._apply(
+            collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob")],
+                hide_stamped_after="alice",
+            ),
+            options=InstagramPublishOptions(collaborators=("alice", "bob")),
+            readback_timeout_ms=2_000,
+            page_timeout_ms=500,
+        )
+        self.assertIsNotNone(outcome.error)
+        self.assertNotIsInstance(outcome.error, PublishResultUnknownError)
+        message = str(outcome.error)
+        self.assertIn("已确认", message)
+        self.assertIn("alice", message)
+        self.assertNotIn("15 分钟", message)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["requested"], ["alice", "bob"])
+        self.assertEqual(record["applied"], ["alice"])
+        self.assertEqual(record["status"], MISMATCH)
+        self.assertNotIn("reason", record)
+        self.assertEqual(outcome.chips, ["alice"])
+        self.assertIn("bob", outcome.queries)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_panel_that_never_opens_is_list_not_collapsed_before_typing(self):
+        outcome = self._apply(
+            collaborator_page_html(
+                [("alice", "Alice")], panel_opens=False
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        message = str(outcome.error)
+        self.assertIn("collaborators=mismatch(list_not_collapsed)", message)
+        self.assertIn("面板未能打开", message)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertIsNone(record["applied"])
+        self.assertEqual(record["reason"], LIST_NOT_COLLAPSED)
+        self.assertEqual(outcome.queries, [])
+        self.assertEqual(outcome.chips, [])
+        self.assertEqual(outcome.row_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
 
     def test_missing_entry_is_unsupported(self):
         outcome = self._apply(
