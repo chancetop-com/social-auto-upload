@@ -14,6 +14,13 @@
 本控件复用既有 ``resolve/read/set`` 协议：``set()`` 内部逐个确认并把已确认
 列表缓存为 ``_confirmed``，管线的 ``read()`` 在设置后返回请求顺序的结果。
 所有可见交互都走共享 ``Humanizer``；不新增测试接缝，也不使用 hash 类名。
+
+真机 2026-11-24 补充：候选面板是**创建弹窗之外的兄弟 ``role="dialog"``**
+（portal 定位在入口附近），不是 ``el.closest('[role="dialog"]')`` 的后代。
+面板解析规则：创建弹窗自身含可见的非 switch checkbox 行时用创建弹窗
+（既有受控 DOM 形态）；否则在所有可见 ``role="dialog"`` 里取同样含可见
+非 switch checkbox 行、且与协作者入口几何最近的兄弟弹窗。Done/完成、
+候选行与 Reels checkbox 回读都限定在这个解析出的面板内。
 """
 from __future__ import annotations
 
@@ -81,6 +88,7 @@ DONE_TIMEOUT_MS = 5_000
 MAX_REPORTED_CANDIDATES = 10
 _POLL_SECONDS = 0.1
 _ROW_ATTR = 'data-instagram-collaborator-row'
+_PANEL_ATTR = 'data-instagram-collaborator-panel'
 
 # 只有页面明确说明账号/地区不具备协作者资格时才使用 account_ineligible；
 # 单纯 disabled 记 control_disabled。
@@ -109,17 +117,19 @@ _COLLABORATOR_RESTRICTION_PATTERNS = (
     ),
 )
 
-# 候选行：从 checkbox 出发找最近的 role=button/button/li/label 行；只读取
-# username 首 token。AI/评论开关是 role=switch，明确排除。
-_ROWS_JS = """(el, action) => {
-  const dialog = el.closest('[role="dialog"]') || document;
+# 面板解析（真机 2026-11-24）：候选面板是创建弹窗之外的兄弟 role=dialog。
+# 先认创建弹窗自身（既有受控 DOM 把结果列表嵌在弹窗内）；否则在所有可见
+# role=dialog 中取“含可见非 switch checkbox 行”且与协作者入口几何最近的
+# 弹窗。只检查 dialog/checkbox 结构，不扫描页面文案，也不使用 hash 类名。
+_PANEL_HELPERS_JS = """
   const norm = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
   const visible = (node) => {
     if (!node || !node.getClientRects().length) return false;
     const style = getComputedStyle(node);
     return style.visibility !== 'hidden' && style.display !== 'none';
   };
-  const rowFor = (input) => {
+  const composer = el.closest('[role="dialog"]');
+  const rowForInput = (input, dialog) => {
     let row = input.closest('button, [role="button"], li, label');
     if (!row) row = input.parentElement;
     while (row && row !== dialog && !norm(row.innerText || row.textContent)) {
@@ -127,12 +137,56 @@ _ROWS_JS = """(el, action) => {
     }
     return row && row !== dialog ? row : null;
   };
+  const hasCandidateRows = (dialog) => {
+    if (!dialog || !visible(dialog)) return false;
+    for (const input of dialog.querySelectorAll('input[type="checkbox"]')) {
+      if ((input.getAttribute('role') || '').toLowerCase() === 'switch') {
+        continue;
+      }
+      if (!visible(input)) continue;
+      const row = rowForInput(input, dialog);
+      if (!row || !visible(row)) continue;
+      if (!norm(row.innerText || row.textContent || '')) continue;
+      return true;
+    }
+    return false;
+  };
+  const entryRect = el.getBoundingClientRect();
+  const distanceTo = (node) => {
+    const rect = node.getBoundingClientRect();
+    const dx = Math.max(
+      0, Math.max(rect.left - entryRect.right, entryRect.left - rect.right));
+    const dy = Math.max(
+      0, Math.max(rect.top - entryRect.bottom, entryRect.top - rect.bottom));
+    return Math.hypot(dx, dy);
+  };
+  const resolvePanel = () => {
+    if (hasCandidateRows(composer)) return composer;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const dialog of document.querySelectorAll('[role="dialog"]')) {
+      if (dialog === composer || !hasCandidateRows(dialog)) continue;
+      const distance = distanceTo(dialog);
+      if (best === null || distance < bestDistance) {
+        best = dialog;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  };
+"""
+
+# 候选行：从 checkbox 出发找最近的 role=button/button/li/label 行；只读取
+# username 首 token。AI/评论开关是 role=switch，明确排除。
+_ROWS_JS = """(el, action) => {""" + _PANEL_HELPERS_JS + """
+  const panel = resolvePanel();
+  if (!panel) return (action && action.action === 'list') ? [] : null;
   const seen = new Set();
   const rows = [];
-  for (const input of dialog.querySelectorAll('input[type="checkbox"]')) {
+  for (const input of panel.querySelectorAll('input[type="checkbox"]')) {
     if ((input.getAttribute('role') || '').toLowerCase() === 'switch') continue;
     if (!visible(input)) continue;
-    const row = rowFor(input);
+    const row = rowForInput(input, panel);
     if (!row || seen.has(row)) continue;
     seen.add(row);
     const text = norm(row.innerText || row.textContent || '');
@@ -160,6 +214,15 @@ _ROWS_JS = """(el, action) => {
   if (norm(target.username).toLowerCase() !==
       norm(action.username).toLowerCase()) return null;
   target.node.setAttribute('data-instagram-collaborator-row', action.stamp);
+  return true;
+}"""
+
+# 用一次性属性戳把解析出的面板交给 Playwright locator；Done/完成 必须落在
+# 这个面板内（兄弟 portal 或创建弹窗），不能全页搜索。
+_PANEL_JS = """(el, stamp) => {""" + _PANEL_HELPERS_JS + """
+  const panel = resolvePanel();
+  if (!panel) return false;
+  panel.setAttribute('data-instagram-collaborator-panel', stamp);
   return true;
 }"""
 
@@ -457,40 +520,66 @@ class CollaboratorsControl:
         self._confirmed = list(confirmed)
 
     # -- panel ------------------------------------------------------------
-    async def _done(self) -> Locator | None:
-        """可见的 Done/完成 按钮；角色定位优先，兼容嵌套文本行。"""
-        dialog = self._dialog()
+    async def _panel(self, entry: Locator) -> Locator | None:
+        """解析当前活动的协作者面板并返回一次性定位器。
+
+        真机面板是入口所在创建弹窗之外的兄弟 ``role="dialog"``；这里用入口
+        元素做锚点，由 ``_PANEL_JS`` 按结构 + 几何选出面板，再用一次性属性
+        戳定位刚选中的节点。面板不存在/已收起时返回 ``None``。
+        """
+        token = uuid4().hex
+        try:
+            stamped = await entry.evaluate(_PANEL_JS, token)
+        except Exception:
+            return None
+        if not stamped:
+            return None
+        panel = self._page.locator(f'[{_PANEL_ATTR}="{token}"]')
+        try:
+            if await panel.count() != 1:
+                return None
+        except Exception:
+            return None
+        return panel
+
+    async def _done(self, entry: Locator) -> Locator | None:
+        """已解析面板内可见的 Done/完成；角色定位优先，兼容嵌套文本行。"""
+        panel = await self._panel(entry)
+        if panel is None:
+            return None
         for label in DONE_LABELS:
-            button = dialog.get_by_role('button', name=label, exact=True).first
+            button = panel.get_by_role(
+                'button', name=label, exact=True
+            ).first
             try:
                 if await button.count() and await button.is_visible():
                     return button
             except Exception:
                 continue
-        return await row_for(dialog, DONE_LABELS)
+        return await row_for(panel, DONE_LABELS)
 
     async def _open_panel(self, entry: Locator) -> None:
         """聚焦优先；只有面板仍未出现时才点击入口。"""
-        if await self._done() is not None:
+        if await self._done(entry) is not None:
             return
         await entry.focus()
-        if await self._wait_panel(open_=True):
+        if await self._wait_panel(entry, open_=True):
             return
         await self._behavior().click(entry)
-        await self._wait_panel(open_=True)
+        await self._wait_panel(entry, open_=True)
 
     async def _close_panel(self, entry: Locator) -> bool:
-        done = await self._done()
+        done = await self._done(entry)
         if done is None:
             return False
         self._check_budget()
         await self._behavior().click(done)
-        return await self._wait_panel(open_=False)
+        return await self._wait_panel(entry, open_=False)
 
-    async def _wait_panel(self, *, open_: bool) -> bool:
+    async def _wait_panel(self, entry: Locator, *, open_: bool) -> bool:
         deadline = time.monotonic() + self._timeout(PANEL_TIMEOUT_MS) / 1000
         while True:
-            is_open = await self._done() is not None
+            is_open = await self._done(entry) is not None
             if is_open is open_:
                 return True
             if time.monotonic() >= deadline:
