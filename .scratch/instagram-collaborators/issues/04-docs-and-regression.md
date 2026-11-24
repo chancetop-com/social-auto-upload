@@ -6,10 +6,12 @@
 
 **Status:** ready-for-agent
 
-- [ ] CLI 文档包含 `--collaborator` 示例、五个 `options` 键、失败原因与退出码，并明确 `set` 不代表接受。
-- [ ] Instagram Skill 从「协作者未接入」改为已接入，说明上限 5、逐个回读、语言/选择器策略与接受状态边界。
-- [ ] CHANGELOG 的 Unreleased 条目记录能力、上限证据日期与账号、以及「不验证接受状态」。
-- [ ] 文档明确 `no_same_username_candidate` 为新增原因值，`list_not_collapsed` 的描述已拓宽。
-- [ ] 既有 location / alt_text / comments / ai_generated 与 `--no-publish` 回归全绿；未传 `--collaborator` 时零控件交互。
-- [ ] `options` 始终包含五个键；旧消费方忽略新键即可，既有字段与取值不变。
-- [ ] 文档记录已知限制：图文/Reels 的 UI 差异、网页上限可能漂移、未来 user tags 需要区分 chip。
+**Resolution:** completed
+
+- [x] CLI 文档包含 `--collaborator` 示例、五个 `options` 键、失败原因与退出码，并明确 `set` 不代表接受。
+- [x] Instagram Skill 从「协作者未接入」改为已接入，说明上限 5、逐个回读、语言/选择器策略与接受状态边界。
+- [x] CHANGELOG 的 Unreleased 条目记录能力、上限证据日期与账号、以及「不验证接受状态」。
+- [x] 文档明确 `no_same_username_candidate` 为新增原因值，`list_not_collapsed` 的描述已拓宽。
+- [x] 既有 location / alt_text / comments / ai_generated 与 `--no-publish` 回归全绿；未传 `--collaborator` 时零控件交互。
+- [x] `options` 始终包含五个键；旧消费方忽略新键即可，既有字段与取值不变。
+- [x] 文档记录已知限制：图文/Reels 的 UI 差异、网页上限可能漂移、未来 user tags 需要区分 chip。

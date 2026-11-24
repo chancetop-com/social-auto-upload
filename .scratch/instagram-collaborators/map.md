@@ -16,6 +16,7 @@ Label: wayfinder:map
 
 ## Decisions so far
 
+- 2026-11-24：tickets 01–05 全部完成；真实账号 `--no-publish` 验收通过（图文/Reels × 1 人/多人）；代码审查修复已合并（`9b19b07`）。
 - [规格](./spec.md) — `Status: ready-for-agent`；`--collaborator` 可重复；trim / 去一个前导 `@` / 转小写；重复与空值退出 `2`；上限 5；只按 username 精确匹配；逐次回读、首个失败即停；结果只记 `options.collaborators`，不记邀请状态。
 - [实测](./findings.md) — 两帖型都有入口；都走 Collaborators 面板 + Done，图文另有预览图 chip 可逐个回读，Reels 只能读面板 checkbox；Done 保留已选；网页上限 5；`nike` 子串会误选 `_nikeza5`。
 - 2026-11-24：Reels 面板收不起来复用 `list_not_collapsed`；文档描述拓宽为「候选列表或协作者面板未收起」，不新增原因值。

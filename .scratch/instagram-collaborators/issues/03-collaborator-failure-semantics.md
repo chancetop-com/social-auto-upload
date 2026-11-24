@@ -6,11 +6,13 @@
 
 **Status:** ready-for-agent
 
-- [ ] 入口缺失：`unsupported` + `entry_missing`，退出 `1`，Share 点击为零。
-- [ ] 入口禁用或页面明确账号不合格：`unsupported` + `account_ineligible` 或 `control_disabled`，退出 `1`。
-- [ ] 搜索无候选：`mismatch` + `no_candidates`；有候选但无同 username：`mismatch` + `no_same_username_candidate`。
-- [ ] 点击后未选中或回读不到：`mismatch` + `selection_failed` 或 `final_mismatch`，`applied` 保留已确认部分。
-- [ ] 创建页被前台确认框遮挡：`mismatch` + `editor_obscured`，不点 Share，不把读不到控件误报成入口缺失。
-- [ ] Reels 面板未收起：`mismatch` + `list_not_collapsed`；文档描述同步拓宽为「候选列表或协作者面板未收起」。
-- [ ] 首个失败即停：后续 username 不再尝试，结果只记一个原因；失败前的 `applied` 按请求顺序保留。
-- [ ] 两帖型都覆盖上述分支；每个失败分支的 Share 点击为零，退出码为 `1`（静态错误仍为 `2`）。
+**Resolution:** completed
+
+- [x] 入口缺失：`unsupported` + `entry_missing`，退出 `1`，Share 点击为零。
+- [x] 入口禁用或页面明确账号不合格：`unsupported` + `account_ineligible` 或 `control_disabled`，退出 `1`。
+- [x] 搜索无候选：`mismatch` + `no_candidates`；有候选但无同 username：`mismatch` + `no_same_username_candidate`。
+- [x] 点击后未选中或回读不到：`mismatch` + `selection_failed` 或 `final_mismatch`，`applied` 保留已确认部分。
+- [x] 创建页被前台确认框遮挡：`mismatch` + `editor_obscured`，不点 Share，不把读不到控件误报成入口缺失。
+- [x] Reels 面板未收起：`mismatch` + `list_not_collapsed`；文档描述同步拓宽为「候选列表或协作者面板未收起」。
+- [x] 首个失败即停：后续 username 不再尝试，结果只记一个原因；失败前的 `applied` 按请求顺序保留。
+- [x] 两帖型都覆盖上述分支；每个失败分支的 Share 点击为零，退出码为 `1`（静态错误仍为 `2`）。

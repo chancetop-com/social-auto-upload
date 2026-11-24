@@ -6,12 +6,14 @@
 
 **Status:** ready-for-agent
 
-- [ ] 图文/轮播与 Reels 各完成一次 `--no-publish`，结果为 `prepared`，`options.collaborators.status=set`，`applied` 与请求一致。
-- [ ] Share 点击为零；未发出任何邀请。
-- [ ] 记录账号别名、界面语言、帖型、请求/已选列表与停止点，作为验收证据。
-- [ ] 覆盖至少一个 1 人请求和一个多人（2–5 人）请求；两帖型都能逐个回读。
-- [ ] 登录失效时明确报告 `blocked: login required`，不尝试自动登录，不把该情况记为代码失败。
-- [ ] 不要求第二账号接受邀请；接受状态不影响本次验收结论。
+**Resolution:** completed
+
+- [x] 图文/轮播与 Reels 各完成一次 `--no-publish`，结果为 `prepared`，`options.collaborators.status=set`，`applied` 与请求一致。
+- [x] Share 点击为零；未发出任何邀请。
+- [x] 记录账号别名、界面语言、帖型、请求/已选列表与停止点，作为验收证据。
+- [x] 覆盖至少一个 1 人请求和一个多人（2–5 人）请求；两帖型都能逐个回读。
+- [x] 登录失效时明确报告 `blocked: login required`，不尝试自动登录，不把该情况记为代码失败。
+- [x] 不要求第二账号接受邀请；接受状态不影响本次验收结论。
 
 ## Comments
 
