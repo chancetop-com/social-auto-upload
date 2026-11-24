@@ -279,6 +279,29 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertEqual(outcome.chips, ["nike"])
         self.assertEqual(outcome.row_clicks, 1)
 
+    def test_double_leading_at_preserves_second_at_and_never_selects_alice(
+        self,
+    ):
+        outcome = self._apply(
+            collaborator_page_html([("alice", "Alice")]),
+            options=InstagramPublishOptions(collaborators=("@@alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(no_candidates)", str(outcome.error)
+        )
+        self.assertEqual(
+            outcome.saved["options"]["collaborators"],
+            {
+                "requested": ["@alice"],
+                "applied": [],
+                "status": MISMATCH,
+                "reason": NO_CANDIDATES,
+            },
+        )
+        self.assertEqual(outcome.chips, [])
+        self.assertEqual(outcome.row_clicks, 0)
+        self.assertEqual(outcome.share_clicks, 0)
+
     def test_english_and_chinese_placeholder_fallbacks(self):
         for entry in ("en", "zh"):
             with self.subTest(entry=entry):

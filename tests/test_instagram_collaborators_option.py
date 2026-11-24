@@ -130,6 +130,39 @@ class InstagramCollaboratorNormalizationTests(unittest.TestCase):
         untouched = InstagramPublishOptions(location="Shanghai")
         self.assertIs(normalize_publish_options(untouched), untouched)
 
+    def test_double_at_is_normalized_only_once_across_cli_validation_and_uploader(
+        self,
+    ):
+        built = instagram_command._build_publish_options(
+            SimpleNamespace(collaborator=["@@Alice"])
+        )
+        self.assertEqual(built.collaborators, ("@alice",))
+        self.assertEqual(
+            normalize_publish_options(built).collaborators, ("@alice",)
+        )
+        validate_publish_options(built, image_count=1, caption="caption")
+        with tempfile.TemporaryDirectory() as folder:
+            app = InstagramUploader(
+                "unused.json",
+                title="caption",
+                image_files=[str(Path(folder) / "image.png")],
+                options=built,
+                result_file=Path(folder) / "result.json",
+            )
+            self.assertEqual(app.options.collaborators, ("@alice",))
+
+        at_only = instagram_command._build_publish_options(
+            SimpleNamespace(collaborator=["@@"])
+        )
+        self.assertEqual(at_only.collaborators, ("@",))
+        validate_publish_options(at_only, image_count=1, caption="caption")
+
+        distinct = instagram_command._build_publish_options(
+            SimpleNamespace(collaborator=["@@alice", "alice"])
+        )
+        self.assertEqual(distinct.collaborators, ("@alice", "alice"))
+        validate_publish_options(distinct, image_count=1, caption="caption")
+
 
 class InstagramCollaboratorResultTests(unittest.TestCase):
     """A 层：第五个键、requested/applied 形状与状态映射。"""

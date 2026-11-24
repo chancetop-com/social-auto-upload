@@ -51,7 +51,6 @@ from ..options import (
     OptionMismatchError,
     OptionUnsupportedError,
     clamp_wait,
-    normalize_collaborator_name,
 )
 from ._collaborator_dom import (
     DONE_LABELS,
@@ -396,7 +395,8 @@ class CollaboratorsControl:
         self._confirmed = None
         if isinstance(requested, str):
             requested = (requested,)
-        names = [normalize_collaborator_name(value) for value in requested]
+        # 入口前已由 options.py 完成一次去前导 @；此处只做大小写/空白统一，绝不再剥 @。
+        names = [str(value).strip().lower() for value in requested]
         try:
             entry = await self._entry(self._timeout(ENTRY_TIMEOUT_MS))
         except (LoginRequiredError, PublishResultUnknownError):
@@ -730,10 +730,10 @@ class CollaboratorsControl:
     def _exact_candidate(
         requested: str, candidates: list[CollaboratorCandidate]
     ) -> CollaboratorCandidate | None:
-        """首个 username 首 token 规范化后完全相等的候选；不比较显示名。"""
-        wanted = normalize_collaborator_name(requested)
+        """首个 username 首 token 精确相等的候选；不再剥离 ``@``，也不比较显示名。"""
+        wanted = str(requested).strip().lower()
         for candidate in candidates:
-            if normalize_collaborator_name(candidate.username) == wanted:
+            if candidate.username.strip().lower() == wanted:
                 return candidate
         return None
 
@@ -858,7 +858,7 @@ class CollaboratorsControl:
             return None
         names: list[str] = []
         for chip in chips:
-            name = normalize_collaborator_name(str(chip or '').strip())
+            name = str(chip or '').strip().lower()
             if name and name not in names:
                 names.append(name)
         return names
@@ -881,9 +881,7 @@ class CollaboratorsControl:
         for row in rows:
             if not isinstance(row, dict) or not row.get('checked'):
                 continue
-            name = normalize_collaborator_name(
-                str(row.get('username') or '').strip()
-            )
+            name = str(row.get('username') or '').strip().lower()
             if name and name not in names:
                 names.append(name)
         return names

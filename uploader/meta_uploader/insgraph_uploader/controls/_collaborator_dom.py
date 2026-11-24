@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import re
 
-from ..options import normalize_collaborator_name
-
 # 入口选择器：结构属性优先，然后英文/中文 placeholder 与 aria-label，最后更宽
 # 的中英文回退。定位限定在包含可见入口的创建弹窗内；没有弹窗祖先的输入框
 # 不参与解析，也不做全页 locator。
@@ -295,11 +293,7 @@ def collaborator_count_summary(
     text = ' '.join(str(value or '').split())
     if not text:
         return None
-    if (
-        query is not None
-        and normalize_collaborator_name(text)
-        == normalize_collaborator_name(query)
-    ):
+    if query is not None and text.lower() == query.strip().lower():
         return None
     match = _COLLABORATOR_COUNT_SUMMARY.fullmatch(text)
     if not match:

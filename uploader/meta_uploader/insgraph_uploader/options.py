@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from utils.errors import UsageError
@@ -76,6 +76,9 @@ class InstagramPublishOptions:
     comments: bool | None = None          # False = 关闭评论
     ai_generated: bool | None = None
     collaborators: tuple[str, ...] | None = None
+    _collaborators_normalized: bool = field(
+        default=False, repr=False, compare=False
+    )
 
 
 class InstagramOptionControl(Protocol):
@@ -188,15 +191,44 @@ def normalize_collaborators(
     return tuple(normalized)
 
 
+def _validate_normalized_collaborators(
+    values: tuple[str, ...] | list[str] | str,
+) -> tuple[str, ...]:
+    """校验已归一化协作者列表（不再剥离前导 ``@``，保持单次归一化幂等）。"""
+    if isinstance(values, str):
+        values = (values,)
+    checked: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise UsageError("Instagram 协作者 username 必须是字符串")
+        name = value.strip().lower()
+        if not name:
+            raise UsageError("Instagram 协作者 username 不能为空")
+        if name in checked:
+            raise UsageError(f"Instagram 协作者重复：{name}（不会自动去重）")
+        checked.append(name)
+    if not checked:
+        raise UsageError("Instagram 协作者至少需要 1 个 username")
+    if len(checked) > MAX_COLLABORATORS:
+        raise UsageError(
+            f"Instagram 协作者最多 {MAX_COLLABORATORS} 个，实际 {len(checked)} 个"
+        )
+    return tuple(checked)
+
+
 def normalize_publish_options(
     options: InstagramPublishOptions | None,
 ) -> InstagramPublishOptions | None:
-    """返回协作者已归一化的选项副本；CLI 与上传器构造共用同一入口。"""
+    """返回协作者已归一化的选项副本；对已归一化副本保持幂等，不重复剥 ``@``。"""
     if options is None or options.collaborators is None:
+        return options
+    if options._collaborators_normalized:
+        _validate_normalized_collaborators(options.collaborators)
         return options
     return replace(
         options,
         collaborators=normalize_collaborators(options.collaborators),
+        _collaborators_normalized=True,
     )
 
 
@@ -402,5 +434,9 @@ def validate_publish_options(
     ):
         raise UsageError("Instagram 地点不能为空")
 
-    # 归一化/重复/上限都在共享纯函数里；这里只触发校验，结果由构造方写入。
-    normalize_collaborators(options.collaborators)
+    # 已归一化副本只复检边界，不再二次剥离前导 @；原始输入走共享纯函数。
+    if options.collaborators is not None:
+        if options._collaborators_normalized:
+            _validate_normalized_collaborators(options.collaborators)
+        else:
+            normalize_collaborators(options.collaborators)
