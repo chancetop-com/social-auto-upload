@@ -835,7 +835,7 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 视频/Reel 可用 `--thumbnail` 指定 JPG/JPEG/PNG 封面；省略时使用 Instagram 默认封面。指定图片后会检查主预览确实使用该图片，失败则停止提交。封面按当前视频画幅居中裁剪，图片边缘的重要文字应留出安全区域。图文发布不接受此参数。
 
-`--no-publish`：素材上传、配文/话题、全部发布选项完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，记录平台、标题、选项与配文话题，不写 `content_id`/`post_id`/`post_url`。
+`--no-publish`：素材上传、配文/话题、全部发布选项（含协作者的逐个选中与回读）完成后，等待 Share 可点击（窗口 `min(60s, 剩余预算)`）即停止，不点击 Share、不等待 `--not-before`、不进入结果观察；成功退出 `0`，就绪超时退出 `1`。若使用 `--result`，结果文件状态为 `prepared`，记录平台、标题、选项与配文话题，不写 `content_id`/`post_id`/`post_url`。
 
 `login` 在同一个持久化 context 中等待人工登录和必要验证，资料由浏览器保存在 `browser_profiles/<chrome|chromium>/instagram/<原始别名>/`；`check`、视频/图文和作品操作复用同目录。当前会话须有正向登录证据和有效 `ds_user_id`，别名不绑定真实账号，两种浏览器可以登录不同账号。正常命令不读取、导出、迁移或删除旧 Cookie JSON。只有 login 引导登录；其他动作缺少 Profile、明确未登录/验证退出 `10`，探测、网络、页面和必需字段故障退出 `1`。`check` 不代替发布权限检查。
 
@@ -853,11 +853,12 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 
 ### Instagram 发布选项
 
-`upload-video` / `upload-note` 已接入四项网页发布选项，全部可选；**不传即完全不动页面默认**，也不会读取任何相关控件。
+`upload-video` / `upload-note` 已接入五项网页发布选项，全部可选；**不传即完全不动页面默认**，也不会读取任何相关控件。`--collaborator` 只负责在创建页选中协作者，不表示邀请已送达或已被接受。
 
 | 参数 | 命令 | 行为 |
 |---|---|---|
 | `--location TEXT` | `upload-video`、`upload-note` | 在 Instagram 的联想列表里按候选**名称**选择：去掉首尾空白、合并连续空白、忽略大小写；候选行若名称/地址分行，只比较第一行名称，点页面顺序第一个同名行并记录该行可见地址。要求列表/行收起且地点框回读所选名称；无候选、只有近似候选、入口缺失、页面明确资格限制、列表未收起或回读为空/不符均退出 `1`、不点击 Share，结果记录原因 |
+| `--collaborator USERNAME` | `upload-video`、`upload-note` | 可重复，每次一个 username；归一化后 1–5 个并逐个选中：打开 Collaborators 面板、按 username 精确匹配候选、点击后立即回读（图文/轮播读预览 chip，Reels 读面板 checkbox），全部完成后点 Done/完成并确认收起。首个失败即停、不点击 Share；没有移除 flag。`status=set` 只表示创建页已选中 |
 | `--no-comments` | `upload-video`、`upload-note` | 请求关闭评论。确认入口缺失或读到已关闭可继续。可操作的开关须在设置后确认关闭。禁用的评论开关记录可读终值和 `default_off/account_ineligible`，继续执行 |
 | `--ai-generated` | `upload-video`、`upload-note` | 请求打开 AI 生成标识；入口缺失、不可用或回读仍为关闭时退出 `1`，不点击 Share |
 | `--no-ai-generated` | `upload-video`、`upload-note` | 请求关闭 AI 生成标识；可见开关已关、从开切到关并回读、或确认入口缺失时可继续；可见但禁用且仍为开启、或无法回读时退出 `1` |
@@ -866,6 +867,11 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 - `--ai-generated` 与 `--no-ai-generated` 互斥，同时传入由 argparse 退出 `2`；没有 `--aigc` 别名。
 - 没有 `--comments`：评论只有“请求关闭”一个方向，想保持开启就不传 `--no-comments`。
 - `--alt-text` 按 `--images` 顺序逐张填写；`upload-video --alt-text` 由 argparse 拒绝，退出 `2`。
+- `--collaborator USERNAME` 可重复，每个值只接受一个 username；不提供 `--collaborators a,b` 逗号分隔形态，也没有移除协作者的 flag。处理前依次去掉首尾空白、去掉一个前导 `@`、转小写；归一化后为空、重复（`alice` 与 `@Alice` 视为同一个）或超过 5 个，都在启动浏览器前退出 `2`，不会静默去重。不传 `--collaborator` 时不解析、不读取协作者控件，结果记 `not_requested`。
+- 候选行文本为 `username display name`，只取首个 token 按 username 精确匹配；显示名、前缀、包含关系与模糊匹配都不参与（请求 `nike` 不会选中 `_nikeza5`）。每选中一个 username 立即回读：图文/轮播确认预览图 chip，Reels 确认面板 checkbox；全部完成后点 `Done`/「完成」并确认面板收起。首个失败即停止列表，`applied` 保留失败前已确认的前缀，且不点击 Share。
+- 网页上限 5 来自 2026-11-24 的真实账号探测（账号 `luke` / `lukechen918`，Profile `browser_profiles/chrome/instagram/luke`，图文与 Reels 均为 5）。Meta Content Publishing API 文档写 3，但本 CLI 自动化的是网页创建页，因此按网页能力执行；上限可能随账号、地区或灰度变化，若页面实际允许更少，第 N 个会在回读时失败并停止。
+- `status=set` 只表示创建页已选中该 username，不代表邀请已发送、待接受或已接受。本 CLI 不查询、不验证接受状态，也不提供发布后增删协作者；验收停在 Share 前不能证明任何邀请被接受。
+- 协作者的退出码与既有约定一致：静态错误（空值/重复/超过 5 个等）`2`；点击 Share 前的入口、匹配、回读或面板失败 `1`；登录/验证 `10`；托管限流 `11`；只有已经点击 Share 后的结果未知才是 `9`。协作者失败发生在点击前，因此不会退化为 `9`。
 - 选项动作与回读（set-then-readback）在点击 Share **之前**完成。任何一项未生效都退出 `1`、不点击发布，也不会用到 `9`；结果文件仍会记录每项状态和失败证据。
 
 单独传 `--no-ai-generated`（不请求地点）时，分享前的 AI 记录按下表判定：
@@ -882,15 +888,19 @@ sau instagram upload-note --account creator --images videos/demo1.png videos/dem
 - 省略 AI 参数时不读取、不点击开关，结果记 `not_requested`，页面原值保持不变（原本开启也保持开启）。
 
 ```powershell
-sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --result .local/instagram-carousel.json
-sau instagram upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文" --no-comments --result .local/instagram-video.json
+sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "轮播标题" --note "正文" --location "Shanghai, China" --no-comments --ai-generated --alt-text "第一张的替代文字" --alt-text "第二张的替代文字" --collaborator alice --collaborator bob --result .local/instagram-carousel.json
+sau instagram upload-video --account creator --file videos/demo.mp4 --title "视频标题" --desc "正文" --no-comments --collaborator alice --result .local/instagram-video.json
 ```
 
-示例中的 `--location` 必须与 Instagram 候选的**名称**完全一致（忽略大小写与多余空白）；候选行若同时显示地址，地址不参与匹配或传参，只作为所点行证据记录。候选名称随账号和地区变化，建议先用 `--headed` 观察一次再固定。
+示例中的 `--location` 必须与 Instagram 候选的**名称**完全一致（忽略大小写与多余空白）；候选行若同时显示地址，地址不参与匹配或传参，只作为所点行证据记录。候选名称随账号和地区变化，建议先用 `--headed` 观察一次再固定。`--collaborator` 的 username 需与候选行首 token 完全一致（忽略大小写与一个前导 `@`）；重复 flag 的顺序就是请求顺序。
 
-其余网页选填能力仍保留页面默认，CLI 不读取也不修改：协作者、Stories、定时发布、配乐/曲库、选帧封面、用户标签、滤镜、隐藏点赞/播放数。上述四项之外的元数据仍不做发布后回读对账；已知平台会在个别情况下降级元数据（等同官方 API 的 `config_issue`），本轮不检测。
+其余网页选填能力仍保留页面默认，CLI 不读取也不修改：Stories、定时发布、配乐/曲库、选帧封面、用户标签、滤镜、隐藏点赞/播放数。上述五项之外的元数据仍不做发布后回读对账；已知平台会在个别情况下降级元数据（等同官方 API 的 `config_issue`），本轮不检测。用户标签（user tags）本次未实现；未来实现时必须区分协作者 chip 与用户标签，不能把协作者 chip 当作用户标签。
 
-结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated` 四个键，每项为 `{requested, applied, status[, reason][, detail]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible` / `editor_obscured` / `control_disabled` / `no_candidates` / `no_same_name_candidate` / `selection_failed` / `list_not_collapsed` / `final_empty` / `final_mismatch`（无归因时省略）；`detail` 说明遮挡或页面明确写出的资格限制文案。`location` 成功时兼容追加 `candidate_name`、`candidate_index`，候选行显示地址时再追加 `candidate_address`；既有 `requested` / `applied` / `status` 不删除、不改名。`options` 是新增字段，旧消费方可直接忽略，原有字段与取值保持兼容。配文回读通过后另行追加顶层 `topics` 数组，详见下一节。
+结果 JSON 新增顶层 `options` 对象，固定包含 `location`、`alt_text`、`comments`、`ai_generated`、`collaborators` 五个键，每项为 `{requested, applied, status[, reason][, detail]}`：`status` 取 `not_requested` / `set` / `default_off` / `unsupported` / `mismatch`，`reason` 取 `entry_missing` / `account_ineligible` / `editor_obscured` / `control_disabled` / `no_candidates` / `no_same_name_candidate` / `no_same_username_candidate` / `selection_failed` / `list_not_collapsed` / `final_empty` / `final_mismatch`（无归因时省略）；`detail` 说明遮挡、页面明确写出的资格限制、候选列表或已确认前缀等现场信息。`location` 成功时兼容追加 `candidate_name`、`candidate_index`，候选行显示地址时再追加 `candidate_address`；既有 `requested` / `applied` / `status` 不删除、不改名。
+
+`collaborators.requested` 是归一化后的 username 数组（未传为 `null`），`applied` 是已确认选中的 username 数组，按请求顺序；没有确认项时为 `[]`，无法读取时为 `null`。`status=set` 只表示创建页已选中，不代表邀请已发送、待接受或已接受。协作者不使用 `final_empty`；失败原因包括 `entry_missing`、`account_ineligible`、`control_disabled`、`no_candidates`、`no_same_username_candidate`（新增，和地点的 `no_same_name_candidate` 是不同契约）、`selection_failed`、`final_mismatch`、`list_not_collapsed`（候选列表或协作者面板未收起）与 `editor_obscured`。添加中途发布预算耗尽时，按无 `reason` 的 `mismatch` 记录，`applied` 保留已确认前缀，`detail` 说明预算与已确认项；任何失败都不点击 Share、退出 `1`。
+
+`options` 是新增字段，旧消费方可直接忽略，原有字段与取值保持兼容。配文回读通过后另行追加顶层 `topics` 数组，详见下一节。
 
 ### Instagram 配文话题
 
@@ -900,11 +910,11 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 - 结果 JSON 顶层兼容追加 `topics` 数组，每项 `{index, text, name, start, end, status, reason}`；`platform`、`title`、`status`、`options` 不删除、不改名。stdout、默认 `.local/instagram-results/<uuid>.json` 与 `--result PATH` 三处内容一致。`--no-publish` 成功仍为 `prepared`，正常发布仍为 `published`。
 - 证据阶段：2026-11-20 简体中文 Creator Reel 与两图轮播在 `--no-publish` 分享前正文含 `#color #study`，该批记录未逐词回读话题；2026-11-21 使用简体中文 Creator 实机 `--no-publish` 复跑通过（`status=prepared`，地点与 AI 开关均回读）。重复词、URL `#片段`、空行、紧邻标点、中英混排、吞字/错位/多余追加与整帖硬限制由受控真实 Chrome 页离线验收。
 
-本地模式保持浏览器/Profile/站点原有语言，不设置 locale、请求头、固定 viewport 或最大化；托管模式不应用该设置，MLX / AdsPower / 比特浏览器的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。
+本地模式保持浏览器/Profile/站点原有语言，不设置 locale、请求头、固定 viewport 或最大化；托管模式不应用该设置，MLX / AdsPower / 比特浏览器的 Instagram Profile 必须人工保持 **English** 界面。若 Instagram 账号自身把语言设为中文，页面仍可能按账号设置渲染中文——先用 `--headed` 观察一次；入口缺失时日志会打印 `html[lang]` 便于判断。协作者控件同样结构优先：先找 `input[name="creation-collaborator-input"]`，再回退英文 `Add collaborators` / 中文「添加合作者」等 placeholder/aria-label，不依赖固定 en-US。
 
-> 选择器证据主要来自 **English 界面 + Personal 账号**；中文标签与专业账号的其余选项尚未全部验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。AI 开关另有 2026-11-20 简体中文 Creator 分享前证据。
+> 选择器证据主要来自 **English 界面 + Personal 账号**；中文标签与专业账号的其余选项尚未全部验证，可能以 `entry_missing` 结束。本节不承诺中文或专业账号可用。AI 开关另有 2026-11-20 简体中文 Creator 分享前证据。协作者入口与面板另有 2026-11-24 中英文入口、图文 chip 与 Reels checkbox 的探测证据；英文图文与中文 Reels 未单独复跑。
 >
-> 四项能力已在真实账号真发验收通过（2026-11-10，English UI、Personal 账号、本地 cookie 模式）：单条两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致（地点显示、`img[alt]` 逐张对应、无评论输入框、`AI content` 标签）；同日另以 `upload-video` 发布 Reel，验证 `--file` / `--thumbnail`（字节校验）/ `--desc` / `--tags`（旧版 `--tags` 行为，现已移除）与关闭评论、AI 标识，发布后 `#话题` 与 `AI content` 均正确。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。中文界面、专业账号与托管模式（MLX / AdsPower）仍未全面验收。
+> 四项能力已在真实账号真发验收通过（2026-11-10，English UI、Personal 账号、本地 cookie 模式）：单条两图轮播同时设置地点、两条替代文字、关闭评论与 AI 标识，发布后回读一致（地点显示、`img[alt]` 逐张对应、无评论输入框、`AI content` 标签）；同日另以 `upload-video` 发布 Reel，验证 `--file` / `--thumbnail`（字节校验）/ `--desc` / `--tags`（旧版 `--tags` 行为，现已移除）与关闭评论、AI 标识，发布后 `#话题` 与 `AI content` 均正确。证据见 `.scratch/instagram-browser-parity/research/08-acceptance-evidence.md`。中文界面、专业账号与托管模式（MLX / AdsPower）仍未全面验收。上述历史验收不含协作者；2026-11-24 的协作者探测（账号 `luke` / `lukechen918`）只验证到 Share 前的入口、上限与逐个回读，不代表任何邀请已送达或已被接受。
 >
 > 2026-11-20 另以简体中文 Creator 账号、本地 Chrome、`--no-publish` 在分享前复验 AI 开关：Reel 由关切到开并读到 `true`，两图轮播原本已关并读到 `false`。同日一次「放弃帖子？」确认框遮挡创建页，旧结果把 AI 误记为 `default_off`/`entry_missing`；现在遮挡会在分享前记 `mismatch`/`editor_obscured` 并停止，受控页面已回归，真实现场见 `.scratch/publish-metadata-support/research/instagram-creator-2026-11-20/carousel-options-error.json`。地点沿用同批 Creator 网页记录：Reel 与两图轮播均搜索 `Shanghai`，候选只显示名称，点首个同名行后分享前读到 `Shanghai`（`.scratch/publish-metadata-support/research/instagram-creator-2026-11-20/reel.json`、`carousel.json`）；该批运行使用代码版本 `ebdeb43`，本工单未新增真实账号运行，实机 CLI 样本未实测。名称/地址分行、同名异址、空列表、仅近似、入口缺失、明确资格限制、列表未收起与回读不符由受控页回归覆盖，不代表真实账号已观察到这些页面变体。替代文字与关闭评论的中文 Creator 验收范围不变。
 
