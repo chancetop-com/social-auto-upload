@@ -35,6 +35,7 @@ NO_SAME_NAME = "no_same_name_candidate"
 # 协作者候选行按 username 首 token 精确匹配；与地点的“名称”原因是不同契约。
 NO_SAME_USERNAME = "no_same_username_candidate"
 SELECTION_FAILED = "selection_failed"
+# 候选列表（地点/协作者）或 Collaborators 面板没有收起；不新增原因值。
 LIST_NOT_COLLAPSED = "list_not_collapsed"
 FINAL_EMPTY = "final_empty"
 FINAL_MISMATCH = "final_mismatch"

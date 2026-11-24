@@ -40,9 +40,9 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     ACCOUNT_INELIGIBLE,
     APPLY_ORDER,
     CONTROL_DISABLED,
+    DEFAULT_OFF,
     EDITOR_OBSCURED,
     ENTRY_MISSING,
-    FINAL_EMPTY,
     FINAL_MISMATCH,
     LIST_NOT_COLLAPSED,
     MISMATCH,
@@ -65,7 +65,7 @@ from uploader.meta_uploader.insgraph_uploader.options import (
     option_status,
     validate_publish_options,
 )
-from utils.errors import UsageError
+from utils.errors import PublishResultUnknownError, UsageError
 
 
 def _subparser(parser: argparse.ArgumentParser, platform: str, action: str):
@@ -365,11 +365,11 @@ class InstagramCollaboratorPipelineTests(unittest.TestCase):
             result_file=Path(folder) / "result.json",
         )
 
-    def _apply(self, app, controls):
+    def _apply(self, app, controls, *, budget=None):
         return asyncio.run(
             app._apply_options(
                 page=None,
-                budget=app.start_publish_budget(),
+                budget=budget or app.start_publish_budget(),
                 controls=controls,
             )
         )
@@ -499,6 +499,58 @@ class InstagramCollaboratorPipelineTests(unittest.TestCase):
                     )
                 )
             self.assertEqual(control.interactions, [])
+            self.assertFalse(app.publish_clicked)
+
+    def test_mid_list_budget_exhaustion_persists_the_confirmed_prefix(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(collaborators=("alice", "bob")),
+                folder=folder,
+            )
+            budget = app.start_publish_budget()
+            control = _FakeCollaboratorControl([[]])
+
+            async def set_then_exhaust(requested):
+                # 控件在确认 alice 后耗尽预算：此刻必须保留已确认前缀。
+                budget.deadline = time.monotonic() - 1
+                raise OptionMismatchError(
+                    "Instagram 协作者在添加「bob」前中止："
+                    f"{budget.pre_click_error()}",
+                    applied=["alice"],
+                )
+
+            control.set = set_then_exhaust
+            with self.assertRaises(RuntimeError) as ctx:
+                self._apply(app, {"collaborators": control}, budget=budget)
+            self.assertNotIsInstance(ctx.exception, PublishResultUnknownError)
+            self.assertIn("15 分钟", str(ctx.exception))
+            saved = json.loads(
+                Path(app.result_file).read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                saved["options"]["collaborators"],
+                {
+                    "requested": ["alice", "bob"],
+                    "applied": ["alice"],
+                    "status": MISMATCH,
+                },
+            )
+            self.assertFalse(app.publish_clicked)
+
+    def test_result_unknown_during_set_is_converted_to_plain_failure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = self._app(
+                InstagramPublishOptions(collaborators=("alice",)),
+                folder=folder,
+            )
+            control = _FakeCollaboratorControl(
+                [[]],
+                failure=PublishResultUnknownError("模拟点击前未知"),
+            )
+            with self.assertRaises(RuntimeError) as ctx:
+                self._apply(app, {"collaborators": control})
+            self.assertNotIsInstance(ctx.exception, PublishResultUnknownError)
+            self.assertIn("collaborators", str(ctx.exception))
             self.assertFalse(app.publish_clicked)
 
     def test_not_requested_collaborators_touch_no_control(self):
@@ -859,6 +911,11 @@ _COLLABORATOR_PAGE = """
           Number(document.body.dataset.rowClicks || 0) + 1);
         document.body.dataset.clickedUsername = candidate.username;
         document.body.dataset.clickedIndex = String(candidates.indexOf(candidate));
+        if (rowClick === 'detach-entry') {
+          // 模拟点击后回读通道消失：输入框被摘除，后续 evaluate 无法解析。
+          if (entry) entry.remove();
+          return;
+        }
         if (rowClick !== 'select') return;
         const toggle = () => {
           const index = selected.indexOf(candidate.username);
@@ -1016,10 +1073,38 @@ def _timeout_patches():
     )
 
 
+async def _expire_budget_after_username(page, budget, username):
+    """页面确认 ``username`` 后把发布预算推到过去，制造“列表中途耗尽”。
+
+    触发条件是页面可见的已选集合（chip / checkbox 同源），不是控件私有调用
+    次数；这样测试观察的就是真实的中途预算耗尽，而不是实现细节。
+    """
+    await page.wait_for_function(
+        """(username) => {
+          try {
+            return JSON.parse(document.body.dataset.selected || '[]')
+              .includes(username);
+          } catch (error) {
+            return false;
+          }
+        }""",
+        arg=username,
+    )
+    budget.deadline = time.monotonic() - 1
+
+
 class InstagramCollaboratorControlDomTests(unittest.TestCase):
     """C 层：真实 Chrome + 受控页，验证面板/精确匹配/chip 回读/Done。"""
 
-    def _apply(self, html, *, options, image_count=1):
+    def _apply(
+        self,
+        html,
+        *,
+        options,
+        image_count=1,
+        expire_after_selection=None,
+        readback_timeout_ms=None,
+    ):
         holder: dict[str, object] = {}
 
         async def scenario():
@@ -1042,11 +1127,23 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
                             result_file=result_file,
                         )
                         budget = app.start_publish_budget()
+                        monitor = None
+                        if expire_after_selection is not None:
+                            monitor = asyncio.create_task(
+                                _expire_budget_after_username(
+                                    page, budget, expire_after_selection
+                                )
+                            )
                         error = None
                         try:
                             await app._apply_options(page, budget=budget)
                         except Exception as wrapped:
                             error = wrapped
+                        finally:
+                            if monitor is not None:
+                                monitor.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await monitor
                         holder["app"] = app
                         holder["error"] = error
                         holder["saved"] = (
@@ -1080,7 +1177,15 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
                 finally:
                     await browser.close()
 
-        patches = _timeout_patches()
+        patches = list(_timeout_patches())
+        if readback_timeout_ms is not None:
+            patches.append(
+                patch.object(
+                    collaborators_control_module,
+                    "READBACK_TIMEOUT_MS",
+                    readback_timeout_ms,
+                )
+            )
         for item in patches:
             item.start()
         try:
@@ -1267,7 +1372,7 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
         self.assertEqual(outcome.saved["options"]["collaborators"]["applied"], [])
         self.assertEqual(outcome.share_clicks, 0)
 
-    def test_missing_chip_readback_is_final_empty(self):
+    def test_missing_chip_readback_is_final_mismatch(self):
         outcome = self._apply(
             _collaborator_page_html(
                 [("alice", "Alice")], render_chips=False
@@ -1275,11 +1380,89 @@ class InstagramCollaboratorControlDomTests(unittest.TestCase):
             options=InstagramPublishOptions(collaborators=("alice",)),
         )
         self.assertIn(
-            "collaborators=mismatch(final_empty)", str(outcome.error)
+            "collaborators=mismatch(final_mismatch)", str(outcome.error)
         )
         self.assertEqual(
-            outcome.saved["options"]["collaborators"]["reason"], FINAL_EMPTY
+            outcome.saved["options"]["collaborators"]["reason"], FINAL_MISMATCH
         )
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_unreadable_chip_and_checkbox_readback_is_final_mismatch(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")], row_click="detach-entry"
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(final_mismatch)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertIsNone(record["applied"])
+        self.assertEqual(record["reason"], FINAL_MISMATCH)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_explicit_account_restriction_is_account_ineligible(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                entry="missing",
+                restriction=(
+                    '<div id="collaborator-restriction" role="alert">'
+                    "Cannot add collaborators to this account."
+                    "</div>"
+                ),
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=unsupported(account_ineligible)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
+        self.assertIn("Cannot add collaborators", record["detail"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_missing_done_is_list_not_collapsed_not_entry_missing(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")], done_label="Fertig"
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        message = str(outcome.error)
+        self.assertIn("collaborators=mismatch(list_not_collapsed)", message)
+        self.assertNotIn("entry_missing", message)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["applied"], ["alice"])
+        self.assertEqual(record["reason"], LIST_NOT_COLLAPSED)
+        self.assertEqual(outcome.chips, ["alice"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_mid_list_budget_exhaustion_keeps_the_confirmed_prefix(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob"), ("carol", "Carol")],
+                checkbox_delay_ms=250,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+            expire_after_selection="alice",
+            readback_timeout_ms=2_000,
+        )
+        self.assertIsNotNone(outcome.error)
+        self.assertIn("15 分钟", str(outcome.error))
+        self.assertNotIsInstance(outcome.error, PublishResultUnknownError)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["requested"], ["alice", "bob", "carol"])
+        self.assertEqual(record["applied"], ["alice"])
+        self.assertEqual(record["status"], MISMATCH)
+        self.assertNotIn("reason", record)
+        self.assertIn("alice", outcome.queries)
+        self.assertNotIn("bob", outcome.queries)
+        self.assertNotIn("carol", outcome.queries)
+        self.assertEqual(outcome.chips, ["alice"])
         self.assertEqual(outcome.share_clicks, 0)
 
     def test_done_that_does_not_collapse_is_list_not_collapsed(self):
@@ -1340,7 +1523,10 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
     控件在继续下一个 username 前确实等待并回读了上一个 checkbox。
     """
 
-    def _apply(self, html, *, options, readback_timeout_ms=None):
+    def _apply(
+        self, html, *, options, readback_timeout_ms=None,
+        expire_after_selection=None,
+    ):
         holder: dict[str, object] = {}
 
         async def scenario():
@@ -1361,11 +1547,23 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
                             result_file=result_file,
                         )
                         budget = app.start_publish_budget()
+                        monitor = None
+                        if expire_after_selection is not None:
+                            monitor = asyncio.create_task(
+                                _expire_budget_after_username(
+                                    page, budget, expire_after_selection
+                                )
+                            )
                         error = None
                         try:
                             await app._apply_options(page, budget=budget)
                         except Exception as wrapped:
                             error = wrapped
+                        finally:
+                            if monitor is not None:
+                                monitor.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await monitor
                         holder["app"] = app
                         holder["error"] = error
                         holder["saved"] = (
@@ -1769,6 +1967,68 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         self.assertEqual(outcome.row_clicks, 1)
         self.assertEqual(outcome.share_clicks, 0)
 
+    def test_unreadable_checkbox_readback_is_final_mismatch(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                row_click="detach-entry",
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        self.assertIn(
+            "collaborators=mismatch(final_mismatch)", str(outcome.error)
+        )
+        record = outcome.saved["options"]["collaborators"]
+        self.assertIsNone(record["applied"])
+        self.assertEqual(record["reason"], FINAL_MISMATCH)
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_missing_done_is_list_not_collapsed_not_entry_missing(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice")],
+                done_label="Fertig",
+                render_chips=False,
+            ),
+            options=InstagramPublishOptions(collaborators=("alice",)),
+        )
+        message = str(outcome.error)
+        self.assertIn("collaborators=mismatch(list_not_collapsed)", message)
+        self.assertNotIn("entry_missing", message)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["applied"], ["alice"])
+        self.assertEqual(record["reason"], LIST_NOT_COLLAPSED)
+        self.assertEqual(outcome.selected, ["alice"])
+        self.assertEqual(outcome.share_clicks, 0)
+
+    def test_mid_list_budget_exhaustion_keeps_the_confirmed_prefix(self):
+        outcome = self._apply(
+            _collaborator_page_html(
+                [("alice", "Alice"), ("bob", "Bob"), ("carol", "Carol")],
+                render_chips=False,
+                checkbox_delay_ms=250,
+            ),
+            options=InstagramPublishOptions(
+                collaborators=("alice", "bob", "carol")
+            ),
+            readback_timeout_ms=2_000,
+            expire_after_selection="alice",
+        )
+        self.assertIsNotNone(outcome.error)
+        self.assertIn("15 分钟", str(outcome.error))
+        self.assertNotIsInstance(outcome.error, PublishResultUnknownError)
+        record = outcome.saved["options"]["collaborators"]
+        self.assertEqual(record["requested"], ["alice", "bob", "carol"])
+        self.assertEqual(record["applied"], ["alice"])
+        self.assertEqual(record["status"], MISMATCH)
+        self.assertNotIn("reason", record)
+        self.assertIn("alice", outcome.queries)
+        self.assertNotIn("bob", outcome.queries)
+        self.assertNotIn("carol", outcome.queries)
+        self.assertEqual(outcome.selected, ["alice"])
+        self.assertEqual(outcome.share_clicks, 0)
+
     def test_done_that_does_not_collapse_is_list_not_collapsed(self):
         outcome = self._apply(
             _collaborator_page_html(
@@ -1832,7 +2092,6 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         outcome = self._apply(
             _collaborator_page_html(
                 [("alice", "Alice")],
-                entry="missing",
                 restriction=(
                     '<div id="collaborator-restriction" role="alert">'
                     "Cannot add collaborators to this account."
@@ -1848,6 +2107,8 @@ class InstagramReelsCollaboratorDomTests(unittest.TestCase):
         record = outcome.saved["options"]["collaborators"]
         self.assertEqual(record["reason"], ACCOUNT_INELIGIBLE)
         self.assertIn("Cannot add collaborators", record["detail"])
+        # 入口仍可聚焦，但页面明确说明账号不合格：不得尝试输入。
+        self.assertEqual(outcome.entry_clicks, 0)
         self.assertEqual(outcome.share_clicks, 0)
 
     def test_obscured_composer_records_editor_obscured_without_control(self):
@@ -1887,6 +2148,8 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
         collaborator_args=(),
         no_publish=True,
         action="upload-note",
+        expire_after_selection=None,
+        extra_args=(),
     ):
         holder: dict[str, object] = {}
         result_file = self.folder / f"result-{uuid4().hex}.json"
@@ -1912,6 +2175,13 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
                         result_file=request.result_file,
                     )
                     budget = app.start_publish_budget()
+                    monitor = None
+                    if expire_after_selection is not None:
+                        monitor = asyncio.create_task(
+                            _expire_budget_after_username(
+                                page, budget, expire_after_selection
+                            )
+                        )
                     try:
                         await app._publish(
                             page,
@@ -1922,12 +2192,20 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
                         holder["error"] = error
                         raise
                     finally:
+                        if monitor is not None:
+                            monitor.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await monitor
                         holder["result"] = app.result
                         holder["share_clicks"] = int(
                             await page.locator("[data-share-clicks]")
                             .get_attribute("data-share-clicks") or 0
                         )
                         body = page.locator("body")
+                        queries = await body.get_attribute("data-queries")
+                        holder["queries"] = (
+                            json.loads(queries) if queries else []
+                        )
                         holder["entry_clicks"] = int(
                             await body.get_attribute("data-entry-clicks") or 0
                         )
@@ -1955,6 +2233,7 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             "instagram", action, "--account", "creator",
             "--title", "caption", *media,
             "--result", str(result_file), *collaborator_args,
+            *extra_args,
         ]
         if no_publish:
             argv.append("--no-publish")
@@ -2148,6 +2427,283 @@ class InstagramCollaboratorControlledCliTests(unittest.TestCase):
             },
         )
         self.assertIn("selection_failed", stderr)
+
+    def test_failure_matrix_exits_1_with_zero_share_clicks(self):
+        restricted = (
+            '<div id="collaborator-restriction" role="alert">'
+            "Cannot add collaborators to this account."
+            "</div>"
+        )
+        cases = (
+            dict(
+                name="entry_missing",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], entry="missing"
+                ),
+                requested=("alice",),
+                applied=None,
+                status=UNSUPPORTED,
+                reason=ENTRY_MISSING,
+                present_queries=(),
+                absent_queries=("alice",),
+                detail=None,
+            ),
+            dict(
+                name="control_disabled",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], entry="disabled"
+                ),
+                requested=("alice",),
+                applied=None,
+                status=UNSUPPORTED,
+                reason=CONTROL_DISABLED,
+                present_queries=(),
+                absent_queries=("alice",),
+                detail=None,
+            ),
+            dict(
+                name="account_ineligible",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], restriction=restricted
+                ),
+                requested=("alice",),
+                applied=None,
+                status=UNSUPPORTED,
+                reason=ACCOUNT_INELIGIBLE,
+                present_queries=(),
+                absent_queries=("alice",),
+                detail="Cannot add collaborators",
+            ),
+            dict(
+                name="no_candidates",
+                html=_collaborator_page_html([]),
+                requested=("alice", "bob"),
+                applied=[],
+                status=MISMATCH,
+                reason=NO_CANDIDATES,
+                present_queries=("alice",),
+                absent_queries=("bob",),
+                detail=None,
+            ),
+            dict(
+                name="no_same_username_prefix",
+                html=_collaborator_page_html(
+                    [("alice", "Alice"), ("_bobby", "Bobby")]
+                ),
+                requested=("alice", "bob", "carol"),
+                applied=["alice"],
+                status=MISMATCH,
+                reason=NO_SAME_USERNAME,
+                present_queries=("alice", "bob"),
+                absent_queries=("carol",),
+                detail=None,
+            ),
+            dict(
+                name="selection_failed",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], row_click="ignore"
+                ),
+                requested=("alice",),
+                applied=[],
+                status=MISMATCH,
+                reason=SELECTION_FAILED,
+                present_queries=("alice",),
+                absent_queries=(),
+                detail=None,
+            ),
+            dict(
+                name="final_mismatch",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], row_click="detach-entry"
+                ),
+                requested=("alice",),
+                applied=None,
+                status=MISMATCH,
+                reason=FINAL_MISMATCH,
+                present_queries=("alice",),
+                absent_queries=(),
+                detail=None,
+            ),
+            dict(
+                name="list_not_collapsed",
+                html=_collaborator_page_html(
+                    [("alice", "Alice"), ("bob", "Bob")],
+                    done_collapses=False,
+                ),
+                requested=("alice", "bob"),
+                applied=["alice", "bob"],
+                status=MISMATCH,
+                reason=LIST_NOT_COLLAPSED,
+                present_queries=("alice", "bob"),
+                absent_queries=(),
+                detail=None,
+            ),
+            dict(
+                name="editor_obscured",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], obscured=True
+                ),
+                requested=("alice",),
+                applied=None,
+                status=MISMATCH,
+                reason=EDITOR_OBSCURED,
+                present_queries=(),
+                absent_queries=("alice",),
+                detail="遮挡",
+            ),
+            dict(
+                name="done_missing",
+                html=_collaborator_page_html(
+                    [("alice", "Alice")], done_label="Fertig"
+                ),
+                requested=("alice",),
+                applied=["alice"],
+                status=MISMATCH,
+                reason=LIST_NOT_COLLAPSED,
+                present_queries=("alice",),
+                absent_queries=(),
+                detail=None,
+            ),
+        )
+        for action in ("upload-note", "upload-video"):
+            for case in cases:
+                with self.subTest(action=action, case=case["name"]):
+                    collaborator_args = tuple(
+                        value
+                        for username in case["requested"]
+                        for value in ("--collaborator", username)
+                    )
+                    code, saved, holder, stdout, stderr = self._run(
+                        action=action,
+                        html=case["html"],
+                        collaborator_args=collaborator_args,
+                        no_publish=False,
+                    )
+                    self.assertEqual(code, 1, stderr)
+                    self.assertEqual(stdout, "")
+                    self.assertEqual(holder["share_clicks"], 0)
+                    self.assertNotIsInstance(
+                        holder.get("error"), PublishResultUnknownError
+                    )
+                    self.assertEqual(saved["status"], "not_submitted")
+                    record = saved["options"]["collaborators"]
+                    expected = {
+                        "requested": list(case["requested"]),
+                        "applied": case["applied"],
+                        "status": case["status"],
+                        "reason": case["reason"],
+                    }
+                    for field, value in expected.items():
+                        self.assertEqual(record[field], value)
+                    # 只允许一个 reason；detail 是额外的取证字段。
+                    self.assertEqual(
+                        set(record) - set(expected) - {"detail"}, set()
+                    )
+                    if case["detail"]:
+                        self.assertIn(case["detail"], record["detail"])
+                    for username in case["present_queries"]:
+                        self.assertIn(username, holder["queries"])
+                    for username in case["absent_queries"]:
+                        self.assertNotIn(username, holder["queries"])
+                    for key in ("content_id", "post_id", "post_url"):
+                        self.assertNotIn(key, saved)
+
+    def test_mid_list_budget_exhaustion_exits_1_and_keeps_prefix(self):
+        for action in ("upload-note", "upload-video"):
+            with self.subTest(action=action):
+                html = _collaborator_page_html(
+                    [("alice", "Alice"), ("bob", "Bob"), ("carol", "Carol")],
+                    checkbox_delay_ms=250,
+                )
+                code, saved, holder, stdout, stderr = self._run(
+                    action=action,
+                    html=html,
+                    collaborator_args=(
+                        "--collaborator", "alice",
+                        "--collaborator", "bob",
+                        "--collaborator", "carol",
+                    ),
+                    no_publish=False,
+                    expire_after_selection="alice",
+                )
+                self.assertEqual(code, 1, stderr)
+                self.assertEqual(stdout, "")
+                self.assertEqual(holder["share_clicks"], 0)
+                self.assertNotIsInstance(
+                    holder.get("error"), PublishResultUnknownError
+                )
+                self.assertIn("15 分钟", stderr)
+                self.assertEqual(saved["status"], "not_submitted")
+                record = saved["options"]["collaborators"]
+                self.assertEqual(
+                    record["requested"], ["alice", "bob", "carol"]
+                )
+                self.assertEqual(record["applied"], ["alice"])
+                self.assertEqual(record["status"], MISMATCH)
+                self.assertNotIn("reason", record)
+                self.assertIn("alice", holder["queries"])
+                self.assertNotIn("bob", holder["queries"])
+                self.assertNotIn("carol", holder["queries"])
+
+    def test_option_result_unknown_maps_to_exit_1_not_9(self):
+        holder: dict[str, object] = {}
+
+        async def fake_upload(request, *, target=None):
+            app = InstagramUploader(
+                "unused.json",
+                title=request.title,
+                video_file=request.video_file,
+                options=request.options,
+                no_publish=request.no_publish,
+                result_file=request.result_file,
+            )
+            try:
+                await app._apply_options(
+                    page=None,
+                    budget=app.start_publish_budget(),
+                    controls={
+                        "collaborators": _FakeCollaboratorControl(
+                            [[]],
+                            failure=PublishResultUnknownError("点击前不得未知"),
+                        )
+                    },
+                )
+            finally:
+                holder["result"] = app.result
+            return holder["result"]
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(
+            instagram_command, "upload_instagram_content", fake_upload
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(
+            stderr
+        ):
+            code = sau_cli.main([
+                "instagram", "upload-video", "--account", "creator",
+                "--title", "caption", "--file", str(self.video),
+                "--collaborator", "alice", "--no-publish",
+            ])
+        self.assertEqual(code, 1)
+        self.assertIn("发布选项未生效", stderr.getvalue())
+        self.assertNotIn("发布结果未知", stderr.getvalue())
+
+    def test_later_options_run_after_collaborator_failure_without_share_click(self):
+        code, saved, holder, stdout, stderr = self._run(
+            html=_collaborator_page_html([("_nikeza5", "nikeza")]),
+            collaborator_args=("--collaborator", "nike"),
+            no_publish=False,
+            extra_args=("--no-comments",),
+        )
+        self.assertEqual(code, 1, stderr)
+        self.assertEqual(holder["share_clicks"], 0)
+        self.assertEqual(saved["options"]["collaborators"]["status"], MISMATCH)
+        # 协作者失败后其它键仍会尝试并被记录；聚合失败阻止 Share。
+        self.assertEqual(
+            saved["options"]["comments"]["status"], DEFAULT_OFF
+        )
+        self.assertEqual(
+            saved["options"]["comments"]["reason"], ENTRY_MISSING
+        )
 
     def test_upload_video_static_errors_exit_2_without_upload(self):
         cases = (
