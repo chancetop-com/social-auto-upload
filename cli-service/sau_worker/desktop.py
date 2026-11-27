@@ -1,6 +1,5 @@
 """Control the paired runtime inside a user-level desktop install."""
 import csv
-from contextlib import contextmanager
 from getpass import getpass
 from importlib.metadata import version
 import json
@@ -10,11 +9,12 @@ import platform
 import shutil
 import subprocess
 import sys
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import TemporaryDirectory
 import time
 from uuid import uuid4
 
 from . import __version__
+from .state import atomic_write, lock
 from .__main__ import main as worker_main
 from .providers import DEFAULT_BASES
 from .worker import Settings
@@ -22,24 +22,6 @@ from .worker import Settings
 
 CONFIG_KEYS = {"SAU_GATEWAY_URL", "SAU_GATEWAY_CA_FILE", "SAU_DESKTOP_TOKEN", "WORKER_MAX_CONCURRENCY",
                "SAU_PROVIDERS", "BITBROWSER_API_BASE", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "ADSPOWER_API_KEY"}
-
-
-def atomic_write(path, value, *, executable=False):
-    with NamedTemporaryFile(dir=path.parent, delete=False) as file:
-        temporary = Path(file.name)
-        try:
-            file.write(value.encode("utf-8"))
-            file.flush()
-            os.fsync(file.fileno())
-        except BaseException:
-            file.close()
-            temporary.unlink(missing_ok=True)
-            raise
-    try:
-        temporary.chmod(0o700 if executable else 0o600)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def settings(state, env):
@@ -67,31 +49,6 @@ def configure(state, env, prompt=getpass):
                 raise ValueError(f"Missing {key}")
     atomic_write(state / "settings.json", json.dumps(values))
     return values
-
-
-@contextmanager
-def lock(path):
-    # Both primitives release automatically on process death. Leave the inode in place.
-    with path.open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-            if stream.tell() == 0:
-                stream.write(b"\0")
-                stream.flush()
-            stream.seek(0)
-            try:
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                acquired = True
-            except OSError:
-                acquired = False
-        else:
-            import fcntl
-            try:
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-            except BlockingIOError:
-                acquired = False
-        yield acquired
 
 
 def interpreter(root):
