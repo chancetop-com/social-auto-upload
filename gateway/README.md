@@ -110,3 +110,17 @@ The built-image test requires Docker Desktop, OpenSSL, the Gateway test dependen
 Postiz may send an expiring media manifest to `POST /internal/preparations`. An eligible desktop that includes `acceptPreparation: true` in its claim request can receive `operation: prepare`. The desktop invokes `sau media predownload` with the occurrence's SHA-256 task ID and ordered URLs. An offer can expire or be lost. It grants no publish right, and the eventual publish command fetches its own current manifest. The worker schedules the existing lock-aware `sau media cleanup` at the next 03:00 local time. Managed downloads and publishes retain active files; seven idle days make them eligible for deletion.
 
 The paired CLI accepts positive numbers of seconds in `SAU_DOWNLOAD_CONNECT_SECONDS` (10), `SAU_DOWNLOAD_IDLE_READ_SECONDS` (30), `SAU_DOWNLOAD_ENQUEUE_SECONDS` (10), and `SAU_BROWSER_PUBLISH_SECONDS` (900). The enqueue budget covers acceptance by the local media queue. File completion can take as long as data continues arriving. Intentional waiting for the earliest click extends the browser budget.
+
+### Profile lease protocol
+
+Claims for the same provider and profile ID share one physical lease across merchant bindings. The Gateway returns the occurrence's `leaseGrantId`, `leaseExpiresAt` at claim time and `renewAfterSeconds`. Each command occupies one desktop slot and one platform on this grant. The holder can run another platform on the same profile when it has capacity.
+
+Send the desktop bearer and the original `sessionId`, `workflowId` and `leaseGrantId` to these endpoints.
+
+| Request | Effect |
+| --- | --- |
+| `POST /profile-lease/renew` | Extend an active command's live grant from PostgreSQL's current time. The worker renews while its CLI is waiting for a scheduled publish. |
+| `POST /profile-lease/complete` | End this command and free its slot and platform. Returns `{"idle":true}` if it was the last member. |
+| `POST /profile-lease/release` | Include `"windowClosed":true` after observing closure for the idle grant. A subsequent claim or completion fences old closure messages. |
+
+Configure `GATEWAY_PROFILE_RENEW_SECONDS` (default 300) and `GATEWAY_PROFILE_LEASE_SECONDS` (default 900). Both are positive integer seconds, with renewal strictly shorter than validity. If the window state cannot be confirmed, the idle grant expires. After expiry, the next eligible session can claim another pending occurrence. Each original claim keeps its claimant, result history and deadline.

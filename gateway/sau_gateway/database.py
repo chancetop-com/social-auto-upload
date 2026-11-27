@@ -5,6 +5,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from . import leases
 from .models import CheckReceipt, PublishReceipt, PublishTask
 
 
@@ -29,12 +30,14 @@ def migrate(dsn):
 
 RECORD = ('workflow_id AS "workflowId", state, session_id AS "sessionId", task, receipt, '
           'claim_deadline AS "claimDeadlineAt", result_deadline AS "resultDeadlineAt", '
+          'claimed_at AS "claimedAt", lease_grant_id AS "leaseGrantId", lease_expires_at AS "leaseExpiresAt", '
           'overdue_at AS "overdueAt", publish_started_at AS "publishStartedAt", receipt_history AS "receiptHistory"')
 
 
 class Store:
     def __init__(self, dsn):
         self.dsn = dsn
+        self.lease_policy = leases.LeasePolicy.from_env()
         self.claim_seconds = int(os.environ.get("GATEWAY_CLAIM_TIMEOUT_SECONDS", 1800))
         self.result_seconds = int(os.environ.get("GATEWAY_RESULT_TIMEOUT_SECONDS", 1800))
         if min(self.claim_seconds, self.result_seconds) <= 0:
@@ -105,13 +108,11 @@ class Store:
             if not report["freeSlots"]:
                 return None
             # The session row serializes concurrent polls even if a stale report advertises free slots.
-            active = db.execute("SELECT count(*) AS n FROM occurrence WHERE session_id=%s AND state IN ('claimed','started')",
-                                (session_id,)).fetchone()["n"]
-            if active >= report["capacity"]:
+            if leases.occupied_slots(db, session_id) >= report["capacity"]:
                 return None
             visible = [{"provider": p["provider"], "profileId": profile["profileId"]}
                        for p in report["providers"] if p["available"] for profile in p["profiles"]]
-            row = db.execute("""
+            row = db.execute(f"""
                 SELECT workflow_id, task FROM occurrence AS pending
                 WHERE state='pending' AND (claim_deadline IS NULL OR claim_deadline > clock_timestamp())
                 AND task->>'release'=%s AND (task->>'contractVersion')::integer=%s
@@ -120,36 +121,28 @@ class Store:
                     (target_session IS NULL AND %s='worker' AND %s::jsonb @> jsonb_build_array(jsonb_build_object(
                          'provider',task->'provider','profileId',task->'profileId'))))
                 AND (target_session=%s OR %s::jsonb @> jsonb_build_array(jsonb_build_object('platform',task->'platform','action',task->'action')))
-                AND NOT EXISTS (
-                    SELECT 1 FROM occurrence busy WHERE busy.state IN ('claimed','started')
-                    AND busy.task->>'provider'=pending.task->>'provider'
-                    AND busy.task->>'profileId'=pending.task->>'profileId'
-                    AND busy.task->>'platform'=pending.task->>'platform'
-                )
+                AND {leases.ELIGIBLE_PROFILE}
                 ORDER BY created_at, workflow_id LIMIT 1 FOR UPDATE SKIP LOCKED
             """, (report["release"], report["contractVersion"], report.get("cliRelease"), session_id, report["mode"], Jsonb(visible), session_id,
-                  Jsonb(report["capabilities"]))).fetchone()
+                  Jsonb(report["capabilities"]), session_id)).fetchone()
             if row is None:
                 return None
-            target = [row["task"][key] for key in ("provider", "profileId", "platform")]
-            # Two polls may select different pending posts for the same physical target.
-            # Take its transaction lock, then check committed occupancy using a new snapshot.
-            locked = db.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s::text, 0)) AS held",
-                                (Jsonb(target),)).fetchone()
-            if not locked["held"] or db.execute("""
-                SELECT 1 FROM occurrence WHERE state IN ('claimed','started')
-                AND task->>'provider'=%s AND task->>'profileId'=%s AND task->>'platform'=%s
-            """, target).fetchone():
+            lease = leases.acquire(db, session_id, row["task"], self.lease_policy)
+            if lease is None:
                 return None
             claimed = db.execute(f"""
-                UPDATE occurrence SET state='claimed', session_id=%s, claimed_at=clock_timestamp(),
+                WITH decision AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                UPDATE occurrence SET state='claimed', session_id=%s, claimed_at=decision.at,
+                    lease_grant_id=%s, lease_expires_at=%s,
                     result_deadline=CASE WHEN task->>'action' <> 'check' THEN
-                        greatest(clock_timestamp(), (task->>'earliestPublishAt')::timestamptz)
+                        greatest(decision.at, (task->>'earliestPublishAt')::timestamptz)
                         + %s * interval '1 second' END
-                WHERE workflow_id=%s AND state='pending'
-                  AND (claim_deadline IS NULL OR claim_deadline > clock_timestamp())
+                FROM decision
+                WHERE workflow_id=%s AND state='pending' AND %s > decision.at
+                  AND (claim_deadline IS NULL OR claim_deadline > decision.at)
                 RETURNING {RECORD}
-            """, (session_id, self.result_seconds, row["workflow_id"])).fetchone()
+            """, (session_id, lease["grant_id"], lease["expires_at"], self.result_seconds,
+                  row["workflow_id"], lease["expires_at"])).fetchone()
             if claimed is None:
                 db.rollback()
                 return None
@@ -157,7 +150,7 @@ class Store:
                 UPDATE desktop_session SET report=jsonb_set(report, '{freeSlots}', to_jsonb((report->>'freeSlots')::int - 1))
                 WHERE session_id=%s
             """, (session_id,))
-            return claimed
+            return {**claimed, "renewAfterSeconds": self.lease_policy.renew_seconds}
 
     def _can_run(self, db, session_id, task):
         report = db.execute("SELECT report FROM desktop_session WHERE session_id=%s FOR UPDATE",
@@ -172,6 +165,7 @@ class Store:
 
     def reserve_start(self, body):
         with self.connect() as db:
+            db.execute("SELECT 1 FROM desktop_session WHERE session_id=%s FOR UPDATE", (body.sessionId,))
             row = db.execute("""
                 UPDATE occurrence SET start_requested_at=clock_timestamp()
                 WHERE workflow_id=%s AND session_id=%s AND state='claimed'
@@ -180,7 +174,7 @@ class Store:
             """, (body.workflowId, body.sessionId)).fetchone()
             if row is None:
                 raise Conflict()
-            if self._can_run(db, body.sessionId, row["task"]):
+            if self._can_run(db, body.sessionId, row["task"]) and leases.holds(db, body):
                 ref = {key: row["task"][key] for key in ("workflowId", "postId", "organizationId")}
                 return {**ref, "resultDeadlineAt": row["result_deadline"].isoformat()}
             self._decline(db, body)
@@ -198,12 +192,16 @@ class Store:
             previous = self._get(db, body.workflowId)["task"]
             identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId", "provider", "profileId",
                         "platform", "action", "requiredCapability", "release", "contractVersion")
-            if any(task[key] != previous[key] for key in identity) or not self._can_run(db, body.sessionId, task):
+            if (any(task[key] != previous[key] for key in identity) or not self._can_run(db, body.sessionId, task)
+                    or not leases.holds(db, body)):
                 self._decline(db, body)
                 return None
             row = db.execute("""
                 UPDATE occurrence SET state='started',publish_started_at=clock_timestamp(),task=%s
-                WHERE workflow_id=%s AND session_id=%s AND state='claimed' AND start_requested_at IS NOT NULL AND result_deadline > clock_timestamp()
+                WHERE workflow_id=%s AND session_id=%s AND state='claimed' AND start_requested_at IS NOT NULL
+                  AND result_deadline > clock_timestamp()
+                  AND EXISTS (SELECT 1 FROM profile_lease l WHERE l.grant_id=occurrence.lease_grant_id
+                              AND l.expires_at > clock_timestamp())
                 RETURNING task
             """, (Jsonb(task), body.workflowId, body.sessionId)).fetchone()
             if row is None:
@@ -224,8 +222,9 @@ class Store:
         db.execute("""
             UPDATE desktop_session SET last_contact_at=clock_timestamp(), report=jsonb_set(
                 report, '{freeSlots}', to_jsonb(least((report->>'capacity')::int, (report->>'freeSlots')::int + 1)))
-            WHERE session_id=%s
-        """, (body.sessionId,))
+            WHERE session_id=%s AND EXISTS (
+                SELECT 1 FROM occurrence WHERE workflow_id=%s AND lease_grant_id IS NULL)
+        """, (body.sessionId, body.workflowId))
 
     def finish(self, result):
         with self.connect() as db:

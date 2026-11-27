@@ -122,6 +122,21 @@ class Start(WireModel):
     sessionId: UUID
 
 
+class LeaseCommand(Start):
+    leaseGrantId: UUID
+
+
+class LeaseRelease(LeaseCommand):
+    windowClosed: StrictBool
+
+    @field_validator("windowClosed")
+    @classmethod
+    def confirmed(cls, value):
+        if not value:
+            raise ValueError("Release requires observed window closure")
+        return value
+
+
 class Claim(WireModel):
     acceptPreparation: StrictBool = False
     sessionId: UUID
