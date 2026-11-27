@@ -18,7 +18,13 @@ async def launch(args):
     async with httpx.AsyncClient(trust_env=False, verify=verify) as client:
         worker = Worker(settings, client, self_check=args.command == "check")
         if args.command == "run":
-            await worker.run()
+            withdraw = asyncio.create_task(worker.withdraw_on_drain()) if worker.generation else None
+            try:
+                await worker.run()
+            finally:
+                if withdraw:
+                    withdraw.cancel()
+                    await asyncio.gather(withdraw, return_exceptions=True)
             return 0
         try:
             record = await worker.check(args.provider, args.profile_id, args.platform)

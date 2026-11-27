@@ -4,8 +4,9 @@ import json
 import os
 from pathlib import Path
 import shutil
-import signal
 import subprocess
+
+from desktop.tests.native_login_fixture import stub_commands
 
 
 @contextmanager
@@ -20,7 +21,7 @@ def bootstrapped_worker(root, build, artifact):
             command = [root / "desktop/bootstrap.sh", revision, digest, artifact.parent]
             if custom_root:
                 command.append(selected)
-            env = {"HOME": str(home), "PATH": "/usr/bin:/bin:/usr/sbin",
+            env = {"HOME": str(home), "PATH": stub_commands(home / "native"),
                    "SAU_GATEWAY_URL": "http://127.0.0.1:1", "BITBROWSER_API_BASE": "http://127.0.0.1:1",
                    "SAU_DESKTOP_TOKEN": "fixture-only", "BITBROWSER_API_KEY": "fixture-only",
                    "WORKER_MAX_CONCURRENCY": "3", "SAU_CLI_PATH": "/unrelated/sau"}
@@ -30,8 +31,8 @@ def bootstrapped_worker(root, build, artifact):
                 assert completed.returncode == 0, completed.stderr
                 return json.loads(completed.stdout)
             first = bootstrap(env)
-            pid = first["pid"]
-            cleanup.callback(os.kill, pid, signal.SIGTERM)
+            cleanup.callback(subprocess.run, [selected / "cli-service", "stop"], env=env,
+                             check=True, timeout=60, stdout=subprocess.DEVNULL)
             assert Path(first["root"]).samefile(selected)
             assert bootstrap({"HOME": str(home), "PATH": env["PATH"]}) == first
             assert not list(selected.glob(".bootstrap.*"))

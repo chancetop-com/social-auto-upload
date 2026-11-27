@@ -1,6 +1,5 @@
 """Control the paired runtime inside a user-level desktop install."""
 import csv
-from contextlib import contextmanager
 from getpass import getpass
 from importlib.metadata import version
 import json
@@ -10,36 +9,19 @@ import platform
 import shutil
 import subprocess
 import sys
-from tempfile import NamedTemporaryFile, TemporaryDirectory
-import time
-from uuid import uuid4
+from tempfile import TemporaryDirectory
 
 from . import __version__
+from .state import atomic_write, lock
+from .login import native_login
+from .supervisor import claimed_worker, drain, interpreter, local_status, start, supervise
 from .__main__ import main as worker_main
 from .providers import DEFAULT_BASES
 from .worker import Settings
 
 
 CONFIG_KEYS = {"SAU_GATEWAY_URL", "SAU_GATEWAY_CA_FILE", "SAU_DESKTOP_TOKEN", "WORKER_MAX_CONCURRENCY",
-               "SAU_PROVIDERS", "SAU_DEV_CHROME_ALIASES", "BITBROWSER_API_BASE", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "ADSPOWER_API_KEY"}
-
-
-def atomic_write(path, value, *, executable=False):
-    with NamedTemporaryFile(dir=path.parent, delete=False) as file:
-        temporary = Path(file.name)
-        try:
-            file.write(value.encode("utf-8"))
-            file.flush()
-            os.fsync(file.fileno())
-        except BaseException:
-            file.close()
-            temporary.unlink(missing_ok=True)
-            raise
-    try:
-        temporary.chmod(0o700 if executable else 0o600)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+               "SAU_PROVIDERS", "SAU_DEV_CHROME_ALIASES", "BITBROWSER_APP_PATH", "ADSPOWER_APP_PATH", "BITBROWSER_API_BASE", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "ADSPOWER_API_KEY"}
 
 
 def settings(state, env):
@@ -71,35 +53,6 @@ def configure(state, env, prompt=getpass):
     return values
 
 
-@contextmanager
-def lock(path):
-    # Both primitives release automatically on process death. Leave the inode in place.
-    with path.open("a+b") as stream:
-        if os.name == "nt":
-            import msvcrt
-            if stream.tell() == 0:
-                stream.write(b"\0")
-                stream.flush()
-            stream.seek(0)
-            try:
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                acquired = True
-            except OSError:
-                acquired = False
-        else:
-            import fcntl
-            try:
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-            except BlockingIOError:
-                acquired = False
-        yield acquired
-
-
-def interpreter(root):
-    return root / "program/runtime" / ("python.exe" if os.name == "nt" else "bin/python3.11")
-
-
 def apply_settings(root):
     os.environ.update(settings(root / "state", os.environ))
     os.environ.pop("SAU_CLI_PATH", None)
@@ -121,44 +74,30 @@ def private_state(root):
     return state
 
 
-def run(root, ready=None):
-    if os.name == "nt":
-        directory = Path(os.environ["LOCALAPPDATA"]) / "social-auto-upload" / ".instance"
-    else:
-        directory = Path.home() / "Library/Caches/social-auto-upload"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with lock(directory / "claim.lock") as acquired:
-        owner = directory / "owner.json"
-        if acquired:
-            atomic_write(owner, json.dumps({"root": str(root), "pid": os.getpid()}))
-        elif not owner.exists() or json.loads(owner.read_text(encoding="utf-8"))["root"] != str(root):
-            raise ValueError("A desktop worker is already running under another installation")
-        if ready:
-            atomic_write(ready, owner.read_text(encoding="utf-8"))
-        if acquired:
-            sys.argv = ["cli-service", "run"]
-            return worker_main()
-        return 0
-
-
-def start(root):
-    apply_settings(root)
-    Settings.from_env(os.environ)
-    ready = root / "state" / ("starting-" + uuid4().hex)
-    flags = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
-    try:
-        with (root / "state/worker.log").open("ab") as log:
-            child = subprocess.Popen([interpreter(root), "-IB", "-m", "sau_worker.desktop", "_claim", ready.name],
-                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=root, **flags)
-        deadline = time.monotonic() + 15
-        while not ready.is_file():
-            if child.poll() is not None or time.monotonic() > deadline:
-                raise ValueError("Worker did not start; see state/worker.log")
-            time.sleep(0.05)
-        print(ready.read_text(encoding="utf-8"))
-    finally:
-        ready.unlink(missing_ok=True)
-    return 0
+def launcher_script(*, windows):
+    # The calling shell outlives the private interpreter. In particular Windows
+    # can only remove its executable/DLLs after the uninstall command exits.
+    if windows:
+        return r"""@echo off
+setlocal
+"%~dp0program\runtime\python.exe" -IB -m sau_worker.desktop %*
+if errorlevel 1 exit /b %errorlevel%
+if /i not "%~1"=="uninstall" exit /b 0
+rd /s /q "%~dp0program"
+if exist "%~dp0program" exit /b 1
+del "%~f0" & exit /b 0
+""".replace("\n", "\r\n")
+    return """#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+if [ "${1:-}" = uninstall ]; then
+    "$root/program/runtime/bin/python3.11" -IB -m sau_worker.desktop "$@"
+    /bin/rm -rf -- "$root/program"
+    /bin/rm -f -- "$root/cli-service"
+else
+    exec "$root/program/runtime/bin/python3.11" -IB -m sau_worker.desktop "$@"
+fi
+"""
 
 
 def install(root, revision, sha256, target):
@@ -181,6 +120,8 @@ def install(root, revision, sha256, target):
     with lock(state / "install.lock") as acquired:
         if not acquired:
             raise ValueError("Another installer is active")
+        if (state / "uninstalled").exists() and program.exists():
+            raise ValueError("Uninstall is still pending; finish cli-service uninstall before reinstalling")
         marker = program / "package.sha256"
         if program.exists() and (not marker.is_file() or marker.read_text(encoding="ascii") != sha256):
             raise ValueError("Another release occupies this root; use the managed upgrade")
@@ -192,9 +133,8 @@ def install(root, revision, sha256, target):
                 shutil.copytree(image, installing)
                 (installing / "package.sha256").write_text(sha256, encoding="ascii")
                 installing.rename(program)
-        script = ('@echo off\r\n"%~dp0program\\runtime\\python.exe" -IB -m sau_worker.desktop %*\r\n'
-                  if os.name == "nt" else '#!/bin/sh\nexec "$(dirname "$0")/program/runtime/bin/python3.11" -IB -m sau_worker.desktop "$@"\n')
-        atomic_write(launcher, script, executable=True)
+        atomic_write(launcher, launcher_script(windows=os.name == "nt"), executable=True)
+        (state / "uninstalled").unlink(missing_ok=True)
         # Always start through the installed copy; the bootstrap stage is disposable.
         return subprocess.call([interpreter(root), "-IB", "-m", "sau_worker.desktop", "start"], cwd=root)
 
@@ -207,14 +147,43 @@ def main():
     if not (root / "program/release.json").is_file():
         raise ValueError("Run the installed cli-service launcher")
     apply_settings(root)
-    if args == ["start"]:
-        return start(root)
-    if args == ["run"]:
-        return run(root)
-    if len(args) == 2 and args[0] == "_claim":
-        from uuid import UUID
-        nonce = UUID(hex=args[1].removeprefix("starting-"))
-        return run(root, root / "state" / ("starting-" + nonce.hex))
+    state = root / "state"
+    if args in (["_supervise"], ["run"]):
+        return supervise(root)
+    if len(args) == 2 and args[0] == "_worker":
+        return claimed_worker(root, args[1])
+    if args == ["status"]:
+        print(json.dumps(local_status(root)))
+        return 0
+    controls = (["start"], ["stop"], ["disable"], ["enable"], ["restart"], ["restart", "--force"], ["uninstall"])
+    if args in controls:
+        force = args == ["restart", "--force"]
+        if force:
+            drain(root, force=True)
+        with lock(state / "control.lock") as acquired:
+            if not acquired:
+                raise ValueError("Another desktop maintenance operation is active")
+            if args == ["uninstall"]:
+                with lock(state / "install.lock") as can_remove:
+                    if not can_remove:
+                        raise ValueError("Another installer is active")
+                    (state / "uninstalled").touch()
+                    drain(root)
+                    native_login(root, remove=True)
+                return 0
+            if args == ["disable"]:
+                (state / "disabled").touch()
+            if args[0] in {"stop", "disable", "restart"}:
+                drain(root)
+            if args == ["disable"]:
+                native_login(root, remove=True)
+            if args == ["enable"]:
+                (state / "disabled").unlink(missing_ok=True)
+            if args[0] in {"start", "enable", "restart"}:
+                if args[0] in {"enable", "restart"}:
+                    configure(state, os.environ)
+                print(json.dumps(start(root)))
+            return 0
     return worker_main()
 
 

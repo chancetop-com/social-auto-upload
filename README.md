@@ -45,6 +45,7 @@ CLI 命令按平台维护在 [cli/sau_commands](./cli/sau_commands)，发布流�
 从 [chancetop-com/social-auto-upload](https://github.com/chancetop-com/social-auto-upload) 获取源码后，在仓库根目录安装和更新：
 
 - [安装说明](./docs/install.md)
+- Postiz 桌面发布节点部署：[Windows](./desktop/windows.zh-CN.md) · [macOS](./desktop/macos.zh-CN.md)
 - [更新说明](./docs/update.md)
 
 独立安装可在仓库根目录执行 `uv build --wheel`，再将 `dist/` 里的 wheel 安装到目标 Python 环境。数据目录和已有配置的查找规则见[安装说明](./docs/install.md#5-配置-confpy)。
