@@ -131,10 +131,10 @@ def test_stop_waits_through_authorized_publish_and_result_then_allows_next_login
     assert api.reports == []
     first = cli("start")
     assert cli("start") == first
+    wait_for(lambda: api.reports)
     native = [json.loads(line) for line in (root.parent / "home/commands").read_text().splitlines()]
     assert ["open", "-g", "-a", "BitBrowser"] in native
     assert sum(cmd[:2] == ["launchctl", "bootstrap"] for cmd in native) == 1
-    wait_for(lambda: api.reports)
     assert not cli("status")["claimReady"] and api.claims == []
     api.ready = True
     wait_for(lambda: cli("status")["claimReady"])
@@ -282,3 +282,23 @@ def test_wake_rechecks_profiles_and_capacity_within_the_same_login(installation)
     wait_for(lambda: cli("status")["claimReady"])
     assert cli("status")["sessionId"] == before["sessionId"]
     assert cli("status")["activeCount"] == 0 and cli("status")["capacity"] == 1
+
+
+def test_second_install_root_cannot_claim_in_same_login_session(installation):
+    root, api, cli = installation
+    api.ready = True
+    cli("start")
+    wait_for(lambda: cli("status")["claimReady"])
+    other = root.parent / "Other install"
+    venv.EnvBuilder(symlinks=True).create(other / "program/runtime")
+    (other / "state").mkdir()
+    (other / "state/settings.json").write_bytes((root / "state/settings.json").read_bytes())
+    (other / "program/release.json").write_bytes((root / "program/release.json").read_bytes())
+    old_site = next((root / "program/runtime/lib").glob("python*/site-packages"))
+    new_site = next((other / "program/runtime/lib").glob("python*/site-packages"))
+    (new_site / "worker.pth").write_bytes((old_site / "worker.pth").read_bytes())
+    env = {"HOME": str(root.parent / "home"), "PATH": str(root.parent / "native") + ":/usr/bin:/bin"}
+    run = subprocess.run([other / "program/runtime/bin/python3.11", "-IB", "-m", "sau_worker.desktop", "start"],
+                         env=env, cwd=other, text=True, capture_output=True, timeout=6)
+    assert run.returncode != 0 and "another installation" in run.stderr
+    assert len({r["sessionId"] for r in api.reports}) == 1 and cli("status")["claimReady"]

@@ -12,14 +12,31 @@ from uuid import uuid4
 from .state import held, lock
 
 
+def discard_marker(marker):
+    # A Windows status reader can briefly hold the inode after the CLI exits.
+    # Housekeeping must not change the exit status or lose its completed receipt.
+    try:
+        marker.unlink(missing_ok=True)
+        marker.with_suffix(".ready").unlink(missing_ok=True)
+        marker.with_suffix(".terminate").unlink(missing_ok=True)
+    except PermissionError:
+        pass
+
+
 class Children:
     def __init__(self, state):
         self.directory = state / "children"
 
     def live(self, excluding=None):
         for marker in self.directory.glob("*.lock"):
-            if marker.name.split(".", 1)[0] != excluding and held(marker):
+            if marker.name.split(".", 1)[0] == excluding:
+                continue
+            if held(marker):
                 yield marker
+            elif marker.with_suffix(".ready").exists() and not held(marker):
+                # A ready marker was written under this unique lifetime lock.
+                # Its release proves that even an orphaned child has finished.
+                discard_marker(marker)
 
     def count(self, excluding=None):
         return sum(1 for _ in self.live(excluding))
@@ -54,9 +71,7 @@ class Children:
                 proc.wait()
                 raise
             finally:
-                marker.with_suffix(".ready").unlink(missing_ok=True)
-                marker.unlink(missing_ok=True)
-                marker.with_suffix(".terminate").unlink(missing_ok=True)
+                discard_marker(marker)
 
 
 def dispatch():

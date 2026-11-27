@@ -343,7 +343,7 @@ class Worker:
                         # Reserve the local active slot before the next session advertisement.
                         await asyncio.sleep(0)
                 elif running:
-                    await asyncio.wait(running, timeout=1, return_when=asyncio.FIRST_COMPLETED)
+                    await asyncio.wait(running, timeout=15, return_when=asyncio.FIRST_COMPLETED)
                 else:
                     await self.pause(2)
             except httpx.HTTPError:
