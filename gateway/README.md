@@ -33,8 +33,7 @@ Send JSON and an `Authorization: Bearer …` header. The desktop token authentic
 | Desktop | `POST /publish-task/result` | Send `{sessionId,workflowId,receipt}`. An original claimant gets the stored occurrence after commit. An unrelated session gets 409. |
 | Internal | `POST /internal/occurrences` | Send the task below. The workflow ID identifies the original occurrence on repeated delivery. |
 | Internal | `GET /internal/occurrences/{workflowId}` | Return the occurrence, including its original claimant and receipt. URL-encode the workflow ID. |
-
-Postiz calls `POST /internal/occurrences/revoke` with `workflowId`, `organizationId` and `postId` after it durably revokes an unstarted occurrence. On repeated delivery the Gateway returns its stored record. An accepted upload keeps its actual result.
+| Internal | `POST /internal/occurrences/revoke` | Send `workflowId`, `organizationId` and `postId` after revoking an unstarted occurrence. Repeated delivery returns the stored record. An upload already in progress keeps its actual result. |
 | Internal | `GET /internal/sessions/{sessionId}` | Return the latest full report, including the observed CLI version, provider availability and last contact. |
 
 A normal session uses `mode="worker"`. The operator command uses `mode="self-check"`. Reconnection preserves the process’s UUID. A new process creates a different one. A report contains `sessionId`, `mode`, `contractVersion`, `release`, `cliRelease`, `preparedStarts`, `capacity`, `freeSlots`, `capabilities` and `providers`. Each capability is a `{platform,action}` pair. Each provider is `{provider,available,profiles:[{profileId,name}]}`. An unavailable provider has an empty list. The four check platforms are `rednote`, `xiaohongshu`, `tiktok` and `instagram`.
