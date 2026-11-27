@@ -1,6 +1,8 @@
 """An expiring cache hint, independent of the durable publish occurrence and profile lease."""
 from psycopg.types.json import Jsonb
 
+from .releases import blocked_claim
+
 
 def enqueue_preparation(store, offer):
     with store.connect() as db:
@@ -16,7 +18,7 @@ def enqueue_preparation(store, offer):
 def take_preparation(store, session_id):
     with store.connect() as db:
         row = db.execute("""
-            SELECT p.workflow_id, p.task FROM media_preparation p JOIN desktop_session s
+            SELECT p.workflow_id, p.task, s.report FROM media_preparation p JOIN desktop_session s
             ON s.session_id=%s
             WHERE p.offered_at IS NULL AND p.expires_at > clock_timestamp()
               AND s.report->>'mode'='worker' AND (s.report->>'freeSlots')::integer > 0
@@ -30,7 +32,7 @@ def take_preparation(store, session_id):
               AND NOT EXISTS (SELECT 1 FROM occurrence o WHERE o.workflow_id=p.workflow_id)
             ORDER BY p.expires_at LIMIT 1 FOR UPDATE OF p SKIP LOCKED
         """, (session_id,)).fetchone()
-        if row is None or not store._can_run(db, session_id, row["task"]):
+        if row is None or blocked_claim(db, row["report"]) or not store._can_run(db, session_id, row["task"]):
             return None
         db.execute("UPDATE media_preparation SET offered_at=clock_timestamp() WHERE workflow_id=%s",
                    (row["workflow_id"],))

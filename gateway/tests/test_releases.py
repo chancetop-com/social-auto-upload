@@ -149,3 +149,23 @@ def test_first_install_online_completion_and_returning_offline_node(gateway, mon
     returning = poll(gateway, offline, **old)
     assert returning["approved"]["revision"] == returning["assignment"]["revision"] == first["revision"]
     assert not gateway.get(path, headers=INTERNAL).json()["onlineReady"]
+
+
+def test_pending_drain_withdraws_preparation_as_well_as_publication(gateway):
+    from datetime import datetime, timedelta, timezone
+    from test_publish_api import video
+
+    node, sid = str(uuid4()), str(uuid4())
+    old = {"revision": "0" * 40, "sha256": "0" * 64}
+    report = {"sessionId": sid, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0", "contractVersion": 1,
+              "capacity": 1, "freeSlots": 1, "capabilities": [{"platform": "tiktok", "action": "upload-video"}],
+              "providers": [{"provider": "local-chrome", "available": True,
+                             "profiles": [{"name": "fixture", "profileId": "operator-approved"}]}],
+              "installation": {"machineId": node, "target": TARGET, **old}}
+    post(gateway, "/session", report)
+    gateway.post("/internal/releases", headers=INTERNAL, json=artifact(gateway)).raise_for_status()
+    assignment = poll(gateway, node, sessionId=sid, **old)["assignment"]
+    assert progress(gateway, node, assignment, "draining")["active"]
+    offer = {"task": video("future-cache"), "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}
+    gateway.post("/internal/preparations", json=offer, headers=INTERNAL).raise_for_status()
+    assert post(gateway, "/publish-task/claim", {"sessionId": sid, "waitSeconds": 0, "acceptPreparation": True})["task"] is None
