@@ -1,24 +1,26 @@
 # macOS 桌面发布节点
 
-使用平时打开浏览器的 macOS 普通用户安装。桌面节点通过出站 HTTPS 连接 Gateway，登录桌面后才能接单。准备可写目录、可访问的开发环境 Gateway、桌面端 Token，以及与本机芯片匹配的程序包（Apple 芯片选 `macos-arm64`，Intel 选 `macos-x86_64`）。包内含 Python、worker 和配套 CLI。
+使用平时打开浏览器的 macOS 普通用户安装。桌面节点通过出站 HTTPS 连接 Gateway，登录桌面后才能接单。准备可写目录、可访问的开发环境 Gateway 和桌面端 Token。默认引导按本机芯片取得 Gateway 批准的包（Apple 芯片为 `macos-arm64`，Intel 为 `macos-x86_64`）。包内含 Python、worker 和配套 CLI。
 
 ## 准备浏览器、窗口和安装包
 
 1. 用该用户安装比特浏览器或 AdsPower，打开 Local API 和 Token 鉴权。比特浏览器使用“复制 ID”取得窗口 ID，AdsPower 使用 Profile 的用户 ID。打开目标窗口，登录平台，核对头像、账号标识及商家归属，再关闭窗口。平台可选 `rednote`、`xiaohongshu`、`tiktok`、`instagram`。
-2. 从发布负责人取得批准的完整 Git SHA、该芯片 ZIP 的 SHA-256 和制品目录读权限。ZIP 文件名为 `sau-desktop-完整SHA-目标.zip`。通过有读取权限的账号获取仓库脚本，例如 `git clone git@github.com:chancetop-com/social-auto-upload.git`，在该仓库执行 `git checkout --detach "$REVISION"`。也可以取得负责人分发的同一提交的 `desktop` 目录。
+2. 从发布负责人取得引导脚本所属的完整 Git SHA（下面的 `REVISION`）。通过有读取权限的账号获取仓库脚本，例如 `git clone git@github.com:chancetop-com/social-auto-upload.git`，在该仓库执行 `git checkout --detach "$REVISION"`。也可以取得负责人分发的同一提交的 `desktop` 目录。
 3. 在浏览器用户的终端设置安装参数。以下示例使用 zsh；替换示例值。省略安装根目录参数时默认使用 `~/Library/Application Support/social-auto-upload`。
 
 ```zsh
 REVISION='替换为40位提交SHA'
-SHA256='替换为该ZIP的64位SHA256'
-ARTIFACT_DIR='/Volumes/Release Share/dev'
 INSTALL_ROOT="$HOME/Library/Application Support/social-auto-upload"
 export SAU_PROVIDERS=bitbrowser
 read -rs 'SAU_DESKTOP_TOKEN?桌面 Token：'; echo
 export SAU_DESKTOP_TOKEN
 # 同时使用两个浏览器时设置 SAU_PROVIDERS=bitbrowser,adspower
-./desktop/bootstrap.sh "$REVISION" "$SHA256" "$ARTIFACT_DIR" "$INSTALL_ROOT"
+export SAU_RELEASE_CHECK_PROVIDER=bitbrowser SAU_RELEASE_CHECK_PLATFORM=tiktok
+export SAU_RELEASE_CHECK_PROFILE='复制的窗口ID'
+./desktop/bootstrap.sh --approved "$INSTALL_ROOT"
 ```
+
+省略全部命令行参数使用默认目录从 Gateway 安装。发布负责人使用本地制品做离线包核验时，可另外指定完整固定参数 `./desktop/bootstrap.sh "$REVISION" "$SHA256" "$ARTIFACT_DIR" "$INSTALL_ROOT"`。
 
 缺少选定提供方的 API Key 时，安装器在终端隐式输入。可预先导出 `BITBROWSER_API_KEY` 或 `ADSPOWER_API_KEY`。默认 Gateway 为 `https://social-media-web-api.connexup-dev.net`；需要覆盖时在安装或重启前导出 `SAU_GATEWAY_URL`。两个 Local API 默认分别为本机 54345、50325 端口，可用 `BITBROWSER_API_BASE`、`ADSPOWER_API_BASE` 指定回环地址。容量默认 1，按机器实际能力设置 `WORKER_MAX_CONCURRENCY`。应用位于非标准位置时，把 `BITBROWSER_APP_PATH` 或 `ADSPOWER_APP_PATH` 设置为对应的绝对 `.app` 路径。
 
@@ -63,11 +65,14 @@ export SAU_RELEASE_CHECK_PROFILE='复制的窗口ID'
 "$INSTALL_ROOT/cli-service" status
 ```
 
+已装旧版且没有 `release-host.sh` 的节点，需由原浏览器用户执行一次上面的 `--approved` 引导，让旧监督进程排空并迁入分批流程。支持自动更新的版本随后在登录或重连时自行查版本。
+
 首次安装从所连 Gateway 取本机芯片已批准的 ZIP 并验证 SHA-256。全新环境首台可取得验证批次。根目录的 `state/machine-id` 自动生成，关机返场、重启和升级沿用同一标识。不要把此文件复制到另一台桌面。以后每次登录或网络恢复会重新查询；收到批次后停止领新工作，等子进程退出并尝试原会话回执，然后核验、切换整包。新的 worker 会话与单独的检查会话均上报实际安装的摘要，Gateway 收到该窗口的成功回执后继续下一台。
 
 发布负责人在有内网 Gateway 访问权的终端运行以下命令。先设置 `SAU_RELEASE_GATEWAY_URL` 为内网 HTTPS 地址或本地端口转发地址，安全注入 `GATEWAY_INTERNAL_TOKEN`。制品目录放置相同提交的各目标 ZIP 及配套 `.sha256`。
 
 ```zsh
+ARTIFACT_DIR='/Volumes/Release Share/dev'
 python3 desktop/release.py worker --env dev --ref main --artifacts "$ARTIFACT_DIR" --watch
 python3 desktop/release.py status --env dev --release-id "$RELEASE_ID" --watch
 ```

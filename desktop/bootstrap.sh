@@ -2,9 +2,9 @@
 # Usage: bootstrap.sh REVISION SHA256 ARTIFACT_DIR [INSTALL_ROOT]
 set -eu
 umask 077
-if [ "${1:-}" = --approved ]; then
+if [ "$#" = 0 ] || [ "${1:-}" = --approved ]; then
     [ "$#" -le 2 ] || exit 2
-    shift
+    if [ "$#" -gt 0 ]; then shift; fi
     exec /bin/sh "$(dirname "$0")/approved.sh" "$@"
 fi
 test "$#" -ge 3 && test "$#" -le 4 || { echo "Expected REVISION SHA256 ARTIFACT_DIR [INSTALL_ROOT]" >&2; exit 2; }
@@ -59,4 +59,8 @@ cd -- "$stage/image"
     chmod(($m->unixFileAttributes & 0111) ? 0755 : 0644, $n) or die "chmod: $!";
   }
 ' "$stage/package.zip"
+if [ -n "${SAU_BOOTSTRAP_ASSIGNMENT:-}" ]; then
+    "$stage/image/runtime/bin/python3.11" -IB -m sau_worker.desktop _verify "$revision" "$target" || exit 65
+fi
+export SAU_VERIFIED_ARCHIVE="$stage/package.zip"
 "$stage/image/runtime/bin/python3.11" -I -B -m sau_worker.desktop install "$root" "$revision" "$digest" "$target"

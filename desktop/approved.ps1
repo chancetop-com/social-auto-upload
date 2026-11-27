@@ -58,6 +58,14 @@ function Install-Approved([string]$Root) {
             [IO.File]::WriteAllText($env:SAU_BOOTSTRAP_ASSIGNMENT, ($a | ConvertTo-Json -Compress))
         }
         & (Join-Path $PSScriptRoot 'bootstrap.ps1') -Revision $a.revision -Sha256 $a.sha256 -ArtifactDir $dir -InstallRoot $Root
+    } catch {
+        if ($reply.assignment -and $_.Exception.Message -eq 'Verified native package failed the paired worker/CLI check') {
+            $defect = @{machineId=$body.machineId;releaseId=$a.releaseId;batchId=$a.batchId;phase='defect';reason=$_.Exception.Message}
+            $form = [Net.Http.StringContent]::new(($defect | ConvertTo-Json -Compress),[Text.Encoding]::UTF8,'application/json')
+            $report = $client.PostAsync("$gateway/session/release/progress",$form).GetAwaiter().GetResult()
+            [void]$report.EnsureSuccessStatusCode()
+        }
+        throw
     } finally {
         $env:SAU_BOOTSTRAP_ASSIGNMENT = $oldAssignment
         $client.Dispose()

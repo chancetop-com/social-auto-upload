@@ -54,4 +54,15 @@ revision=$(cat "$stage/revision")
 digest=$(cat "$stage/sha256")
 req "$base/session/release/packages/$digest" -o "$stage/sau-desktop-$revision-$target.zip"
 if [ -f "$stage/assignment.json" ]; then export SAU_BOOTSTRAP_ASSIGNMENT="$stage/assignment.json"; fi
-"$scripts/bootstrap.sh" "$revision" "$digest" "$stage" "$root"
+rc=0
+"$scripts/bootstrap.sh" "$revision" "$digest" "$stage" "$root" || rc=$?
+if [ "$rc" = 65 ] && [ -f "$stage/assignment.json" ]; then
+    /usr/bin/perl -MJSON::PP -e '
+      sub load_file {local $/; open my $f,"<",$_[0] or die $!; decode_json(<$f>)}
+      ($a,$r)=map {load_file($_)} @ARGV; print encode_json({machineId=>$r->{machineId},
+        batchId=>$a->{batchId},releaseId=>$a->{releaseId},phase=>"defect",
+        reason=>"Verified native package failed the paired worker/CLI check"})' \
+      "$stage/assignment.json" "$stage/request" > "$stage/defect"
+    req -H 'Content-Type: application/json' --data-binary "@$stage/defect" "$base/session/release/progress" -o /dev/null
+fi
+exit "$rc"

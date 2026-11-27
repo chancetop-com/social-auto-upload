@@ -99,7 +99,7 @@ class Worker:
             return False
         from .supervisor import ending
         return ending(self.state, self.generation) or (
-            not self.self_check and self.upgrade.get("step") in ("draining", "staging"))
+            not self.self_check and self.upgrade.get("step") in ("draining", "staging", "returning"))
 
     @property
     def upgrade(self):
@@ -354,7 +354,10 @@ class Worker:
             return True
         response = await self.post("/session/release/progress", progress_body(
             self.state.parent, batch, "switched", sessionId=self.session_id))
-        if not response["active"] or read(self.state / "release-check-result.json").get("batchId") == batch["batchId"]:
+        receipt = read(self.state / "release-check-result.json")
+        if not response["active"] or (
+            receipt.get("batchId") == batch["batchId"] and receipt.get("sessionId") == self.session_id
+        ):
             return True
         saved = read(self.state / "release-check-target.json")
         provider = os.environ.get("SAU_RELEASE_CHECK_PROVIDER") or saved.get("provider")

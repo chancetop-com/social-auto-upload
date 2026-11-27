@@ -130,6 +130,8 @@ def install(root, revision, sha256, target):
         if batch and (batch["sha256"] != sha256 or batch["revision"] != revision):
             raise ValueError("Installer pin differs from the Gateway assignment")
         if batch and program.exists() and not (root / ("release-host.ps1" if os.name == "nt" else "release-host.sh")).exists():
+            if not marker.is_file() or not interpreter(root).is_file() or not (program / "release.json").is_file():
+                raise ValueError("Expected an existing paired desktop installation")
             return adopt(root, image, batch)
 
         if program.exists() and (not marker.is_file() or marker.read_text(encoding="ascii") != sha256):
@@ -177,6 +179,9 @@ def adopt(root, image, batch):
             verify_image(image, batch)
             versions = root / ".versions"
             versions.mkdir(mode=0o700, exist_ok=True)
+            archive = versions / "download/package.zip"
+            archive.parent.mkdir(mode=0o700, exist_ok=True)
+            shutil.copyfile(os.environ["SAU_VERIFIED_ARCHIVE"], archive)
             staged = versions / "next"
             if staged.is_dir():
                 shutil.rmtree(staged)
@@ -230,6 +235,13 @@ def main():
                     (state / "uninstalled").touch()
                     drain(root)
                     native_login(root, remove=True)
+                    for name in ("release-host.sh", "release-host.ps1", "verify-install.py"):
+                        (root / name).unlink(missing_ok=True)
+                    for name in (".versions", ".retired-release"):
+                        if (root / name).is_dir():
+                            shutil.rmtree(root / name)
+                    for name in ("upgrade.json", "release-check-result.json"):
+                        (state / name).unlink(missing_ok=True)
                 return 0
             if args == ["disable"]:
                 (state / "disabled").touch()

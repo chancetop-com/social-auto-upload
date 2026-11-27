@@ -1,23 +1,26 @@
 # Windows 桌面发布节点
 
-在使用浏览器的 Windows x64 普通用户会话中运行 PowerShell 5.1 或更新版本。准备可写目录、开发环境 Gateway 的出站 HTTPS、桌面端 Token、目标平台的现有登录态及 `windows-x86_64` 私有运行时包。
+在使用浏览器的 Windows x64 普通用户会话中运行 PowerShell 5.1 或更新版本。准备可写目录、开发环境 Gateway 的出站 HTTPS、桌面端 Token及目标平台的现有登录态。默认引导从 Gateway 取得本机的 `windows-x86_64` 私有运行时包。
 
 ## 准备窗口和安装来源
 
 1. 在该用户下安装比特浏览器或 AdsPower，打开 Local API 和 Token 鉴权。比特浏览器在目标窗口选择“复制 ID”；AdsPower 记录 Profile 的用户 ID。打开该窗口，登录目标平台，核对账号标识、头像及商家归属，再关闭窗口。
-2. 向发布负责人取得获批版本的完整 Git SHA、Windows ZIP 的 SHA-256 和制品目录读权限。如果从私有仓库取脚本，先用有读取权限的 SSH 账号执行 `git clone git@github.com:chancetop-com/social-auto-upload.git`，进入仓库并执行 `git checkout --detach $Revision`。也可以使用该提交分发的完整 `desktop` 目录，其中应同时包含 `bootstrap.ps1` 和 `expand-package.ps1`。制品目录应有 `sau-desktop-完整SHA-windows-x86_64.zip`。
+2. 向发布负责人取得引导脚本所在版本的完整 Git SHA。如果从私有仓库取脚本，先用有读取权限的 SSH 账号执行 `git clone git@github.com:chancetop-com/social-auto-upload.git`，进入仓库并执行 `git checkout --detach $Revision`。也可以使用该提交分发的完整 `desktop` 目录，保留该目录中的所有脚本。
 3. 从仓库根目录运行以下 PowerShell 命令，替换占位值。省略 `-InstallRoot` 时默认使用 `%LOCALAPPDATA%\social-auto-upload`。
 
 ```powershell
 $Revision = '替换为40位提交SHA'
-$Digest = '替换为Windows包的64位SHA256'
-$ArtifactDir = '\\fileserver\releases\dev'
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'social-auto-upload'
 $env:SAU_PROVIDERS = 'bitbrowser'
 $token = Read-Host '桌面 Token' -AsSecureString
 $env:SAU_DESKTOP_TOKEN = ([pscredential]::new('desktop', $token)).GetNetworkCredential().Password
-& .\desktop\bootstrap.ps1 -Revision $Revision -Sha256 $Digest -ArtifactDir $ArtifactDir -InstallRoot $InstallRoot
+$env:SAU_RELEASE_CHECK_PROVIDER = 'bitbrowser'
+$env:SAU_RELEASE_CHECK_PLATFORM = 'tiktok'
+$env:SAU_RELEASE_CHECK_PROFILE = '复制的窗口ID'
+& .\desktop\bootstrap.ps1 -Approved -InstallRoot $InstallRoot
 ```
+
+省略全部命令行参数使用默认目录从 Gateway 安装。发布负责人核验本地制品时，可使用固定参数 `& .\desktop\bootstrap.ps1 -Revision $Revision -Sha256 $Digest -ArtifactDir $ArtifactDir -InstallRoot $InstallRoot`。
 
 也可选择 `adspower` 或 `bitbrowser,adspower`。需要时设置 `BITBROWSER_API_KEY`、`ADSPOWER_API_KEY`；缺少已选提供方的 Key 时安装器会在本机提示输入。Local API 默认使用回环地址上的 54345（比特浏览器）和 50325（AdsPower）端口，覆盖变量分别为 `BITBROWSER_API_BASE`、`ADSPOWER_API_BASE`。若客户端安装在自定义路径，设置 `BITBROWSER_APP_PATH` 或 `ADSPOWER_APP_PATH` 为实际 EXE 的完整路径，例如 `$env:BITBROWSER_APP_PATH = 'D:\Apps\BitBrowser\BitBrowser.exe'`。默认 Gateway 是 `https://social-media-web-api.connexup-dev.net`，通过 `SAU_GATEWAY_URL` 覆盖；默认容量 1，通过 `WORKER_MAX_CONCURRENCY` 调整。安装及重启保存本用户设置。
 
@@ -61,11 +64,14 @@ $env:SAU_RELEASE_CHECK_PROFILE = '复制的窗口ID'
 & (Join-Path $InstallRoot 'cli-service.cmd') status
 ```
 
+旧安装中没有 `release-host.ps1` 时，先用原浏览器用户执行一次上面的 `-Approved` 引导，等待旧监督进程排空。支持自动更新的版本在登录或重连时自行查询。
+
 引导程序从配置的 Gateway 查询已批准的 Windows x64 包，核验 SHA-256 后安装。全新环境可以由首台参加验证。`state\machine-id` 自动生成，重启和更新沿用；每台桌面独立首装。离线机器重新登录后查询当前批次。收到更新时先停止领取，等现有 CLI 退出并尝试原任务回执；任务计划程序从运行时目录外执行切换，随后开新会话、上报实际版本和能力并执行指定窗口的检查。
 
 发布负责人在内网终端使用已配置的 `SAU_RELEASE_GATEWAY_URL` 和 `GATEWAY_INTERNAL_TOKEN`。把同一提交各目标 ZIP 和配套 `.sha256` 放入 `$ArtifactDir`。
 
 ```powershell
+$ArtifactDir = '\\fileserver\releases\dev'
 py -3 .\desktop\release.py worker --env dev --ref main --artifacts $ArtifactDir --watch
 $ReleaseId = '第一条输出中的 releaseId'
 py -3 .\desktop\release.py status --env dev --release-id $ReleaseId --watch

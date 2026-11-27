@@ -125,7 +125,7 @@ def supervise(root):
                 if process is not None and process.poll() is not None:
                     elapsed = time.monotonic() - started
                     delay = retry.after_exit(elapsed)
-                    reason = action or ("disabled" if stopping else "unexpected")
+                    reason = action or ("upgrade" if changing else "disabled" if stopping else "unexpected")
                     status.update(workerPid=None, lastExit={"reason": reason, "code": process.returncode, "at": time.time()},
                                   nextAttempt=None if stopping else time.time() + delay)
                     write(status_file, status)
@@ -145,7 +145,7 @@ def supervise(root):
                             if time.monotonic() >= retry_release:
                                 if release.after_drain():
                                     monitor[1].set()
-                                    return 75
+                                    return 0 if requested(state, generation) else 75
                                 retry_release = time.monotonic() + 5
                         else:
                             if monitor:
