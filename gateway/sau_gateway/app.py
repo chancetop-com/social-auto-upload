@@ -9,9 +9,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from . import leases
 from .wakeups import Wakeups
 from .database import Conflict, Missing, Store
-from .models import CheckTarget, CheckTask, Claim, PublishTask, Result, Session, Start
+from .models import CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, PublishTask, Result, Session, Start
 
 
 def authorized(token):
@@ -106,6 +107,39 @@ def create_app(stopping=None):
             disconnect.cancel()
             stop.cancel()
             await asyncio.gather(disconnect, stop, return_exceptions=True)
+
+    @app.post("/profile-lease/renew", dependencies=desktop)
+    def renew(body: LeaseCommand):
+        with store.connect() as db:
+            expiry = leases.renew(db, body, store.lease_policy)
+            if expiry is None:
+                raise Conflict()
+            return {"expiresAt": expiry}
+
+    def complete_transaction(body):
+        with store.connect() as db:
+            idle = leases.complete(db, body)
+            if idle is None:
+                raise Conflict()
+            return {"idle": idle}
+
+    @app.post("/profile-lease/complete", dependencies=desktop)
+    async def complete(body: LeaseCommand):
+        status = await asyncio.to_thread(complete_transaction, body)
+        await wakeups.publish()
+        return status
+
+    def release_transaction(body):
+        with store.connect() as db:
+            if not leases.release(db, body):
+                raise Conflict()
+            return {"released": True}
+
+    @app.post("/profile-lease/release", dependencies=desktop)
+    async def release(body: LeaseRelease):
+        status = await asyncio.to_thread(release_transaction, body)
+        await wakeups.publish()
+        return status
 
     @app.post("/publish-task/start", dependencies=desktop)
     def start(body: Start):
