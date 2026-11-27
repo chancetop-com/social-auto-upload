@@ -82,16 +82,23 @@ def launcher_script(*, windows):
     if windows:
         return r"""@echo off
 setlocal
+if /i "%~1"=="run" if "%~2"=="" if exist "%~dp0release-host.ps1" goto managed_run
 "%~dp0program\runtime\python.exe" -IB -m sau_worker.desktop %*
 if errorlevel 1 exit /b %errorlevel%
 if /i not "%~1"=="uninstall" exit /b 0
 rd /s /q "%~dp0program"
 if exist "%~dp0program" exit /b 1
 del "%~f0" & exit /b 0
+:managed_run
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0release-host.ps1"
+exit /b %errorlevel%
 """.replace("\n", "\r\n")
     return """#!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+if [ "$#" = 1 ] && [ "$1" = run ] && [ -x "$root/release-host.sh" ]; then
+    exec "$root/release-host.sh"
+fi
 if [ "${1:-}" = uninstall ]; then
     "$root/program/runtime/bin/python3.11" -IB -m sau_worker.desktop "$@"
     /bin/rm -rf -- "$root/program"
@@ -189,6 +196,8 @@ def adopt(root, image, batch):
             atomic_write(staged / "package.sha256", batch["sha256"])
             write(state / "upgrade.json", {**batch, "step": "validating"})
             write_host(root, windows=os.name == "nt")
+            launcher = root / ("cli-service.cmd" if os.name == "nt" else "cli-service")
+            atomic_write(launcher, launcher_script(windows=os.name == "nt"), executable=True)
             atomic_write(versions / "switch", batch["sha256"])
             # Change the old native registration only after its claiming process has exited.
             native_login(root, remove=True)

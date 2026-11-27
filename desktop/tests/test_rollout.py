@@ -356,15 +356,30 @@ stage(Path(sys.argv[1]),{'sha256':sys.argv[3]},stream())
     assert (program / "package.sha256").read_text() == "a" * 64
     stage(root, {"sha256": digest}, [archive.read_bytes()], lambda *_: None)
     path = write_host(root, windows=False)
-    shim = tmp_path / "commands"
-    shim.mkdir()
-    mv = shim / "mv"
-    mv.write_text('#!/bin/sh\n/bin/mv "$@" || exit 1\nkill -KILL "$PPID"\n')
-    mv.chmod(0o755)
-    fault = subprocess.run([path, "recover"], env={"PATH": str(shim) + ":/usr/bin:/bin"}, check=False)
+    # Interrupt the native host immediately after its first successful rename.
+    host = path.read_text()
+    seam = 'move_dir program "$versions/previous";'
+    assert host.count(seam) == 1
+    path.write_text(host.replace(seam, seam + ' kill -KILL $$;'))
+    fault = subprocess.run([path, "recover"], check=False)
+    path.write_text(host)
     assert (
         fault.returncode < 0 and not program.exists() and (root / ".versions/previous/package.sha256").exists()
     )
     subprocess.run([path, "recover"], check=True)
     assert (program / "package.sha256").read_text() == digest
     assert (program / "runtime/bin/python3.11").read_bytes() == b"complete new runtime"
+
+
+def test_foreground_run_enters_recoverable_host_before_loading_program(tmp_path):
+    from sau_worker.desktop import launcher_script
+
+    launcher = tmp_path / "cli-service"
+    launcher.write_text(launcher_script(windows=False))
+    launcher.chmod(0o700)
+    host = tmp_path / "release-host.sh"
+    host.write_text("#!/bin/sh\nexit 17\n")
+    host.chmod(0o700)
+    assert subprocess.run([launcher, "run"], check=False).returncode == 17
+    windows = launcher_script(windows=True)
+    assert "release-host.ps1" in windows and '=="run"' in windows

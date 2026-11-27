@@ -2,16 +2,18 @@
 set -eu
 cd -- "$(dirname "$0")"
 versions=.versions
+# rename(2) treats the destination as an exact path if a concurrent start wins.
+move_dir() { /usr/bin/perl -e 'rename($ARGV[0],$ARGV[1]) or die "rename: $!"' "$1" "$2"; }
 while :; do
     if [ -f "$versions/rollback" ]; then
         if [ -d "$versions/previous" ]; then
-            if [ -d program ]; then mv program "$versions/rejected"; fi
-            mv "$versions/previous" program
+            if [ -d program ]; then move_dir program "$versions/rejected"; fi
+            move_dir "$versions/previous" program
         fi
     elif [ -f "$versions/switch" ]; then
         if [ -d "$versions/next" ]; then
-            if [ -d program ]; then test ! -e "$versions/previous"; mv program "$versions/previous"; fi
-            mv "$versions/next" program
+            if [ -d program ]; then test ! -e "$versions/previous"; move_dir program "$versions/previous"; fi
+            move_dir "$versions/next" program
         fi
         if [ ! -f program/package.sha256 ] || [ "$(cat program/package.sha256)" != "$(cat "$versions/switch")" ]; then
             [ -d "$versions/previous" ] || [ -f program/package.sha256 ] || exit 1
