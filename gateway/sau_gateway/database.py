@@ -1,10 +1,11 @@
 from importlib.resources import files
+import os
 
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .models import CheckReceipt, PublishReceipt
+from .models import CheckReceipt, PublishReceipt, PublishTask
 
 
 class Missing(Exception):
@@ -26,12 +27,17 @@ def migrate(dsn):
                 conn.execute("INSERT INTO gateway_migration VALUES (%s)", (script.name,))
 
 
-RECORD = 'workflow_id AS "workflowId", state, session_id AS "sessionId", task, receipt'
+RECORD = ('workflow_id AS "workflowId", state, session_id AS "sessionId", task, receipt, '
+          'claim_deadline AS "claimDeadlineAt", result_deadline AS "resultDeadlineAt"')
 
 
 class Store:
     def __init__(self, dsn):
         self.dsn = dsn
+        self.claim_seconds = int(os.environ.get("GATEWAY_CLAIM_TIMEOUT_SECONDS", 1800))
+        self.result_seconds = int(os.environ.get("GATEWAY_RESULT_TIMEOUT_SECONDS", 1800))
+        if min(self.claim_seconds, self.result_seconds) <= 0:
+            raise ValueError("Occurrence timeouts must be positive")
 
     def connect(self):
         return psycopg.connect(self.dsn, row_factory=dict_row, connect_timeout=5)
@@ -58,13 +64,21 @@ class Store:
 
     def enqueue(self, task, target_session=None):
         with self.connect() as db:
+            payload = task.model_dump(mode="json", exclude_unset=True)
             db.execute("""
-                INSERT INTO occurrence(workflow_id, task, target_session) VALUES (%s,%s,%s)
+                INSERT INTO occurrence(workflow_id, task, target_session, claim_deadline)
+                VALUES (%s,%s,%s,CASE WHEN %s THEN coalesce(%s::timestamptz,
+                    coalesce(%s::timestamptz, clock_timestamp()) + %s * interval '1 second') END)
                 ON CONFLICT (workflow_id) DO NOTHING
-            """, (task.workflowId, Jsonb(task.model_dump(mode="json")), target_session))
+            """, (task.workflowId, Jsonb(payload), target_session, isinstance(task, PublishTask),
+                  payload.get("claimDeadlineAt"), payload.get("earliestPublishAt"), self.claim_seconds))
             return self._get(db, task.workflowId)
 
     def _get(self, db, workflow_id):
+        db.execute("""
+            UPDATE occurrence SET state='timed_out', completed_at=clock_timestamp()
+            WHERE workflow_id=%s AND state='pending' AND claim_deadline <= clock_timestamp()
+        """, (workflow_id,))
         row = db.execute(f"SELECT {RECORD} FROM occurrence WHERE workflow_id=%s", (workflow_id,)).fetchone()
         if row is None:
             raise Missing()
@@ -93,7 +107,8 @@ class Store:
                        for p in report["providers"] if p["available"] for profile in p["profiles"]]
             row = db.execute("""
                 SELECT workflow_id, task FROM occurrence AS pending
-                WHERE state='pending' AND task->>'release'=%s AND (task->>'contractVersion')::integer=%s
+                WHERE state='pending' AND (claim_deadline IS NULL OR claim_deadline > clock_timestamp())
+                AND task->>'release'=%s AND (task->>'contractVersion')::integer=%s
                 AND (task->>'action'='check' OR task->>'release'=%s)
                 AND ((target_session=%s) OR
                     (target_session IS NULL AND %s='worker' AND %s::jsonb @> jsonb_build_array(jsonb_build_object(
@@ -120,14 +135,23 @@ class Store:
                 AND task->>'provider'=%s AND task->>'profileId'=%s AND task->>'platform'=%s
             """, target).fetchone():
                 return None
+            claimed = db.execute(f"""
+                UPDATE occurrence SET state='claimed', session_id=%s, claimed_at=clock_timestamp(),
+                    result_deadline=CASE WHEN task->>'action' <> 'check' THEN
+                        greatest(clock_timestamp(), (task->>'earliestPublishAt')::timestamptz)
+                        + %s * interval '1 second' END
+                WHERE workflow_id=%s AND state='pending'
+                  AND (claim_deadline IS NULL OR claim_deadline > clock_timestamp())
+                RETURNING {RECORD}
+            """, (session_id, self.result_seconds, row["workflow_id"])).fetchone()
+            if claimed is None:
+                db.rollback()
+                return None
             db.execute("""
                 UPDATE desktop_session SET report=jsonb_set(report, '{freeSlots}', to_jsonb((report->>'freeSlots')::int - 1))
                 WHERE session_id=%s
             """, (session_id,))
-            return db.execute(f"""
-                UPDATE occurrence SET state='claimed',session_id=%s,claimed_at=clock_timestamp()
-                WHERE workflow_id=%s RETURNING {RECORD}
-            """, (session_id, row["workflow_id"])).fetchone()
+            return claimed
 
     def _can_run(self, db, session_id, task):
         report = db.execute("SELECT report FROM desktop_session WHERE session_id=%s FOR UPDATE",
@@ -163,7 +187,7 @@ class Store:
 
     def start(self, body, latest):
         with self.connect() as db:
-            task = latest.model_dump(mode="json")
+            task = latest.model_dump(mode="json", exclude_unset=True)
             previous = self._get(db, body.workflowId)["task"]
             identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId", "provider", "profileId",
                         "platform", "action", "requiredCapability", "release", "contractVersion")
