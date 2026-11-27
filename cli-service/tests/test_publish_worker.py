@@ -138,7 +138,7 @@ async def test_immediate_preparation_and_actual_child_evidence(child, code, outp
     monkeypatch.setenv("PYTHONIOENCODING", "ascii")
     _, _, receipts, calls = await desktop(child, prepared=True, provider="bitbrowser", code=code,
                                          output=output, error=error)
-    assert receipts[0]["receipt"] == {"outcome": outcome, "cliInvoked": True, "exitCode": code}
+    assert receipts[0]["receipt"].items() >= {"outcome": outcome, "cliInvoked": True, "exitCode": code}.items()
     assert len(calls) == 1
     assert calls[0]["credentials"] == ["BITBROWSER_API_KEY"]
     argv = calls[0]["argv"]
@@ -261,3 +261,20 @@ async def test_regional_channels_dispatch_their_own_cli_and_accept_idless_confir
     assert {"--title=-title", body_flag + "-first line\n#café & second", "--location=Town", "--content-type=self-shot",
             "--original", "--shoot-location=Garden", "--shoot-date=2024-02-29"}.issubset(argv)
     assert receipts[0]["receipt"] == {"outcome": "published", "exitCode": 0, "cliInvoked": True}
+
+@pytest.mark.parametrize(("code", "stderr", "outcome", "reason"), [
+    (1, "TikTok发布超时（15 分钟）：尚未点击发布，结束。", "failed", "upload_timeout"),
+    (1, "Private media URL", "unknown", "possible_submission"),
+    (1, "Private media URL\npublish_attempted=false", "failed", "pre_submit_failure"),
+    (10, "private account label", "failed", "login_required"),
+    (9, "private diagnostic", "unknown", "possible_submission"),
+    (10, "private diagnostic\npublish_attempted=true", "unknown", "possible_submission"),
+    (-9, "", "unknown", "possible_submission"),
+])
+@pytest.mark.asyncio
+async def test_merchant_safe_receipt_on_failure(child, code, stderr, outcome, reason):
+    _, _, reports, calls = await desktop(child, code=code, output="", error=stderr)
+    receipt = reports[0]["receipt"]
+    assert (receipt["outcome"], receipt["reason"]) == (outcome, reason)
+    assert "private" not in json.dumps(receipt).lower()
+    assert len(calls) == 1

@@ -28,7 +28,8 @@ def migrate(dsn):
 
 
 RECORD = ('workflow_id AS "workflowId", state, session_id AS "sessionId", task, receipt, '
-          'claim_deadline AS "claimDeadlineAt", result_deadline AS "resultDeadlineAt"')
+          'claim_deadline AS "claimDeadlineAt", result_deadline AS "resultDeadlineAt", '
+          'overdue_at AS "overdueAt", publish_started_at AS "publishStartedAt", receipt_history AS "receiptHistory"')
 
 
 class Store:
@@ -78,6 +79,11 @@ class Store:
         db.execute("""
             UPDATE occurrence SET state='timed_out', completed_at=clock_timestamp()
             WHERE workflow_id=%s AND state='pending' AND claim_deadline <= clock_timestamp()
+        """, (workflow_id,))
+        db.execute("""
+            UPDATE occurrence SET state='unknown', overdue_at=clock_timestamp()
+            WHERE workflow_id=%s AND state IN ('claimed','started') AND result_deadline <= clock_timestamp()
+              AND task->>'action' <> 'check'
         """, (workflow_id,))
         row = db.execute(f"SELECT {RECORD} FROM occurrence WHERE workflow_id=%s", (workflow_id,)).fetchone()
         if row is None:
@@ -169,7 +175,7 @@ class Store:
             row = db.execute("""
                 UPDATE occurrence SET start_requested_at=clock_timestamp()
                 WHERE workflow_id=%s AND session_id=%s AND state='claimed'
-                  AND start_requested_at IS NULL AND task->>'action' != 'check'
+                  AND start_requested_at IS NULL AND result_deadline > clock_timestamp() AND task->>'action' != 'check'
                 RETURNING task
             """, (body.workflowId, body.sessionId)).fetchone()
             if row is None:
@@ -195,8 +201,8 @@ class Store:
                 self._decline(db, body)
                 return None
             row = db.execute("""
-                UPDATE occurrence SET state='started',task=%s
-                WHERE workflow_id=%s AND session_id=%s AND state='claimed' AND start_requested_at IS NOT NULL
+                UPDATE occurrence SET state='started',publish_started_at=clock_timestamp(),task=%s
+                WHERE workflow_id=%s AND session_id=%s AND state='claimed' AND start_requested_at IS NOT NULL AND result_deadline > clock_timestamp()
                 RETURNING task
             """, (Jsonb(task), body.workflowId, body.sessionId)).fetchone()
             if row is None:
@@ -204,12 +210,16 @@ class Store:
             return row["task"]
 
     def _settle(self, db, body, expected, state, receipt):
+        stored = Jsonb(receipt.model_dump(exclude_unset=True))
         row = db.execute("""
-            UPDATE occurrence SET state=%s, receipt=%s, completed_at=clock_timestamp()
+            UPDATE occurrence SET state=%s, receipt=%s, receipt_history=receipt_history || jsonb_build_array(%s::jsonb),
+                completed_at=clock_timestamp()
             WHERE workflow_id=%s AND session_id=%s AND state=%s RETURNING workflow_id
-        """, (state, Jsonb(receipt.model_dump()), body.workflowId, body.sessionId, expected)).fetchone()
+        """, (state, stored, stored, body.workflowId, body.sessionId, expected)).fetchone()
         if row is None:
             raise Conflict()
+        if expected == "unknown":
+            return
         db.execute("""
             UPDATE desktop_session SET last_contact_at=clock_timestamp(), report=jsonb_set(
                 report, '{freeSlots}', to_jsonb(least((report->>'capacity')::int, (report->>'freeSlots')::int + 1)))
@@ -224,15 +234,26 @@ class Store:
                 raise Missing()
             if row["sessionId"] != result.sessionId:
                 raise Conflict()
-            if row["receipt"] is not None:
-                return row
             receipt = result.receipt
+            prior = row["receipt"] or {}
+            if row["receipt"] is not None and prior.get("outcome") not in ("unknown", "processing"):
+                return row
             if row["task"]["action"] == "check":
                 if not isinstance(receipt, CheckReceipt) or row["state"] != "claimed":
                     raise Conflict()
                 state = "succeeded" if receipt.platformLogin == "valid" else "failed"
             else:
-                if not isinstance(receipt, PublishReceipt) or row["state"] != "started":
+                if not isinstance(receipt, PublishReceipt) or not row["publishStartedAt"]:
+                    raise Conflict()
+                if receipt.outcome == "processing":
+                    if row["state"] == "started" and not prior:
+                        progress = Jsonb(receipt.model_dump(exclude_unset=True))
+                        db.execute("""UPDATE occurrence SET receipt=%s, receipt_history=receipt_history || jsonb_build_array(%s::jsonb)
+                                      WHERE workflow_id=%s""", (progress, progress, result.workflowId))
+                    return self._get(db, result.workflowId)
+                if prior.get("outcome") == "unknown" and receipt.outcome == "unknown":
+                    return row
+                if row["state"] not in ("started", "unknown"):
                     raise Conflict()
                 if (receipt.outcome in ("published", "prepared")
                         and row["task"]["noPublish"] != (receipt.outcome == "prepared")):
