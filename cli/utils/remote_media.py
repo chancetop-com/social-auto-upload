@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlsplit
 import requests
 
 import conf
+from utils.budgets import seconds
 
 
 QUEUE_DIRECTORY = ".sau-queue"
@@ -160,12 +161,13 @@ def item_path(directory: Path, url: str) -> Path:
 def open_response(url: str, headers: dict):
     # Session.send builds its next request by draining the entire redirect body,
     # even with allow_redirects=False. The adapter returns just the headers.
+    timeout = (seconds("SAU_DOWNLOAD_CONNECT_SECONDS", 10), seconds("SAU_DOWNLOAD_IDLE_READ_SECONDS", 30))
     with requests.Session() as session:
         for _ in range(session.max_redirects + 1):
             request = requests.Request("GET", url, headers=headers).prepare()
             settings = session.merge_environment_settings(request.url, {}, True, None, None)
             adapter = session.get_adapter(request.url)
-            with adapter.send(request, timeout=(10, 30), **settings) as response:
+            with adapter.send(request, timeout=timeout, **settings) as response:
                 if not response.is_redirect:
                     yield response
                     return

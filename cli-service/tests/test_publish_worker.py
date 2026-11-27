@@ -23,7 +23,17 @@ with (root / "calls").open("a", encoding="utf-8") as output:
     print(json.dumps({"argv": sys.argv[1:], "credentials": sorted(k for k in os.environ
           if k in ("BITBROWSER_API_KEY", "ADSPOWER_API_KEY", "MLX_API_TOKEN", "SAU_DESKTOP_TOKEN"))}), file=output)
 result = json.loads((root / "controlled-result").read_text(encoding="utf-8"))
-print(result["stdout"])
+for line in result["stdout"].splitlines():
+    if line.startswith("FIXTURE_EVENT "):
+        print("SAU-EVENT " + os.environ.get("SAU_EVENT_NONCE", "missing") + " " + line[len("FIXTURE_EVENT "):], flush=True)
+    elif line == "WAIT_FOR_PROGRESS":
+        import time
+        for i in range(100):
+            if (root / "progress-seen").exists(): break
+            time.sleep(.02)
+        else: sys.exit(99)
+    else:
+        print(line)
 print(result["stderr"], file=sys.stderr)
 sys.exit(result["code"])
 """, encoding="utf-8")
@@ -32,7 +42,7 @@ sys.exit(result["code"])
 
 async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
                   output="TikTok video upload submitted: video.mp4", error="", start_status=200,
-                  options=None, lost_start=False, aliases="operator-selected"):
+                  options=None, lost_start=False, aliases="operator-selected", selection=None):
     root = script.parent
     (root / "controlled-result").write_text(json.dumps({"code": code, "stdout": output, "stderr": error}))
     workflow = "scheduled/shop|first"
@@ -46,6 +56,9 @@ async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
               "earliestPublishAt": None if prepared else "2026-11-27T15:30:00Z",
               "media": [{"id": "c", "role": "cover", "url": "https://media.example/current.jpg"},
                         {"id": "v2", "role": "video", "url": "https://media.example/current.mp4"}]}
+    if selection:
+        task.update(selection)
+        latest.update(selection)
     starts, reports, receipts = [], [], []
 
     def gateway(request):
@@ -68,6 +81,8 @@ async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
             return httpx.Response(start_status, json={"task": latest})
         assert path == "/publish-task/result"
         receipts.append(body)
+        if body["receipt"]["outcome"] == "processing":
+            (root / "progress-seen").touch()
         return httpx.Response(200, json={})
 
     config = Settings.from_env({"SAU_DESKTOP_TOKEN": "fixture", "SAU_GATEWAY_URL": "https://gateway.test",
@@ -146,9 +161,171 @@ async def test_worker_without_explicit_dev_alias_or_option_support_never_falls_b
     assert calls == []
     assert receipts[0]["receipt"] == {"outcome": "failed", "cliInvoked": False, "exitCode": None}
 
+@pytest.mark.asyncio
+async def test_photo_capability_dispatch_and_fuzzy_lookup(child):
+    media = [{"id": key, "role": "image", "url": f"https://media.test/{key}.png"} for key in ("b", "a", "b")]
+    selection = {"platform": "tiktok", "action": "upload-note", "requiredCapability": "tiktok.upload-note",
+                 "caption": "line one\n#话题", "settings": {"title": "-title", "privacy": "friends", "aigc": False,
+                 "brandedContent": True, "yourBrand": True, "location": "City", "noComments": True}, "media": media}
+    reports, _, receipts, calls = await desktop(child, selection=selection, output="photo post id: 123")
+    assert {"platform": "tiktok", "action": "upload-note"} in reports[0]["capabilities"]
+    args = calls[0]["argv"]
+    assert args[:6] == ["tiktok", "upload-note", "--images", "https://media.test/b.png",
+                        "https://media.test/a.png", "https://media.test/b.png"]
+    assert set(["--title=-title", "--note=line one\n#话题", "--privacy=friends", "--no-aigc", "--location=City",
+                "--branded-content", "--your-brand", "--no-comments"]).issubset(args)
+    assert receipts[-1]["receipt"]["outcome"] == "unknown"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code,terminal", [(0, "published"), (9, "unknown")])
+async def test_instagram_photo_progress_precedes_final_receipt_and_preserves_accessibility(child, code, terminal):
+    selection = {"platform": "instagram", "action": "upload-note", "requiredCapability": "instagram.upload-note",
+                 "settings": {"title": "one", "location": "City", "aiGenerated": False, "noComments": True,
+                              "collaborators": [" @Alice ", "Bob"], "altText": ["B image", "A image"]},
+                 "caption": "-body #photo", "media": [{"id": name, "role": "image", "url": "https://media.test/" + name + ".png"}
+                                                        for name in ("b", "a")]}
+    output = 'FIXTURE_EVENT {"status":"processing"}\nWAIT_FOR_PROGRESS'
+    if not code:
+        output += '\nFIXTURE_EVENT {"status":"published","post_id":"Az-7","post_url":"https://www.instagram.com/p/Az-7/","content_id":"12345"}'
+    reports, _, receipts, calls = await desktop(child, selection=selection, output=output, code=code)
+    assert {"platform": "instagram", "action": "upload-note"} in reports[0]["capabilities"]
+    assert [r["receipt"]["outcome"] for r in receipts] == ["processing", terminal]
+    assert len({(r["sessionId"], r["workflowId"]) for r in receipts}) == 1
+    if not code:
+        assert receipts[-1]["receipt"]["releaseId"] == "Az-7"
+        assert receipts[-1]["receipt"]["url"] == "https://www.instagram.com/p/Az-7/"
+    args = calls[0]["argv"]
+    assert args[:5] == ["instagram", "upload-note", "--images", "https://media.test/b.png", "https://media.test/a.png"]
+    assert [arg for arg in args if arg.startswith("--alt-text")] == ["--alt-text=B image", "--alt-text=A image"]
+    assert [arg for arg in args if arg.startswith("--collaborator")] == ["--collaborator=alice", "--collaborator=bob"]
+    assert {"--title=one", "--note=-body #photo", "--no-ai-generated", "--no-comments", "--location=City"}.issubset(args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,settings,output,outcome,expected", [
+    ("tiktok", {"disableReuse": True, "aigc": True}, "TikTok video upload submitted: v.mp4\nvideo_id: 123",
+     "published", ["--title=-first line\n#café & second", "--disable-reuse", "--aigc"]),
+    ("instagram", {"title": "-title", "aiGenerated": True}, 'FIXTURE_EVENT {"status":"prepared"}',
+     "prepared", ["--title=-title", "--desc=-first line\n#café & second", "--ai-generated"]),
+    ("instagram", {"title": "title"}, '{"status":"published","post_id":"abc","post_url":"https://www.instagram.com/reel/abc/"}',
+     "unknown", ["--title=title"]),
+    ("instagram", {"title": "title"}, 'FIXTURE_EVENT {"status":"published","post_id":"abc","post_url":"https://www.instagram.com/reel/abc/"}',
+     "published", ["--title=title"]),
+])
+async def test_video_roles_options_and_paired_output(child, platform, settings, output, outcome, expected):
+    selection = {"platform": platform, "requiredCapability": platform + ".upload-video", "settings": settings}
+    _, _, receipts, calls = await desktop(child, selection=selection, output=output, prepared=outcome == "prepared")
+    assert receipts[-1]["receipt"]["outcome"] == outcome
+    if platform == "tiktok":
+        assert "releaseId" not in receipts[-1]["receipt"]
+    args = calls[0]["argv"]
+    assert {"--file=https://media.example/current.mp4", "--thumbnail=https://media.example/current.jpg", *expected}.issubset(args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,settings,path", [
+    ("tiktok", {"disableReuse": True}, "ok.png"), ("tiktok", {}, "bad.avif"),
+    ("tiktok", {"brandedContent": True, "privacy": "only-me"}, "ok.png"),
+    ("instagram", {}, "ok.png"), ("instagram", {"title": "ok"}, "bad.webp"),
+    ("instagram", {"title": "ok", "altText": []}, "ok.png"),
+    ("instagram", {"title": "ok", "collaborators": ["@User", "user"]}, "ok.png"),
+])
+async def test_unusable_options_and_media_do_not_launch_cli(child, platform, settings, path):
+    selection = {"platform": platform, "action": "upload-note", "requiredCapability": platform + ".upload-note",
+                 "settings": settings, "media": [{"id": "1", "url": "https://media.test/" + path, "role": "image"}]}
+    _, _, receipts, calls = await desktop(child, selection=selection)
+    assert receipts[-1]["receipt"]["outcome"] == "failed" and not calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,label", [("rednote", "Rednote"), ("xiaohongshu", "Xiaohongshu")])
+@pytest.mark.parametrize("action", ["upload-video", "upload-note"])
+async def test_regional_channels_dispatch_their_own_cli_and_accept_idless_confirmation(child, platform, label, action):
+    selection = {"platform": platform, "action": action, "requiredCapability": platform + "." + action,
+                 "settings": {"title": "-title", "contentType": "self-shot", "shootLocation": "Garden",
+                              "shootDate": "2024-02-29", "original": True, "location": "Town"}}
+    if action == "upload-note":
+        selection["media"] = [{"id": key, "role": "image", "url": f"https://media.test/{key}.jpg"}
+                              for key in ("b", "a", "b")]
+        expected = ["--images", "https://media.test/b.jpg", "https://media.test/a.jpg", "https://media.test/b.jpg"]
+        body_flag, summary = "--note=", "note upload submitted: 3 images"
+    else:
+        expected = ["--file=https://media.example/current.mp4", "--thumbnail=https://media.example/current.jpg"]
+        body_flag, summary = "--desc=", "video upload submitted: fixture.mp4"
+    _, _, receipts, calls = await desktop(child, selection=selection, output=label + " " + summary)
+    assert len(calls) == 1
+    argv = calls[0]["argv"]
+    assert argv[:2] == [platform, action]
+    index = argv.index(expected[0])
+    assert argv[index:index + len(expected)] == expected
+    assert {"--title=-title", body_flag + "-first line\n#café & second", "--location=Town", "--content-type=self-shot",
+            "--original", "--shoot-location=Garden", "--shoot-date=2024-02-29"}.issubset(argv)
+    assert receipts[0]["receipt"] == {"outcome": "published", "exitCode": 0, "cliInvoked": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("code", "output", "error", "expected"), [
+    (0, "Xiaohongshu video upload submitted: clip.mp4", "", "unknown"),
+    (0, "Rednote note upload submitted: 2 images", "", "unknown"),
+    (0, "素材已上传，发布前检查已通过；已停止，未点击发布按钮。", "", "unknown"),
+    (10, "", "login required", "failed"),
+    (10, "", "publish_attempted=true", "unknown"),
+    (9, "", "submission uncertain", "unknown"),
+])
+async def test_regional_video_accepts_only_its_own_formal_confirmation(child, code, output, error, expected):
+    selected = {"platform": "rednote", "action": "upload-video", "requiredCapability": "rednote.upload-video",
+                "settings": {"title": "Regional"}}
+    _, _, receipts, calls = await desktop(child, selection=selected, code=code, output=output, error=error)
+    assert len(calls) == 1
+    receipt = receipts[0]["receipt"]
+    assert (receipt["outcome"], receipt["cliInvoked"], receipt["exitCode"]) == (expected, True, code)
+    if code:
+        assert receipt["reason"] == ("login_required" if expected == "failed" else "possible_submission")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [
+    {"contentType": "repost", "original": False, "repostSource": "Agency"},
+    {"contentType": "self-shot", "shootLocation": "Studio", "shootDate": "2026-02-31"},
+    {"contentType": ["fiction", "ai"]}, {"location": "  "}, {"shootLocation": "Studio"}, {"unsupported": True},
+])
+async def test_incompatible_regional_options_fail_before_cli_invocation(child, invalid):
+    selected = {"platform": "xiaohongshu", "action": "upload-video", "requiredCapability": "xiaohongshu.upload-video",
+                "settings": {"title": "Regional", **invalid}}
+    _, _, receipts, calls = await desktop(child, selection=selected)
+    assert not calls
+    assert receipts[0]["receipt"] == {"outcome": "failed", "cliInvoked": False, "exitCode": None}
+
+
+@pytest.mark.asyncio
+async def test_optional_preparation_runs_only_media_enqueue(child):
+    def gateway(request):
+        assert request.url.path == "/session"
+        return httpx.Response(200, json={})
+
+    settings = replace(Settings.from_env({"SAU_DESKTOP_TOKEN": "fixture", "SAU_DEV_CHROME_ALIASES": "alias"}),
+                       cli=(sys.executable, str(child)))
+    root = child.parent
+    (root / "controlled-result").write_text(json.dumps({"code": 0, "stdout": "accepted", "stderr": ""}))
+    workflow = "../scheduled/shop|42"
+    task = {"workflowId": workflow, "provider": "local-chrome", "profileId": "alias", "release": "0.1.0",
+            "contractVersion": 1, "platform": "tiktok", "action": "upload-video", "requiredCapability": "tiktok.upload-video",
+            "media": [{"id": "v", "role": "video", "url": "https://example.test/a.mp4"},
+                      {"id": "c", "role": "cover", "url": "https://example.test/c.jpg"}]}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(gateway)) as client:
+        worker = Worker(settings, client)
+        await worker.report()
+        await worker.finish({"operation": "prepare", "workflowId": workflow, "task": task})
+    [call] = [json.loads(line)["argv"] for line in (root / "calls").read_text().splitlines()]
+    from hashlib import sha256
+    assert call == ["media", "predownload", "--task-id=" + sha256(workflow.encode()).hexdigest(), "--urls",
+                    "https://example.test/a.mp4", "https://example.test/c.jpg"]
+
+
 @pytest.mark.parametrize(("code", "stderr", "outcome", "reason"), [
-    (1, "TikTok发布超时（15 分钟）：尚未点击发布，结束。", "failed", "upload_timeout"),
+    (1, "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
     (1, "Private media URL", "unknown", "possible_submission"),
+    (1, "Unexpected exception mentioning 发布超时 after 尚未点击发布", "unknown", "possible_submission"),
     (1, "Private media URL\npublish_attempted=false", "failed", "pre_submit_failure"),
     (10, "private account label", "failed", "login_required"),
     (9, "private diagnostic", "unknown", "possible_submission"),
@@ -162,3 +339,16 @@ async def test_merchant_safe_receipt_on_failure(child, code, stderr, outcome, re
     assert (receipt["outcome"], receipt["reason"]) == (outcome, reason)
     assert "private" not in json.dumps(receipt).lower()
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("diagnostic,outcome,reason", [
+    ("Instagram 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
+    ("publish_attempted=false\nfinal unknown diagnostic", "unknown", "possible_submission"),
+    ("publish_attempted=false\n" + "x" * 16384, "unknown", "possible_submission"),
+])
+async def test_instagram_stream_preserves_only_definitive_terminal_diagnostic(child, diagnostic, outcome, reason):
+    selection = {"platform": "instagram", "requiredCapability": "instagram.upload-video", "settings": {"title": "Title"}}
+    _, _, receipts, _ = await desktop(child, selection=selection, code=1, output="", error=diagnostic)
+    assert receipts[-1]["receipt"]["outcome"] == outcome
+    assert receipts[-1]["receipt"]["reason"] == reason

@@ -16,14 +16,17 @@ from . import __version__
 from .children import Children
 from .state import read, write
 from .rollout import installation, progress_body
-from .publish import receipt as publish_receipt, video_args
+from .instagram_events import instagram_command
+from .publish import receipt as publish_receipt
+from .platforms import PUBLISH_CAPABILITIES, publish_args
 from .leases import command_lease, local_close_marker
+from .maintenance import daily_cleanup
+from .media import predownload_args
 from .providers import DEFAULT_BASES, inventory
 
 
 PLATFORMS = ("rednote", "xiaohongshu", "tiktok", "instagram")
 CAPABILITIES = [{"platform": platform, "action": "check"} for platform in PLATFORMS]
-PUBLISH_CAPABILITY = {"platform": "tiktok", "action": "upload-video"}
 DEFAULT_GATEWAY = "https://social-media-web-api.connexup-dev.net"
 
 
@@ -150,7 +153,7 @@ class Worker:
             raise httpx.RemoteProtocolError("Gateway returned an invalid object", request=response.request)
         return body
 
-    def command(self, args, provider=None, timeout=120):
+    def command(self, args, provider=None, timeout=120, on_processing=None):
         env = os.environ.copy()
         env.pop("SAU_WINDOW_CLOSED_FILE", None)
         if provider == "local-chrome" and (marker := local_close_marker.get()):
@@ -162,7 +165,12 @@ class Worker:
         if provider and provider != "local-chrome":
             base, key = self.settings.providers[provider]
             env.update({provider.upper() + "_API_KEY": key, provider.upper() + "_API_BASE": base})
+        env.pop("SAU_EVENT_NONCE", None)
+        if on_processing:
+            env["SAU_EVENT_NONCE"] = uuid4().hex
         with self.open_command(args, env) as proc:
+            if on_processing:
+                return instagram_command(proc, env["SAU_EVENT_NONCE"], on_processing)
             out, err = proc.communicate(timeout=timeout)
             return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
@@ -199,7 +207,7 @@ class Worker:
                     self.providers.append({"provider": "local-chrome", "available": True,
                                            "profiles": [{"profileId": alias, "name": alias}
                                                         for alias in self.settings.dev_aliases]})
-            capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, PUBLISH_CAPABILITY]
+            capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, *PUBLISH_CAPABILITIES]
             reply = await self.post("/session", {
                 **({"installation": self.installation} if self.installation else {}),
                 "sessionId": self.session_id, "mode": "self-check" if self.self_check else "worker",
@@ -213,7 +221,8 @@ class Worker:
             return reply
 
     async def claim(self, wait_seconds=15):
-        response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds})
+        response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds,
+                                                          "acceptPreparation": not self.self_check})
         return response["task"]
 
     def target(self, task):
@@ -256,19 +265,43 @@ class Worker:
         failed = {"outcome": "failed", "cliInvoked": False, "exitCode": None}
         target = self.target(task)
         if (not self.paired or not target or task["contractVersion"] != 1 or task["release"] != __version__
-                or task["platform"] != "tiktok" or task["action"] != "upload-video"
-                or task["requiredCapability"] != "tiktok.upload-video"):
+                or {"platform": task["platform"], "action": task["action"]} not in PUBLISH_CAPABILITIES
+                or task["requiredCapability"] != task["platform"] + "." + task["action"]):
             return failed
         try:
-            args = video_args(task, target)
+            args = publish_args(task, target)
             # The CLI owns its publish budget and extends it for an intentional earliest-click wait.
-            proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None)
+            kwargs = {}
+            if task["platform"] == "instagram":
+                loop = asyncio.get_running_loop()
+
+                async def report_processing():
+                    try:
+                        await self.post("/publish-task/result", {
+                            "sessionId": self.session_id, "workflowId": task["workflowId"],
+                            "receipt": {"outcome": "processing", "cliInvoked": True, "exitCode": None}})
+                    except httpx.HTTPError:
+                        pass  # Progress is advisory. The final receipt still belongs to the original claim.
+
+                kwargs["on_processing"] = lambda: asyncio.run_coroutine_threadsafe(report_processing(), loop)
+            proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None, **kwargs)
         except (KeyError, TypeError, ValueError, OSError):
             return failed
-        return publish_receipt(proc, no_publish=task["noPublish"])
+        return publish_receipt(proc, task)
 
     async def finish(self, record):
         workflow_id = record["workflowId"]
+        if record.get("operation") == "prepare":
+            task = record["task"]
+            if (self.paired and not self.self_check and self.target(task)
+                    and task.get("workflowId") == workflow_id and task.get("release") == __version__
+                    and task.get("contractVersion") == 1):
+                try:
+                    # This command returns on enqueue. The paired CLI owns its acknowledgement budget.
+                    await asyncio.to_thread(self.command, predownload_args(task), timeout=None)
+                except (KeyError, TypeError, ValueError, OSError):
+                    pass  # Publish will obtain the current manifest on the executing machine.
+            return
         if workflow_id in self.active:
             return
         self.active.add(workflow_id)
@@ -339,6 +372,14 @@ class Worker:
         return True
 
     async def run(self):
+        maintenance = asyncio.create_task(daily_cleanup(self))
+        try:
+            await self.poll()
+        finally:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
+
+    async def poll(self):
         running = set()
         while not self.draining:
             try:

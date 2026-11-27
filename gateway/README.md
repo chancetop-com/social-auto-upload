@@ -119,6 +119,12 @@ Send the desktop bearer and the original `sessionId`, `workflowId` and `leaseGra
 
 Configure `GATEWAY_PROFILE_RENEW_SECONDS` (default 300) and `GATEWAY_PROFILE_LEASE_SECONDS` (default 900). Both are positive integer seconds, with renewal strictly shorter than validity. If the window state cannot be confirmed, the idle grant expires. After expiry, the next eligible session can claim another pending occurrence. Each original claim keeps its claimant, result history and deadline.
 
+### Desktop media preparation and retention
+
+Postiz may send an expiring media manifest to `POST /internal/preparations`. An eligible desktop that includes `acceptPreparation: true` in its claim request can receive `operation: prepare`. The desktop invokes `sau media predownload` with the occurrence's SHA-256 task ID and ordered URLs. An offer can expire or be lost. It grants no publish right, and the eventual publish command fetches its own current manifest. The worker schedules the existing lock-aware `sau media cleanup` at the next 03:00 local time. Managed downloads and publishes retain active files; seven idle days make them eligible for deletion.
+
+The paired CLI accepts positive numbers of seconds in `SAU_DOWNLOAD_CONNECT_SECONDS` (10), `SAU_DOWNLOAD_IDLE_READ_SECONDS` (30), `SAU_DOWNLOAD_ENQUEUE_SECONDS` (10), and `SAU_BROWSER_PUBLISH_SECONDS` (900). The enqueue budget covers acceptance by the local media queue. File completion can take as long as data continues arriving. Intentional waiting for the earliest click extends the browser budget.
+
 ## Managed desktop releases
 
 Apply the bundled Gateway migrations, including `038_desktop_releases.sql`. PostgreSQL stores the release, batches, receipts and package contents. Uploads commit atomically after the SHA-256 matches. Downloads stream the immutable package in bounded chunks. Budget database and backup storage for all retained native packages. Both public release operations and package downloads use the existing desktop bearer under `/session/release`.

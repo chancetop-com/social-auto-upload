@@ -13,7 +13,7 @@ class WireModel(BaseModel):
 Identifier = Annotated[str, Field(min_length=1, max_length=512)]
 Provider = Literal["bitbrowser", "adspower", "local-chrome"]
 Platform = Literal["rednote", "xiaohongshu", "tiktok", "instagram"]
-Action = Literal["check", "upload-video"]
+Action = Literal["check", "upload-video", "upload-note"]
 
 
 class Capability(WireModel):
@@ -103,8 +103,7 @@ class Media(WireModel):
 
 
 class PublishTask(Task):
-    action: Literal["upload-video"]
-    platform: Literal["tiktok"]
+    action: Literal["upload-video", "upload-note"]
     organizationId: Identifier
     bindingId: Identifier
     postId: Identifier
@@ -117,13 +116,20 @@ class PublishTask(Task):
     noPublish: StrictBool
 
     @model_validator(mode="after")
-    def video_contract(self):
+    def media_contract(self):
         roles = sorted(item.role for item in self.media)
-        if roles not in (["video"], ["cover", "video"]):
-            raise ValueError("TikTok video requires one video and an optional cover")
+        if self.action == "upload-video" and roles not in (["video"], ["cover", "video"]):
+            raise ValueError("Video requires one video and an optional cover")
+        if self.action == "upload-note" and (not roles or set(roles) != {"image"}):
+            raise ValueError("Image post requires ordered images")
         if self.earliestPublishAt:
             datetime.strptime(self.earliestPublishAt, "%Y-%m-%dT%H:%M:%SZ")
         return self
+
+
+class Preparation(WireModel):
+    task: PublishTask
+    expiresAt: AwareDatetime
 
 
 class Start(WireModel):
@@ -147,6 +153,7 @@ class LeaseRelease(LeaseCommand):
 
 
 class Claim(WireModel):
+    acceptPreparation: StrictBool = False
     sessionId: UUID
     waitSeconds: Annotated[int, Field(ge=0, le=30)] = 20
 

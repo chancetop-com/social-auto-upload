@@ -712,6 +712,14 @@ class InstagramUploader:
     def _write_result(self) -> None:
         """落盘当前结果；输出字节与既有内联写法一致，且不吞异常。"""
         write_result(self.result_file, self.result)
+        nonce = os.environ.get("SAU_EVENT_NONCE")
+        status = self.result["status"]
+        if nonce and status in ("processing", "published", "prepared"):
+            # The upload response has already passed owner, caption and returned-media checks.
+            event = {"status": status}
+            if status == "published":
+                event.update(post_id=self.result["post_id"], post_url=self.result["post_url"])
+            print("SAU-EVENT " + nonce + " " + json.dumps(event), flush=True)
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         self._publish_budget = PublishTimeoutBudget(
