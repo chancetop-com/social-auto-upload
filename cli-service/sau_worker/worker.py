@@ -11,13 +11,13 @@ from uuid import uuid4
 import httpx
 
 from . import __version__
-from .publish import receipt as publish_receipt, video_args
+from .publish import receipt as publish_receipt
+from .platforms import PUBLISH_CAPABILITIES, publish_args, successful_receipt
 from .providers import DEFAULT_BASES, inventory
 
 
 PLATFORMS = ("rednote", "xiaohongshu", "tiktok", "instagram")
 CAPABILITIES = [{"platform": platform, "action": "check"} for platform in PLATFORMS]
-PUBLISH_CAPABILITY = {"platform": "tiktok", "action": "upload-video"}
 DEFAULT_GATEWAY = "https://social-media-web-api.connexup-dev.net"
 
 
@@ -126,7 +126,7 @@ class Worker:
                     self.providers.append({"provider": "local-chrome", "available": True,
                                            "profiles": [{"profileId": alias, "name": alias}
                                                         for alias in self.settings.dev_aliases]})
-            capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, PUBLISH_CAPABILITY]
+            capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, *PUBLISH_CAPABILITIES]
             return await self.post("/session", {
                 "sessionId": self.session_id, "mode": "self-check" if self.self_check else "worker",
                 "contractVersion": 1, "release": __version__, "cliRelease": self.cli_release,
@@ -179,15 +179,18 @@ class Worker:
         failed = {"outcome": "failed", "cliInvoked": False, "exitCode": None}
         target = self.target(task)
         if (not self.paired or not target or task["contractVersion"] != 1 or task["release"] != __version__
-                or task["platform"] != "tiktok" or task["action"] != "upload-video"
-                or task["requiredCapability"] != "tiktok.upload-video"):
+                or {"platform": task["platform"], "action": task["action"]} not in PUBLISH_CAPABILITIES
+                or task["requiredCapability"] != task["platform"] + "." + task["action"]):
             return failed
         try:
-            args = video_args(task, target)
+            args = publish_args(task, target)
             # The CLI owns its publish budget and extends it for an intentional earliest-click wait.
             proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None)
         except (KeyError, TypeError, ValueError, OSError):
             return failed
+        if proc.returncode == 0:
+            success = successful_receipt(task, proc.stdout, task["noPublish"])
+            return {"cliInvoked": True, "exitCode": 0, "outcome": "unknown", **success}
         return publish_receipt(proc, no_publish=task["noPublish"])
 
     async def finish(self, record):

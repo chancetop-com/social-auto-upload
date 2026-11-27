@@ -32,7 +32,7 @@ sys.exit(result["code"])
 
 async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
                   output="TikTok video upload submitted: video.mp4", error="", start_status=200,
-                  options=None, lost_start=False, aliases="operator-selected"):
+                  options=None, lost_start=False, aliases="operator-selected", selection=None):
     root = script.parent
     (root / "controlled-result").write_text(json.dumps({"code": code, "stdout": output, "stderr": error}))
     workflow = "scheduled/shop|first"
@@ -46,6 +46,9 @@ async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
               "earliestPublishAt": None if prepared else "2026-11-27T15:30:00Z",
               "media": [{"id": "c", "role": "cover", "url": "https://media.example/current.jpg"},
                         {"id": "v2", "role": "video", "url": "https://media.example/current.mp4"}]}
+    if selection:
+        task.update(selection)
+        latest.update(selection)
     starts, reports, receipts = [], [], []
 
     def gateway(request):
@@ -145,3 +148,18 @@ async def test_worker_without_explicit_dev_alias_or_option_support_never_falls_b
     _, _, receipts, calls = await desktop(child, **changes)
     assert calls == []
     assert receipts[0]["receipt"] == {"outcome": "failed", "cliInvoked": False, "exitCode": None}
+
+@pytest.mark.asyncio
+async def test_photo_capability_dispatch_and_fuzzy_lookup(child):
+    media = [{"id": key, "role": "image", "url": f"https://media.test/{key}.png"} for key in ("b", "a", "b")]
+    selection = {"platform": "tiktok", "action": "upload-note", "requiredCapability": "tiktok.upload-note",
+                 "caption": "line one\n#话题", "settings": {"title": "-title", "privacy": "friends", "aigc": False,
+                 "brandedContent": True, "yourBrand": True, "location": "City", "noComments": True}, "media": media}
+    reports, _, receipts, calls = await desktop(child, selection=selection, output="photo post id: 123")
+    assert {"platform": "tiktok", "action": "upload-note"} in reports[0]["capabilities"]
+    args = calls[0]["argv"]
+    assert args[:6] == ["tiktok", "upload-note", "--images", "https://media.test/b.png",
+                        "https://media.test/a.png", "https://media.test/b.png"]
+    assert set(["--title=-title", "--note=line one\n#话题", "--privacy=friends", "--no-aigc", "--location=City",
+                "--branded-content", "--your-brand", "--no-comments"]).issubset(args)
+    assert receipts[-1]["receipt"]["outcome"] == "unknown"
