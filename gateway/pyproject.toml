@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "social-media-web-api"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["fastapi>=0.110,<1", "pydantic>=2.7,<3", "psycopg[binary]>=3.2,<4", "uvicorn>=0.27,<1"]
+
+[project.scripts]
+social-media-web-api = "sau_gateway.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["sau_gateway*"]
+
+[tool.setuptools.package-data]
+sau_gateway = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

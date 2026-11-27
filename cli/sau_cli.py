@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 import sys
 from typing import Sequence
 
@@ -34,6 +35,11 @@ for name in get_supported_social_media():
 def build_parser() -> argparse.ArgumentParser:
     """组装平台命令；每个平台维护自己的参数和执行函数。"""
     parser = argparse.ArgumentParser(prog="sau", description="CLI for social-auto-upload.")
+    try:
+        release = version("social-auto-upload")
+    except PackageNotFoundError:
+        release = "uninstalled"
+    parser.add_argument("--version", action="version", version="%(prog)s " + release)
     platform_parsers = parser.add_subparsers(dest="platform", required=True)
     for platform in PLATFORMS.values():
         platform.register(platform_parsers)
