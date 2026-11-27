@@ -176,12 +176,13 @@ class Store:
                 UPDATE occurrence SET start_requested_at=clock_timestamp()
                 WHERE workflow_id=%s AND session_id=%s AND state='claimed'
                   AND start_requested_at IS NULL AND result_deadline > clock_timestamp() AND task->>'action' != 'check'
-                RETURNING task
+                RETURNING task, result_deadline
             """, (body.workflowId, body.sessionId)).fetchone()
             if row is None:
                 raise Conflict()
             if self._can_run(db, body.sessionId, row["task"]):
-                return row["task"]
+                ref = {key: row["task"][key] for key in ("workflowId", "postId", "organizationId")}
+                return {**ref, "resultDeadlineAt": row["result_deadline"].isoformat()}
             self._decline(db, body)
 
     def _decline(self, db, body):
