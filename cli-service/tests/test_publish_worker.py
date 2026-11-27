@@ -262,6 +262,41 @@ async def test_regional_channels_dispatch_their_own_cli_and_accept_idless_confir
             "--original", "--shoot-location=Garden", "--shoot-date=2024-02-29"}.issubset(argv)
     assert receipts[0]["receipt"] == {"outcome": "published", "exitCode": 0, "cliInvoked": True}
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("code", "output", "error", "expected"), [
+    (0, "Xiaohongshu video upload submitted: clip.mp4", "", "unknown"),
+    (0, "Rednote note upload submitted: 2 images", "", "unknown"),
+    (0, "素材已上传，发布前检查已通过；已停止，未点击发布按钮。", "", "unknown"),
+    (10, "", "login required", "failed"),
+    (10, "", "publish_attempted=true", "unknown"),
+    (9, "", "submission uncertain", "unknown"),
+])
+async def test_regional_video_accepts_only_its_own_formal_confirmation(child, code, output, error, expected):
+    selected = {"platform": "rednote", "action": "upload-video", "requiredCapability": "rednote.upload-video",
+                "settings": {"title": "Regional"}}
+    _, _, receipts, calls = await desktop(child, selection=selected, code=code, output=output, error=error)
+    assert len(calls) == 1
+    receipt = receipts[0]["receipt"]
+    assert (receipt["outcome"], receipt["cliInvoked"], receipt["exitCode"]) == (expected, True, code)
+    if code:
+        assert receipt["reason"] == ("login_required" if expected == "failed" else "possible_submission")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [
+    {"contentType": "repost", "original": False, "repostSource": "Agency"},
+    {"contentType": "self-shot", "shootLocation": "Studio", "shootDate": "2026-02-31"},
+    {"contentType": ["fiction", "ai"]}, {"location": "  "}, {"shootLocation": "Studio"}, {"unsupported": True},
+])
+async def test_incompatible_regional_options_fail_before_cli_invocation(child, invalid):
+    selected = {"platform": "xiaohongshu", "action": "upload-video", "requiredCapability": "xiaohongshu.upload-video",
+                "settings": {"title": "Regional", **invalid}}
+    _, _, receipts, calls = await desktop(child, selection=selected)
+    assert not calls
+    assert receipts[0]["receipt"] == {"outcome": "failed", "cliInvoked": False, "exitCode": None}
+
+
 @pytest.mark.parametrize(("code", "stderr", "outcome", "reason"), [
     (1, "TikTok发布超时（15 分钟）：尚未点击发布，结束。", "failed", "upload_timeout"),
     (1, "Private media URL", "unknown", "possible_submission"),
