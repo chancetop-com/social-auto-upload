@@ -1,5 +1,6 @@
 """Run the worker entry point against a live Gateway and a controlled private CLI."""
 from contextlib import contextmanager
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -36,7 +37,7 @@ def live_gateway():
             assert not thread.is_alive()
 
 
-def test_worker_run_invokes_paired_process_once_and_records_edited_occurrence(postiz, gateway_env, tmp_path):
+def test_worker_run_prepares_then_publishes_the_edited_occurrence_once(postiz, gateway_env, tmp_path):
     root = tmp_path / "private fixture CLI"
     venv.EnvBuilder(with_pip=False).create(root)
     python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -50,7 +51,8 @@ def test_worker_run_invokes_paired_process_once_and_records_edited_occurrence(po
         "else:\n"
         f"    with open({str(calls)!r}, 'a', encoding='utf-8') as out:\n"
         "        print(json.dumps(sys.argv[1:]), file=out)\n"
-        "    print('TikTok video upload submitted: controlled.mp4')\n",
+        "    if sys.argv[1:3] == ['tiktok', 'upload-video']:\n"
+        "        print('TikTok video upload submitted: controlled.mp4')\n",
         encoding="utf-8")
     task = video("temporal-repeating-414")
     postiz[1]["task"] = {**task, "caption": "edited before start", "earliestPublishAt": "2026-11-28T01:00:00Z"}
@@ -72,7 +74,11 @@ def test_worker_run_invokes_paired_process_once_and_records_edited_occurrence(po
             assert record["state"] == "succeeded" and record["sessionId"]
             assert record["receipt"] == {"cliInvoked": True, "outcome": "published", "exitCode": 0}
             assert api.post("/internal/occurrences", json=task).json() == record
-            argv, = [json.loads(line) for line in calls.read_text().splitlines()]
+            prepare, argv = [json.loads(line) for line in calls.read_text().splitlines()]
+            cache = "--task-id=" + sha256(task["workflowId"].encode()).hexdigest()
+            assert prepare == ["media", "predownload", cache, "--urls", task["media"][0]["url"], "--wait"]
+            assert cache in argv and "--prepared-media-only" in argv
+            assert "--file=" + task["media"][0]["url"] in argv
             assert argv[:2] == ["tiktok", "upload-video"]
             assert "--title=edited before start" in argv and "--account=operator-approved" in argv
             assert "--not-before=2026-11-28T01:00:00Z" in argv
