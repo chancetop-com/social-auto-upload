@@ -9,8 +9,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from . import leases
 from .database import Conflict, Missing, Store
-from .models import CheckTarget, CheckTask, Claim, PublishTask, Result, Session, Start
+from .models import CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, PublishTask, Result, Session, Start
 
 
 def authorized(token):
@@ -86,6 +87,29 @@ def create_app(stopping=None):
             except asyncio.TimeoutError:
                 pass
         return {"task": None}
+
+    @app.post("/profile-lease/renew", dependencies=desktop)
+    def renew(body: LeaseCommand):
+        with store.connect() as db:
+            expiry = leases.renew(db, body, store.lease_policy)
+            if expiry is None:
+                raise Conflict()
+            return {"expiresAt": expiry}
+
+    @app.post("/profile-lease/complete", dependencies=desktop)
+    def complete(body: LeaseCommand):
+        with store.connect() as db:
+            idle = leases.complete(db, body)
+            if idle is None:
+                raise Conflict()
+            return {"idle": idle}
+
+    @app.post("/profile-lease/release", dependencies=desktop)
+    def release(body: LeaseRelease):
+        with store.connect() as db:
+            if not leases.release(db, body):
+                raise Conflict()
+            return {"released": True}
 
     @app.post("/publish-task/start", dependencies=desktop)
     def start(body: Start):

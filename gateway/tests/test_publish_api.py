@@ -108,6 +108,10 @@ def test_competing_desktops_serialize_a_profile_platform_until_settlement(postiz
     assert claim(gateway, other) is None
     receipt = {"outcome": "published", "cliInvoked": True, "exitCode": 0}
     gateway.post("/publish-task/result", json={**identity, "receipt": receipt}, headers=DESKTOP).raise_for_status()
+    lease = {**identity, "leaseGrantId": records[index]["leaseGrantId"]}
+    assert gateway.post("/profile-lease/complete", json=lease, headers=DESKTOP).json() == {"idle": True}
+    assert claim(gateway, other) is None
+    gateway.post("/profile-lease/release", json={**lease, "windowClosed": True}, headers=DESKTOP).raise_for_status()
     following = claim(gateway, other)
     assert following["workflowId"] != original["workflowId"]
     assert following["task"]["postId"] == original["postId"]

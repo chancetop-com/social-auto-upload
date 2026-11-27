@@ -116,6 +116,21 @@ class Start(WireModel):
     sessionId: UUID
 
 
+class LeaseCommand(Start):
+    leaseGrantId: UUID
+
+
+class LeaseRelease(LeaseCommand):
+    windowClosed: StrictBool
+
+    @field_validator("windowClosed")
+    @classmethod
+    def confirmed(cls, value):
+        if not value:
+            raise ValueError("Release requires observed window closure")
+        return value
+
+
 class Claim(WireModel):
     sessionId: UUID
     waitSeconds: Annotated[int, Field(ge=0, le=30)] = 20
