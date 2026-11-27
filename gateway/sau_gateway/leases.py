@@ -72,9 +72,13 @@ def acquire(db, session_id, task, policy):
     """, (lease["grant_id"], task["platform"])).fetchone()
     if busy:
         return None
-    db.execute("UPDATE profile_lease SET idle_after=NULL WHERE grant_id=%s AND idle_after IS NOT NULL",
-               (lease["grant_id"],))
-    return lease
+    # A joining command gets a full first-renewal window, even when the
+    # previous member is just about to finish and stop its heartbeat.
+    return db.execute("""
+        UPDATE profile_lease SET idle_after=NULL, expires_at=clock_timestamp() + %s * interval '1 second'
+        WHERE grant_id=%s AND expires_at > clock_timestamp()
+        RETURNING grant_id, expires_at
+    """, (policy.validity_seconds, lease["grant_id"])).fetchone()
 
 
 def renew(db, body, policy):

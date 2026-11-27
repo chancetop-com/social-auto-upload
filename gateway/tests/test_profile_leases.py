@@ -54,7 +54,11 @@ def test_racing_merchants_and_platforms_share_only_with_grant_holder(gateway):
     assert second['task']['platform'] != first['task']['platform']
     assert first['leaseGrantId'] == second['leaseGrantId']
     assert first['renewAfterSeconds'] == 300
-    assert 899 < (datetime.fromisoformat(first['leaseExpiresAt']) - datetime.fromisoformat(first['claimedAt'])).total_seconds() < 901
+    for member in (first, second):
+        expiry = datetime.fromisoformat(member['leaseExpiresAt'].replace('Z', '+00:00'))
+        claimed = datetime.fromisoformat(member['claimedAt'].replace('Z', '+00:00'))
+        assert 899 < (expiry - claimed).total_seconds() < 901
+    assert first['leaseExpiresAt'] < second['leaseExpiresAt']
     assert claim(gateway, owner) is None
 
 

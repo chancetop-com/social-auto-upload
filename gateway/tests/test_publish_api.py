@@ -183,3 +183,39 @@ def test_shutdown_drains_existing_work_without_granting_new_starts(postiz, gatew
                              json={"workflowId": task["workflowId"], "sessionId": session})
         assert reply.status_code == 503 and not postiz[0]
         assert gateway.get("/internal/occurrences/shutdown-start", headers=INTERNAL).json()["state"] == "claimed"
+
+@pytest.fixture
+def short_deadline_gateway(gateway_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sau_gateway.app import create_app
+    monkeypatch.setenv("GATEWAY_RESULT_TIMEOUT_SECONDS", "2")
+    with TestClient(create_app()) as client:
+        yield client
+
+
+def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, short_deadline_gateway):
+    import time
+    gateway = short_deadline_gateway
+    task = {**video("deadline-review"), "earliestPublishAt": None}
+    postiz[1]["task"] = task
+    owner = register(gateway)
+    path = "/internal/occurrences/" + task["workflowId"]
+    gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
+    claimed = claim(gateway, owner)
+    deadline = claimed["resultDeadlineAt"]
+    identity = {"workflowId": task["workflowId"], "sessionId": owner}
+    gateway.post("/publish-task/start", headers=DESKTOP, json=identity).raise_for_status()
+    def result(receipt):
+        response = gateway.post("/publish-task/result", headers=DESKTOP, json={**identity, "receipt": receipt})
+        response.raise_for_status()
+        return response.json()
+    progress = {"outcome": "processing", "cliInvoked": True, "exitCode": None}
+    assert result(progress)["state"] == "started"
+    time.sleep(2.01)
+    overdue = gateway.get(path, headers=INTERNAL).json()
+    assert (overdue["state"], overdue["resultDeadlineAt"], overdue["overdueAt"] is not None) == ("unknown", deadline, True)
+    assert claim(gateway, register(gateway)) is None
+    final = {"outcome": "published", "cliInvoked": True, "exitCode": 0, "releaseId": "abc"}
+    assert result(final)["receipt"] == final
+    assert result(progress)["receipt"] == final
+    assert result(final)["resultDeadlineAt"] == deadline
