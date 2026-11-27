@@ -187,7 +187,10 @@ def test_unavailable_start_never_grants_a_task_or_permits_replay(postiz, gateway
         assert record["state"] == "claimed" and record["receipt"] is None
     else:
         assert record["state"] == "failed"
-        assert record["receipt"] == {"cliInvoked": False, "exitCode": None, "outcome": "failed"}
+        expected = {"cliInvoked": False, "exitCode": None, "outcome": "failed"}
+        if failure in ("revoked", "stale"):
+            expected["reason"] = "authorization_declined"
+        assert record["receipt"] == expected
 
 
 def test_only_original_owner_can_settle_authorized_mode_once(postiz, gateway):
@@ -282,3 +285,31 @@ def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, sho
     assert result(final)["receipt"] == final
     assert result(progress)["receipt"] == final
     assert result(final)["resultDeadlineAt"] == deadline
+
+
+@pytest.mark.parametrize("phase", ["pending", "claimed", "started"])
+def test_postiz_revocation_settles_original_receipt_only_before_upload(gateway, postiz, phase):
+    task = video("original/revoked")
+    ref = {key: task[key] for key in ("workflowId", "organizationId", "postId")}
+    gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
+    path = "/internal/occurrences/revoke"
+    assert gateway.post(path, headers=DESKTOP, json=ref).status_code == 401
+    assert gateway.post(path, headers=INTERNAL, json={**ref, "organizationId": "foreign"}).status_code == 404
+    session = register(gateway)
+    identity = {"workflowId": task["workflowId"], "sessionId": session}
+    if phase != "pending":
+        assert claim(gateway, session)["workflowId"] == task["workflowId"]
+    if phase == "started":
+        postiz[1]["task"] = task
+        start_upload(gateway, identity, task).raise_for_status()
+    for _ in range(2):
+        gateway.post(path, headers=INTERNAL, json=ref).raise_for_status()
+    record = gateway.get("/internal/occurrences/" + task["workflowId"], headers=INTERNAL).json()
+    if phase == "started":
+        assert record["state"] == "started" and record["receipt"] is None
+    else:
+        assert record["state"] == "failed"
+        assert record["receipt"] == {"outcome": "failed", "reason": "authorization_declined", "exitCode": None, "cliInvoked": False}
+        assert record["receiptHistory"] == [record["receipt"]]
+        assert claim(gateway, session) is None
+        assert start_upload(gateway, identity, task).status_code == 409

@@ -13,7 +13,7 @@ from . import leases, releases
 from .preparation import enqueue_preparation, take_preparation
 from .wakeups import Wakeups
 from .database import Conflict, Missing, Store
-from .models import PreparedStart, CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, Preparation, PublishTask, Result, Session
+from .models import PreparedStart, CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, Preparation, PublishTask, Result, RevokeOccurrence, Session
 
 
 def authorized(token):
@@ -78,6 +78,10 @@ def create_app(stopping=None):
         record = await asyncio.to_thread(store.enqueue, task)
         await wakeups.publish()
         return record
+
+    @app.post("/internal/occurrences/revoke", dependencies=internal)
+    def revoke(body: RevokeOccurrence):
+        return store.revoke(body)
 
     @app.post("/internal/preparations", dependencies=internal)
     async def prepare(offer: Preparation):

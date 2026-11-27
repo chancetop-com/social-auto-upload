@@ -109,6 +109,25 @@ class Store:
         with self.connect() as db:
             return self._get(db, workflow_id)
 
+    def revoke(self, ref):
+        with self.connect() as db:
+            row = db.execute("""SELECT state, publish_started_at, receipt FROM occurrence
+                WHERE workflow_id=%s AND task->>'organizationId'=%s AND task->>'postId'=%s
+                AND task->>'action' <> 'check' FOR UPDATE""",
+                (ref.workflowId, ref.organizationId, ref.postId)).fetchone()
+            if row is None:
+                raise Missing()
+            # Postiz serializes binding revocation against its own authorize-start commit.
+            # A delayed revocation still supplies definite evidence for an unstarted overdue claim.
+            if not row["publish_started_at"] and not row["receipt"] and row["state"] in (
+                    "pending", "claimed", "timed_out", "unknown"):
+                receipt = Jsonb({"outcome": "failed", "reason": "authorization_declined",
+                                 "cliInvoked": False, "exitCode": None})
+                db.execute("""UPDATE occurrence SET state='failed', receipt=%s,
+                    receipt_history=receipt_history||jsonb_build_array(%s::jsonb), completed_at=clock_timestamp()
+                    WHERE workflow_id=%s""", (receipt, receipt, ref.workflowId))
+            return self._get(db, ref.workflowId)
+
     def claim(self, session_id):
         with self.connect() as db:
             row = db.execute("""
@@ -197,7 +216,8 @@ class Store:
 
     def deny_start(self, body):
         with self.connect() as db:
-            self._decline(db, body)
+            self._settle(db, body, "claimed", "failed", PublishReceipt(
+                outcome="failed", cliInvoked=False, exitCode=None, reason="authorization_declined"))
 
     def start(self, body, latest, refresh=False):
         with self.connect() as db:

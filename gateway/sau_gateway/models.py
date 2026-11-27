@@ -65,6 +65,12 @@ class Session(WireModel):
         return self
 
 
+class RevokeOccurrence(WireModel):
+    workflowId: Identifier
+    organizationId: Identifier
+    postId: Identifier
+
+
 class CheckTarget(WireModel):
     provider: Provider
     profileId: Identifier
