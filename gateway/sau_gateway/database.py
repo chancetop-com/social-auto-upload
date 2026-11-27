@@ -131,13 +131,15 @@ class Store:
             if lease is None:
                 return None
             claimed = db.execute(f"""
-                UPDATE occurrence SET state='claimed', session_id=%s, claimed_at=clock_timestamp(),
+                WITH decision AS MATERIALIZED (SELECT clock_timestamp() AS at)
+                UPDATE occurrence SET state='claimed', session_id=%s, claimed_at=decision.at,
                     lease_grant_id=%s, lease_expires_at=%s,
                     result_deadline=CASE WHEN task->>'action' <> 'check' THEN
-                        greatest(clock_timestamp(), (task->>'earliestPublishAt')::timestamptz)
+                        greatest(decision.at, (task->>'earliestPublishAt')::timestamptz)
                         + %s * interval '1 second' END
-                WHERE workflow_id=%s AND state='pending' AND %s > clock_timestamp()
-                  AND (claim_deadline IS NULL OR claim_deadline > clock_timestamp())
+                FROM decision
+                WHERE workflow_id=%s AND state='pending' AND %s > decision.at
+                  AND (claim_deadline IS NULL OR claim_deadline > decision.at)
                 RETURNING {RECORD}
             """, (session_id, lease["grant_id"], lease["expires_at"], self.result_seconds,
                   row["workflow_id"], lease["expires_at"])).fetchone()

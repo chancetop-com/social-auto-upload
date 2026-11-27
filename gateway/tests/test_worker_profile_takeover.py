@@ -61,7 +61,7 @@ def provider_api(refuse):
 
 
 async def wait_for_file(path):
-    async with asyncio.timeout(8):
+    async with asyncio.timeout(30):
         while not path.exists():
             await asyncio.sleep(.025)
 
@@ -90,7 +90,7 @@ except urllib.error.HTTPError as exc:
     refused = True
 root = Path(__file__).parent
 (root / (desktop + '.waiting')).touch()
-deadline = time.monotonic() + 20
+deadline = time.monotonic() + 90
 not_before = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--not-before=')), None)
 if desktop == 'A':
     assert not_before
@@ -109,20 +109,27 @@ print('TikTok video upload submitted: fixture.mp4')
 class MobileNetwork(httpx.AsyncHTTPTransport):
     offline = False
 
+    def __init__(self):
+        super().__init__()
+        self.renewed = asyncio.Event()
+
     async def handle_async_request(self, request):
         if self.offline and request.url.path == '/profile-lease/renew':
             raise httpx.ConnectError('fixture disconnect', request=request)
-        return await super().handle_async_request(request)
+        response = await super().handle_async_request(request)
+        if request.url.path == '/profile-lease/renew' and response.is_success:
+            self.renewed.set()
+        return response
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('refuse', [False, True], ids=['provider-opens', 'provider-refuses'])
 async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(postiz, gateway_env, tmp_path, monkeypatch, refuse):
     monkeypatch.setenv('GATEWAY_PROFILE_RENEW_SECONDS', '1')
-    monkeypatch.setenv('GATEWAY_PROFILE_LEASE_SECONDS', '2')
+    monkeypatch.setenv('GATEWAY_PROFILE_LEASE_SECONDS', '8')
     script = paired_cli(tmp_path)
     with provider_api(refuse) as (provider, opened), live_gateway() as url, httpx.Client(
-        base_url=url, headers=INTERNAL, trust_env=False
+        base_url=url, headers=INTERNAL, trust_env=False, timeout=30
     ) as api:
         network = MobileNetwork()
         async with httpx.AsyncClient(transport=network) as client_a, httpx.AsyncClient(trust_env=False) as client_b:
@@ -131,20 +138,23 @@ async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(pos
             a = Worker(replace(settings, cli=(sys.executable, str(script), 'A')), client_a)
             b = Worker(replace(settings, cli=(sys.executable, str(script), 'B')), client_b)
             await asyncio.gather(a.report(), b.report())
-            earliest = (datetime.now(timezone.utc) + timedelta(seconds=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-            original = enqueue_video(api, 'merchant-A', earliest=earliest)
+            earliest = (datetime.now(timezone.utc) + timedelta(seconds=12)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            original = await asyncio.to_thread(enqueue_video, api, 'merchant-A', earliest=earliest)
             postiz[1]['task'] = original
             first = await a.claim(0)
             job_a = asyncio.create_task(a.finish(first))
             job_b = None
             try:
                 await wait_for_file(tmp_path / 'A.waiting')
-                following = enqueue_video(api, 'merchant-B')
+                network.renewed.clear()
+                following = await asyncio.to_thread(enqueue_video, api, 'merchant-B')
+                await asyncio.wait_for(network.renewed.wait(), timeout=12)
                 # This exceeds the initial validity. The child is still waiting for a scheduled click.
-                await asyncio.sleep(2.25)
+                initial_expiry = datetime.fromisoformat(first['leaseExpiresAt'].replace('Z', '+00:00'))
+                await asyncio.sleep(max(0, (initial_expiry - datetime.now(timezone.utc)).total_seconds()) + .1)
                 assert await b.claim(0) is None
                 network.offline = True
-                async with asyncio.timeout(6):
+                async with asyncio.timeout(25):
                     while not (second := await b.claim(0)):
                         await asyncio.sleep(.05)
                 assert second['workflowId'] == following['workflowId']
@@ -155,7 +165,8 @@ async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(pos
                 late = {k: first[k] for k in ('sessionId', 'workflowId', 'leaseGrantId')}
                 for method in ('renew', 'complete', 'release'):
                     event = {**late, 'windowClosed': True} if method == 'release' else late
-                    assert api.post('/profile-lease/' + method, json=event, headers=DESKTOP).status_code == 409
+                    stale = await asyncio.to_thread(api.post, '/profile-lease/' + method, json=event, headers=DESKTOP)
+                    assert stale.status_code == 409
                 (tmp_path / 'A.finish').touch()
                 old_result = await job_a
                 assert old_result['state'] == 'succeeded'
@@ -167,7 +178,7 @@ async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(pos
                 result = await job_b
                 assert result['state'] == ('failed' if refuse else 'succeeded')
                 assert result['receipt']['exitCode'] == (11 if refuse else 0)
-                enqueue_video(api, 'merchant-C')
+                await asyncio.to_thread(enqueue_video, api, 'merchant-C')
                 assert (await a.claim(0))['workflowId'] == 'merchant-C'
                 assert opened == ['A', 'B']
                 print(f"{refuse=} A={a.session_id}/{first['workflowId']}/{first['leaseGrantId']} "
