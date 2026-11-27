@@ -89,6 +89,8 @@ def create_app(stopping=None):
 
     @app.post("/publish-task/start", dependencies=desktop)
     def start(body: Start):
+        if stopping.is_set():
+            raise HTTPException(503, "Gateway is draining")
         task = store.reserve_start(body)
         base = os.environ.get("POSTIZ_INTERNAL_URL", "").rstrip("/")
         if task is None:

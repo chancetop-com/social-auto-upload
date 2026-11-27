@@ -159,3 +159,22 @@ def test_only_original_owner_can_settle_authorized_mode_once(postiz, gateway):
     assert finish({**prepared, "outcome": "published"}).status_code == 409
     assert finish(prepared).json()["state"] == "prepared"
     assert finish({"outcome": "unknown", "cliInvoked": True, "exitCode": 9}).json()["receipt"] == prepared
+
+
+def test_shutdown_drains_existing_work_without_granting_new_starts(postiz, gateway_env):
+    import asyncio
+    from fastapi.testclient import TestClient
+    from sau_gateway.app import create_app
+
+    stopping = asyncio.Event()
+    with TestClient(create_app(stopping)) as gateway:
+        session = register(gateway)
+        task = video("shutdown-start")
+        gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
+        assert claim(gateway, session)["task"] == task
+        postiz[1]["task"] = task
+        stopping.set()
+        reply = gateway.post("/publish-task/start", headers=DESKTOP,
+                             json={"workflowId": task["workflowId"], "sessionId": session})
+        assert reply.status_code == 503 and not postiz[0]
+        assert gateway.get("/internal/occurrences/shutdown-start", headers=INTERNAL).json()["state"] == "claimed"
