@@ -1,6 +1,8 @@
 """Author options shared by the distinct Rednote and Xiaohongshu CLI actions."""
 from datetime import date
 
+from .media import media_args
+
 
 LABELS = {"rednote": "Rednote", "xiaohongshu": "Xiaohongshu"}
 CONTENT_TYPES = ("fiction", "ai", "marketing", "self-shot", "repost")
@@ -13,16 +15,8 @@ def publish_args(task):
         raise ValueError("Enter a single-line title")
     if options.keys() - {"title", "location", "original", "contentType", "repostSource", "shootLocation", "shootDate"}:
         raise ValueError("Unsupported author setting")
-    media = task["media"]
-    if task["action"] == "upload-note":
-        args = ["--images", *(item["url"] for item in media)]
-        body_flag = "--note="
-    else:
-        files = {item["role"]: item["url"] for item in media}
-        args = ["--file=" + files["video"]]
-        if "cover" in files:
-            args.append("--thumbnail=" + files["cover"])
-        body_flag = "--desc="
+    args = media_args(task)
+    body_flag = "--note=" if task["action"] == "upload-note" else "--desc="
     args.append("--title=" + title)
     if task["caption"]:
         args.append(body_flag + task["caption"])

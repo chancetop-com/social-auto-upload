@@ -5,7 +5,10 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 
-def media_args(task):
+from .media import media_args
+
+
+def validate_formats(task):
     media = task["media"]
     instagram = task["platform"] == "instagram"
     formats = ({"video": {"mp4", "mov"}, "cover": {"jpg", "jpeg", "png"},
@@ -16,13 +19,6 @@ def media_args(task):
         suffix = PurePosixPath(urlsplit(item["url"]).path).suffix.lower().lstrip(".")
         if suffix and allowed and suffix not in allowed:
             raise ValueError("Media format is unsupported by the selected action")
-    if task["action"] == "upload-note":
-        return ["--images", *(item["url"] for item in media)]
-    files = {item["role"]: item["url"] for item in media}
-    args = ["--file=" + files["video"]]
-    if "cover" in files:
-        args.append("--thumbnail=" + files["cover"])
-    return args
 
 
 def text_option(options, key):
@@ -40,6 +36,7 @@ def option_keys(options, allowed, booleans):
 
 
 def publish_args(task):
+    validate_formats(task)
     args = media_args(task)
     options = task["settings"]
     note = task["action"] == "upload-note"

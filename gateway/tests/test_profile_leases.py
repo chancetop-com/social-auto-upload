@@ -10,7 +10,7 @@ from test_publish_api import DESKTOP, INTERNAL, claim, video
 def desktop(api, capacity=3):
     session = str(uuid4())
     report = dict(sessionId=session, mode='worker', release='0.1.0', cliRelease='0.1.0',
-                  contractVersion=1, capacity=capacity, freeSlots=capacity,
+                  contractVersion=1, preparedStarts=True, capacity=capacity, freeSlots=capacity,
                   capabilities=[{'platform': 'tiktok', 'action': 'upload-video'},
                                 {'platform': 'instagram', 'action': 'check'}],
                   providers=[{'provider': 'bitbrowser', 'available': True,

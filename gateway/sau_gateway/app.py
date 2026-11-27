@@ -13,7 +13,7 @@ from . import leases, releases
 from .preparation import enqueue_preparation, take_preparation
 from .wakeups import Wakeups
 from .database import Conflict, Missing, Store
-from .models import CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, Preparation, PublishTask, Result, Session, Start
+from .models import PreparedStart, CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, Preparation, PublishTask, Result, Session
 
 
 def authorized(token):
@@ -156,7 +156,7 @@ def create_app(stopping=None):
         return status
 
     @app.post("/publish-task/start", dependencies=desktop)
-    def start(body: Start):
+    def start(body: PreparedStart):
         if stopping.is_set():
             raise HTTPException(503, "Gateway is draining")
         authorization = store.reserve_start(body)
@@ -169,7 +169,13 @@ def create_app(stopping=None):
             with httpx.Client(timeout=10, trust_env=False) as client:
                 response = client.post(base + "/internal/browser-publishing/authorize-start",
                                        headers={"Authorization": "Bearer " + internal_token},
-                                       json=authorization)
+                                       json={**authorization, "preparedMedia": [m.model_dump() for m in body.preparedMedia],
+                                             "mediaFailed": body.mediaFailed})
+            if response.status_code == 412:
+                refresh = PublishTask.model_validate(response.json()["task"])
+                if store.start(body, refresh, refresh=True) is None:
+                    raise HTTPException(409, "Target or desktop changed during preparation")
+                return {"prepare": refresh.model_dump(mode="json", exclude_unset=True)}
             if response.status_code in (403, 409):
                 store.deny_start(body)
                 raise HTTPException(response.status_code, "Postiz declined this occurrence")

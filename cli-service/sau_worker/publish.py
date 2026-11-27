@@ -5,6 +5,7 @@ from .platforms import successful_receipt
 
 
 PRE_SUBMIT_TIMEOUT = re.compile(
+    r"Instagram 发布就绪超时（上限 60 秒或剩余预算）：Share 按钮未出现或不可用；尚未点击发布，未发布任何内容。|"
     r"(?:TikTok|Instagram|Rednote|小红书) ?发布超时（[0-9]+ 分钟）：尚未点击发布，未发布任何内容。"
 )
 
@@ -21,10 +22,11 @@ def receipt(proc, task):
     diagnostics = proc.stderr.splitlines()
     before_timeout = proc.returncode == 1 and diagnostics and PRE_SUBMIT_TIMEOUT.fullmatch(diagnostics[-1])
     explicit_failure = proc.returncode == 1 and diagnostics[-1:] == ["publish_attempted=false"]
-    if proc.returncode in (2, 10, 11) or explicit_failure or before_timeout:
+    preparation_failed = task["noPublish"] and proc.returncode == 1
+    if proc.returncode in (2, 10, 11) or explicit_failure or before_timeout or preparation_failed:
         reason = "pre_submit_failure"
         if proc.returncode == 10:
-            reason = "login_required"
+            reason = "verification_required" if diagnostics[-1:] == ["login_reason=verification"] else "login_required"
         elif before_timeout:
             reason = "upload_timeout"
         return {**evidence, "outcome": "failed", "reason": reason}

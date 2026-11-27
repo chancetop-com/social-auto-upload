@@ -34,7 +34,7 @@ ctl="$INSTALL_ROOT/cli-service"
 "$ctl" check --provider bitbrowser --profile-id '复制的窗口ID' --platform tiktok
 ```
 
-`status` 输出 `release`、`revision`、`running`、`claimReady`、`activeCount`、`capacity`、`sessionId`、`lastExit` 和 `nextAttempt`。时间为 Unix 秒。自检调用配套 CLI 检查现有登录态，无素材和发布步骤。回执中确认 `cloudConnected=true`、`profileVisible=true`、`cliInvoked=true`、`platformLogin="valid"`。更换 AdsPower 时使用 `--provider adspower`。若 Local API 不可用，检查客户端、回环端口和 Key；若窗口不可见，核对所复制的 ID；若为 `login-required`，在目标窗口手动登录后重新自检。
+`status` 输出 `release`、`revision`、`running`、`claimReady`、`activeCount`、`capacity`、`sessionId`、`lastExit` 和 `nextAttempt`。时间为 Unix 秒。自检调用配套 CLI 检查现有登录态，无素材和发布步骤。回执中确认 `cloudConnected=true`、`profileVisible=true`、`cliInvoked=true`、`platformLogin="valid"`。更换 AdsPower 时使用 `--provider adspower`。若 Local API 不可用，检查客户端、回环端口和 Key；若窗口不可见，核对所复制的 ID；若为 `verification-required`，打开目标窗口完成平台验证。`login-or-verification-required` 表示需按平台提示登录或完成验证，完成后重新自检。
 
 ## 维护、升级和异常恢复
 

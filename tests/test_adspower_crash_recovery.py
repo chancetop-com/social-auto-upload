@@ -101,12 +101,16 @@ def test_definitively_rejected_stop_preserves_result_and_next_command_can_join(p
     assert api.state == 'Inactive'
 
 
-def test_rejected_start_is_terminal_and_next_authorized_command_can_start(profile):
+@pytest.mark.parametrize(("http_status", "exit_code"), [(403, 1), (429, 11)])
+def test_rejected_start_is_terminal_and_next_authorized_command_can_start(profile, http_status, exit_code):
     api = ControlledProvider(profile)
-    api.start = lambda request: request.send_error(403)
-    refused = profile.command(0, 'instagram')
+    api.start = lambda request: request.send_error(http_status)
+    clip = profile.root / "upload.mp4"
+    clip.write_bytes(b"offline media")
+    refused = profile.command(0, 'instagram', '--title', 'Draft', '--file', str(clip), action='upload-video')
     output = refused.communicate(timeout=10)[0]
-    assert refused.returncode == 1 and 'start' in output
+    assert refused.returncode == exit_code and 'start' in output
+    assert output.splitlines()[-1] == "publish_attempted=false"
     assert api.stops == [] and profile.pages_requested == []
 
     api.start = api.start_ok

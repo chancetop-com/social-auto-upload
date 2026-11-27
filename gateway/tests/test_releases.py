@@ -51,7 +51,7 @@ def progress(client, machine, assignment, phase, **extra):
 
 def session(client, machine, assignment, mode):
     sid = str(uuid4())
-    report = {"sessionId": sid, "mode": mode, "release": "0.1.0", "cliRelease": "0.1.0", "contractVersion": 1,
+    report = {"sessionId": sid, "mode": mode, "release": "0.1.0", "cliRelease": "0.1.0", "preparedStarts": True, "contractVersion": 1,
               "capacity": 1, "freeSlots": 1, "capabilities": [{"platform": "tiktok", "action": "check"}],
               "providers": [{"provider": "local-chrome", "available": True,
                              "profiles": [{"name": "fixture", "profileId": "fixture"}]}],
@@ -157,7 +157,7 @@ def test_pending_drain_withdraws_preparation_as_well_as_publication(gateway):
 
     node, sid = str(uuid4()), str(uuid4())
     old = {"revision": "0" * 40, "sha256": "0" * 64}
-    report = {"sessionId": sid, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0", "contractVersion": 1,
+    report = {"sessionId": sid, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0", "preparedStarts": True, "contractVersion": 1,
               "capacity": 1, "freeSlots": 1, "capabilities": [{"platform": "tiktok", "action": "upload-video"}],
               "providers": [{"provider": "local-chrome", "available": True,
                              "profiles": [{"name": "fixture", "profileId": "operator-approved"}]}],
@@ -184,7 +184,7 @@ def test_confirmed_defect_fences_restarted_workers_by_package_digest(gateway):
     gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
     for revision in (original["revision"], "2" * 40):
         sid = str(uuid4())
-        report = {"sessionId": sid, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0",
+        report = {"sessionId": sid, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0", "preparedStarts": True,
                   "contractVersion": 1, "capacity": 1, "freeSlots": 1,
                   "capabilities": [{"platform": "tiktok", "action": "upload-video"}],
                   "providers": [{"provider": "local-chrome", "available": True,

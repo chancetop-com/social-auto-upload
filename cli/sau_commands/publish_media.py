@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from sau_commands.arguments import existing_file_path
 from utils.media_queue import clear_media, publish_access, submit, task_gate, wait_for_result
-from utils.remote_media import validate_task_id, validate_url
+from utils.remote_media import item_path, validate_task_id, validate_url
 
 
 def is_remote(value):
@@ -24,6 +24,7 @@ def media_source(value: str) -> Path | str:
 
 
 def add_task_id(parser):
+    parser.add_argument("--prepared-media-only", action="store_true", help="Require complete cached media and skip network transfers")
     parser.add_argument("--task-id", type=validate_task_id, help="Reuse downloads for this task ID")
 
 
@@ -80,7 +81,7 @@ async def _acquire(args, images, urls, task_id):
                 if directory is None:
                     continue
                 try:
-                    resolved = await _resolve(args, images, urls, candidate)
+                    resolved = await _resolve(args, images, urls, candidate, directory)
                     # Only the platform knows which successful runs actually published.
                     resolved.post_published = False
                     yield resolved
@@ -117,13 +118,21 @@ async def _release(task_id, published):
             raise
 
 
-async def _resolve(args, images, urls, task_id):
+async def _resolve(args, images, urls, task_id, directory):
     resolved = copy(args)
     if not urls:
         return resolved
     try:
-        request = await submit(task_id, urls, background=False, priority=True)
-        items = await wait_for_result(request, urls, fail_fast=True)
+        if getattr(args, "prepared_media_only", False):
+            items = []
+            for url in urls:
+                path = item_path(directory, url)
+                if path.is_symlink() or not path.is_file():
+                    raise OSError("Prepared media is no longer available")
+                items.append({"path": path})
+        else:
+            request = await submit(task_id, urls, background=False, priority=True)
+            items = await wait_for_result(request, urls, fail_fast=True)
     except (OSError, sqlite3.Error) as exc:
         raise RuntimeError(f"Could not acquire media for {task_id}: {exc}\npublish_attempted=false") from exc
     paths = {url: Path(item["path"]) for url, item in zip(urls, items)}

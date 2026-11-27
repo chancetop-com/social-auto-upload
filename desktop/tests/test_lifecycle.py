@@ -33,6 +33,7 @@ def installation(tmp_path):
     release = root / "finish"
     site.joinpath("sau_cli.py").write_text(
         "import sys,time,os\nfrom pathlib import Path\nif sys.argv[1:] == ['--version']:\n    print('sau 0.1.0')\n"
+        "elif sys.argv[1] == 'media' and '--wait' in sys.argv: sys.exit(0)\n"
         "else:\n"
         f"    with Path({str(calls)!r}).open('a') as f: print(str(os.getpid())+' '+sys.argv[2],file=f)\n"
         f"    while not Path({str(release)!r}).exists(): time.sleep(.03)\n"

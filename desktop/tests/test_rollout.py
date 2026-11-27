@@ -383,3 +383,39 @@ def test_foreground_run_enters_recoverable_host_before_loading_program(tmp_path)
     assert subprocess.run([launcher, "run"], check=False).returncode == 17
     windows = launcher_script(windows=True)
     assert "release-host.ps1" in windows and '=="run"' in windows
+
+
+def test_late_validation_keeps_the_approved_installed_program(tmp_path):
+    import httpx
+    from sau_worker.rollout import ReleaseAgent
+    from sau_worker.state import write
+
+    state, program = tmp_path / "state", tmp_path / "program"
+    state.mkdir()
+    program.mkdir()
+    (tmp_path / ".versions/previous").mkdir(parents=True)
+    batch = {"batchId": "old-assignment", "releaseId": "new-release", "revision": "c" * 40,
+             "target": "macos-arm64", "sha256": "e" * 64, "step": "validating"}
+    write(program / "release.json", {"revision": batch["revision"], "target": batch["target"]})
+    (program / "package.sha256").write_text(batch["sha256"])
+    (program / "paired-worker").write_text("healthy")
+    write(state / "upgrade.json", batch)
+    write(state / "release-check-result.json", {"batchId": batch["batchId"], "sessionId": "A", "checkWorkflowId": "check-A"})
+    reports = []
+
+    def gateway(request):
+        if request.url.path.endswith("/discover"):
+            return httpx.Response(200, json={"approved": batch["releaseId"], "assignment": None})
+        assert request.url.path.endswith("/progress")
+        reports.append(json.loads(request.content))
+        return httpx.Response(200, json={"active": False, "confirmed": False})
+
+    with httpx.Client(base_url="https://fixture.test", transport=httpx.MockTransport(gateway)) as client:
+        agent = ReleaseAgent(tmp_path, client, "fixture")
+        agent.discover()
+        assert not agent.needs_drain()
+        agent.discover()
+    assert [(r["phase"], r["batchId"]) for r in reports] == [("ready", "old-assignment")]
+    assert (program / "paired-worker").read_text() == "healthy"
+    assert not (tmp_path / ".versions").exists()
+    assert not (state / "upgrade.json").exists()

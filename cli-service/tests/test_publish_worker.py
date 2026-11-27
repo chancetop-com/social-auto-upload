@@ -19,6 +19,8 @@ if sys.argv[1:] == ["--version"]:
     print("sau 0.1.0")
     sys.exit(0)
 root = Path(__file__).parent
+if sys.argv[1:3] == ["media", "predownload"] and "--wait" in sys.argv:
+    sys.exit(0)
 with (root / "calls").open("a", encoding="utf-8") as output:
     print(json.dumps({"argv": sys.argv[1:], "credentials": sorted(k for k in os.environ
           if k in ("BITBROWSER_API_KEY", "ADSPOWER_API_KEY", "MLX_API_TOKEN", "SAU_DESKTOP_TOKEN"))}), file=output)
@@ -42,7 +44,7 @@ sys.exit(result["code"])
 
 async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
                   output="TikTok video upload submitted: video.mp4", error="", start_status=200,
-                  options=None, lost_start=False, aliases="operator-selected", selection=None):
+                  options=None, lost_start=False, aliases="operator-selected", selection=None, latest_edit=None):
     root = script.parent
     (root / "controlled-result").write_text(json.dumps({"code": code, "stdout": output, "stderr": error}))
     workflow = "scheduled/shop|first"
@@ -59,6 +61,7 @@ async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
     if selection:
         task.update(selection)
         latest.update(selection)
+    latest.update(latest_edit or {})
     starts, reports, receipts = [], [], []
 
     def gateway(request):
@@ -75,7 +78,9 @@ async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
         if path == "/publish-task/claim":
             return httpx.Response(200, json={"task": {"workflowId": workflow, "task": task}})
         if path == "/publish-task/start":
-            starts.append(body)
+            if start_status == 200 and not lost_start and body["preparedMedia"] != latest["media"]:
+                return httpx.Response(200, json={"prepare": latest})
+            starts.append({key: body[key] for key in ("workflowId", "sessionId")})
             if lost_start:
                 raise httpx.ReadError("connection interrupted")
             return httpx.Response(start_status, json={"task": latest})
@@ -167,7 +172,7 @@ async def test_photo_capability_dispatch_and_fuzzy_lookup(child):
     selection = {"platform": "tiktok", "action": "upload-note", "requiredCapability": "tiktok.upload-note",
                  "caption": "line one\n#话题", "settings": {"title": "-title", "privacy": "friends", "aigc": False,
                  "brandedContent": True, "yourBrand": True, "location": "City", "noComments": True}, "media": media}
-    reports, _, receipts, calls = await desktop(child, selection=selection, output="photo post id: 123")
+    reports, _, receipts, calls = await desktop(child, latest_edit=selection, output="photo post id: 123")
     assert {"platform": "tiktok", "action": "upload-note"} in reports[0]["capabilities"]
     args = calls[0]["argv"]
     assert args[:6] == ["tiktok", "upload-note", "--images", "https://media.test/b.png",
@@ -328,6 +333,7 @@ async def test_optional_preparation_runs_only_media_enqueue(child):
     (1, "Unexpected exception mentioning 发布超时 after 尚未点击发布", "unknown", "possible_submission"),
     (1, "Private media URL\npublish_attempted=false", "failed", "pre_submit_failure"),
     (10, "private account label", "failed", "login_required"),
+    (10, "login_reason=verification", "failed", "verification_required"),
     (9, "private diagnostic", "unknown", "possible_submission"),
     (10, "private diagnostic\npublish_attempted=true", "unknown", "possible_submission"),
     (-9, "", "unknown", "possible_submission"),
@@ -352,3 +358,11 @@ async def test_instagram_stream_preserves_only_definitive_terminal_diagnostic(ch
     _, _, receipts, _ = await desktop(child, selection=selection, code=1, output="", error=diagnostic)
     assert receipts[-1]["receipt"]["outcome"] == outcome
     assert receipts[-1]["receipt"]["reason"] == reason
+
+
+@pytest.mark.asyncio
+async def test_instagram_readiness_failure_during_no_publish_is_definitive(child):
+    selection = {"platform": "instagram", "requiredCapability": "instagram.upload-video", "settings": {"title": "Title"}}
+    diagnostic = "Instagram 发布就绪超时（上限 60 秒或剩余预算）：Share 按钮未出现或不可用；尚未点击发布，未发布任何内容。"
+    _, _, receipts, _ = await desktop(child, selection=selection, prepared=True, code=1, output="", error=diagnostic)
+    assert receipts[-1]["receipt"] == {"outcome": "failed", "cliInvoked": True, "exitCode": 1, "reason": "upload_timeout"}

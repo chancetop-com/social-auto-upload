@@ -233,14 +233,6 @@ class ReleaseAgent:
         (self.state / "release-check-result.json").unlink(missing_ok=True)
         self.pending.unlink(missing_ok=True)
 
-    def retire(self, batch):
-
-        if (self.versions / "previous").is_dir():
-            # Keep the last confirmed program until the native host has restored it.
-            write(self.pending, {**batch, "step": "returning"})
-        else:
-            self.clear()
-
     def discover(self):
 
         observed = installation(self.root)
@@ -266,7 +258,7 @@ class ReleaseAgent:
             elif batch.get("defect"):
                 self.progress(batch, "defect", reason=batch["defect"])
                 self.clear()
-            elif batch.get("step") == "validating":
+            elif batch.get("step") in ("validating", "returning"):
                 receipt = read(self.state / "release-check-result.json")
                 if receipt.get("batchId") == batch["batchId"]:
                     response = self.progress(
@@ -275,16 +267,14 @@ class ReleaseAgent:
                         sessionId=receipt["sessionId"],
                         checkWorkflowId=receipt["checkWorkflowId"],
                     )
-                    if response["confirmed"]:
+                    if response["confirmed"] or not response["active"]:
                         self.clear()
-                    elif not response["active"]:
-                        self.retire(batch)
                 elif not reply.get("assignment") or reply["assignment"]["batchId"] != batch["batchId"]:
                     # It may have expired while offline. Do not let an obsolete
                     # local assignment prevent this desktop from converging later.
                     response = self.progress(batch, "switched")
                     if not response["active"]:
-                        self.retire(batch)
+                        self.clear()
             return
         if reply.get("assignment"):
             batch = assignment_for(reply["assignment"], observed["target"])
@@ -292,19 +282,13 @@ class ReleaseAgent:
             self.progress(batch, "draining")
 
     def needs_drain(self):
-        return read(self.pending).get("step") in ("draining", "staging", "returning")
+        return read(self.pending).get("step") in ("draining", "staging")
 
     def after_drain(self):
         """Called only after the old worker, its reports and every child have exited."""
 
         batch = read(self.pending)
         if batch.get("defect") or not batch or (self.versions / "repair").exists():
-            return False
-        if batch["step"] == "returning":
-            if (self.versions / "previous").is_dir():
-                atomic_write(self.versions / "revoked", batch["batchId"])
-                atomic_write(self.versions / "rollback", batch["batchId"])
-                return True
             return False
         try:
             if batch["step"] == "draining":

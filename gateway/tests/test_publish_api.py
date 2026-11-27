@@ -23,12 +23,12 @@ def video(workflow):
     }
 
 
-def register(gateway):
+def register(gateway, actions=("upload-video",), prepared=True):
     session = str(uuid4())
     report = {
         "sessionId": session, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0",
-        "contractVersion": 1, "capacity": 1, "freeSlots": 1,
-        "capabilities": [{"platform": "tiktok", "action": "upload-video"}],
+        "contractVersion": 1, "preparedStarts": prepared, "capacity": 1, "freeSlots": 1,
+        "capabilities": [{"platform": "tiktok", "action": action} for action in actions],
         "providers": [{"provider": "local-chrome", "available": True,
                        "profiles": [{"profileId": "operator-approved", "name": "operator-approved"}]}],
     }
@@ -45,9 +45,12 @@ def postiz(monkeypatch):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append((self.path, self.headers.get("Authorization"), body))
-            self.send_response(reply["status"])
+            status, data = reply["status"], reply["task"]
+            if status == 200 and body.get("preparedMedia") != data["media"]:
+                status, data = 412, {"task": data}
+            self.send_response(status)
             self.end_headers()
-            self.wfile.write(json.dumps(reply["task"]).encode())
+            self.wfile.write(json.dumps(data).encode())
 
         def log_message(self, *_):
             pass
@@ -68,6 +71,17 @@ def claim(gateway, session):
                         json={"sessionId": session, "waitSeconds": 0}).json()["task"]
 
 
+def start_upload(gateway, identity, task):
+    return gateway.post("/publish-task/start", headers=DESKTOP, json={**identity, "preparedMedia": task["media"]})
+
+
+def test_publish_claim_requires_a_desktop_that_can_confirm_prepared_media(gateway):
+    task = video("mixed-desktop-releases")
+    gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
+    assert claim(gateway, register(gateway, prepared=False)) is None
+    assert claim(gateway, register(gateway))["task"] == task
+
+
 def test_one_start_grants_latest_content_and_settles_original_occurrence(postiz, gateway):
     requests, reply = postiz
     task = video("repeatable/post/one")
@@ -77,20 +91,46 @@ def test_one_start_grants_latest_content_and_settles_original_occurrence(postiz,
     assert claimed["task"] == task
     reply["task"] = {**task, "caption": "Edited caption", "earliestPublishAt": "2026-11-27T13:00:00Z"}
     start = {"workflowId": task["workflowId"], "sessionId": owner}
-    assert gateway.post("/publish-task/start", headers=DESKTOP, json={**start, "sessionId": other}).status_code == 409
+    assert start_upload(gateway, {**start, "sessionId": other}, task).status_code == 409
     with ThreadPoolExecutor(2) as pool:
-        results = list(pool.map(lambda _: gateway.post("/publish-task/start", headers=DESKTOP, json=start), range(2)))
+        results = list(pool.map(lambda _: start_upload(gateway, start, task), range(2)))
     assert sorted(r.status_code for r in results) == [200, 409]
     assert next(r.json() for r in results if r.is_success) == {"task": reply["task"]}
     assert requests == [("/api/internal/browser-publishing/authorize-start", "Bearer fixture-internal",
                          {"workflowId": task["workflowId"], "postId": "post", "organizationId": "org",
-                          "resultDeadlineAt": claimed["resultDeadlineAt"]})]
+                          "resultDeadlineAt": claimed["resultDeadlineAt"], "preparedMedia": task["media"], "mediaFailed": False})]
     receipt = {"outcome": "published", "cliInvoked": True, "exitCode": 0}
     record = gateway.post("/publish-task/result", headers=DESKTOP, json={**start, "receipt": receipt}).json()
     assert (record["state"], record["receipt"]) == ("succeeded", receipt)
     assert gateway.post("/internal/occurrences", headers=INTERNAL, json=task).json() == record
     assert gateway.get("/internal/occurrences/" + task["workflowId"], headers=INTERNAL).json() == record
-    assert gateway.post("/publish-task/start", headers=DESKTOP, json=start).status_code == 409
+    assert start_upload(gateway, start, task).status_code == 409
+
+
+@pytest.mark.parametrize("supports_images", [True, False])
+def test_start_checks_the_latest_media_capability_on_the_original_lease(postiz, gateway, supports_images):
+    task = video("edited-media")
+    actions = ("upload-video", "upload-note") if supports_images else ("upload-video",)
+    session = register(gateway, actions)
+    gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
+    claimed = claim(gateway, session)
+    latest = {**task, "action": "upload-note", "requiredCapability": "tiktok.upload-note",
+              "media": [{"id": "image", "role": "image", "url": "https://media.example/edit.jpg"}]}
+    postiz[1]["task"] = latest
+    identity = {"sessionId": session, "workflowId": task["workflowId"]}
+    response = start_upload(gateway, identity, task)
+    if supports_images:
+        assert response.json() == {"prepare": latest}
+        response = start_upload(gateway, identity, latest)
+    record = gateway.get("/internal/occurrences/edited-media", headers=INTERNAL).json()
+    assert record["leaseGrantId"] == claimed["leaseGrantId"]
+    if supports_images:
+        assert response.json() == {"task": latest}
+        assert record["state"] == "started"
+    else:
+        assert response.status_code == 409
+        assert record["receipt"]["cliInvoked"] is False
+    assert start_upload(gateway, identity, task).status_code == 409
 
 
 def test_competing_desktops_serialize_a_profile_platform_until_settlement(postiz, gateway):
@@ -107,7 +147,7 @@ def test_competing_desktops_serialize_a_profile_platform_until_settlement(postiz
     assert claim(gateway, other) is None
     postiz[1]["task"] = original
     identity = {"workflowId": original["workflowId"], "sessionId": owner}
-    gateway.post("/publish-task/start", json=identity, headers=DESKTOP).raise_for_status()
+    start_upload(gateway, identity, original).raise_for_status()
     assert claim(gateway, other) is None
     receipt = {"outcome": "published", "cliInvoked": True, "exitCode": 0}
     gateway.post("/publish-task/result", json={**identity, "receipt": receipt}, headers=DESKTOP).raise_for_status()
@@ -138,9 +178,9 @@ def test_unavailable_start_never_grants_a_task_or_permits_replay(postiz, gateway
     reply["status"] = {"revoked": 403, "stale": 409, "unavailable": 503}.get(failure, 200)
     reply["task"] = {**task, "profileId": "other"} if failure == "changed-target" else task
     identity = {"workflowId": task["workflowId"], "sessionId": session}
-    result = gateway.post("/publish-task/start", headers=DESKTOP, json=identity)
+    result = start_upload(gateway, identity, task)
     assert result.status_code in (403, 409, 503) and "task" not in result.json()
-    assert gateway.post("/publish-task/start", headers=DESKTOP, json=identity).status_code == 409
+    assert start_upload(gateway, identity, task).status_code == 409
     assert len(requests) == (0 if failure in ("inventory", "wrong-cli-release") else 1)
     record = gateway.get("/internal/occurrences/no-start", headers=INTERNAL).json()
     if failure == "unavailable":
@@ -161,7 +201,7 @@ def test_only_original_owner_can_settle_authorized_mode_once(postiz, gateway):
         return gateway.post("/publish-task/result", headers=DESKTOP, json={**identity, "receipt": receipt, **overrides})
     assert finish(prepared).status_code == 409
     postiz[1]["task"] = task
-    gateway.post("/publish-task/start", json=identity, headers=DESKTOP).raise_for_status()
+    start_upload(gateway, identity, task).raise_for_status()
     assert finish(prepared, sessionId=str(uuid4())).status_code == 409
     assert finish({**prepared, "outcome": "published"}).status_code == 409
     assert finish(prepared).json()["state"] == "prepared"
@@ -181,8 +221,7 @@ def test_shutdown_drains_existing_work_without_granting_new_starts(postiz, gatew
         assert claim(gateway, session)["task"] == task
         postiz[1]["task"] = task
         stopping.set()
-        reply = gateway.post("/publish-task/start", headers=DESKTOP,
-                             json={"workflowId": task["workflowId"], "sessionId": session})
+        reply = start_upload(gateway, {"workflowId": task["workflowId"], "sessionId": session}, task)
         assert reply.status_code == 503 and not postiz[0]
         assert gateway.get("/internal/occurrences/shutdown-start", headers=INTERNAL).json()["state"] == "claimed"
 
@@ -201,7 +240,7 @@ def test_preparation_can_download_without_claiming_or_authorizing_publication(ga
     response = gateway.post("/publish-task/claim", json=modern, headers=DESKTOP)
     assert response.json()["task"] == {"operation": "prepare", "workflowId": task["workflowId"], "task": task}
     assert gateway.post("/publish-task/claim", json=modern, headers=DESKTOP).json()["task"] is None
-    assert gateway.post("/publish-task/start", json=publish, headers=DESKTOP).status_code == 409
+    assert start_upload(gateway, publish, task).status_code == 409
     assert gateway.get("/internal/occurrences/" + task["workflowId"], headers=INTERNAL).status_code == 404
     changed = {**task, "media": [{"id": "replacement", "role": "video", "url": "https://media.example/new.mp4"}]}
     gateway.post("/internal/occurrences", json=changed, headers=INTERNAL).raise_for_status()
@@ -228,7 +267,7 @@ def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, sho
     claimed = claim(gateway, owner)
     deadline = claimed["resultDeadlineAt"]
     identity = {"workflowId": task["workflowId"], "sessionId": owner}
-    gateway.post("/publish-task/start", headers=DESKTOP, json=identity).raise_for_status()
+    start_upload(gateway, identity, task).raise_for_status()
     def result(receipt):
         response = gateway.post("/publish-task/result", headers=DESKTOP, json={**identity, "receipt": receipt})
         response.raise_for_status()

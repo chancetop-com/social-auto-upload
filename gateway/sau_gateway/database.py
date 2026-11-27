@@ -128,14 +128,14 @@ class Store:
                 SELECT workflow_id, task FROM occurrence AS pending
                 WHERE state='pending' AND (claim_deadline IS NULL OR claim_deadline > clock_timestamp())
                 AND task->>'release'=%s AND (task->>'contractVersion')::integer=%s
-                AND (task->>'action'='check' OR task->>'release'=%s)
+                AND (task->>'action'='check' OR (%s AND task->>'release'=%s))
                 AND ((target_session=%s) OR
                     (target_session IS NULL AND %s='worker' AND %s::jsonb @> jsonb_build_array(jsonb_build_object(
                          'provider',task->'provider','profileId',task->'profileId'))))
                 AND (target_session=%s OR %s::jsonb @> jsonb_build_array(jsonb_build_object('platform',task->'platform','action',task->'action')))
                 AND {leases.ELIGIBLE_PROFILE}
                 ORDER BY created_at, workflow_id LIMIT 1 FOR UPDATE SKIP LOCKED
-            """, (report["release"], report["contractVersion"], report.get("cliRelease"), session_id, report["mode"], Jsonb(visible), session_id,
+            """, (report["release"], report["contractVersion"], report.get("preparedStarts", False), report.get("cliRelease"), session_id, report["mode"], Jsonb(visible), session_id,
                   Jsonb(report["capabilities"]), session_id)).fetchone()
             if row is None:
                 return None
@@ -164,13 +164,14 @@ class Store:
             """, (session_id,))
             return {**claimed, "renewAfterSeconds": self.lease_policy.renew_seconds}
 
-    def _can_run(self, db, session_id, task):
+    def _can_run(self, db, session_id, task, *, check_action=True):
         report = db.execute("SELECT report FROM desktop_session WHERE session_id=%s FOR UPDATE",
                             (session_id,)).fetchone()["report"]
         capability = {"platform": task["platform"], "action": task["action"]}
         return (report["mode"] == "worker" and report["contractVersion"] == task["contractVersion"]
                 and report["release"] == report["cliRelease"] == task["release"]
-                and capability in report["capabilities"]
+                and report.get("preparedStarts", False)
+                and (not check_action or capability in report["capabilities"])
                 and any(p["available"] and p["provider"] == task["provider"]
                         and any(profile["profileId"] == task["profileId"] for profile in p["profiles"])
                         for p in report["providers"]))
@@ -186,7 +187,7 @@ class Store:
             """, (body.workflowId, body.sessionId)).fetchone()
             if row is None:
                 raise Conflict()
-            if self._can_run(db, body.sessionId, row["task"]) and leases.holds(db, body):
+            if self._can_run(db, body.sessionId, row["task"], check_action=False) and leases.holds(db, body):
                 ref = {key: row["task"][key] for key in ("workflowId", "postId", "organizationId")}
                 return {**ref, "resultDeadlineAt": row["result_deadline"].isoformat()}
             self._decline(db, body)
@@ -198,14 +199,26 @@ class Store:
         with self.connect() as db:
             self._decline(db, body)
 
-    def start(self, body, latest):
+    def start(self, body, latest, refresh=False):
         with self.connect() as db:
             task = latest.model_dump(mode="json", exclude_unset=True)
             previous = self._get(db, body.workflowId)["task"]
             identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId", "provider", "profileId",
-                        "platform", "action", "requiredCapability", "release", "contractVersion")
+                        "platform", "release", "contractVersion")
             if (any(task[key] != previous[key] for key in identity) or not self._can_run(db, body.sessionId, task)
                     or not leases.holds(db, body)):
+                self._decline(db, body)
+                return None
+            if refresh:
+                updated = db.execute("""
+                    UPDATE occurrence SET start_requested_at=NULL, task=%s
+                    WHERE workflow_id=%s AND session_id=%s AND state='claimed' AND start_requested_at IS NOT NULL
+                      AND result_deadline > clock_timestamp() RETURNING task
+                """, (Jsonb(task), body.workflowId, body.sessionId)).fetchone()
+                if updated is None:
+                    raise Conflict()
+                return updated["task"]
+            if body.mediaFailed or body.preparedMedia != latest.media:
                 self._decline(db, body)
                 return None
             row = db.execute("""

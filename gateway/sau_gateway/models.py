@@ -52,6 +52,7 @@ class Session(WireModel):
     cliRelease: Identifier | None = None
     release: Identifier
     contractVersion: Literal[1]
+    preparedStarts: StrictBool = False
     capabilities: list[Capability]
     capacity: Annotated[int, Field(ge=1)]
     freeSlots: Annotated[int, Field(ge=0)]
@@ -137,6 +138,11 @@ class Start(WireModel):
     sessionId: UUID
 
 
+class PreparedStart(Start):
+    preparedMedia: list[Media]
+    mediaFailed: StrictBool = False
+
+
 class LeaseCommand(Start):
     leaseGrantId: UUID
 
@@ -162,7 +168,7 @@ class CheckReceipt(WireModel):
     cloudConnected: Literal[True]
     cliInvoked: bool
     profileVisible: bool
-    platformLogin: Literal["valid", "login-required", "unknown"]
+    platformLogin: Literal["valid", "login-required", "login-or-verification-required", "verification-required", "unknown"]
     exitCode: int | None
 
     @model_validator(mode="after")
@@ -177,7 +183,7 @@ class PublishReceipt(WireModel):
     cliInvoked: StrictBool
     exitCode: int | None
 
-    reason: Literal["login_required", "upload_timeout", "pre_submit_failure", "possible_submission", "authorization_declined"] | None = None
+    reason: Literal["login_required", "verification_required", "upload_timeout", "pre_submit_failure", "possible_submission", "authorization_declined"] | None = None
     releaseId: Identifier | None = None
     url: Annotated[str, Field(max_length=2048)] | None = None
     publishAttempted: StrictBool | None = None

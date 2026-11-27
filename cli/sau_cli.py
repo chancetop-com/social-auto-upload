@@ -99,6 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise
     except LoginRequiredError as exc:
         print(str(exc), file=sys.stderr)
+        if exc.reason == "verification":
+            print("login_reason=verification", file=sys.stderr)
         # Machine signal: only exit 10 *after* dispatch prints the standalone
         # token line.  No prefix, no timestamp, no leading text.
         if getattr(exc, "publish_attempted", False):
@@ -106,6 +108,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 10
     except RateLimitedError as exc:
         print(str(exc), file=sys.stderr)
+        if getattr(exc, "before_platform_session", False) and args.action in {"upload-video", "upload-note"}:
+            print("publish_attempted=false", file=sys.stderr)
         return 11
     except UsageError as exc:
         parser.print_usage(sys.stderr)
@@ -116,6 +120,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 9
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        if getattr(exc, "before_platform_session", False) and args.action in {"upload-video", "upload-note"}:
+            print("publish_attempted=false", file=sys.stderr)
         return 1
 
 

@@ -526,6 +526,7 @@ def test_platform_verification_page_exits_10_and_preserves_reason(harness, platf
     assert "publish_attempted=true" not in result.err.splitlines()
     assert KEY not in result.out + result.err + "".join(result.logs)
     if platform in ("xiaohongshu", "rednote"):
+        assert "login_reason=verification" in result.err.splitlines()
         assert result.out.splitlines() == ["invalid"]
 
 

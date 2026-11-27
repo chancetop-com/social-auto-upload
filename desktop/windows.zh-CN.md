@@ -34,7 +34,7 @@ $Ctl = Join-Path $InstallRoot 'cli-service.cmd'
 & $Ctl check --provider bitbrowser --profile-id '复制的窗口ID' --platform tiktok
 ```
 
-`status` 返回版本和提交（`release`、`revision`）、`running`、`claimReady`、`activeCount`、`capacity`、`sessionId`、`lastExit`、`nextAttempt`。时间是 Unix 秒。自检只检查登录态，不上传、不发布。确认回执中的 `cloudConnected=true`、`profileVisible=true`、`cliInvoked=true`、`platformLogin="valid"`。可换用 `--provider adspower`，或将平台换为 `rednote`、`xiaohongshu`、`instagram`。未连云端时检查 Gateway 地址和 Token；窗口不可见时核对 Local API、密钥及窗口 ID；`login-required` 时打开该窗口手动登录并重试自检。
+`status` 返回版本和提交（`release`、`revision`）、`running`、`claimReady`、`activeCount`、`capacity`、`sessionId`、`lastExit`、`nextAttempt`。时间是 Unix 秒。自检只检查登录态，不上传、不发布。确认回执中的 `cloudConnected=true`、`profileVisible=true`、`cliInvoked=true`、`platformLogin="valid"`。可换用 `--provider adspower`，或将平台换为 `rednote`、`xiaohongshu`、`instagram`。未连云端时检查 Gateway 地址和 Token；窗口不可见时核对 Local API、密钥及窗口 ID；`verification-required` 时打开该窗口完成平台验证。`login-or-verification-required` 表示需按平台提示登录或完成验证，完成后重新自检。
 
 ## 日常维护和恢复
 

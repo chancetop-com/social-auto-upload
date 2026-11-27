@@ -212,6 +212,7 @@ class Worker:
                 **({"installation": self.installation} if self.installation else {}),
                 "sessionId": self.session_id, "mode": "self-check" if self.self_check else "worker",
                 "contractVersion": 1, "release": __version__, "cliRelease": self.cli_release,
+                "preparedStarts": self.paired and not self.self_check,
                 "capacity": self.settings.capacity,
                 "freeSlots": self.free_slots,
                 "capabilities": capabilities if self.paired else [], "providers": self.providers,
@@ -258,7 +259,8 @@ class Worker:
         if proc.returncode == 0 and "valid" in proc.stdout.splitlines():
             evidence["platformLogin"] = "valid"
         elif proc.returncode == 10:
-            evidence["platformLogin"] = "login-required"
+            evidence["platformLogin"] = ("verification-required" if proc.stderr.splitlines()[-1:] == ["login_reason=verification"]
+                                         else "login-or-verification-required")
         return evidence
 
     async def publish(self, task):
@@ -269,7 +271,7 @@ class Worker:
                 or task["requiredCapability"] != task["platform"] + "." + task["action"]):
             return failed
         try:
-            args = publish_args(task, target)
+            args = [*publish_args(task, target), "--prepared-media-only"]
             # The CLI owns its publish budget and extends it for an intentional earliest-click wait.
             kwargs = {}
             if task["platform"] == "instagram":
@@ -288,6 +290,29 @@ class Worker:
         except (KeyError, TypeError, ValueError, OSError):
             return failed
         return publish_receipt(proc, task)
+
+    async def prepare_start(self, claimed):
+        identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId",
+                    "provider", "profileId", "platform", "contractVersion", "release")
+        task = claimed
+        while True:
+            try:
+                ready = await asyncio.to_thread(self.command, [*predownload_args(task), "--wait"], timeout=None)
+                failed = bool(ready.returncode)
+            except (ValueError, OSError):
+                failed = True
+            response = await self.post("/publish-task/start", {
+                "sessionId": self.session_id, "workflowId": claimed["workflowId"],
+                "preparedMedia": task["media"], "mediaFailed": failed})
+            refreshed = "prepare" in response
+            current = response.get("prepare" if refreshed else "task")
+            if not isinstance(current, dict) or any(current.get(k) != claimed.get(k) for k in identity):
+                raise httpx.RemoteProtocolError("Gateway returned an inconsistent occurrence")
+            if not refreshed:
+                if failed or current.get("media") != task["media"]:
+                    raise httpx.RemoteProtocolError("Gateway granted media that was not prepared")
+                return current
+            task = current
 
     async def finish(self, record):
         workflow_id = record["workflowId"]
@@ -319,13 +344,7 @@ class Worker:
                     # Only the current start response grants permission to create a child.
                     # A lost response, conflict or restart never execs from the stale claim.
                     await self.report()
-                    response = await self.post("/publish-task/start", {"sessionId": self.session_id,
-                                               "workflowId": workflow_id})
-                    task = response.get("task")
-                    identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId",
-                                "provider", "profileId", "platform", "action")
-                    if not isinstance(task, dict) or any(task.get(k) != claimed.get(k) for k in identity):
-                        raise httpx.RemoteProtocolError("Gateway returned an inconsistent start grant")
+                    task = await self.prepare_start(claimed)
                     receipt = await self.publish(task)
             return await self.post("/publish-task/result", {"sessionId": self.session_id,
                                    "workflowId": workflow_id, "receipt": receipt})

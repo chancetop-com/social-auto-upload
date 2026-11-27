@@ -86,20 +86,21 @@ def installed_gateway(gateway_env, installed_services, tmp_path):
 
 
 @pytest.mark.parametrize(("outcome", "state", "login"), [
-    ("valid", "succeeded", "valid"), ("login", "failed", "login-required"), ("missing", "failed", "unknown"),
-    ("offline", "failed", "unknown")])
+    ("valid", "succeeded", "valid"), ("login", "failed", "login-or-verification-required"), ("missing", "failed", "unknown"),
+    ("offline", "failed", "unknown"), ("verification", "failed", "verification-required")])
 def test_installed_self_check_reports_only_offline_login_evidence(
         installed_gateway, installed_services, harness, tmp_path, outcome, state, login):
     url, cert, client = installed_gateway
     worker, _ = installed_services
     profile_id = WINDOW_ID if outcome != "missing" else "absent"
-    harness.site.outcome["tiktok"] = outcome
+    platform = "rednote" if outcome == "verification" else "tiktok"
+    harness.site.outcome[platform] = outcome
     harness.api.queue("/browser/list", status=503 if outcome == "offline" else 200, payload={"success": True, "data": {"list": [{"id": WINDOW_ID, "name": "Shop"}]}})
     env = {"PATH": os.environ["PATH"], "HOME": str(harness.profile.home), "OFFLINE_OS_PROFILE": str(harness.profile.home),
            "SAU_HOME": str(tmp_path / "private CLI data"), "SAU_GATEWAY_URL": url, "SAU_GATEWAY_CA_FILE": str(cert),
            "SAU_DESKTOP_TOKEN": "fixture-desktop", "BITBROWSER_API_BASE": f"http://127.0.0.1:{harness.api_port}",
            "BITBROWSER_API_KEY": KEY}
-    result = subprocess.run([worker, "check", "--provider", "bitbrowser", "--platform", "tiktok", "--profile-id", profile_id],
+    result = subprocess.run([worker, "check", "--provider", "bitbrowser", "--platform", platform, "--profile-id", profile_id],
                             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=45)
     assert result.returncode == (0 if state == "succeeded" else 1), (result.stdout, result.stderr)
     if outcome == "offline":
@@ -118,4 +119,4 @@ def test_installed_self_check_reports_only_offline_login_evidence(
     expected = 3 if os.environ.get("SAU_TEST_DESKTOP_ARTIFACT") else 1
     assert (report["capacity"], report["freeSlots"]) == (expected, expected)
     assert {"platform": "tiktok", "action": "check"} in report["capabilities"]
-    assert harness.site.documents == ([] if outcome in ("missing", "offline") else [("tiktok", "/tiktokstudio/upload")])
+    assert harness.site.documents == ([] if outcome in ("missing", "offline") else [(platform, "/publish/publish" if platform == "rednote" else "/tiktokstudio/upload")])

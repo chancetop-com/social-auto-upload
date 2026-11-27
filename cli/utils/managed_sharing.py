@@ -321,7 +321,12 @@ class ManagedCommand:
         browser = None
         try:
             async with self.lifecycle() as deadline:
-                endpoint, record = await self.connection(provider, headless, deadline)
+                try:
+                    endpoint, record = await self.connection(provider, headless, deadline)
+                except RuntimeError as error:
+                    if self.member is None:
+                        error.before_platform_session = True
+                    raise
                 try:
                     browser = await connect(playwright, provider, endpoint)
                     contexts = browser.contexts

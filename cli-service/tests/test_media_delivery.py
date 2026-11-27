@@ -28,8 +28,10 @@ async def until(predicate):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reclaim", [False, True])
-async def test_edited_manifest_and_receipt_survive_cleanup(tmp_path, monkeypatch, reclaim):
+@pytest.mark.parametrize("scenario", ["cached", "reclaimed", "edit-during-download", "unbind-during-download", "lost-cache-after-start"])
+async def test_edited_manifest_and_receipt_survive_cleanup(tmp_path, monkeypatch, scenario):
+    reclaim = scenario == "reclaimed"
+    early = scenario in ("cached", "reclaimed")
     root = tmp_path
     monkeypatch.setenv("SAU_HOME", str(root / "state"))
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join(map(str, (root, ROOT / "cli"))))
@@ -51,6 +53,12 @@ def transport(self, request, **options):
     data = (root / Path(url.path).name).read_bytes()
     with (root / "fetches").open("a") as log:
         print(json.dumps([url.path, options["timeout"]]), file=log)
+    if (root / "slow").exists():
+        (root / "downloading").touch()
+        for _ in range(3000):
+            if (root / "resume").exists(): break
+            time.sleep(.02)
+        else: raise OSError("fixture download was not released")
     response = Response()
     response.raw, response.url, response.status_code = io.BytesIO(data), request.url, 200
     response.headers["Content-Length"] = str(len(data))
@@ -80,10 +88,21 @@ if sys.argv[0].endswith("sau_cli.py"):
             "action": "upload-video", "noPublish": False, "settings": {}, "caption": "fixture", "media": media,
             "earliestPublishAt": "2025-11-27T10:00:00Z"}
     latest = {**task, "media": [{**media[0], "id": "two", "url": base + "/movie.mp4#two"}, media[1]]}
-    receipts = []
+    receipts, starts = [], []
+    bound = True
+    if not early:
+        latest = task
+        (root / "slow").touch()
     def gateway(request):
         if request.url.path == "/publish-task/start":
-            return httpx.Response(200, json={"task": latest})
+            starts.append(json.loads(request.content))
+            if not bound:
+                return httpx.Response(403)
+            if scenario == "lost-cache-after-start":
+                for file in path.glob("*.mp4"):
+                    file.unlink()
+            key = "task" if json.loads(request.content)["preparedMedia"] == latest["media"] else "prepare"
+            return httpx.Response(200, json={key: latest})
         if request.url.path == "/publish-task/result":
             receipts.append(json.loads(request.content)["receipt"])
         return httpx.Response(200, json={})
@@ -97,9 +116,10 @@ if sys.argv[0].endswith("sau_cli.py"):
         await worker.report()
         assert worker.paired
         record = {"workflowId": workflow, "task": task}
-        await worker.finish({**record, "operation": "prepare"})
-        await until(lambda: len(list(path.glob("*.mp4"))) == len(list(path.glob("*.jpg"))) == 1)
-        assert receipts == [] and not (root / "upload").exists()
+        if early:
+            await worker.finish({**record, "operation": "prepare"})
+            await until(lambda: len(list(path.glob("*.mp4"))) == len(list(path.glob("*.jpg"))) == 1)
+            assert receipts == [] and not (root / "upload").exists()
         if reclaim:
             # A transfer may still own its writer after the completed file appears.
             # Simulate seven idle days after that process releases the cache.
@@ -108,8 +128,28 @@ if sys.argv[0].endswith("sau_cli.py"):
                 assert worker.command(["media", "cleanup"]).returncode == 0
                 return not path.exists()
             await until(reclaimed)
-        (root / "movie.mp4").write_text("version two")
+        if early:
+            (root / "movie.mp4").write_text("version two")
         job = asyncio.create_task(worker.finish(record))
+        if not early:
+            await until(lambda: (root / "downloading").exists())
+            assert not starts and not (root / "upload").exists()
+            if scenario == "edit-during-download":
+                latest = {**task, "media": [{**media[0], "id": "two", "url": base + "/movie.mp4#two"}, media[1]]}
+                (root / "movie.mp4").write_text("version two")
+            bound = scenario != "unbind-during-download"
+            (root / "resume").touch()
+            if not bound:
+                with pytest.raises(httpx.HTTPStatusError):
+                    await job
+                assert len(starts) == 1 and not receipts and not (root / "upload").exists()
+                return
+            if scenario == "lost-cache-after-start":
+                await job
+                assert receipts == [{"cliInvoked": True, "exitCode": 1, "outcome": "failed", "reason": "pre_submit_failure"}]
+                assert not (root / "upload").exists()
+                assert len((root / "fetches").read_text().splitlines()) == 2
+                return
         try:
             await until(lambda: (root / "upload").exists() or job.done())
             assert not job.done(), receipts
@@ -123,6 +163,6 @@ if sys.argv[0].endswith("sau_cli.py"):
         assert not path.exists()  # Success removed task files before the worker consumed stdout.
         assert receipts == [{"outcome": "published", "cliInvoked": True, "exitCode": 0}]
     fetches = [json.loads(line) for line in (root / "fetches").read_text().splitlines()]
-    assert sum(path == "/movie.mp4" for path, _ in fetches) == 2
+    assert sum(path == "/movie.mp4" for path, _ in fetches) == 2 + int(reclaim)
     assert sum(path == "/cover.jpg" for path, _ in fetches) == 1 + int(reclaim)
     assert all(timeout == [2.5, 3.5] for _, timeout in fetches)

@@ -185,7 +185,7 @@ def _raise_if_login_required(page: Page, *, publish_attempted: bool = False, man
                    'Instagram 需要重新登录或完成验证：请运行 sau instagram login --account <别名> 完成登录或验证，再重新执行命令。')
         raise LoginRequiredError(
             message,
-            reason='verification' if verification and not managed else 'login',
+            reason='verification' if verification else 'login',
             publish_attempted=publish_attempted,
         )
 
