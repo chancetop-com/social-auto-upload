@@ -86,19 +86,14 @@ def package(row, target):
             "url": "/session/release/packages/" + digest}
 
 
-def approved(db, target):
+def approved_release(db, target):
     # Approve each native package only after it passed on its own target.
-    row = db.execute("""SELECT r.* FROM desktop_release r JOIN desktop_release_batch b USING (release_id)
+    return db.execute("""SELECT r.* FROM desktop_release r JOIN desktop_release_batch b USING (release_id)
         WHERE b.target=%s AND b.phase='ready' AND r.pause_reason IS NULL
         ORDER BY r.created_at DESC LIMIT 1""", (target,)).fetchone()
-    return package(row, target) if row else None
 
 
 def next_batch(db, release):
-    current = db.execute("""SELECT * FROM desktop_release_batch WHERE release_id=%s AND phase=ANY(%s)""",
-                         (release["release_id"], list(ACTIVE))).fetchone()
-    if current:
-        return current
     # Reserve an online candidate even if a different desktop happened to poll first.
     # Prefer idle and untried nodes. Once it is the last node a busy machine still wins.
     candidate = db.execute("""SELECT m.*
@@ -116,6 +111,10 @@ def next_batch(db, release):
             Jsonb(release["packages"]), release["revision"], Jsonb(release["packages"]))).fetchone()
     if not candidate:
         return None
+    return assign(db, release, candidate)
+
+
+def assign(db, release, candidate):
     return db.execute("""INSERT INTO desktop_release_batch
         (batch_id,release_id,machine_id,target,prior_session,phase,deadline,replacement_for)
         VALUES (%s,%s,%s,%s,%s,'assigned',clock_timestamp()+make_interval(secs=>%s),
@@ -141,7 +140,14 @@ def evidence(db, batch, release, body):
         AND probe.report->>'release'=%s AND probe.report->>'cliRelease'=%s
         AND (worker.report->>'contractVersion')::int=%s AND (probe.report->>'contractVersion')::int=%s
         AND EXISTS (SELECT 1 FROM desktop_installation m WHERE m.machine_id=%s AND m.worker_session=worker.session_id)
-        AND worker.report->'capabilities' @> jsonb_build_array(jsonb_build_object('action','check','platform',o.task->'platform'))
+        AND worker.report @> '{"preparedStarts":true}'
+        AND worker.report->'capabilities' @> jsonb_build_array(
+            jsonb_build_object('platform',o.task->'platform','action','check'),
+            jsonb_build_object('platform',o.task->'platform','action','upload-video'),
+            jsonb_build_object('platform',o.task->'platform','action','upload-note'))
+        AND worker.report->'providers' @> jsonb_build_array(jsonb_build_object(
+            'provider',o.task->'provider','available',true,'profiles',jsonb_build_array(
+            jsonb_build_object('profileId',o.task->'profileId'))))
         AND o.task->>'action'='check' AND o.state='succeeded'
         AND o.receipt @> '{"platformLogin":"valid","cliInvoked":true,"profileVisible":true,"cloudConnected":true,"exitCode":0}'
         """, (body.checkWorkflowId, body.sessionId, batch["prior_session"], batch["created_at"],
@@ -168,8 +174,8 @@ def blocked_claim(db, session):
              installation["target"], installation["sha256"])).fetchone()
         if not ready:
             return True
-    return db.execute("""SELECT 1 FROM desktop_release_batch b JOIN desktop_release r USING(release_id)
-        WHERE b.machine_id=%s AND b.phase=ANY(%s) AND NOT r.superseded LIMIT 1""",
+    return db.execute("""SELECT 1 FROM desktop_release_batch b
+        WHERE b.machine_id=%s AND b.phase=ANY(%s) LIMIT 1""",
         (installation["machineId"], list(ACTIVE))).fetchone() is not None
 
 
@@ -297,12 +303,30 @@ def register(app, store, desktop, internal):
                      "revision": body.revision, "sha256": body.sha256}), online_seconds())).fetchone()
                 session_id = session["session_id"] if session else None
             observe(db, body.machineId, body.target, body.revision, body.sha256, session_id)
-            response = {"assignment": None, "approved": approved(db, body.target)}
-            release = db.execute("SELECT * FROM desktop_release WHERE NOT superseded AND pause_reason IS NULL").fetchone()
-            if release:
-                batch = next_batch(db, release)
-                if batch and batch["machine_id"] == body.machineId:
-                    response["assignment"] = {**package(release, batch["target"]), "batchId": batch["batch_id"]}
+            approved = approved_release(db, body.target)
+            response = {"assignment": None, "approved": package(approved, body.target) if approved else None}
+            # Catch-up on a previously approved release shares the rollout slot across all targets.
+            batch = db.execute("SELECT * FROM desktop_release_batch WHERE phase=ANY(%s)",
+                               (list(ACTIVE),)).fetchone()
+            if batch:
+                release = db.execute("SELECT * FROM desktop_release WHERE release_id=%s",
+                                     (batch["release_id"],)).fetchone()
+            else:
+                release = db.execute("SELECT * FROM desktop_release WHERE NOT superseded AND pause_reason IS NULL").fetchone()
+                if release:
+                    batch = next_batch(db, release)
+                if not batch and approved and body.revision and body.sha256 != approved["packages"][body.target]:
+                    # Legacy installations have no registration. For registered packages, only move forward.
+                    newer = db.execute("""SELECT 1 FROM desktop_release WHERE revision=%s
+                        AND packages->>%s=%s AND created_at>=%s""",
+                        (body.revision, body.target, body.sha256, approved["created_at"])).fetchone()
+                    if not newer:
+                        release = approved
+                        machine = db.execute("SELECT * FROM desktop_installation WHERE machine_id=%s",
+                                             (body.machineId,)).fetchone()
+                        batch = assign(db, release, machine)
+            if batch and batch["machine_id"] == body.machineId:
+                response["assignment"] = {**package(release, batch["target"]), "batchId": batch["batch_id"]}
             return response
 
     @app.post("/session/release/progress", dependencies=desktop)

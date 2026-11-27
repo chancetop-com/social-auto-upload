@@ -49,14 +49,16 @@ def progress(client, machine, assignment, phase, **extra):
                 "batchId": assignment["batchId"], "phase": phase, **extra})
 
 
-def session(client, machine, assignment, mode):
+def session(client, machine, assignment, mode, **changes):
     sid = str(uuid4())
     report = {"sessionId": sid, "mode": mode, "release": "0.1.0", "cliRelease": "0.1.0", "preparedStarts": True, "contractVersion": 1,
               "capacity": 1, "freeSlots": 1, "capabilities": [{"platform": "tiktok", "action": "check"}],
               "providers": [{"provider": "local-chrome", "available": True,
                              "profiles": [{"name": "fixture", "profileId": "fixture"}]}],
               "installation": {"machineId": machine, **{k: assignment[k] for k in ("revision", "sha256", "target", "batchId")}}}
-    post(client, "/session", report)
+    if mode == "worker":
+        report["capabilities"] += [{"platform": "tiktok", "action": action} for action in ("upload-video", "upload-note")]
+    post(client, "/session", {**report, **changes})
     return sid
 
 
@@ -71,6 +73,9 @@ def validate(client, machine, assignment):
     assert claim["task"]["workflowId"] == record["workflowId"]
     post(client, "/publish-task/result", {"sessionId": check, "workflowId": record["workflowId"],
          "receipt": {"cloudConnected": True, "cliInvoked": True, "profileVisible": True, "platformLogin": "valid", "exitCode": 0}})
+    lease = {"sessionId": check, "workflowId": record["workflowId"], "leaseGrantId": claim["task"]["leaseGrantId"]}
+    post(client, "/publish-task/profile-lease/complete", lease)
+    post(client, "/publish-task/profile-lease/release", {**lease, "windowClosed": True})
     return {"sessionId": sid, "checkWorkflowId": record["workflowId"]}
 
 
@@ -85,6 +90,16 @@ def test_one_at_a_time_requires_new_observed_worker_and_check_receipt(gateway):
     for phase in ("draining", "staging", "switched"):
         assert progress(gateway, a, first, phase)["active"]
     evidence = validate(gateway, a, first)
+    check = {"platform": "tiktok", "action": "check"}
+    for missing in ({"capabilities": [check]},
+                    {"capabilities": [check, {"platform": "tiktok", "action": "upload-video"}]},
+                    {"preparedStarts": False},
+                    {"providers": [{"provider": "local-chrome", "available": True, "profiles": []}]},
+                    {"providers": [{"provider": "local-chrome", "available": False,
+                                    "profiles": [{"profileId": "fixture", "name": "fixture"}]}]}):
+        sid = session(gateway, a, first, "worker", **missing)
+        assert not progress(gateway, a, first, "ready", **{**evidence, "sessionId": sid})["confirmed"]
+    evidence["sessionId"] = session(gateway, a, first, "worker")
     assert progress(gateway, a, first, "ready", **evidence)["confirmed"]
     assert progress(gateway, a, first, "ready", **evidence)["confirmed"]
     second = poll(gateway, b, **old)["assignment"]
@@ -210,3 +225,37 @@ def test_late_defect_pauses_a_newer_release_only_when_it_reuses_the_same_bytes(g
     assert prior["batches"][0]["latePhase"] == "defect" and prior["batches"][0]["phase"] == "superseded"
     assert now["pauseReason"] == "Paired runtime cannot start" and now["batches"][0]["phase"] == "paused"
     assert not progress(gateway, node, next_batch, "draining")["active"]
+
+
+def test_paused_rollout_allows_one_returning_installation_at_a_time_to_catch_up(gateway):
+    old = {"revision": "0" * 40, "sha256": "0" * 64}
+    canary, a, b = (str(uuid4()) for _ in range(3))
+    good = artifact(gateway)
+    gateway.post("/internal/releases", headers=INTERNAL, json=good).raise_for_status()
+    first = poll(gateway, canary, **old)["assignment"]
+    for phase in ("draining", "staging", "switched"):
+        progress(gateway, canary, first, phase)
+    assert progress(gateway, canary, first, "ready", **validate(gateway, canary, first))["confirmed"]
+    good_pins = {k: first[k] for k in ("revision", "sha256")}
+
+    bad = artifact(gateway, "2" * 40)
+    gateway.post("/internal/releases", headers=INTERNAL, json=bad).raise_for_status()
+    broken = poll(gateway, canary, **good_pins)["assignment"]
+    progress(gateway, canary, broken, "defect", reason="Package cannot start")
+    assert poll(gateway, canary, **good_pins)["assignment"] is None
+
+    wrong_target = post(gateway, "/session/release/discover", {
+        "machineId": str(uuid4()), "target": "windows-x86_64", **old})
+    assert wrong_target == {"assignment": None, "approved": None}
+    # A desktop already on newer registered pins cannot be rolled back by discovery.
+    assert poll(gateway, str(uuid4()), revision=bad["revision"], sha256=broken["sha256"])["assignment"] is None
+
+    catchup = poll(gateway, a, **old)["assignment"]
+    assert catchup and catchup["sha256"] == first["sha256"]
+    assert poll(gateway, b, **old)["assignment"] is None
+    for phase in ("draining", "staging", "switched"):
+        progress(gateway, a, catchup, phase)
+    assert progress(gateway, a, catchup, "ready", **validate(gateway, a, catchup))["confirmed"]
+    second = poll(gateway, b, **old)["assignment"]
+    assert second and second["releaseId"] == first["releaseId"] and second["batchId"] != catchup["batchId"]
+    assert poll(gateway, a, **good_pins)["assignment"] is None

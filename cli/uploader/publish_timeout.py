@@ -17,7 +17,7 @@ from typing import Any, TypeVar
 
 from uploader.publish_gate import wait_until_publish_allowed
 from utils.budgets import seconds
-from utils.errors import PublishResultUnknownError
+from utils.errors import PreSubmitTimeout, PublishResultUnknownError
 
 PUBLISH_TIMEOUT_SECONDS = 15 * 60
 _T = TypeVar("_T")
@@ -51,9 +51,9 @@ class PublishTimeoutBudget:
             message = self.pre_click_message
             if self.timeout_seconds != PUBLISH_TIMEOUT_SECONDS:
                 message = message.replace("15 分钟", f"{self.timeout_seconds:g} 秒")
-            return RuntimeError(message)
+            return PreSubmitTimeout(message)
         minutes = max(1, int(self.timeout_seconds // 60))
-        return RuntimeError(
+        return PreSubmitTimeout(
             f"{self.platform}发布超时（{minutes} 分钟）：尚未点击发布，"
             "未发布任何内容。"
         )

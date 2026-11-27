@@ -10,6 +10,8 @@ summary: 发布 Instagram Reels、单图或轮播，并核验作品。
 
 # Instagram 独立网页发布
 
+若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+
 调用现有 CLI，不自行实现浏览器上传。使用 Patchright 与项目专用持久化 Profile，不使用 Business Suite 的绑定入口。默认选择系统 Chrome、有头；已有 `conf.py` 的 `LOCAL_CHROME_HEADLESS` 仍生效，显式 `--headed` / `--headless` 优先。未配置代理时按系统网络直连；需要代理时显式使用 `--proxy` 或设置 `SAU_INSTAGRAM_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。
 
 ```powershell

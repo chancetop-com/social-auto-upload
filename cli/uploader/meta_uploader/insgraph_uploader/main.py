@@ -62,7 +62,7 @@ from utils.browser_session import BrowserSession
 from utils.local_browser_session import local_browser_session
 from utils.dom import ElementUnusableError, check, reject_ambiguous, visible_element_snapshot
 from utils.caption_topics import describe_caption_difference
-from utils.errors import LoginRequiredError, PublishResultUnknownError
+from utils.errors import LoginRequiredError, PreSubmitFailure, PreSubmitTimeout, PublishResultUnknownError
 from utils.humanize import Humanizer
 from utils.humanize import maybe_dispatched
 
@@ -1030,7 +1030,7 @@ class InstagramUploader:
                 detail=obstruction,
             )
         self._write_result()
-        raise RuntimeError(
+        raise PreSubmitFailure(
             'Instagram 发布选项未生效（尚未点击 Share）: '
             f'{obstruction}'
         )
@@ -1198,7 +1198,7 @@ class InstagramUploader:
                 raise
             except PublishResultUnknownError as error:
                 # 点击发布前不可能“结果未知”；按普通失败中止，不能误报退出 9。
-                raise RuntimeError(
+                raise PreSubmitFailure(
                     f'Instagram 发布选项未生效: {key}: {error}'
                 ) from error
             except Exception as error:
@@ -1211,7 +1211,7 @@ class InstagramUploader:
                 self._write_result()
         failures = option_failures(self.result['options']) + details
         if failures:
-            raise RuntimeError('Instagram 发布选项未生效: ' + '; '.join(failures))
+            raise PreSubmitFailure('Instagram 发布选项未生效: ' + '; '.join(failures))
 
     async def _wait_until_publish_ready(
         self, action: Locator, *, budget: PublishTimeoutBudget
@@ -1227,7 +1227,7 @@ class InstagramUploader:
         while True:
             remaining = min(deadline - time.monotonic(), budget.remaining_seconds())
             if remaining <= 0:
-                raise RuntimeError(
+                raise PreSubmitTimeout(
                     "Instagram 发布就绪超时（上限 60 秒或剩余预算）："
                     "Share 按钮未出现或不可用；尚未点击发布，未发布任何内容。"
                 )
@@ -1294,7 +1294,7 @@ class InstagramUploader:
                 self.stage = 'options'
                 self._record_option('collaborators', requested, error.applied, MISMATCH, error.reason)
                 self._write_result()
-                raise
+                raise PreSubmitFailure(str(error)) from error
             except RuntimeError:
                 # 预算先于最终回读用尽；不能保留之前的 set 证据。
                 self.stage = 'options'
@@ -1444,7 +1444,8 @@ class InstagramUploader:
         self._write_result()
         await page.screenshot(path=str(folder/'page.png'))
         (folder/'page.html').write_text(await page.content(), encoding='utf-8')
-        return RuntimeError(f'Instagram {self.stage} 未完成；结果记录: {self.result_file}；原因: {error}')
+        failure = type(error) if isinstance(error, PreSubmitFailure) else RuntimeError
+        return failure(f'Instagram {self.stage} 未完成；结果记录: {self.result_file}；原因: {error}')
 
     async def _capture_failure_safely(self, page: Page, error: Exception) -> None:
         """结果未知优先保留专用错误类型；现场保存失败不能覆盖退出码 9。"""
@@ -1495,7 +1496,13 @@ class InstagramUploader:
                 await self._capture_failure_safely(page, error)
             _raise_if_login_required(page, publish_attempted=self.publish_clicked, managed=session.managed)
             if session.managed:
-                raise await self._capture_failure(page, error) from error
+                try:
+                    captured = await self._capture_failure(page, error)
+                except Exception:
+                    if isinstance(error, PreSubmitFailure):
+                        raise error
+                    raise
+                raise captured from error
             raise
 
     async def upload(self, *, session: BrowserSession | None = None) -> dict:

@@ -10,6 +10,8 @@ summary: 使用 sau tiktok 在本地模式或托管浏览器模式（MLX / AdsPo
 
 # TikTok 视频与图文发布
 
+若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+
 TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI：
 
 - **本地模式**（默认）：不设置托管凭据，使用专用 `browser_profiles/<chrome|chromium>/tiktok/<原始别名>`。`--account` 必填，`--folder-id` / `--profile-id` 忽略；浏览器保存完整状态，旧 Cookie JSON 不读写或自动清理。

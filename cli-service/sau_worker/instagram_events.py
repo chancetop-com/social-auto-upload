@@ -27,7 +27,7 @@ def instagram_command(proc, nonce, on_processing):
         nonlocal attempted, last_diagnostic
         for line in bounded_lines(proc.stderr):
             attempted |= line == "publish_attempted=true"
-            last_diagnostic = line if line in ("publish_attempted=false", "login_reason=verification") or PRE_SUBMIT_TIMEOUT.fullmatch(line) else ""
+            last_diagnostic = line if line in ("publish_attempted=false", "publish_failure=upload_timeout", "login_reason=verification") or PRE_SUBMIT_TIMEOUT.fullmatch(line) else ""
 
     stderr_reader = Thread(target=collect_stderr, daemon=True)
     stderr_reader.start()
@@ -52,5 +52,5 @@ def instagram_command(proc, nonce, on_processing):
     finally:
         stderr_reader.join()
     code = proc.wait()
-    diagnostic = "publish_attempted=true" if attempted or (processing and code) else last_diagnostic
+    diagnostic = "publish_attempted=true" if attempted or (code and (processing or terminal.get("status") == "published")) else last_diagnostic
     return CompletedProcess(proc.args, code, json.dumps(terminal), diagnostic)

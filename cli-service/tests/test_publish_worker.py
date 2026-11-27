@@ -329,6 +329,7 @@ async def test_optional_preparation_runs_only_media_enqueue(child):
 
 @pytest.mark.parametrize(("code", "stderr", "outcome", "reason"), [
     (1, "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
+    (1, "TikTok 发布超时（30 秒）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
     (1, "Private media URL", "unknown", "possible_submission"),
     (1, "Unexpected exception mentioning 发布超时 after 尚未点击发布", "unknown", "possible_submission"),
     (1, "Private media URL\npublish_attempted=false", "failed", "pre_submit_failure"),
@@ -350,6 +351,7 @@ async def test_merchant_safe_receipt_on_failure(child, code, stderr, outcome, re
 @pytest.mark.asyncio
 @pytest.mark.parametrize("diagnostic,outcome,reason", [
     ("Instagram 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
+    ("Instagram upload 未完成；结果记录: private；原因: Instagram 发布超时（30 秒）：尚未点击发布，未发布任何内容。\npublish_failure=upload_timeout", "failed", "upload_timeout"),
     ("publish_attempted=false\nfinal unknown diagnostic", "unknown", "possible_submission"),
     ("publish_attempted=false\n" + "x" * 16384, "unknown", "possible_submission"),
 ])

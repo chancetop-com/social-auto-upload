@@ -22,6 +22,8 @@ from utils.managed_sharing import managed_command
 from utils.errors import (
     LoginRequiredError,
     PublishResultUnknownError,
+    PreSubmitFailure,
+    PreSubmitTimeout,
     RateLimitedError,
     UsageError,
 )
@@ -118,6 +120,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except PublishResultUnknownError as exc:
         print(str(exc), file=sys.stderr)
         return 9
+    except PreSubmitFailure as exc:
+        print(str(exc), file=sys.stderr)
+        signal = "publish_failure=upload_timeout" if isinstance(exc, PreSubmitTimeout) else "publish_attempted=false"
+        print(signal, file=sys.stderr)
+        return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         if getattr(exc, "before_platform_session", False) and args.action in {"upload-video", "upload-note"}:

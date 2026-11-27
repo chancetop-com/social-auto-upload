@@ -310,6 +310,46 @@ class InstagramProfileCliTests(unittest.TestCase):
                         self.assertEqual(clock.now, 0)
                 self.assertEqual(page.step, 0)
 
+    def test_managed_upload_budget_survives_wrapped_diagnostic(self):
+        from utils.browser_session import BrowserSession
+
+        class EvidencePage(ComposerPage):
+            async def screenshot(self, **kwargs): pass
+            async def content(self): return '<html></html>'
+
+        self.context.page_type = EvidencePage
+        path = self.root / 'photo.png'
+        path.touch()
+        async def exhaust(_app, page, *, budget):
+            budget.deadline = 0
+            budget.check_pre_click()
+
+        async def managed_upload(request, **kwargs):
+            app = main.InstagramUploader(title=request.title, image_files=[path], result_file=self.root / 'result.json')
+            return await app.upload(session=BrowserSession(browser=None, context=self.context, mode='adspower'))
+
+        with patch.dict(os.environ, {'SAU_BROWSER_PUBLISH_SECONDS': '30'}), patch.object(
+            instagram, 'upload_instagram_content', managed_upload
+        ), patch.object(main.InstagramUploader, '_upload_files', exhaust):
+            code, _, err = self.run_cli('upload-note', '--account', 'Creator', '--images', str(path), '--title', 'caption')
+        self.assertEqual(code, 1, err)
+        self.assertIn('Instagram upload 未完成', err)
+        self.assertIn('30 秒', err)
+        self.assertEqual(err.splitlines()[-1], 'publish_failure=upload_timeout')
+        self.assertEqual(self.context.pages[-1].share_clicks, 0)
+
+    def test_missing_requested_ai_label_fails_before_share(self):
+        self.profile()
+        self.context.page_type = ComposerPage
+        path = self.root / 'photo.png'
+        path.touch()
+        with patch.object(main, 'resolve_instagram_option_controls', return_value={}), patch.object(main, '_composer_obstruction', AsyncMock(return_value=None)):
+            code, _, err = self.run_cli('upload-note', '--account', 'Creator', '--images', str(path), '--title', 'caption', '--ai-generated')
+        self.assertEqual(code, 1, err)
+        self.assertIn('ai_generated=unsupported(entry_missing)', err)
+        self.assertEqual(err.splitlines()[-1], 'publish_attempted=false')
+        self.assertEqual(self.context.pages[-1].share_clicks, 0)
+
     def test_local_composer_uses_observed_continue_label_before_share(self):
         class ChineseLocator(ComposerLocator):
             def get_by_role(self, role, **kwargs):

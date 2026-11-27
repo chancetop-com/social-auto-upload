@@ -10,6 +10,8 @@ summary: 发布 Facebook Page 视频或图文，并管理排期。
 
 # Facebook Page 发布与删除
 
+若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+
 本 Skill 调用现有 `sau facebook-page`，不重复实现浏览器逻辑。Instagram 已改为独立网页命令 `sau instagram`（见 `instagram-upload` Skill），不使用 Business Suite 绑定 Instagram。
 
 默认不配置代理，浏览器按系统网络直连；网络环境需要代理时显式传 `--proxy` 或设置 `SAU_FACEBOOK_PAGE_PROXY`。

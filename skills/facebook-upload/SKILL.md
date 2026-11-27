@@ -10,6 +10,8 @@ summary: 管理 Facebook 个人主页登录、视频图文发布和作品核验�
 
 # Facebook 个人主页发布与删除
 
+若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+
 本 Skill 需要已安装的 `sau` CLI；独立安装 Skill 不会安装 Python 项目。若 `sau --help` 不可用，在项目根目录使用 Python 3.10–3.12 创建环境：`uv venv --python 3.11`，激活后 `uv pip install -e .`。首次没有 conf.py 时从 conf.example.py 复制，已有配置保留。
 
 本地默认使用系统 Chrome、有头。Chrome 由用户正常安装；显式 Chromium 先在同一项目环境运行 `uv run patchright install --no-shell chromium`，再给动作传 `--local-browser chromium`。自定义可执行文件配置 `LOCAL_CHROME_PATH`，实际产品种类决定 Profile；路径优先于 `--local-browser`/`LOCAL_BROWSER`，无路径时显式选择 > `LOCAL_BROWSER` > chrome。只要求选定来源，失败不切换浏览器或模式。有头运行需可用桌面/显示服务；无头环境显式传 `--headless`。保留项目固定 Patchright，安装与运行使用相同 `PLAYWRIGHT_BROWSERS_PATH`（如设置）。

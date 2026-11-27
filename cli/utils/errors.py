@@ -37,6 +37,14 @@ class PageCheckError(RuntimeError):
     """
 
 
+class PreSubmitFailure(RuntimeError):
+    """The platform stopped before dispatching its publish action."""
+
+
+class PreSubmitTimeout(PreSubmitFailure):
+    """The upload or readiness budget expired before submit."""
+
+
 class PublishResultUnknownError(Exception):
     """The publish click was sent but success was never observed.
 

@@ -10,6 +10,8 @@ summary: 使用 sau 登录 YouTube、检查 Profile 并上传视频。
 
 # YouTube 视频发布
 
+若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+
 调用现有 `sau youtube` CLI。登录在浏览器中完成 Google 账号登录，不使用二维码；账号名是本地会话别名。
 
 ```powershell
