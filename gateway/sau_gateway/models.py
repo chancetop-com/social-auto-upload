@@ -113,6 +113,11 @@ class PublishTask(Task):
         return self
 
 
+class Preparation(WireModel):
+    task: PublishTask
+    expiresAt: AwareDatetime
+
+
 class Start(WireModel):
     workflowId: Identifier
     sessionId: UUID
@@ -134,6 +139,7 @@ class LeaseRelease(LeaseCommand):
 
 
 class Claim(WireModel):
+    acceptPreparation: StrictBool = False
     sessionId: UUID
     waitSeconds: Annotated[int, Field(ge=0, le=30)] = 20
 

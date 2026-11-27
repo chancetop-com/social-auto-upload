@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from . import leases
+from .preparation import enqueue_preparation, take_preparation
 from .wakeups import Wakeups
 from .database import Conflict, Missing, Store
-from .models import CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, PublishTask, Result, Session, Start
+from .models import CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, Preparation, PublishTask, Result, Session, Start
 
 
 def authorized(token):
@@ -76,6 +77,12 @@ def create_app(stopping=None):
         await wakeups.publish()
         return record
 
+    @app.post("/internal/preparations", dependencies=internal)
+    async def prepare(offer: Preparation):
+        await asyncio.to_thread(enqueue_preparation, store, offer)
+        await wakeups.publish()
+        return {"accepted": True}
+
     @app.get("/internal/occurrences/{workflow_id:path}", dependencies=internal)
     def lookup(workflow_id: str):
         return store.get(workflow_id)
@@ -92,6 +99,8 @@ def create_app(stopping=None):
                 while not stopping.is_set() and not disconnect.done():
                     event.clear()  # A notification during the query remains set when it returns.
                     task = await asyncio.to_thread(store.claim, body.sessionId)
+                    if not task and body.acceptPreparation:
+                        task = await asyncio.to_thread(take_preparation, store, body.sessionId)
                     remaining = deadline - loop.time()
                     if task or remaining <= 0:
                         return {"task": task}

@@ -17,8 +17,10 @@ from .children import Children
 from .state import write
 from .instagram_events import instagram_command
 from .publish import receipt as publish_receipt
-from .platforms import PUBLISH_CAPABILITIES, publish_args, successful_receipt
+from .platforms import PUBLISH_CAPABILITIES, publish_args
 from .leases import command_lease, local_close_marker
+from .maintenance import daily_cleanup
+from .media import predownload_args
 from .providers import DEFAULT_BASES, inventory
 
 
@@ -211,7 +213,8 @@ class Worker:
             return reply
 
     async def claim(self, wait_seconds=15):
-        response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds})
+        response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds,
+                                                          "acceptPreparation": not self.self_check})
         return response["task"]
 
     def target(self, task):
@@ -276,13 +279,21 @@ class Worker:
             proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None, **kwargs)
         except (KeyError, TypeError, ValueError, OSError):
             return failed
-        if proc.returncode == 0:
-            success = successful_receipt(task, proc.stdout, task["noPublish"])
-            return {"cliInvoked": True, "exitCode": 0, "outcome": "unknown", **success}
-        return publish_receipt(proc, no_publish=task["noPublish"])
+        return publish_receipt(proc, task)
 
     async def finish(self, record):
         workflow_id = record["workflowId"]
+        if record.get("operation") == "prepare":
+            task = record["task"]
+            if (self.paired and not self.self_check and self.target(task)
+                    and task.get("workflowId") == workflow_id and task.get("release") == __version__
+                    and task.get("contractVersion") == 1):
+                try:
+                    # This command returns on enqueue. The paired CLI owns its acknowledgement budget.
+                    await asyncio.to_thread(self.command, predownload_args(task), timeout=None)
+                except (KeyError, TypeError, ValueError, OSError):
+                    pass  # Publish will obtain the current manifest on the executing machine.
+            return
         if workflow_id in self.active:
             return
         self.active.add(workflow_id)
@@ -328,6 +339,14 @@ class Worker:
         return await self.finish(record)
 
     async def run(self):
+        maintenance = asyncio.create_task(daily_cleanup(self))
+        try:
+            await self.poll()
+        finally:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
+
+    async def poll(self):
         running = set()
         while not self.draining:
             try:

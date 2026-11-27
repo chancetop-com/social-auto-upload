@@ -1,9 +1,10 @@
 """Translate an authorized occurrence to one paired CLI invocation."""
-from hashlib import sha256
 from urllib.parse import urlsplit
 
 from . import tiktok_instagram
-from .publish import PREPARED
+from .media import media_task_id
+
+PREPARED = "素材已上传，发布前检查已通过；已停止，未点击发布按钮。"
 
 
 PUBLISH_PLATFORMS = ("rednote", "xiaohongshu", "tiktok", "instagram")
@@ -31,7 +32,7 @@ def publish_args(task, target):
         fields = rednote_args(task)
     else:
         fields = tiktok_instagram.publish_args(task)
-    task_id = sha256(task["workflowId"].encode("utf-8")).hexdigest()
+    task_id = media_task_id(task["workflowId"])
     args = [platform, action, *fields, *target, "--task-id=" + task_id]
     if task["earliestPublishAt"]:
         args.append("--not-before=" + task["earliestPublishAt"])

@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, TypeVar
 
 from uploader.publish_gate import wait_until_publish_allowed
+from utils.budgets import seconds
 from utils.errors import PublishResultUnknownError
 
 PUBLISH_TIMEOUT_SECONDS = 15 * 60
@@ -29,10 +30,12 @@ class PublishTimeoutBudget:
         self,
         platform: str,
         *,
-        timeout_seconds: float = PUBLISH_TIMEOUT_SECONDS,
+        timeout_seconds: float | None = None,
         pre_click_message: str | None = None,
         result_unknown_message: str | None = None,
     ) -> None:
+        if timeout_seconds is None:
+            timeout_seconds = seconds("SAU_BROWSER_PUBLISH_SECONDS", PUBLISH_TIMEOUT_SECONDS)
         self.platform = platform
         self.timeout_seconds = timeout_seconds
         self.pre_click_message = pre_click_message
@@ -45,7 +48,10 @@ class PublishTimeoutBudget:
 
     def pre_click_error(self) -> RuntimeError:
         if self.pre_click_message is not None:
-            return RuntimeError(self.pre_click_message)
+            message = self.pre_click_message
+            if self.timeout_seconds != PUBLISH_TIMEOUT_SECONDS:
+                message = message.replace("15 分钟", f"{self.timeout_seconds:g} 秒")
+            return RuntimeError(message)
         minutes = max(1, int(self.timeout_seconds // 60))
         return RuntimeError(
             f"{self.platform}发布超时（{minutes} 分钟）：尚未点击发布，"

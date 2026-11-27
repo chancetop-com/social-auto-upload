@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from uploader.publish_timeout import (
-    PUBLISH_TIMEOUT_SECONDS,
     PublishTimeoutBudget,
 )
 from utils.time_utils import require_schedule_window
@@ -16,7 +15,7 @@ class BaseVideoUploader:
     publish_not_before: datetime | None = None
     #: 发布超时预算使用的平台名；子类覆盖后错误文案会带上平台名。
     publish_platform_label = "平台"
-    publish_timeout_seconds = PUBLISH_TIMEOUT_SECONDS
+    publish_timeout_seconds: float | None = None
 
     def start_publish_budget(self) -> PublishTimeoutBudget:
         """在整条上传/发布流程开始时创建共享 deadline。"""
