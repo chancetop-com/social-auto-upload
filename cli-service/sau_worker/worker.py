@@ -1,16 +1,20 @@
 import asyncio
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import os
 import re
 from pathlib import Path
 import subprocess
 import sys
+import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
 
 from . import __version__
+from .children import Children
+from .state import write
 from .publish import receipt as publish_receipt, video_args
 from .providers import DEFAULT_BASES, inventory
 
@@ -78,6 +82,48 @@ class Worker:
         self.cli_release = None
         self.connected = False
         self.report_lock = asyncio.Lock()
+        root = os.environ.get("SAU_INSTALL_ROOT")
+        self.state = Path(root) / "state" if root else None
+        self.generation = os.environ.get("SAU_WORKER_GENERATION")
+        self.children = Children(self.state) if self.state else None
+
+    @property
+    def draining(self):
+        if not self.generation:
+            return False
+        from .supervisor import ending
+        return ending(self.state, self.generation)
+
+    @property
+    def free_slots(self):
+        if self.draining:
+            return 0
+        occupied = self.children.count(excluding=self.session_id) if self.children else 0
+        return max(0, self.settings.capacity - len(self.active) - occupied)
+
+    @property
+    def ready(self):
+        return self.connected and self.paired and self.free_slots > 0 and any(
+            p["available"] and p["profiles"] for p in self.providers)
+
+    def save_status(self):
+        if self.generation and not self.self_check:
+            write(self.state / "worker.json", {"sessionId": self.session_id, "pid": os.getpid(),
+                  "claimReady": bool(self.ready), "capacity": self.settings.capacity,
+                  "active": len(self.active), "updatedAt": time.time()})
+
+    async def withdraw_on_drain(self):
+        while not self.draining:
+            await asyncio.sleep(.1)
+        try:
+            await self.report(discover=False)
+        except httpx.HTTPError:
+            pass
+
+    async def pause(self, seconds):
+        until = time.monotonic() + seconds
+        while not self.draining and time.monotonic() < until:
+            await asyncio.sleep(min(.25, max(0, until - time.monotonic())))
 
     @property
     def paired(self):
@@ -105,8 +151,24 @@ class Worker:
         if provider and provider != "local-chrome":
             base, key = self.settings.providers[provider]
             env.update({provider.upper() + "_API_KEY": key, provider.upper() + "_API_BASE": base})
-        return subprocess.run([*self.settings.cli, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True,
-                              encoding="utf-8", errors="replace", timeout=timeout)
+        with self.open_command(args, env) as proc:
+            out, err = proc.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+    @contextmanager
+    def open_command(self, args, env):
+        if self.children and self.settings.cli[-2:] == ("-m", "sau_cli") and args != ["--version"]:
+            with self.children.launch(self.session_id, self.settings.cli[:-2], args, env) as proc:
+                yield proc
+            return
+        with subprocess.Popen([*self.settings.cli, *args], env=env, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace") as proc:
+            try:
+                yield proc
+            except BaseException:
+                proc.kill()
+                proc.wait()
+                raise
 
     async def report(self, *, discover=True):
         async with self.report_lock:
@@ -127,13 +189,16 @@ class Worker:
                                            "profiles": [{"profileId": alias, "name": alias}
                                                         for alias in self.settings.dev_aliases]})
             capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, PUBLISH_CAPABILITY]
-            return await self.post("/session", {
+            reply = await self.post("/session", {
                 "sessionId": self.session_id, "mode": "self-check" if self.self_check else "worker",
                 "contractVersion": 1, "release": __version__, "cliRelease": self.cli_release,
                 "capacity": self.settings.capacity,
-                "freeSlots": max(0, self.settings.capacity - len(self.active)),
+                "freeSlots": self.free_slots,
                 "capabilities": capabilities if self.paired else [], "providers": self.providers,
             })
+
+            self.save_status()
+            return reply
 
     async def claim(self, wait_seconds=15):
         response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds})
@@ -195,6 +260,7 @@ class Worker:
         if workflow_id in self.active:
             return
         self.active.add(workflow_id)
+        self.save_status()
         try:
             claimed = record["task"]
             if claimed["action"] == "check":
@@ -219,6 +285,7 @@ class Worker:
                                    "workflowId": workflow_id, "receipt": receipt})
         finally:
             self.active.remove(workflow_id)
+            self.save_status()
             try:
                 await self.report(discover=False)
             except httpx.HTTPError:
@@ -235,7 +302,7 @@ class Worker:
 
     async def run(self):
         running = set()
-        while True:
+        while not self.draining:
             try:
                 completed = {job for job in running if job.done()}
                 running -= completed
@@ -245,12 +312,26 @@ class Worker:
                     except httpx.HTTPError:
                         print("Gateway result acknowledgement unavailable", file=sys.stderr, flush=True)
                 await self.report()
-                if len(running) >= self.settings.capacity:
-                    await asyncio.wait(running, timeout=15, return_when=asyncio.FIRST_COMPLETED)
-                else:
+                if self.draining:
+                    break
+                if self.ready and len(running) < self.settings.capacity:
                     record = await self.claim()
                     if record:
                         running.add(asyncio.create_task(self.finish(record)))
+                        # Reserve the local active slot before the next session advertisement.
+                        await asyncio.sleep(0)
+                elif running:
+                    await asyncio.wait(running, timeout=1, return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await self.pause(2)
             except httpx.HTTPError:
                 self.connected = False
-                await asyncio.sleep(2)
+                self.save_status()
+                await self.pause(2)
+        # A poll already in flight can have committed one final claim. Finish and
+        # attempt its result in the original session before yielding to maintenance.
+        try:
+            await self.report(discover=False)
+        except httpx.HTTPError:
+            pass
+        await asyncio.gather(*running, return_exceptions=True)

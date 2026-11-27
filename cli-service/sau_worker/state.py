@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import json
 import os
+import time
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -19,18 +20,27 @@ def atomic_write(path, value, *, executable=False):
             raise
     try:
         temporary.chmod(0o700 if executable else 0o600)
-        temporary.replace(path)
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                temporary.replace(path)
+                break
+            except PermissionError:
+                if os.name != "nt" or time.monotonic() >= deadline:
+                    raise
+                # Windows readers may briefly prevent replacing an open snapshot.
+                time.sleep(.02)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 @contextmanager
-def lock(path):
+def lock(path, *, existing=False):
     # Both primitives release automatically on process death. Leave the inode in place.
-    with path.open("a+b") as stream:
+    with path.open("r+b" if existing else "a+b") as stream:
         if os.name == "nt":
             import msvcrt
-            if stream.tell() == 0:
+            if stream.seek(0, os.SEEK_END) == 0:
                 stream.write(b"\0")
                 stream.flush()
             stream.seek(0)
@@ -61,7 +71,8 @@ def write(path, value):
 
 
 def held(path):
-    if not path.exists():
+    try:
+        with lock(path, existing=True) as acquired:
+            return not acquired
+    except FileNotFoundError:
         return False
-    with lock(path) as acquired:
-        return not acquired

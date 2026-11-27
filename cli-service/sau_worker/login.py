@@ -8,6 +8,9 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 
+WINDOWS = os.name == "nt"
+
+
 def label(root):
     return "net.connexup.social-auto-upload." + hashlib.sha256(os.fsencode(root)).hexdigest()[:16]
 
@@ -50,7 +53,7 @@ def native(args, *, check=True):
 
 def native_login(root, *, remove=False, start=False):
     name = label(root)
-    if os.name == "nt":
+    if WINDOWS:
         who = subprocess.check_output(["whoami.exe", "/user", "/fo", "csv", "/nh"], text=True)
         user = next(csv.reader([who.strip()]))[-1]
         name += "-" + user
@@ -94,7 +97,7 @@ def start_browsers(settings):
     for provider in settings.providers:
         path = os.environ.get(provider.upper() + "_APP_PATH")
         try:
-            if os.name == "nt":
+            if WINDOWS:
                 candidates = {"bitbrowser": ["BitBrowser/BitBrowser.exe"],
                               "adspower": ["AdsPower Global/AdsPower Global.exe", "adspower_global/AdsPower Global.exe"]}
                 if not path:

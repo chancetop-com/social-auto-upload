@@ -1,5 +1,4 @@
 import plistlib
-import subprocess
 import xml.etree.ElementTree as ET
 
 from sau_worker.login import registration
@@ -22,3 +21,33 @@ def test_native_registration_only_runs_in_browser_users_interactive_login(tmp_pa
     assert value("Actions/Exec/Arguments") == "-IB -m sau_worker.desktop _supervise"
     assert value("Settings/ExecutionTimeLimit") == "PT0S"
     assert value("Settings/StopIfGoingOnBatteries") == "false"
+
+
+def test_windows_scheduler_reinstall_start_disable_and_reenable_use_one_interactive_task(tmp_path, monkeypatch):
+    from sau_worker import login
+    from types import SimpleNamespace
+    (tmp_path / "state").mkdir()
+    installed = {}
+    command_log = []
+    def scheduler(args, check=True):
+        command_log.append(args)
+        assert args[0] == "schtasks.exe"
+        command = args[1]
+        name = args[args.index("/tn") + 1]
+        if command == "/create":
+            installed[name] = ET.parse(args[args.index("/xml") + 1]).getroot()
+        elif command == "/delete":
+            installed.pop(name)
+        elif command == "/run":
+            assert name in installed
+        return SimpleNamespace(returncode=0 if name in installed else 1)
+    monkeypatch.setattr(login, "WINDOWS", True)
+    monkeypatch.setattr(login.subprocess, "check_output", lambda *a, **kw: '"DOMAIN\\User","S-1-5-21-123"')
+    monkeypatch.setattr(login, "native", scheduler)
+    login.native_login(tmp_path, start=True)
+    login.native_login(tmp_path, start=True)
+    assert len(installed) == 1 and sum(c[1] == "/create" for c in command_log) == 1
+    login.native_login(tmp_path, remove=True)
+    assert not installed
+    login.native_login(tmp_path, start=True)
+    assert len(installed) == 1 and command_log[-1][1] == "/run"
