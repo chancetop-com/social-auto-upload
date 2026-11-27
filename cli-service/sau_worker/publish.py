@@ -25,14 +25,22 @@ def video_args(task, target):
 
 
 def receipt(proc, *, no_publish):
-    lines = proc.stdout.splitlines()
-    outcome = "unknown"
+    evidence = {"cliInvoked": True, "exitCode": proc.returncode}
+    attempted = "publish_attempted=true" in proc.stderr.splitlines()
     if proc.returncode == 0:
-        if no_publish and PREPARED in lines:
-            outcome = "prepared"
-        elif not no_publish and any(line.startswith("TikTok video upload submitted: ") for line in lines):
-            outcome = "published"
-    elif (proc.returncode in (2, 11) or
-          (proc.returncode == 10 and "publish_attempted=true" not in proc.stderr.splitlines())):
-        outcome = "failed"
-    return {"outcome": outcome, "cliInvoked": True, "exitCode": proc.returncode}
+        if no_publish and PREPARED in proc.stdout.splitlines():
+            return {**evidence, "outcome": "prepared"}
+        elif not no_publish and any(line.startswith("TikTok video upload submitted: ") for line in proc.stdout.splitlines()):
+            return {**evidence, "outcome": "published"}
+    if attempted:
+        return {**evidence, "outcome": "unknown", "reason": "possible_submission", "publishAttempted": True}
+    before_timeout = proc.returncode == 1 and "尚未点击发布" in proc.stderr and "发布超时" in proc.stderr
+    explicit_failure = proc.returncode == 1 and "publish_attempted=false" in proc.stderr.splitlines()
+    if proc.returncode in (2, 10, 11) or explicit_failure or before_timeout:
+        reason = "pre_submit_failure"
+        if proc.returncode == 10:
+            reason = "login_required"
+        elif before_timeout:
+            reason = "upload_timeout"
+        return {**evidence, "outcome": "failed", "reason": reason}
+    return {**evidence, "outcome": "unknown", "reason": "possible_submission"}
