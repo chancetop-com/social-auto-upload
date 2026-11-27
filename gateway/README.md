@@ -94,3 +94,9 @@ SAU_TEST_PAIRED_CHECK=1 python -m pytest -q gateway/tests
 ```
 
 The POSIX process fixture builds independent wheels, installs into directories containing spaces, migrates a random schema, starts a TLS-verified loopback Gateway and registers a new simulated OS account with each CLI fixture. A disposable Chromium maps the TikTok hostname to a local fixture page. The tests cover a valid login, a login redirect and a missing profile, and read the durable receipt through the internal API. The lighter worker tests exercise both paginated provider responses, changed inventory, availability and reconnects.
+
+## Linux Gateway image
+
+From the paired SAU source checkout, build the Gateway alone with `docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" -t gateway-local:verify gateway`. The non-root container entrypoint accepts `migrate` or `serve` (default), serves one application process on port 8080, and accepts SIGTERM. Idle claims return an empty response during drain. Allow at least 45 seconds of Pod termination grace for the 20-second HTTP shutdown budget and cleanup.
+
+The built-image test requires Docker Desktop, OpenSSL, the Gateway test dependencies and a disposable PostgreSQL administrator that can create databases and roles. Set `GATEWAY_TEST_DATABASE_URL` to that admin's local URL. `GATEWAY_TEST_PG_HOST` and `GATEWAY_TEST_PG_PORT` can override the PostgreSQL address visible inside Docker (defaults to `host.docker.internal` and the admin URL port). Run `GATEWAY_TEST_IMAGE=gateway-local:verify python -m pytest -q gateway/tests/test_linux_image.py`. The test migrates a fresh database twice as its non-superuser owner, probes readiness, sends desktop requests through a temporary loopback TLS terminator, disconnects and stops active long polls, restarts the container, and checks the durable self-check receipt.
