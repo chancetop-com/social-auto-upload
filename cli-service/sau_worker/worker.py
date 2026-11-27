@@ -16,6 +16,7 @@ from . import __version__
 from .children import Children
 from .state import write
 from .publish import receipt as publish_receipt, video_args
+from .leases import command_lease, local_close_marker
 from .providers import DEFAULT_BASES, inventory
 
 
@@ -144,6 +145,9 @@ class Worker:
 
     def command(self, args, provider=None, timeout=120):
         env = os.environ.copy()
+        env.pop("SAU_WINDOW_CLOSED_FILE", None)
+        if provider == "local-chrome" and (marker := local_close_marker.get()):
+            env["SAU_WINDOW_CLOSED_FILE"] = str(marker)
         env["PYTHONIOENCODING"] = "utf-8"
         for key in ("MLX_API_TOKEN", "SAU_DESKTOP_TOKEN", "GATEWAY_DESKTOP_TOKEN", "GATEWAY_INTERNAL_TOKEN",
                     "GATEWAY_DATABASE_URL", "ADSPOWER_API_KEY", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "BITBROWSER_API_BASE"):
@@ -262,25 +266,26 @@ class Worker:
         self.active.add(workflow_id)
         self.save_status()
         try:
-            claimed = record["task"]
-            if claimed["action"] == "check":
-                try:
-                    await self.report(discover=False)
-                except httpx.HTTPError:
-                    pass
-                receipt = await self.execute(claimed)
-            else:
-                # Only the current start response grants permission to create a child.
-                # A lost response, conflict or restart never execs from the stale claim.
-                await self.report()
-                response = await self.post("/publish-task/start", {"sessionId": self.session_id,
-                                           "workflowId": workflow_id})
-                task = response.get("task")
-                identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId",
-                            "provider", "profileId", "platform", "action")
-                if not isinstance(task, dict) or any(task.get(k) != claimed.get(k) for k in identity):
-                    raise httpx.RemoteProtocolError("Gateway returned an inconsistent start grant")
-                receipt = await self.publish(task)
+            async with command_lease(self, record):
+                claimed = record["task"]
+                if claimed["action"] == "check":
+                    try:
+                        await self.report(discover=False)
+                    except httpx.HTTPError:
+                        pass
+                    receipt = await self.execute(claimed)
+                else:
+                    # Only the current start response grants permission to create a child.
+                    # A lost response, conflict or restart never execs from the stale claim.
+                    await self.report()
+                    response = await self.post("/publish-task/start", {"sessionId": self.session_id,
+                                               "workflowId": workflow_id})
+                    task = response.get("task")
+                    identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId",
+                                "provider", "profileId", "platform", "action")
+                    if not isinstance(task, dict) or any(task.get(k) != claimed.get(k) for k in identity):
+                        raise httpx.RemoteProtocolError("Gateway returned an inconsistent start grant")
+                    receipt = await self.publish(task)
             return await self.post("/publish-task/result", {"sessionId": self.session_id,
                                    "workflowId": workflow_id, "receipt": receipt})
         finally:

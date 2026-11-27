@@ -104,3 +104,17 @@ The POSIX process fixture builds independent wheels, installs into directories c
 From the paired SAU source checkout, build the Gateway alone with `docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" -t gateway-local:verify gateway`. The non-root container entrypoint accepts `migrate` or `serve` (default), serves one application process on port 8080, and accepts SIGTERM. Idle claims return an empty response during drain. Allow at least 45 seconds of Pod termination grace for the 20-second HTTP shutdown budget and cleanup.
 
 The built-image test requires Docker Desktop, OpenSSL, the Gateway test dependencies and a disposable PostgreSQL administrator that can create databases and roles. Set `GATEWAY_TEST_DATABASE_URL` to that admin's local URL. `GATEWAY_TEST_PG_HOST` and `GATEWAY_TEST_PG_PORT` can override the PostgreSQL address visible inside Docker (defaults to `host.docker.internal` and the admin URL port). Run `GATEWAY_TEST_IMAGE=gateway-local:verify python -m pytest -q gateway/tests/test_linux_image.py`. The test migrates a fresh database twice as its non-superuser owner, probes readiness, sends desktop requests through a temporary loopback TLS terminator, disconnects and stops active long polls, restarts the container, and checks the durable self-check receipt.
+
+### Profile lease protocol
+
+Claims for the same provider and profile ID share one physical lease across merchant bindings. The Gateway returns the occurrence's `leaseGrantId`, `leaseExpiresAt` at claim time and `renewAfterSeconds`. Each command occupies one desktop slot and one platform on this grant. The holder can run another platform on the same profile when it has capacity.
+
+Send the desktop bearer and the original `sessionId`, `workflowId` and `leaseGrantId` to these endpoints.
+
+| Request | Effect |
+| --- | --- |
+| `POST /profile-lease/renew` | Extend an active command's live grant from PostgreSQL's current time. The worker renews while its CLI is waiting for a scheduled publish. |
+| `POST /profile-lease/complete` | End this command and free its slot and platform. Returns `{"idle":true}` if it was the last member. |
+| `POST /profile-lease/release` | Include `"windowClosed":true` after observing closure for the idle grant. A subsequent claim or completion fences old closure messages. |
+
+Configure `GATEWAY_PROFILE_RENEW_SECONDS` (default 300) and `GATEWAY_PROFILE_LEASE_SECONDS` (default 900). Both are positive integer seconds, with renewal strictly shorter than validity. If the window state cannot be confirmed, the idle grant expires. After expiry, the next eligible session can claim another pending occurrence. Each original claim keeps its claimant, result history and deadline.

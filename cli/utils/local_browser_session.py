@@ -1,5 +1,7 @@
 """Opt-in persistent local lifecycle; legacy and managed sessions are unchanged."""
 import asyncio
+import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from loguru import logger
 
@@ -59,6 +61,11 @@ async def close_persistent_context(context):
             logger.warning('Persistent context cleanup cancelled; preserving operation result.')
         elif task.exception() is not None:
             logger.warning('Persistent context cleanup failed; preserving operation result: {}', task.exception())
+        elif marker := os.environ.get("SAU_WINDOW_CLOSED_FILE"):
+            try:
+                Path(marker).touch(exist_ok=False)
+            except OSError:
+                logger.warning('Unable to record persistent context closure for the worker.')
     finally:
         if not task.done():
             task.cancel()
