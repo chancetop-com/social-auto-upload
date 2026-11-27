@@ -56,12 +56,12 @@ def claimed_worker(root, generation):
     state = root / "state"
     # A replacement supervisor cannot start a second claiming process while an
     # orphaned worker finishes its command and attempts its original report.
-    with lock(owner_directory() / "claim.lock") as acquired:
+    with lock(owner_directory() / "claim.lock", lifetime=True) as acquired:
         if not acquired:
             return 1
         if ending(state, generation):
             return 0
-        with lock(state / "worker.lock") as owns_root:
+        with lock(state / "worker.lock", lifetime=True) as owns_root:
             if not owns_root:
                 return 1
             # Works when this supervisor has already died and Popen is gone.
@@ -85,7 +85,7 @@ def claimed_worker(root, generation):
 def supervise(root):
     state = root / "state"
     owner = owner_directory()
-    with lock(owner / "supervisor.lock") as owns_user, lock(state / "supervisor.lock") as owns_root:
+    with lock(owner / "supervisor.lock", lifetime=True) as owns_user, lock(state / "supervisor.lock", lifetime=True) as owns_root:
         if not owns_user or not owns_root or (state / "disabled").exists() or (state / "uninstalled").exists():
             return 0
         previous = read(owner / "owner.json").get("root")

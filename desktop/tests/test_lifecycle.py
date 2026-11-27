@@ -62,6 +62,8 @@ def installation(tmp_path):
                         local.pending = False
                         local.claims.append(data["sessionId"])
                         reply = {"task": {"workflowId": "occ", "task": task}}
+                        if local.leased:
+                            reply["task"].update(leaseGrantId="fixture-grant", renewAfterSeconds=.2)
                 if not reply["task"]:
                     local.poll_entered.set()
                     local.allow_poll.wait(6)
@@ -69,6 +71,9 @@ def installation(tmp_path):
             elif self.path == "/publish-task/start":
                 local.starts.append(data)
                 reply = {"task": task}
+            elif self.path in {"/profile-lease/renew", "/profile-lease/complete"}:
+                local.leases.append((self.path, data))
+                reply = {"idle": False}
             elif self.path == "/publish-task/result":
                 local.results.append(data)
                 while not local.ack.wait(.05):
@@ -92,7 +97,7 @@ def installation(tmp_path):
                 media=[{"url": "https://media.test/demo.mp4", "role": "video"}], caption="fixture")
     from types import SimpleNamespace
     local = SimpleNamespace(ready=False, online=True, pending=False, reports=[], claims=[], starts=[],
-                            results=[], mutex=threading.Lock(), ack=threading.Event(),
+                            results=[], leased=False, leases=[], mutex=threading.Lock(), ack=threading.Event(),
                             poll_entered=threading.Event(), allow_poll=threading.Event())
     local.allow_poll.set()
     with ThreadingHTTPServer(("127.0.0.1", 0), Gateway) as http:
@@ -302,3 +307,24 @@ def test_second_install_root_cannot_claim_in_same_login_session(installation):
                          env=env, cwd=other, text=True, capture_output=True, timeout=6)
     assert run.returncode != 0 and "another installation" in run.stderr
     assert len({r["sessionId"] for r in api.reports}) == 1 and cli("status")["claimReady"]
+
+
+def test_draining_worker_keeps_original_lease_until_its_cli_finishes(installation):
+    root, api, cli = installation
+    api.leased = api.ready = api.pending = True
+    cli("start")
+    wait_for(lambda: (root / "calls").exists())
+    stop = cli("stop", wait=False)
+    try:
+        wait_for(lambda: api.reports[-1]["freeSlots"] == 0)
+        count = len(api.leases)
+        wait_for(lambda: len(api.leases) >= count + 2)
+        grant = {"workflowId": "occ", "sessionId": api.claims[0], "leaseGrantId": "fixture-grant"}
+        assert all(path == "/profile-lease/renew" and body == grant for path, body in api.leases)
+        (root / "finish").touch()
+        wait_for(lambda: api.results)
+        assert api.leases[-1] == ("/profile-lease/complete", grant) and stop.poll() is None
+    finally:
+        (root / "finish").touch()
+        api.ack.set()
+        stop.wait(timeout=8)

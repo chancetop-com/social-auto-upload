@@ -81,3 +81,25 @@ def test_busy_windows_marker_cannot_discard_a_completed_cli_result(tmp_path, mon
             output, _ = process.communicate(timeout=3)
     assert output.strip() == "confirmed" and process.returncode == 0
     assert children.count() == 0
+
+
+def test_occupancy_lasts_through_interpreter_shutdown(tmp_path):
+    from sau_worker.children import Children
+    (tmp_path / "sau_cli.py").write_text(
+        "import threading,time,os\nfrom pathlib import Path\n"
+        "def finalize():\n    time.sleep(.2)\n    Path(os.environ['CLOSING']).touch()\n"
+        "    while not Path(os.environ['EXIT']).exists(): time.sleep(.03)\n"
+        "threading.Thread(target=finalize).start()\n")
+    package = Path(__file__).resolve().parents[2] / "cli-service"
+    closing, exit_file = tmp_path / "closing", tmp_path / "exit"
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, (tmp_path, package))),
+           "CLOSING": str(closing), "EXIT": str(exit_file)}
+    children = Children(tmp_path)
+    with children.launch("old-session", (sys.executable, "-P"), ["publish"], env) as process:
+        try:
+            wait_for(closing.exists)
+            assert process.poll() is None
+            assert children.count(excluding="new-session") == 1
+        finally:
+            exit_file.touch()
+            process.wait(3)
