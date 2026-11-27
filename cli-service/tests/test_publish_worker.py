@@ -23,7 +23,17 @@ with (root / "calls").open("a", encoding="utf-8") as output:
     print(json.dumps({"argv": sys.argv[1:], "credentials": sorted(k for k in os.environ
           if k in ("BITBROWSER_API_KEY", "ADSPOWER_API_KEY", "MLX_API_TOKEN", "SAU_DESKTOP_TOKEN"))}), file=output)
 result = json.loads((root / "controlled-result").read_text(encoding="utf-8"))
-print(result["stdout"])
+for line in result["stdout"].splitlines():
+    if line.startswith("FIXTURE_EVENT "):
+        print("SAU-EVENT " + os.environ.get("SAU_EVENT_NONCE", "missing") + " " + line[len("FIXTURE_EVENT "):], flush=True)
+    elif line == "WAIT_FOR_PROGRESS":
+        import time
+        for i in range(100):
+            if (root / "progress-seen").exists(): break
+            time.sleep(.02)
+        else: sys.exit(99)
+    else:
+        print(line)
 print(result["stderr"], file=sys.stderr)
 sys.exit(result["code"])
 """, encoding="utf-8")
@@ -71,6 +81,8 @@ async def desktop(script, *, prepared=False, provider="local-chrome", code=0,
             return httpx.Response(start_status, json={"task": latest})
         assert path == "/publish-task/result"
         receipts.append(body)
+        if body["receipt"]["outcome"] == "processing":
+            (root / "progress-seen").touch()
         return httpx.Response(200, json={})
 
     config = Settings.from_env({"SAU_DESKTOP_TOKEN": "fixture", "SAU_GATEWAY_URL": "https://gateway.test",
@@ -163,3 +175,63 @@ async def test_photo_capability_dispatch_and_fuzzy_lookup(child):
     assert set(["--title=-title", "--note=line one\n#话题", "--privacy=friends", "--no-aigc", "--location=City",
                 "--branded-content", "--your-brand", "--no-comments"]).issubset(args)
     assert receipts[-1]["receipt"]["outcome"] == "unknown"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code,terminal", [(0, "published"), (9, "unknown")])
+async def test_instagram_photo_progress_precedes_final_receipt_and_preserves_accessibility(child, code, terminal):
+    selection = {"platform": "instagram", "action": "upload-note", "requiredCapability": "instagram.upload-note",
+                 "settings": {"title": "one", "location": "City", "aiGenerated": False, "noComments": True,
+                              "collaborators": [" @Alice ", "Bob"], "altText": ["B image", "A image"]},
+                 "caption": "-body #photo", "media": [{"id": name, "role": "image", "url": "https://media.test/" + name + ".png"}
+                                                        for name in ("b", "a")]}
+    output = 'FIXTURE_EVENT {"status":"processing"}\nWAIT_FOR_PROGRESS'
+    if not code:
+        output += '\nFIXTURE_EVENT {"status":"published","post_id":"Az-7","post_url":"https://www.instagram.com/p/Az-7/","content_id":"12345"}'
+    reports, _, receipts, calls = await desktop(child, selection=selection, output=output, code=code)
+    assert {"platform": "instagram", "action": "upload-note"} in reports[0]["capabilities"]
+    assert [r["receipt"]["outcome"] for r in receipts] == ["processing", terminal]
+    assert len({(r["sessionId"], r["workflowId"]) for r in receipts}) == 1
+    if not code:
+        assert receipts[-1]["receipt"]["releaseId"] == "Az-7"
+        assert receipts[-1]["receipt"]["url"] == "https://www.instagram.com/p/Az-7/"
+    args = calls[0]["argv"]
+    assert args[:5] == ["instagram", "upload-note", "--images", "https://media.test/b.png", "https://media.test/a.png"]
+    assert [arg for arg in args if arg.startswith("--alt-text")] == ["--alt-text=B image", "--alt-text=A image"]
+    assert [arg for arg in args if arg.startswith("--collaborator")] == ["--collaborator=alice", "--collaborator=bob"]
+    assert {"--title=one", "--note=-body #photo", "--no-ai-generated", "--no-comments", "--location=City"}.issubset(args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,settings,output,outcome,expected", [
+    ("tiktok", {"disableReuse": True, "aigc": True}, "TikTok video upload submitted: v.mp4\nvideo_id: 123",
+     "published", ["--title=-first line\n#café & second", "--disable-reuse", "--aigc"]),
+    ("instagram", {"title": "-title", "aiGenerated": True}, 'FIXTURE_EVENT {"status":"prepared"}',
+     "prepared", ["--title=-title", "--desc=-first line\n#café & second", "--ai-generated"]),
+    ("instagram", {"title": "title"}, '{"status":"published","post_id":"abc","post_url":"https://www.instagram.com/reel/abc/"}',
+     "unknown", ["--title=title"]),
+    ("instagram", {"title": "title"}, 'FIXTURE_EVENT {"status":"published","post_id":"abc","post_url":"https://www.instagram.com/reel/abc/"}',
+     "published", ["--title=title"]),
+])
+async def test_video_roles_options_and_paired_output(child, platform, settings, output, outcome, expected):
+    selection = {"platform": platform, "requiredCapability": platform + ".upload-video", "settings": settings}
+    _, _, receipts, calls = await desktop(child, selection=selection, output=output, prepared=outcome == "prepared")
+    assert receipts[-1]["receipt"]["outcome"] == outcome
+    if platform == "tiktok":
+        assert "releaseId" not in receipts[-1]["receipt"]
+    args = calls[0]["argv"]
+    assert {"--file=https://media.example/current.mp4", "--thumbnail=https://media.example/current.jpg", *expected}.issubset(args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,settings,path", [
+    ("tiktok", {"disableReuse": True}, "ok.png"), ("tiktok", {}, "bad.avif"),
+    ("tiktok", {"brandedContent": True, "privacy": "only-me"}, "ok.png"),
+    ("instagram", {}, "ok.png"), ("instagram", {"title": "ok"}, "bad.webp"),
+    ("instagram", {"title": "ok", "altText": []}, "ok.png"),
+    ("instagram", {"title": "ok", "collaborators": ["@User", "user"]}, "ok.png"),
+])
+async def test_unusable_options_and_media_do_not_launch_cli(child, platform, settings, path):
+    selection = {"platform": platform, "action": "upload-note", "requiredCapability": platform + ".upload-note",
+                 "settings": settings, "media": [{"id": "1", "url": "https://media.test/" + path, "role": "image"}]}
+    _, _, receipts, calls = await desktop(child, selection=selection)
+    assert receipts[-1]["receipt"]["outcome"] == "failed" and not calls

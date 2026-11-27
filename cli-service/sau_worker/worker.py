@@ -11,6 +11,7 @@ from uuid import uuid4
 import httpx
 
 from . import __version__
+from .instagram_events import instagram_command
 from .publish import receipt as publish_receipt
 from .platforms import PUBLISH_CAPABILITIES, publish_args, successful_receipt
 from .providers import DEFAULT_BASES, inventory
@@ -96,7 +97,7 @@ class Worker:
             raise httpx.RemoteProtocolError("Gateway returned an invalid object", request=response.request)
         return body
 
-    def command(self, args, provider=None, timeout=120):
+    def command(self, args, provider=None, timeout=120, on_processing=None):
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         for key in ("MLX_API_TOKEN", "SAU_DESKTOP_TOKEN", "GATEWAY_DESKTOP_TOKEN", "GATEWAY_INTERNAL_TOKEN",
@@ -105,6 +106,13 @@ class Worker:
         if provider and provider != "local-chrome":
             base, key = self.settings.providers[provider]
             env.update({provider.upper() + "_API_KEY": key, provider.upper() + "_API_BASE": base})
+        env.pop("SAU_EVENT_NONCE", None)
+        if on_processing:
+            nonce = uuid4().hex
+            env["SAU_EVENT_NONCE"] = nonce
+            with subprocess.Popen([*self.settings.cli, *args], env=env, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace") as proc:
+                return instagram_command(proc, nonce, on_processing)
         return subprocess.run([*self.settings.cli, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True,
                               encoding="utf-8", errors="replace", timeout=timeout)
 
@@ -185,7 +193,20 @@ class Worker:
         try:
             args = publish_args(task, target)
             # The CLI owns its publish budget and extends it for an intentional earliest-click wait.
-            proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None)
+            kwargs = {}
+            if task["platform"] == "instagram":
+                loop = asyncio.get_running_loop()
+
+                async def report_processing():
+                    try:
+                        await self.post("/publish-task/result", {
+                            "sessionId": self.session_id, "workflowId": task["workflowId"],
+                            "receipt": {"outcome": "processing", "cliInvoked": True, "exitCode": None}})
+                    except httpx.HTTPError:
+                        pass  # Progress is advisory. The final receipt still belongs to the original claim.
+
+                kwargs["on_processing"] = lambda: asyncio.run_coroutine_threadsafe(report_processing(), loop)
+            proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None, **kwargs)
         except (KeyError, TypeError, ValueError, OSError):
             return failed
         if proc.returncode == 0:
