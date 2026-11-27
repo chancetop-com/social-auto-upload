@@ -47,16 +47,13 @@ class PublishTimeoutBudget:
         return self.deadline - time.monotonic()
 
     def pre_click_error(self) -> RuntimeError:
-        if self.pre_click_message is not None:
-            message = self.pre_click_message
-            if self.timeout_seconds != PUBLISH_TIMEOUT_SECONDS:
-                message = message.replace("15 分钟", f"{self.timeout_seconds:g} 秒")
-            return PreSubmitTimeout(message)
-        minutes = max(1, int(self.timeout_seconds // 60))
-        return PreSubmitTimeout(
-            f"{self.platform}发布超时（{minutes} 分钟）：尚未点击发布，"
-            "未发布任何内容。"
-        )
+        message = self.pre_click_message
+        if message is None:
+            message = f"{self.platform}发布超时（15 分钟）：尚未点击发布，未发布任何内容。"
+        if self.timeout_seconds != PUBLISH_TIMEOUT_SECONDS:
+            seconds_label = str(self.timeout_seconds).removesuffix(".0")
+            message = message.replace("15 分钟", f"{seconds_label} 秒")
+        return PreSubmitTimeout(message)
 
     def check_pre_click(self) -> None:
         """在「尚未点击发布」的阶段检查总预算。"""

@@ -257,6 +257,8 @@ class Store:
         stored = Jsonb(receipt.model_dump(exclude_unset=True))
         row = db.execute("""
             UPDATE occurrence SET state=%s, receipt=%s, receipt_history=receipt_history || jsonb_build_array(%s::jsonb),
+                overdue_at=coalesce(overdue_at, CASE WHEN state IN ('claimed','started')
+                    AND task->>'action'<>'check' AND result_deadline<=clock_timestamp() THEN result_deadline END),
                 completed_at=clock_timestamp()
             WHERE workflow_id=%s AND session_id=%s AND state=%s RETURNING workflow_id
         """, (state, stored, stored, body.workflowId, body.sessionId, expected)).fetchone()

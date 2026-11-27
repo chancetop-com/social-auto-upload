@@ -10,7 +10,7 @@ summary: 使用 sau tiktok 在本地模式或托管浏览器模式（MLX / AdsPo
 
 # TikTok 视频与图文发布
 
-若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+TikTok 从预下载任务取得视频、封面或按输入顺序排列的图片时，在上传命令中添加 `--task-id <原任务ID> --prepared-media-only`，并沿用原素材 URL。
 
 TikTok 支持本地与两种托管子模式，使用同一个 `sau tiktok` CLI：
 
@@ -86,7 +86,7 @@ sau tiktok upload-video \
 - 本地模式必填 `--account`；托管模式 --account 被忽略，身份及日志标签取 profile_id。
 - 支持 `check`、`upload-video`、`upload-note`；`login` 仅本地模式，托管模式下退出 `1`。
 - 本地 Profile 是唯一登录态来源；检查/发布不引导登录。重建一个明确目标：`sau tiktok reset-profile --account creator --browser-kind chrome`；不启动浏览器，不删除另一种类、旧文件或历史结果，之后先重新 login。占用时立即失败，禁止抢占。
-- 两种模式登录/验证均退出 `10`，网络/页面结构/浏览器故障退出 `1`；共享 15 分钟发布预算。提交后错误带 `publish_attempted=true` 时，先核查作品再决定重跑。
+- 两种模式登录/验证均退出 `10`，网络/页面结构/浏览器故障退出 `1`；共享发布预算（默认 15 分钟）。提交后错误带 `publish_attempted=true` 时，先核查作品再决定重跑。
 - 安装、浏览器启动与当前 Profile 登录分开核验。验收视频/图文显式传 `--no-publish`：上传素材、编辑并等待发布就绪后停止，可能留下临时素材/草稿，不证明已经发布。
 
 ## 托管浏览器模式（可选）

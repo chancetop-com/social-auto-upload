@@ -22,6 +22,13 @@ class PublishTimeoutBudgetTests(unittest.TestCase):
             budget = _DummyUploader().start_publish_budget()
             self.assertEqual(budget.timeout_seconds, 4.5)
 
+    def test_fractional_budget_is_reported_in_both_platform_and_shared_errors(self):
+        with patch.dict("os.environ", {"SAU_BROWSER_PUBLISH_SECONDS": "5.5"}):
+            for template in (None, "平台发布超时（15 分钟）：尚未点击发布"):
+                with self.subTest(template=template):
+                    budget = PublishTimeoutBudget("平台", pre_click_message=template)
+                    self.assertIn("5.5 秒", str(budget.timeout_error(False)))
+
     def test_upload_probe_timeout_keeps_its_cause_when_budget_remains(self):
         async def probe():
             raise asyncio.TimeoutError("browser read timed out")

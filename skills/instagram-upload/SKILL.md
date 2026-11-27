@@ -10,7 +10,7 @@ summary: 发布 Instagram Reels、单图或轮播，并核验作品。
 
 # Instagram 独立网页发布
 
-若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+Instagram 从预下载任务取得 Reel 或轮播图片时，在上传命令中添加 `--task-id <原任务ID> --prepared-media-only`，并沿用原素材 URL。
 
 调用现有 CLI，不自行实现浏览器上传。使用 Patchright 与项目专用持久化 Profile，不使用 Business Suite 的绑定入口。默认选择系统 Chrome、有头；已有 `conf.py` 的 `LOCAL_CHROME_HEADLESS` 仍生效，显式 `--headed` / `--headless` 优先。未配置代理时按系统网络直连；需要代理时显式使用 `--proxy` 或设置 `SAU_INSTAGRAM_PROXY`。传 `--proxy ""` 可忽略环境变量并直连。
 
@@ -53,7 +53,7 @@ Stories、定时发布、配乐、选帧封面、用户标签、滤镜、隐藏�
 
 最终结果 `published` 代表平台确认作品创建，返回作品编号、原作品链接和媒体数。`processing` 表示已受理且仍在处理，`submission_unknown` 表示提交后结果未确认；不能当成已发布，也不能直接重发。默认结果位于 `.local/instagram-results/`，使用 `--result` 固定记录路径。
 
-整条上传/发布流程与 TikTok 一样使用 15 分钟总预算。**尚未点击发布**时超时退出 `1`，确定没有发布；**点击发布后**等待最终创建响应超时退出 `9`，结果未知，禁止自动重发，先按配文和发布时间在账号主页核对。`--not-before` 的主动等待不计入预算，会从 deadline 中顺延。
+整条上传/发布流程与 TikTok 一样使用默认 15 分钟的总预算。**尚未点击发布**时超时退出 `1`，确定没有发布；**点击发布后**等待最终创建响应超时退出 `9`，结果未知，禁止自动重发，先按配文和发布时间在账号主页核对。`--not-before` 的主动等待不计入预算，会从 deadline 中顺延。
 
 ```powershell
 sau instagram verify --account creator --post-url "原作品链接" --expected-text "原作品中的准确文字" --result .local/instagram-verify.json

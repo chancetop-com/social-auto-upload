@@ -10,7 +10,7 @@ summary: 管理 Facebook 个人主页登录、视频图文发布和作品核验�
 
 # Facebook 个人主页发布与删除
 
-若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+Facebook 个人主页发布已预下载的视频或图片时，在上传命令中添加 `--task-id <原任务ID> --prepared-media-only`，并沿用原素材 URL。
 
 本 Skill 需要已安装的 `sau` CLI；独立安装 Skill 不会安装 Python 项目。若 `sau --help` 不可用，在项目根目录使用 Python 3.10–3.12 创建环境：`uv venv --python 3.11`，激活后 `uv pip install -e .`。首次没有 conf.py 时从 conf.example.py 复制，已有配置保留。
 

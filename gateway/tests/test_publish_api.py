@@ -259,7 +259,8 @@ def short_deadline_gateway(gateway_env, monkeypatch):
         yield client
 
 
-def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, short_deadline_gateway):
+@pytest.mark.parametrize("lookup_before_receipt", [False, True])
+def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, short_deadline_gateway, lookup_before_receipt):
     import time
     gateway = short_deadline_gateway
     task = {**video("deadline-review"), "earliestPublishAt": None}
@@ -278,11 +279,15 @@ def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, sho
     progress = {"outcome": "processing", "cliInvoked": True, "exitCode": None}
     assert result(progress)["state"] == "started"
     time.sleep(2.01)
-    overdue = gateway.get(path, headers=INTERNAL).json()
-    assert (overdue["state"], overdue["resultDeadlineAt"], overdue["overdueAt"] is not None) == ("unknown", deadline, True)
+    if lookup_before_receipt:
+        overdue = gateway.get(path, headers=INTERNAL).json()
+        assert (overdue["state"], overdue["resultDeadlineAt"], overdue["overdueAt"] is not None) == ("unknown", deadline, True)
     assert claim(gateway, register(gateway)) is None
     final = {"outcome": "published", "cliInvoked": True, "exitCode": 0, "releaseId": "abc"}
-    assert result(final)["receipt"] == final
+    committed = result(final)
+    assert committed["receipt"] == final
+    assert committed["overdueAt"] is not None
+    assert gateway.get(path, headers=INTERNAL).json()["overdueAt"] == committed["overdueAt"]
     assert result(progress)["receipt"] == final
     assert result(final)["resultDeadlineAt"] == deadline
 

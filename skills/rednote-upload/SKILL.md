@@ -10,7 +10,7 @@ summary: 使用独立 Rednote Profile 完成登录、检查及发布流程。
 
 # Rednote 上传
 
-若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
+Rednote 发布预下载的视频、封面或有序图集时，在上传命令中添加 `--task-id <原任务ID> --prepared-media-only`，并沿用原素材 URL。
 
 1. 运行 `sau rednote --help` 确认安装支持此平台；命令不存在或浏览器缺失时，读取 [运行前提](references/runtime-requirements.md)。
 2. 确认内容类型、账号及发布意图。测试接入时使用 `--no-publish`，只有用户要求发布时才省略该参数。干跑仍会向平台上传素材。

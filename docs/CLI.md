@@ -61,7 +61,7 @@ sau tiktok upload-note --account creator --task-id post-42 --images 'https://cdn
 
 若调度器已预下载远程素材，在上传命令中传 `--task-id <原任务ID> --prepared-media-only` 并沿用完整 URL。命令只读取该任务的缓存，缺少任一远程文件时在进入平台前退出 `1`。本地文件仍按原路径读取。
 
-发布等待全部素材就绪后才开始计算平台的 15 分钟预算。素材下载失败时，命令指出失败项并以 `1` 退出，此时尚未提交帖子。省略 ID 时，远程文件放在本次发布的临时目录中，命令结束后清理。
+发布等待全部素材就绪后才开始计算平台的发布预算（默认 15 分钟）。素材下载失败时，命令指出失败项并以 `1` 退出，此时尚未提交帖子。省略 ID 时，远程文件放在本次发布的临时目录中，命令结束后清理。
 
 指定 ID 时，确认帖子已发布会清理整个 `downloads/<任务ID>/`，包括同一 ID 下未用于这次发布的文件。平台仅确认已排期或正在处理时保留指定目录。失败、中断、结果未知或使用 `--no-publish` 时也保留，之前拿到的路径仍可用于核查。
 
@@ -133,9 +133,7 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 
 ## 发布超时预算（全平台）
 
-浏览器发布平台统一与 TikTok 对齐：整条上传/发布流程共用一个 **15 分钟总预算**
-（`cli/uploader/publish_timeout.py` 的 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）。TikTok、
-小红书与 Instagram 也使用同一 `PublishTimeoutBudget`，仅保留各自更具体的错误文案。
+浏览器上传和发布共用一个超时预算，默认为 **15 分钟**。用环境变量 `SAU_BROWSER_PUBLISH_SECONDS` 指定大于零的有限秒数，支持小数。例如 `SAU_BROWSER_PUBLISH_SECONDS=5.5` 将本次预算设为 5.5 秒。
 
 - 预算覆盖打开发布页、上传素材、填写标题/正文/正文中的 `#话题`、封面、声明、合集、定时设置、点击发布，以及等待平台确认；
 - **尚未点击发布**时超时：普通失败，CLI 退出 `1`，确定没有发布任何内容；
@@ -725,7 +723,7 @@ sau rednote upload-video --account creator \
 
 ### 小红书发布超时
 
-小红书的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
+小红书的发布预算已与 TikTok 对齐，整条流程默认使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
 
 - 预算覆盖打开发布页、上传素材、填写标题/正文/正文中的 `#话题`、设置声明和封面、定时设置、ARM 就绪等待以及点击发布；
 - **尚未点击发布**时超时（含 ARM 就绪窗/预算耗尽）：退出 `1`，确定没有发布任何内容；
@@ -925,7 +923,7 @@ sau instagram upload-video --account creator --file videos/demo.mp4 --title "视
 
 ### Instagram 发布超时
 
-Instagram 的发布预算已与 TikTok 对齐，整条流程使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
+Instagram 的发布预算已与 TikTok 对齐，整条流程默认使用 **15 分钟总预算**（共享 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）：
 
 - 预算覆盖打开首页、身份核验、上传素材、裁剪/编辑、填写配文、封面设置以及点击发布；
 - **尚未点击发布**时超时：退出 `1`，确定没有发布任何内容；
@@ -1024,7 +1022,7 @@ sau tiktok upload-note --account creator \
 - 别名是管理名称，可登录不同真实账号；Chrome / Chromium 隔离，同种类改路径、版本或 headless 复用资料。跨种类不复制凭据；另一个种类未登录需单独 login。
 - 本地模式持有 Profile 独占权直到业务和关闭结束；占用时立即失败，不抢占外部浏览器。正常关闭只关闭 persistent context；关闭故障独立告警，保持成功/未知/主异常，取消继续传播。重建不恢复任务或自动重发。
 - TikTok 本地持久化路径不再注入 stealth、UA、请求头、语言参数或固定 viewport。现有选择器仍依赖支持的页面布局；自动化不会切换语言。
-- 本地与托管共用 15 分钟发布预算；提交后登录/验证错误保留 `publish_attempted=true`。离线、隔离浏览器矩阵与四平台真实 login/no-publish 的证据分列于[最终验收记录](../.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。此前 Cookie 路径验收不作为当前 Profile 的登录证据。
+- 本地与托管共用发布预算（默认 15 分钟）；提交后登录/验证错误保留 `publish_attempted=true`。离线、隔离浏览器矩阵与四平台真实 login/no-publish 的证据分列于[最终验收记录](../.scratch/local-chrome-profile-implementation/research/20-final-validation.md)。此前 Cookie 路径验收不作为当前 Profile 的登录证据。
 - `--no-publish`：上传、标题/正文/话题、全部发布选项、封面与 `--schedule` 完成后，等待发布按钮可点击（`post_video_button` / `Post` / `Schedule`，窗口 `min(60s, 剩余预算)`）即停止，不点击发布，也不等待 `--not-before`；成功退出 `0`，就绪超时退出 `1`。
 - 未注册的子命令仍由 argparse 退出 `2`。
 
