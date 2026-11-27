@@ -1,0 +1,5 @@
+**
+!Dockerfile
+!pyproject.toml
+!sau_gateway/*.py
+!sau_gateway/migrations/*.sql

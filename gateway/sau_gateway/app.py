@@ -20,7 +20,9 @@ def authorized(token):
     return [Depends(check)]
 
 
-def create_app():
+def create_app(stopping=None):
+    if stopping is None:
+        stopping = asyncio.Event()
     desktop_token = os.environ["GATEWAY_DESKTOP_TOKEN"]
     internal_token = os.environ["GATEWAY_INTERNAL_TOKEN"]
     if not (desktop_token.strip() and internal_token.strip()) or desktop_token == internal_token:
@@ -39,6 +41,8 @@ def create_app():
 
     @app.get("/health-check")
     def ready():
+        if stopping.is_set():
+            raise HTTPException(503, "Gateway is draining")
         store.ready()
         return {"status": "ready"}
 
@@ -70,12 +74,16 @@ def create_app():
     @app.post("/publish-task/claim", dependencies=desktop)
     async def claim(body: Claim, request: Request):
         deadline = asyncio.get_running_loop().time() + body.waitSeconds
-        while True:
+        while not stopping.is_set() and not await request.is_disconnected():
             task = await asyncio.to_thread(store.claim, body.sessionId)
             remaining = deadline - asyncio.get_running_loop().time()
-            if task or remaining <= 0 or await request.is_disconnected():
+            if task or remaining <= 0:
                 return {"task": task}
-            await asyncio.sleep(min(remaining, 0.5))
+            try:
+                await asyncio.wait_for(stopping.wait(), timeout=min(remaining, 0.5))
+            except asyncio.TimeoutError:
+                pass
+        return {"task": None}
 
     @app.post("/publish-task/result", dependencies=desktop)
     def finish(result: Result):

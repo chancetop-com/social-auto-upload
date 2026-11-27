@@ -1,8 +1,22 @@
 import argparse
+import asyncio
 import os
 
 import uvicorn
+from .app import create_app
 from .database import migrate
+
+
+class GatewayServer(uvicorn.Server):
+    def __init__(self, host, port):
+        self.stopping = asyncio.Event()
+        super().__init__(uvicorn.Config(create_app(self.stopping), host=host, port=port,
+                                        workers=1, timeout_graceful_shutdown=20))
+
+    async def shutdown(self, sockets=None):
+        # Uvicorn waits for open HTTP requests before ASGI lifespan shutdown.
+        self.stopping.set()
+        await super().shutdown(sockets=sockets)
 
 
 def main():
@@ -14,7 +28,7 @@ def main():
     if args.command == "migrate":
         migrate(os.environ["GATEWAY_DATABASE_URL"])
     else:
-        uvicorn.run("sau_gateway.app:create_app", factory=True, host=args.host, port=args.port, workers=1)
+        GatewayServer(args.host, args.port).run()
 
 
 if __name__ == "__main__":
