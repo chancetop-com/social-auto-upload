@@ -1,5 +1,6 @@
 """Map a Gateway-authorized TikTok occurrence to the paired CLI's public contract."""
 from hashlib import sha256
+import re
 
 
 PREPARED = "素材已上传，发布前检查已通过；已停止，未点击发布按钮。"
@@ -34,8 +35,12 @@ def receipt(proc, *, no_publish):
             return {**evidence, "outcome": "published"}
     if attempted:
         return {**evidence, "outcome": "unknown", "reason": "possible_submission", "publishAttempted": True}
-    before_timeout = proc.returncode == 1 and "尚未点击发布" in proc.stderr and "发布超时" in proc.stderr
-    explicit_failure = proc.returncode == 1 and "publish_attempted=false" in proc.stderr.splitlines()
+    diagnostics = proc.stderr.splitlines()
+    before_timeout = proc.returncode == 1 and diagnostics and re.fullmatch(
+        r"(?:TikTok|Instagram|Rednote|小红书) ?发布超时（[0-9]+ 分钟）：尚未点击发布，未发布任何内容。",
+        diagnostics[-1],
+    )
+    explicit_failure = proc.returncode == 1 and diagnostics[-1:] == ["publish_attempted=false"]
     if proc.returncode in (2, 10, 11) or explicit_failure or before_timeout:
         reason = "pre_submit_failure"
         if proc.returncode == 10:

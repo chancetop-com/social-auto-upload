@@ -147,8 +147,9 @@ async def test_worker_without_explicit_dev_alias_or_option_support_never_falls_b
     assert receipts[0]["receipt"] == {"outcome": "failed", "cliInvoked": False, "exitCode": None}
 
 @pytest.mark.parametrize(("code", "stderr", "outcome", "reason"), [
-    (1, "TikTok发布超时（15 分钟）：尚未点击发布，结束。", "failed", "upload_timeout"),
+    (1, "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
     (1, "Private media URL", "unknown", "possible_submission"),
+    (1, "Unexpected exception mentioning 发布超时 after 尚未点击发布", "unknown", "possible_submission"),
     (1, "Private media URL\npublish_attempted=false", "failed", "pre_submit_failure"),
     (10, "private account label", "failed", "login_required"),
     (9, "private diagnostic", "unknown", "possible_submission"),
