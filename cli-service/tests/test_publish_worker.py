@@ -163,3 +163,28 @@ async def test_photo_capability_dispatch_and_fuzzy_lookup(child):
     assert set(["--title=-title", "--note=line one\n#话题", "--privacy=friends", "--no-aigc", "--location=City",
                 "--branded-content", "--your-brand", "--no-comments"]).issubset(args)
     assert receipts[-1]["receipt"]["outcome"] == "unknown"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform,label", [("rednote", "Rednote"), ("xiaohongshu", "Xiaohongshu")])
+@pytest.mark.parametrize("action", ["upload-video", "upload-note"])
+async def test_regional_channels_dispatch_their_own_cli_and_accept_idless_confirmation(child, platform, label, action):
+    selection = {"platform": platform, "action": action, "requiredCapability": platform + "." + action,
+                 "settings": {"title": "-title", "contentType": "self-shot", "shootLocation": "Garden",
+                              "shootDate": "2024-02-29", "original": True, "location": "Town"}}
+    if action == "upload-note":
+        selection["media"] = [{"id": key, "role": "image", "url": f"https://media.test/{key}.jpg"}
+                              for key in ("b", "a", "b")]
+        expected = ["--images", "https://media.test/b.jpg", "https://media.test/a.jpg", "https://media.test/b.jpg"]
+        body_flag, summary = "--note=", "note upload submitted: 3 images"
+    else:
+        expected = ["--file=https://media.example/current.mp4", "--thumbnail=https://media.example/current.jpg"]
+        body_flag, summary = "--desc=", "video upload submitted: fixture.mp4"
+    _, _, receipts, calls = await desktop(child, selection=selection, output=label + " " + summary)
+    assert len(calls) == 1
+    argv = calls[0]["argv"]
+    assert argv[:2] == [platform, action]
+    index = argv.index(expected[0])
+    assert argv[index:index + len(expected)] == expected
+    assert {"--title=-title", body_flag + "-first line\n#café & second", "--location=Town", "--content-type=self-shot",
+            "--original", "--shoot-location=Garden", "--shoot-date=2024-02-29"}.issubset(argv)
+    assert receipts[0]["receipt"] == {"outcome": "published", "exitCode": 0, "cliInvoked": True}
