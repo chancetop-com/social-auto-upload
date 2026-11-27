@@ -76,7 +76,16 @@ desktop = sys.argv[1]
 if sys.argv[2:] == ['--version']:
     print('sau 0.1.0')
     sys.exit()
+root = Path(__file__).parent
+cache = next(arg for arg in sys.argv if arg.startswith('--task-id='))
+prepared = root / (desktop + '.prepared')
+if sys.argv[2:4] == ['media', 'predownload']:
+    assert '--wait' in sys.argv
+    with prepared.open('x') as marker:
+        marker.write(cache)
+    sys.exit(0)
 assert sys.argv[2:4] == ['tiktok', 'upload-video']
+assert '--prepared-media-only' in sys.argv and prepared.read_text() == cache
 base = os.environ['BITBROWSER_API_BASE']
 def call(path):
     req = urllib.request.Request(base + path, data=json.dumps({'desktop': desktop}).encode())
@@ -88,7 +97,6 @@ try:
 except urllib.error.HTTPError as exc:
     assert exc.code == 429
     refused = True
-root = Path(__file__).parent
 (root / (desktop + '.waiting')).touch()
 deadline = time.monotonic() + 90
 not_before = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--not-before=')), None)
@@ -180,6 +188,8 @@ async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(pos
                 assert await a.claim(0) is None
                 (tmp_path / 'B.finish').touch()
                 result = await job_b
+                assert old_result['workflowId'] == 'merchant-A' and result['workflowId'] == 'merchant-B'
+                assert result['sessionId'] == b.session_id and result['receipt']['cliInvoked']
                 assert result['state'] == ('failed' if refuse else 'succeeded')
                 assert result['receipt']['exitCode'] == (11 if refuse else 0)
                 await asyncio.to_thread(enqueue_video, api, 'merchant-C')
