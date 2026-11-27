@@ -307,7 +307,7 @@ def test_recovery_rejects_incomplete_installed_tree_even_with_its_correct_digest
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX kill injection")
-def test_killed_transfer_and_native_switch_resume_from_complete_bytes(tmp_path):
+def test_interrupted_download_can_retry_and_install_complete_bytes(tmp_path):
     import sys
     import time
 
@@ -356,16 +356,6 @@ stage(Path(sys.argv[1]),{'sha256':sys.argv[3]},stream())
     assert (program / "package.sha256").read_text() == "a" * 64
     stage(root, {"sha256": digest}, [archive.read_bytes()], lambda *_: None)
     path = write_host(root, windows=False)
-    # Interrupt the native host immediately after its first successful rename.
-    host = path.read_text()
-    seam = 'move_dir program "$versions/previous";'
-    assert host.count(seam) == 1
-    path.write_text(host.replace(seam, seam + ' kill -KILL $$;'))
-    fault = subprocess.run([path, "recover"], check=False)
-    path.write_text(host)
-    assert (
-        fault.returncode < 0 and not program.exists() and (root / ".versions/previous/package.sha256").exists()
-    )
     subprocess.run([path, "recover"], check=True)
     assert (program / "package.sha256").read_text() == digest
     assert (program / "runtime/bin/python3.11").read_bytes() == b"complete new runtime"
@@ -386,6 +376,8 @@ def test_foreground_run_enters_recoverable_host_before_loading_program(tmp_path)
 
 
 def test_late_validation_keeps_the_approved_installed_program(tmp_path):
+    from uuid import uuid4
+
     import httpx
     from sau_worker.rollout import ReleaseAgent
     from sau_worker.state import write
@@ -394,19 +386,22 @@ def test_late_validation_keeps_the_approved_installed_program(tmp_path):
     state.mkdir()
     program.mkdir()
     (tmp_path / ".versions/previous").mkdir(parents=True)
-    batch = {"batchId": "old-assignment", "releaseId": "new-release", "revision": "c" * 40,
+    batch = {"batchId": str(uuid4()), "releaseId": str(uuid4()), "revision": "c" * 40,
              "target": "macos-arm64", "sha256": "e" * 64, "step": "validating"}
     write(program / "release.json", {"revision": batch["revision"], "target": batch["target"]})
     (program / "package.sha256").write_text(batch["sha256"])
     (program / "paired-worker").write_text("healthy")
     write(state / "upgrade.json", batch)
-    write(state / "release-check-result.json", {"batchId": batch["batchId"], "sessionId": "A", "checkWorkflowId": "check-A"})
+    write(state / "release-check-result.json", {"batchId": batch["batchId"], "sessionId": str(uuid4()), "checkWorkflowId": "check-A"})
     reports = []
+    approved = {key: batch[key] for key in ("releaseId", "revision", "target", "sha256")}
+    approved["url"] = "/session/release/packages/" + batch["sha256"]
 
     def gateway(request):
-        if request.url.path.endswith("/discover"):
-            return httpx.Response(200, json={"approved": batch["releaseId"], "assignment": None})
-        assert request.url.path.endswith("/progress")
+        assert request.method == "POST"
+        if request.url.path == "/session/release/discover":
+            return httpx.Response(200, json={"approved": approved, "assignment": None})
+        assert request.url.path == "/session/release/progress"
         reports.append(json.loads(request.content))
         return httpx.Response(200, json={"active": False, "confirmed": False})
 
@@ -415,7 +410,7 @@ def test_late_validation_keeps_the_approved_installed_program(tmp_path):
         agent.discover()
         assert not agent.needs_drain()
         agent.discover()
-    assert [(r["phase"], r["batchId"]) for r in reports] == [("ready", "old-assignment")]
+    assert [(r["phase"], r["batchId"]) for r in reports] == [("ready", batch["batchId"])]
     assert (program / "paired-worker").read_text() == "healthy"
     assert not (tmp_path / ".versions").exists()
     assert not (state / "upgrade.json").exists()

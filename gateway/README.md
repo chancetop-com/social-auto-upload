@@ -94,7 +94,7 @@ Use Python 3.11, uv, OpenSSL, a disposable PostgreSQL database and the Patchrigh
 uv pip install . ./gateway ./cli-service pytest pytest-asyncio
 python -m patchright install chromium
 python -m pytest -q cli-service/tests
-python -m pytest -q tests/test_worker_cli_release.py
+python -m pytest -q tests/test_cli_distribution.py::test_installed_entry_starts_outside_checkout
 SAU_TEST_PAIRED_CHECK=1 python -m pytest -q gateway/tests
 ```
 

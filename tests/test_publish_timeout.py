@@ -1,11 +1,12 @@
 import asyncio
+import os
 import time
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from uploader.base_video import BaseVideoUploader
-from uploader.publish_timeout import PUBLISH_TIMEOUT_SECONDS, PublishTimeoutBudget
+from uploader.publish_timeout import PublishTimeoutBudget
 from utils.errors import PublishResultUnknownError
 
 
@@ -14,9 +15,6 @@ class _DummyUploader(BaseVideoUploader):
 
 
 class PublishTimeoutBudgetTests(unittest.TestCase):
-    def test_default_budget_is_fifteen_minutes(self):
-        self.assertEqual(PUBLISH_TIMEOUT_SECONDS, 15 * 60)
-
     def test_environment_budget_applies_to_new_uploader_runs(self):
         with patch.dict("os.environ", {"SAU_BROWSER_PUBLISH_SECONDS": "4.5"}):
             budget = _DummyUploader().start_publish_budget()
@@ -87,9 +85,12 @@ class PublishTimeoutBudgetTests(unittest.TestCase):
     def test_uploader_budget_is_shared_across_one_run(self):
         uploader = _DummyUploader()
 
-        started = uploader.start_publish_budget()
+        with patch.dict(os.environ):
+            os.environ.pop("SAU_BROWSER_PUBLISH_SECONDS", None)
+            started = uploader.start_publish_budget()
 
         self.assertIs(uploader.publish_budget, started)
+        self.assertEqual(started.timeout_seconds, 900)
         self.assertEqual(started.platform, "测试平台")
 
     def test_post_click_clamp_never_raises_pre_click_error(self):

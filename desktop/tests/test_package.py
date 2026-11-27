@@ -52,10 +52,10 @@ def test_native_package_records_only_shipped_entrypoints():
         pytest.skip("set SAU_TEST_DESKTOP_ARTIFACT to a native package")
     with zipfile.ZipFile(artifact) as archive:
         names = set(archive.namelist())
-        for name in names:
-            if ".dist-info/RECORD" not in name or "/social_auto_upload-" not in name:
-                continue
-            rows = csv.reader(io.StringIO(archive.read(name).decode()))
-            site = name.split("social_auto_upload-")[0]
-            for relative, _, _ in rows:
-                assert site + relative in names
+        record, = (name for name in names
+                   if name.endswith(".dist-info/RECORD") and "/social_auto_upload-" in name)
+        site, metadata, _ = record.rsplit("/", 2)
+        rows = csv.reader(io.StringIO(archive.read(record).decode()))
+        files = {relative for relative, _, _ in rows}
+        assert any(not path.startswith(metadata + "/") for path in files), "RECORD lists no CLI files"
+        assert {f"{site}/{relative}" for relative in files} <= names

@@ -1,5 +1,6 @@
 """Smoke-test the installed wheel, with no source checkout on its import path."""
 import json
+from importlib.metadata import distributions
 import os
 from pathlib import Path
 import subprocess
@@ -8,8 +9,13 @@ from tests.remote_media_cli import origin
 
 
 def test_installed_entry_starts_outside_checkout(install_cli, tmp_path):
-    sau, _ = install_cli(tmp_path / "worker install")
+    sau, packages = install_cli(tmp_path / "worker install")
     env = {**os.environ, "PYTHONPATH": "", "SAU_HOME": "", "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
+    cli, = (dist for dist in distributions(path=[str(packages)])
+            if dist.metadata["Name"] == "social-auto-upload")
+    version = subprocess.run([sau, "--version"], cwd=tmp_path, env=env,
+                             capture_output=True, text=True, check=True, timeout=30)
+    assert version.stdout.strip() == f"sau {cli.version}"
     result = subprocess.run([sau, "article", "themes"], cwd=tmp_path, env=env,
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
