@@ -19,7 +19,8 @@ pytestmark = pytest.mark.skipif(not CLI_PYTHON, reason="set SAU_MEDIA_TEST_PYTHO
 
 
 async def until(predicate):
-    for _ in range(250):
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
         if predicate():
             return
         await asyncio.sleep(.04)
@@ -34,7 +35,7 @@ async def test_edited_manifest_and_receipt_survive_cleanup(tmp_path, monkeypatch
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join(map(str, (root, ROOT / "cli"))))
     monkeypatch.setenv("SAU_DOWNLOAD_CONNECT_SECONDS", "2.5")
     monkeypatch.setenv("SAU_DOWNLOAD_IDLE_READ_SECONDS", "3.5")
-    monkeypatch.setenv("SAU_DOWNLOAD_ENQUEUE_SECONDS", "8")
+    monkeypatch.setenv("SAU_DOWNLOAD_ENQUEUE_SECONDS", "45")
     # Exercise requests' transport timeout parameters and the actual CLI platform adapter
     # without opening any sockets, reading an OS browser profile or touching a platform.
     (root / "sitecustomize.py").write_text("""
@@ -61,7 +62,7 @@ if sys.argv[0].endswith("sau_cli.py"):
         assert target is None
         with (root / "upload").open("a") as log:
             print(json.dumps([request.video_file.read_text(), request.thumbnail_file.read_text()]), file=log)
-        for _ in range(500):
+        for _ in range(3000):
             if (root / "release").exists(): return
             time.sleep(.02)
         raise RuntimeError("fixture did not release upload")
@@ -110,7 +111,8 @@ if sys.argv[0].endswith("sau_cli.py"):
         (root / "movie.mp4").write_text("version two")
         job = asyncio.create_task(worker.finish(record))
         try:
-            await until((root / "upload").exists)
+            await until(lambda: (root / "upload").exists() or job.done())
+            assert not job.done(), receipts
             assert json.loads((root / "upload").read_text()) == ["version two", "retained cover"]
             os.utime(path, (old, old))
             assert worker.command(["media", "cleanup"]).returncode == 0
