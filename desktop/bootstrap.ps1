@@ -1,13 +1,19 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='Pinned')]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$Revision,
-    [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{64}$')][string]$Sha256,
-    [Parameter(Mandatory)][string]$ArtifactDir,
+    [Parameter(Mandatory,ParameterSetName='Pinned')][ValidatePattern('^[0-9a-f]{40}$')][string]$Revision,
+    [Parameter(Mandatory,ParameterSetName='Pinned')][ValidatePattern('^[0-9a-f]{64}$')][string]$Sha256,
+    [Parameter(Mandatory,ParameterSetName='Pinned')][string]$ArtifactDir,
+    [Parameter(Mandatory,ParameterSetName='Approved')][switch]$Approved,
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'social-auto-upload')
 )
 $ErrorActionPreference = 'Stop'
 $nativeCpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 if ($nativeCpu -ne 'AMD64') { throw "Unsupported Windows architecture: $nativeCpu" }
+if ($Approved) {
+    . (Join-Path $PSScriptRoot 'approved.ps1')
+    Install-Approved $InstallRoot
+    return
+}
 $target = 'windows-x86_64'
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 [void][IO.Directory]::CreateDirectory($InstallRoot)

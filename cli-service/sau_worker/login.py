@@ -16,11 +16,12 @@ def label(root):
 
 
 def registration(root, *, windows, user):
+    host = root / ("release-host.ps1" if windows else "release-host.sh")
     if not windows:
         return plistlib.dumps({
             "Label": label(root), "RunAtLoad": True, "LimitLoadToSessionType": "Aqua",
             "KeepAlive": {"SuccessfulExit": False},
-            "ProgramArguments": [str(root / "program/runtime/bin/python3.11"),
+            "ProgramArguments": [str(host)] if host.exists() else [str(root / "program/runtime/bin/python3.11"),
                                  "-IB", "-m", "sau_worker.desktop", "_supervise"],
             "WorkingDirectory": str(root),
             "StandardOutPath": str(root / "state/worker.log"),
@@ -40,8 +41,9 @@ def registration(root, *, windows, user):
     ET.SubElement(retry, "Interval").text = "PT1M"
     ET.SubElement(retry, "Count").text = "999"
     action = ET.SubElement(ET.SubElement(task, "Actions", Context="Operator"), "Exec")
-    ET.SubElement(action, "Command").text = str(root / "program/runtime/python.exe")
-    ET.SubElement(action, "Arguments").text = "-IB -m sau_worker.desktop _supervise"
+    ET.SubElement(action, "Command").text = "powershell.exe" if host.is_file() else str(root / "program/runtime/python.exe")
+    ET.SubElement(action, "Arguments").text = (f'-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{host}"'
+                                               if host.is_file() else "-IB -m sau_worker.desktop _supervise")
     ET.SubElement(action, "WorkingDirectory").text = str(root)
     return ET.tostring(task, encoding="utf-16", xml_declaration=True)
 

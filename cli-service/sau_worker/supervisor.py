@@ -12,6 +12,7 @@ from .children import Children
 from .login import native_login, start_browsers
 from .state import held, lock, read, write
 from .worker import Settings
+from .rollout import start_monitor
 
 
 class Backoff:
@@ -108,6 +109,9 @@ def supervise(root):
         children = Children(state)
         retry = Backoff()
         start_browsers(Settings.from_env(os.environ))
+        monitor = start_monitor(root)
+        release = monitor[0] if monitor else None
+        retry_release = 0
         process = None
         due = time.monotonic()
         with (state / "worker.log").open("ab") as log:
@@ -116,7 +120,8 @@ def supervise(root):
                 if quitting and not action:
                     write(state / "request.json", {"generation": generation, "action": "stop"})
                     action = "stop"
-                stopping = action or (state / "disabled").exists()
+                changing = release and release.needs_drain()
+                stopping = action or (state / "disabled").exists() or changing
                 if process is not None and process.poll() is not None:
                     elapsed = time.monotonic() - started
                     delay = retry.after_exit(elapsed)
@@ -136,7 +141,16 @@ def supervise(root):
                     if process is None and not held(owner / "claim.lock") and not children.count():
                         status.update(workerPid=None, nextAttempt=None)
                         write(status_file, status)
-                        return 0
+                        if changing and not action and not (state / "disabled").exists():
+                            if time.monotonic() >= retry_release:
+                                if release.after_drain():
+                                    monitor[1].set()
+                                    return 75
+                                retry_release = time.monotonic() + 5
+                        else:
+                            if monitor:
+                                monitor[1].set()
+                            return 0
                 elif process is None and time.monotonic() >= due and not held(owner / "claim.lock"):
                     started = time.monotonic()
                     process = subprocess.Popen([interpreter(root), "-IB", "-m", "sau_worker.desktop", "_worker",
@@ -161,7 +175,9 @@ def local_status(root):
         active += worker.get("active", 0)
     capacity = worker.get("capacity") if worker_live else None
     capacity = capacity or int(os.environ.get("WORKER_MAX_CONCURRENCY", 1))
-    return {"root": str(root), "running": running, "enabled": enabled, "claimReady": bool(ready and active < capacity),
+    upgrade = read(state / "upgrade.json")
+    return {"upgrade": {k: upgrade.get(k) for k in ("releaseId","batchId","step","defect")} if upgrade else None,
+            "root": str(root), "running": running, "enabled": enabled, "claimReady": bool(ready and active < capacity),
             "release": manifest.get("version"), "revision": manifest.get("revision"),
             "activeCount": active, "capacity": capacity,
             "pid": supervisor.get("pid") if running else None, "workerPid": supervisor.get("workerPid") if worker_live else None,

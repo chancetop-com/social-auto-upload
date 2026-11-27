@@ -12,7 +12,9 @@ import sys
 from tempfile import TemporaryDirectory
 
 from . import __version__
-from .state import atomic_write, lock
+from .state import atomic_write, lock, read, write
+from .host import write_host
+from .rollout import assignment_for, verify_image
 from .login import native_login
 from .supervisor import claimed_worker, drain, interpreter, local_status, start, supervise
 from .__main__ import main as worker_main
@@ -20,7 +22,7 @@ from .providers import DEFAULT_BASES
 from .worker import Settings
 
 
-CONFIG_KEYS = {"SAU_GATEWAY_URL", "SAU_GATEWAY_CA_FILE", "SAU_DESKTOP_TOKEN", "WORKER_MAX_CONCURRENCY",
+CONFIG_KEYS = {"SAU_RELEASE_CHECK_PROVIDER", "SAU_RELEASE_CHECK_PROFILE", "SAU_RELEASE_CHECK_PLATFORM", "SAU_GATEWAY_URL", "SAU_GATEWAY_CA_FILE", "SAU_DESKTOP_TOKEN", "WORKER_MAX_CONCURRENCY",
                "SAU_PROVIDERS", "SAU_DEV_CHROME_ALIASES", "BITBROWSER_APP_PATH", "ADSPOWER_APP_PATH", "BITBROWSER_API_BASE", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "ADSPOWER_API_KEY"}
 
 
@@ -123,9 +125,18 @@ def install(root, revision, sha256, target):
         if (state / "uninstalled").exists() and program.exists():
             raise ValueError("Uninstall is still pending; finish cli-service uninstall before reinstalling")
         marker = program / "package.sha256"
+        assignment_path = os.environ.get("SAU_BOOTSTRAP_ASSIGNMENT")
+        batch = assignment_for(read(Path(assignment_path)), target) if assignment_path else None
+        if batch and (batch["sha256"] != sha256 or batch["revision"] != revision):
+            raise ValueError("Installer pin differs from the Gateway assignment")
+        if batch and program.exists() and not (root / ("release-host.ps1" if os.name == "nt" else "release-host.sh")).exists():
+            return adopt(root, image, batch)
+
         if program.exists() and (not marker.is_file() or marker.read_text(encoding="ascii") != sha256):
             raise ValueError("Another release occupies this root; use the managed upgrade")
         configure(state, os.environ)
+        if batch and not read(state / "upgrade.json"):
+            write(state / "upgrade.json", {**batch, "step": "draining"})
         if not program.exists():
             # Copy out of the running staged interpreter on Windows before the atomic rename.
             with TemporaryDirectory(dir=root, prefix=".install-") as scratch:
@@ -133,14 +144,60 @@ def install(root, revision, sha256, target):
                 shutil.copytree(image, installing)
                 (installing / "package.sha256").write_text(sha256, encoding="ascii")
                 installing.rename(program)
+        write_host(root, windows=os.name == "nt")
         atomic_write(launcher, launcher_script(windows=os.name == "nt"), executable=True)
         (state / "uninstalled").unlink(missing_ok=True)
         # Always start through the installed copy; the bootstrap stage is disposable.
         return subprocess.call([interpreter(root), "-IB", "-m", "sau_worker.desktop", "start"], cwd=root)
 
 
+def adopt(root, image, batch):
+    """Use a verified new bootstrap to enroll a pre-rollout supervisor in its first batch."""
+    from .state import held
+    from .supervisor import owner_directory
+    from .rollout import start_monitor
+    state = root / "state"
+    if (state / "disabled").exists() or (state / "uninstalled").exists():
+        raise ValueError("This installation is disabled")
+    with lock(state / "control.lock") as acquired:
+        if not acquired:
+            raise ValueError("Another maintenance command is active")
+        configure(state, os.environ)
+        apply_settings(root)
+        write(state / "upgrade.json", {**batch, "step": "draining"})
+        monitor, stopping = start_monitor(root)
+        try:
+            if not monitor.progress(batch, "draining")["active"]:
+                raise ValueError("Validation batch has expired; run approved install again")
+            drain(root)
+            if held(owner_directory() / "claim.lock"):
+                raise ValueError("Previous worker still running; wait for the old process to exit before upgrading")
+            if not monitor.progress(batch, "staging")["active"]:
+                raise ValueError("Validation batch has expired; run approved install again")
+            verify_image(image, batch)
+            versions = root / ".versions"
+            versions.mkdir(mode=0o700, exist_ok=True)
+            staged = versions / "next"
+            if staged.is_dir():
+                shutil.rmtree(staged)
+            shutil.copytree(image, staged)
+            atomic_write(staged / "package.sha256", batch["sha256"])
+            write(state / "upgrade.json", {**batch, "step": "validating"})
+            write_host(root, windows=os.name == "nt")
+            atomic_write(versions / "switch", batch["sha256"])
+            # Change the old native registration only after its claiming process has exited.
+            native_login(root, remove=True)
+            native_login(root, start=True)
+        finally:
+            stopping.set()
+    return 0
+
+
 def main():
     args = sys.argv[1:]
+    if len(args) == 3 and args[0] == "_verify":
+        verify_image(Path(sys.prefix).resolve().parent, {"revision": args[1], "target": args[2]})
+        return 0
     if len(args) == 5 and args[0] == "install":
         return install(*args[1:])
     root = Path(sys.prefix).resolve().parents[1]
@@ -148,6 +205,9 @@ def main():
         raise ValueError("Run the installed cli-service launcher")
     apply_settings(root)
     state = root / "state"
+    if args == ["_probe-install"]:
+        verify_image(root / "program", read(state / "upgrade.json"))
+        return 0
     if args in (["_supervise"], ["run"]):
         return supervise(root)
     if len(args) == 2 and args[0] == "_worker":
@@ -184,7 +244,16 @@ def main():
                     configure(state, os.environ)
                 print(json.dumps(start(root)))
             return 0
-    return worker_main()
+    result = worker_main()
+    if args and args[0] == "check" and result == 0:
+        import argparse
+        options = argparse.ArgumentParser()
+        for option in ("provider", "profile-id", "platform"):
+            options.add_argument("--" + option, required=True)
+        chosen = options.parse_args(args[1:])
+        write(state / "release-check-target.json", {"provider": chosen.provider, "profile": chosen.profile_id,
+                                                   "platform": chosen.platform})
+    return result
 
 
 if __name__ == "__main__":

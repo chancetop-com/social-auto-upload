@@ -48,3 +48,29 @@ $Ctl = Join-Path $InstallRoot 'cli-service.cmd'
 空闲 worker 崩溃第一次立即重启，连续故障依次退避 10、20、40、80、160 秒，之后每次 300 秒。稳定运行满 10 分钟后重置。忙时崩溃仍在执行的可识别 CLI 继续占用一个名额。新 worker 创建新会话，既不重跑旧发布，也不重发旧回执。云端未确认时，请先到目标平台核对账号和内容。浏览器或网络暂时不可用时，worker 保持运行，恢复后重新上报。
 
 根目录的 `program\runtime` 是配套 Python、worker 及 CLI，`program\release.json` 记录版本，`state\worker.log` 记录运行日志，`state\settings.json` 存放该用户的私有设置，`state\cli` 存放工作资料。相同包可重复安装。跨版本升级由发布负责人分批安排，排空后切换整包，执行不发布自检并等待 Gateway 确认。原安装器会拒绝在已占用的目录覆盖其他摘要。单独安装的 CLI 使用自己的路径。
+
+### 从 Gateway 安装、升级和处理断电
+
+选定已登录、允许运维自检的窗口。首次安装前设置以下目标，也可在现有安装成功执行前文的 `check` 命令，保存该窗口和平台。安装时保存原有 Gateway、提供方和容量设置。
+
+```powershell
+$env:SAU_RELEASE_CHECK_PROVIDER = 'bitbrowser'
+$env:SAU_RELEASE_CHECK_PLATFORM = 'tiktok'
+$env:SAU_RELEASE_CHECK_PROFILE = '复制的窗口ID'
+& .\desktop\bootstrap.ps1 -Approved -InstallRoot $InstallRoot
+& (Join-Path $InstallRoot 'cli-service.cmd') status
+```
+
+引导程序从配置的 Gateway 查询已批准的 Windows x64 包，核验 SHA-256 后安装。全新环境可以由首台参加验证。`state\machine-id` 自动生成，重启和更新沿用；每台桌面独立首装。离线机器重新登录后查询当前批次。收到更新时先停止领取，等现有 CLI 退出并尝试原任务回执；任务计划程序从运行时目录外执行切换，随后开新会话、上报实际版本和能力并执行指定窗口的检查。
+
+发布负责人在内网终端使用已配置的 `SAU_RELEASE_GATEWAY_URL` 和 `GATEWAY_INTERNAL_TOKEN`。把同一提交各目标 ZIP 和配套 `.sha256` 放入 `$ArtifactDir`。
+
+```powershell
+py -3 .\desktop\release.py worker --env dev --ref main --artifacts $ArtifactDir --watch
+$ReleaseId = '第一条输出中的 releaseId'
+py -3 .\desktop\release.py status --env dev --release-id $ReleaseId --watch
+```
+
+可关闭原发布终端并用第二条续查。输出包括 `revision`、每台机器实际 SHA、`batches[].phase`、`validationDeadline` 和 `replacementFor`。失联超时后由下一台排空接替，迟到回执记在原批次。确认包本身损坏时，`pauseReason` 说明原因，修复后发布新的提交。`onlineReady=true` 表示当前在线节点全部通过。
+
+下载断网时节点重试。切换中断电后用原用户重新登录；任务计划程序运行固定的 PowerShell 启动脚本，读 `.versions` 的提交记录恢复完整镜像。已激活程序不能启动时回到上一套并报告失败。保留安装根目录，查看 `status`、`state\worker.log` 和发布进度。目标版本的检查回执获 Gateway 确认后，`upgrade` 为空，旧程序和 `.versions` 均会清除。若自检提示登录失效，先人工恢复选定账号。对原发布按原工作流核对，避免重复发送。

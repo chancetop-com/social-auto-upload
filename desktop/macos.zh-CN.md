@@ -51,3 +51,27 @@ ctl="$INSTALL_ROOT/cli-service"
 空闲 worker 意外退出后，监督进程第一次立即重启，连续退出依次等待 10、20、40、80、160 秒，随后每次 300 秒；运行满 10 分钟重置。忙时崩溃留下的可识别 CLI 继续占用容量，结束后才释放。新会话只领取新的工作。可查看 `state/worker.log` 及 `status` 的最后退出原因和下次时间。网络或浏览器暂时不可用时，worker 原地重试。
 
 安装根目录中的 `program` 存放配套运行时和版本清单，`cli-service` 是稳定入口；`state` 存放用户私有配置、日志和 `cli` 数据。更换版本走发布负责人的分批升级流程，等待排空、切换、无发布自检及 Gateway 确认。原安装器拒绝覆盖另一摘要。卸载删除本安装的程序、入口及登录项，保留 `state` 以便保管浏览器资料和配置。用户单独安装的 CLI 可继续使用。
+
+### 从 Gateway 首装和滚动升级
+
+在首次安装前选定一个已登录、允许运维自检的窗口。以下变量与 Gateway 地址、桌面 Token 和提供方 Key 一起由安装器保存。也可在已装节点成功运行上面的 `check` 命令，记住本次自检目标。
+
+```zsh
+export SAU_RELEASE_CHECK_PROVIDER=bitbrowser SAU_RELEASE_CHECK_PLATFORM=tiktok
+export SAU_RELEASE_CHECK_PROFILE='复制的窗口ID'
+./desktop/bootstrap.sh --approved "$INSTALL_ROOT"
+"$INSTALL_ROOT/cli-service" status
+```
+
+首次安装从所连 Gateway 取本机芯片已批准的 ZIP 并验证 SHA-256。全新环境首台可取得验证批次。根目录的 `state/machine-id` 自动生成，关机返场、重启和升级沿用同一标识。不要把此文件复制到另一台桌面。以后每次登录或网络恢复会重新查询；收到批次后停止领新工作，等子进程退出并尝试原会话回执，然后核验、切换整包。新的 worker 会话与单独的检查会话均上报实际安装的摘要，Gateway 收到该窗口的成功回执后继续下一台。
+
+发布负责人在有内网 Gateway 访问权的终端运行以下命令。先设置 `SAU_RELEASE_GATEWAY_URL` 为内网 HTTPS 地址或本地端口转发地址，安全注入 `GATEWAY_INTERNAL_TOKEN`。制品目录放置相同提交的各目标 ZIP 及配套 `.sha256`。
+
+```zsh
+python3 desktop/release.py worker --env dev --ref main --artifacts "$ARTIFACT_DIR" --watch
+python3 desktop/release.py status --env dev --release-id "$RELEASE_ID" --watch
+```
+
+把第一条输出的 `releaseId` 保存为 `RELEASE_ID`。关闭终端后第二条仍能查到目标 `revision`、各节点实际 SHA、`batches[].phase`、`validationDeadline` 和 `replacementFor`。失联超过期限后，即使只剩一台忙机，也先排空再接替。迟到回执进入原批次。包内 CLI 不能运行时，查看 `pauseReason`，修复并发布新的提交。`onlineReady=true` 表示当前在线节点全部通过。
+
+下载断网时保留现有程序并重试。切换遇断电，恢复后用原用户登录，稳定登录脚本会根据 `.versions` 中的提交记录启动完整镜像；已切换镜像不能启动时，恢复上一套并报告失败。等 `status` 的 `revision` 与目标一致、`upgrade` 为空并核对 Gateway 回执；确认后会删除 `.versions` 和旧程序。切换中请保留这些文件。若窗口登录失效，先在选定窗口恢复账号，若无回执请按既有工作流核对原发布结果。

@@ -14,7 +14,8 @@ import httpx
 
 from . import __version__
 from .children import Children
-from .state import write
+from .state import read, write
+from .rollout import installation, progress_body
 from .publish import receipt as publish_receipt, video_args
 from .leases import command_lease, local_close_marker
 from .providers import DEFAULT_BASES, inventory
@@ -85,6 +86,7 @@ class Worker:
         self.report_lock = asyncio.Lock()
         root = os.environ.get("SAU_INSTALL_ROOT")
         self.state = Path(root) / "state" if root else None
+        self.installation = installation(Path(root)) if self.state else None
         self.generation = os.environ.get("SAU_WORKER_GENERATION")
         self.children = Children(self.state) if self.state else None
 
@@ -93,11 +95,16 @@ class Worker:
         if not self.generation:
             return False
         from .supervisor import ending
-        return ending(self.state, self.generation)
+        return ending(self.state, self.generation) or (
+            not self.self_check and self.upgrade.get("step") in ("draining", "staging"))
+
+    @property
+    def upgrade(self):
+        return read(self.state / "upgrade.json") if self.installation else {}
 
     @property
     def free_slots(self):
-        if self.draining:
+        if self.draining or (not self.self_check and self.upgrade):
             return 0
         occupied = self.children.count(excluding=self.session_id) if self.children else 0
         return max(0, self.settings.capacity - len(self.active) - occupied)
@@ -194,6 +201,7 @@ class Worker:
                                                         for alias in self.settings.dev_aliases]})
             capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, PUBLISH_CAPABILITY]
             reply = await self.post("/session", {
+                **({"installation": self.installation} if self.installation else {}),
                 "sessionId": self.session_id, "mode": "self-check" if self.self_check else "worker",
                 "contractVersion": 1, "release": __version__, "cliRelease": self.cli_release,
                 "capacity": self.settings.capacity,
@@ -305,6 +313,31 @@ class Worker:
             raise RuntimeError("Self-check was not claimed")
         return await self.finish(record)
 
+    async def validate_release(self):
+        batch = self.upgrade
+        if not batch or batch.get("step") != "validating":
+            return False
+        if self.installation.get("batchId") != batch["batchId"]:
+            return True
+        response = await self.post("/session/release/progress", progress_body(
+            self.state.parent, batch, "switched", sessionId=self.session_id))
+        if not response["active"] or read(self.state / "release-check-result.json").get("batchId") == batch["batchId"]:
+            return True
+        saved = read(self.state / "release-check-target.json")
+        provider = os.environ.get("SAU_RELEASE_CHECK_PROVIDER") or saved.get("provider")
+        profile = os.environ.get("SAU_RELEASE_CHECK_PROFILE") or saved.get("profile")
+        platform = os.environ.get("SAU_RELEASE_CHECK_PLATFORM") or saved.get("platform")
+        if provider and profile and platform and self.paired:
+            checker = Worker(self.settings, self.client, self_check=True)
+            try:
+                result = await checker.check(provider, profile, platform)
+            except RuntimeError:
+                return True
+            if result["state"] == "succeeded":
+                write(self.state / "release-check-result.json", {"batchId": batch["batchId"],
+                      "sessionId": self.session_id, "checkWorkflowId": result["workflowId"]})
+        return True
+
     async def run(self):
         running = set()
         while not self.draining:
@@ -319,6 +352,9 @@ class Worker:
                 await self.report()
                 if self.draining:
                     break
+                if await self.validate_release():
+                    await self.pause(5)
+                    continue
                 if self.ready and len(running) < self.settings.capacity:
                     record = await self.claim()
                     if record:

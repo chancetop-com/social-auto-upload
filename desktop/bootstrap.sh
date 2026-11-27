@@ -2,6 +2,11 @@
 # Usage: bootstrap.sh REVISION SHA256 ARTIFACT_DIR [INSTALL_ROOT]
 set -eu
 umask 077
+if [ "${1:-}" = --approved ]; then
+    [ "$#" -le 2 ] || exit 2
+    shift
+    exec /bin/sh "$(dirname "$0")/approved.sh" "$@"
+fi
 test "$#" -ge 3 && test "$#" -le 4 || { echo "Expected REVISION SHA256 ARTIFACT_DIR [INSTALL_ROOT]" >&2; exit 2; }
 revision=$1
 digest=$2
