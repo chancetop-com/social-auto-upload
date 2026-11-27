@@ -160,8 +160,8 @@ async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(pos
                 old_result = await job_a
                 assert old_result['state'] == 'succeeded'
                 assert old_result['sessionId'] == a.session_id
-                if 'resultDeadlineAt' in first:
-                    assert old_result['resultDeadlineAt'] == first['resultDeadlineAt']
+                assert first['resultDeadlineAt']
+                assert old_result['resultDeadlineAt'] == first['resultDeadlineAt']
                 assert await a.claim(0) is None
                 (tmp_path / 'B.finish').touch()
                 result = await job_b

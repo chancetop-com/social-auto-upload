@@ -1,5 +1,6 @@
 """Publish protocol as seen by Postiz and two independent desktops."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
@@ -18,7 +19,7 @@ def video(workflow):
         "organizationId": "org", "bindingId": "binding", "postId": "post", "channelId": "channel",
         "provider": "local-chrome", "profileId": "operator-approved", "caption": "Old caption", "settings": {},
         "media": [{"id": "v", "url": "https://media.example/first.mp4", "role": "video"}],
-        "earliestPublishAt": "2026-11-27T12:00:00Z", "noPublish": False,
+        "earliestPublishAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "noPublish": False,
     }
 
 

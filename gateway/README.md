@@ -1,10 +1,12 @@
 # Gateway and desktop publishing
 
-Build the Gateway from this directory and the desktop service from `cli-service/`. Both have a Python wheel and a console entry point. Install the CLI from the repository root into the worker’s private Python environment. The Gateway requires FastAPI, psycopg and PostgreSQL. The desktop initiates HTTPS requests and uses the two providers’ loopback Local APIs.
+Build the Gateway from this directory and the desktop service from `cli-service/`. Both have a Python wheel and a console entry point. Install the CLI from the repository root into the worker’s private Python environment. The Gateway uses FastAPI, psycopg, PostgreSQL and Redis Pub/Sub. The desktop initiates HTTPS requests and uses the two providers’ loopback Local APIs.
 
 ## Start the services
 
 Set `GATEWAY_DATABASE_URL` to the Gateway account’s PostgreSQL database. Set separate `GATEWAY_DESKTOP_TOKEN` and `GATEWAY_INTERNAL_TOKEN` values in the service environment. Set `POSTIZ_INTERNAL_URL` to the internal Postiz API base, including its API prefix, for example `http://postiz-backend:3000/api`. Postiz must accept the same internal bearer token on its authorize-start route. Run `social-media-web-api migrate` with that database account, then `social-media-web-api serve`. The default listener is port 8080. Terminate HTTPS at the ingress and expose only the desktop routes listed below. The readiness probe `GET /health-check` reads the migrated database and returns `{"status":"ready"}`.
+
+Set `GATEWAY_REDIS_URL` and `GATEWAY_REDIS_CHANNEL` on the Gateway. Use the service’s assigned Redis database and an environment-specific channel, for example `dev:social-media-web-api:publish-task`. Redis channels span logical databases. After a commit the Gateway wakes long polls. Reconnection triggers a new database check. During Redis outages the Gateway also checks every `GATEWAY_RECHECK_SECONDS` (default 5, maximum 30) while a poll is open.
 
 Set `SAU_DESKTOP_TOKEN` on the desktop to the Gateway’s desktop token. `SAU_GATEWAY_URL` defaults to `https://social-media-web-api.connexup-dev.net`. For local verification, set an explicit loopback URL. A private HTTPS fixture CA can be supplied via `SAU_GATEWAY_CA_FILE`. The worker’s default CLI argument vector starts with its absolute interpreter and `-I -X utf8 -m sau_cli`. Alternatively, pin `SAU_CLI_PYTHON` to a private absolute interpreter or `SAU_CLI_PATH` to its installed absolute `sau` entry. Paths containing spaces are supported. Set `SAU_HOME` for writable CLI data. `sau --version` must report the worker package version for it to advertise capabilities.
 
@@ -74,6 +76,8 @@ For a publish occurrence, use the same contract, release, target and workflow ID
 ```
 
 Use one video and an optional cover. This release implements basic videos with empty author settings. A UTC second-precision instant becomes the CLI's `--not-before` argument. Send `null` for an immediate post. The worker passes the current media URLs and the complete caption to its absolute paired executable. Its CLI task ID is the lower-case hexadecimal SHA-256 of the UTF-8 workflow ID.
+
+Postiz sends an absolute `claimDeadlineAt`, saved with the scheduled occurrence using `BROWSER_CLAIM_TIMEOUT_SECONDS` (default 1800). For older senders the Gateway derives the deadline from `earliestPublishAt` or, for immediate work, the first enqueue time, plus `GATEWAY_CLAIM_TIMEOUT_SECONDS` (default 1800). A pending occurrence expires to `timed_out` at that instant. A committed claim has an immutable `resultDeadlineAt` equal to the later of claim time and earliest click plus `GATEWAY_RESULT_TIMEOUT_SECONDS` (default 1800). Redelivery returns the original deadlines.
 
 A claim reserves the session slot and profile/platform pair. On start, the Gateway rechecks worker eligibility and contacts `POST ${POSTIZ_INTERNAL_URL}/internal/browser-publishing/authorize-start` with its internal bearer token and `{workflowId,postId,organizationId}`. Postiz returns the latest task directly. The Gateway validates its identity and persists the edited task and `started` state before granting the worker its single invocation. A duplicate request receives 409. A revoked or stale occurrence receives a failed, uninvoked receipt. If authorization is interrupted, the occurrence remains claimed for reconciliation.
 
