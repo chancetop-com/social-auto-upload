@@ -34,7 +34,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("run")
     check = commands.add_parser("check", help="claim and report a check on this desktop")
-    check.add_argument("--provider", required=True, choices=DEFAULT_BASES)
+    check.add_argument("--provider", required=True, choices=[*DEFAULT_BASES, "local-chrome"])
     check.add_argument("--profile-id", required=True)
     check.add_argument("--platform", required=True, choices=PLATFORMS)
     try:

@@ -4,6 +4,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .models import CheckReceipt, PublishReceipt
+
 
 class Missing(Exception):
     pass
@@ -83,23 +85,40 @@ class Store:
             if not report["freeSlots"]:
                 return None
             # The session row serializes concurrent polls even if a stale report advertises free slots.
-            active = db.execute("SELECT count(*) AS n FROM occurrence WHERE session_id=%s AND state='claimed'",
+            active = db.execute("SELECT count(*) AS n FROM occurrence WHERE session_id=%s AND state IN ('claimed','started')",
                                 (session_id,)).fetchone()["n"]
             if active >= report["capacity"]:
                 return None
             visible = [{"provider": p["provider"], "profileId": profile["profileId"]}
                        for p in report["providers"] if p["available"] for profile in p["profiles"]]
             row = db.execute("""
-                SELECT workflow_id FROM occurrence
+                SELECT workflow_id, task FROM occurrence AS pending
                 WHERE state='pending' AND task->>'release'=%s AND (task->>'contractVersion')::integer=%s
+                AND (task->>'action'='check' OR task->>'release'=%s)
                 AND ((target_session=%s) OR
                     (target_session IS NULL AND %s='worker' AND %s::jsonb @> jsonb_build_array(jsonb_build_object(
                          'provider',task->'provider','profileId',task->'profileId'))))
                 AND (target_session=%s OR %s::jsonb @> jsonb_build_array(jsonb_build_object('platform',task->'platform','action',task->'action')))
+                AND NOT EXISTS (
+                    SELECT 1 FROM occurrence busy WHERE busy.state IN ('claimed','started')
+                    AND busy.task->>'provider'=pending.task->>'provider'
+                    AND busy.task->>'profileId'=pending.task->>'profileId'
+                    AND busy.task->>'platform'=pending.task->>'platform'
+                )
                 ORDER BY created_at, workflow_id LIMIT 1 FOR UPDATE SKIP LOCKED
-            """, (report["release"], report["contractVersion"], session_id, report["mode"], Jsonb(visible), session_id,
+            """, (report["release"], report["contractVersion"], report.get("cliRelease"), session_id, report["mode"], Jsonb(visible), session_id,
                   Jsonb(report["capabilities"]))).fetchone()
             if row is None:
+                return None
+            target = [row["task"][key] for key in ("provider", "profileId", "platform")]
+            # Two polls may select different pending posts for the same physical target.
+            # Take its transaction lock, then check committed occupancy using a new snapshot.
+            locked = db.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s::text, 0)) AS held",
+                                (Jsonb(target),)).fetchone()
+            if not locked["held"] or db.execute("""
+                SELECT 1 FROM occurrence WHERE state IN ('claimed','started')
+                AND task->>'provider'=%s AND task->>'profileId'=%s AND task->>'platform'=%s
+            """, target).fetchone():
                 return None
             db.execute("""
                 UPDATE desktop_session SET report=jsonb_set(report, '{freeSlots}', to_jsonb((report->>'freeSlots')::int - 1))
@@ -110,22 +129,90 @@ class Store:
                 WHERE workflow_id=%s RETURNING {RECORD}
             """, (session_id, row["workflow_id"])).fetchone()
 
+    def _can_run(self, db, session_id, task):
+        report = db.execute("SELECT report FROM desktop_session WHERE session_id=%s FOR UPDATE",
+                            (session_id,)).fetchone()["report"]
+        capability = {"platform": task["platform"], "action": task["action"]}
+        return (report["mode"] == "worker" and report["contractVersion"] == task["contractVersion"]
+                and report["release"] == report["cliRelease"] == task["release"]
+                and capability in report["capabilities"]
+                and any(p["available"] and p["provider"] == task["provider"]
+                        and any(profile["profileId"] == task["profileId"] for profile in p["profiles"])
+                        for p in report["providers"]))
+
+    def reserve_start(self, body):
+        with self.connect() as db:
+            row = db.execute("""
+                UPDATE occurrence SET start_requested_at=clock_timestamp()
+                WHERE workflow_id=%s AND session_id=%s AND state='claimed'
+                  AND start_requested_at IS NULL AND task->>'action' != 'check'
+                RETURNING task
+            """, (body.workflowId, body.sessionId)).fetchone()
+            if row is None:
+                raise Conflict()
+            if self._can_run(db, body.sessionId, row["task"]):
+                return row["task"]
+            self._decline(db, body)
+
+    def _decline(self, db, body):
+        self._settle(db, body, "claimed", "failed", PublishReceipt(outcome="failed", cliInvoked=False, exitCode=None))
+
+    def deny_start(self, body):
+        with self.connect() as db:
+            self._decline(db, body)
+
+    def start(self, body, latest):
+        with self.connect() as db:
+            task = latest.model_dump(mode="json")
+            previous = self._get(db, body.workflowId)["task"]
+            identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId", "provider", "profileId",
+                        "platform", "action", "requiredCapability", "release", "contractVersion")
+            if any(task[key] != previous[key] for key in identity) or not self._can_run(db, body.sessionId, task):
+                self._decline(db, body)
+                return None
+            row = db.execute("""
+                UPDATE occurrence SET state='started',task=%s
+                WHERE workflow_id=%s AND session_id=%s AND state='claimed' AND start_requested_at IS NOT NULL
+                RETURNING task
+            """, (Jsonb(task), body.workflowId, body.sessionId)).fetchone()
+            if row is None:
+                raise Conflict()
+            return row["task"]
+
+    def _settle(self, db, body, expected, state, receipt):
+        row = db.execute("""
+            UPDATE occurrence SET state=%s, receipt=%s, completed_at=clock_timestamp()
+            WHERE workflow_id=%s AND session_id=%s AND state=%s RETURNING workflow_id
+        """, (state, Jsonb(receipt.model_dump()), body.workflowId, body.sessionId, expected)).fetchone()
+        if row is None:
+            raise Conflict()
+        db.execute("""
+            UPDATE desktop_session SET last_contact_at=clock_timestamp(), report=jsonb_set(
+                report, '{freeSlots}', to_jsonb(least((report->>'capacity')::int, (report->>'freeSlots')::int + 1)))
+            WHERE session_id=%s
+        """, (body.sessionId,))
+
     def finish(self, result):
         with self.connect() as db:
-            row = db.execute("SELECT state,session_id FROM occurrence WHERE workflow_id=%s FOR UPDATE",
+            row = db.execute(f"SELECT {RECORD} FROM occurrence WHERE workflow_id=%s FOR UPDATE",
                              (result.workflowId,)).fetchone()
             if row is None:
                 raise Missing()
-            if row["session_id"] != result.sessionId:
+            if row["sessionId"] != result.sessionId:
                 raise Conflict()
-            if row["state"] == "claimed":
-                db.execute("""
-                    UPDATE desktop_session SET last_contact_at=clock_timestamp(), report=jsonb_set(
-                        report, '{freeSlots}', to_jsonb(least((report->>'capacity')::int, (report->>'freeSlots')::int + 1)))
-                    WHERE session_id=%s
-                """, (result.sessionId,))
-                state = "succeeded" if result.receipt.platformLogin == "valid" else "failed"
-                db.execute("""
-                    UPDATE occurrence SET state=%s, receipt=%s, completed_at=clock_timestamp() WHERE workflow_id=%s
-                """, (state, Jsonb(result.receipt.model_dump()), result.workflowId))
+            if row["receipt"] is not None:
+                return row
+            receipt = result.receipt
+            if row["task"]["action"] == "check":
+                if not isinstance(receipt, CheckReceipt) or row["state"] != "claimed":
+                    raise Conflict()
+                state = "succeeded" if receipt.platformLogin == "valid" else "failed"
+            else:
+                if not isinstance(receipt, PublishReceipt) or row["state"] != "started":
+                    raise Conflict()
+                if (receipt.outcome in ("published", "prepared")
+                        and row["task"]["noPublish"] != (receipt.outcome == "prepared")):
+                    raise Conflict()
+                state = "succeeded" if receipt.outcome == "published" else receipt.outcome
+            self._settle(db, result, row["state"], state, receipt)
             return self._get(db, result.workflowId)

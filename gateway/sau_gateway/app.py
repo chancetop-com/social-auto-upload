@@ -3,12 +3,14 @@ import os
 from secrets import compare_digest
 from uuid import UUID, uuid4
 
+import httpx
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .database import Conflict, Missing, Store
-from .models import CheckTarget, Claim, Result, Session, Task
+from .models import CheckTarget, CheckTask, Claim, PublishTask, Result, Session, Start
 
 
 def authorized(token):
@@ -55,12 +57,12 @@ def create_app():
         session = store.session(session_id)
         if session["mode"] != "self-check":
             raise HTTPException(409, "Use a dedicated self-check session")
-        task = Task(**target.model_dump(), action="check", workflowId=f"check-{uuid4()}",
+        task = CheckTask(**target.model_dump(), action="check", workflowId=f"check-{uuid4()}",
                     requiredCapability=f"{target.platform}.check", contractVersion=1, release=session["release"])
         return store.enqueue(task, target_session=session_id)
 
     @app.post("/internal/occurrences", dependencies=internal)
-    def enqueue(task: Task):
+    def enqueue(task: CheckTask | PublishTask):
         return store.enqueue(task)
 
     @app.get("/internal/occurrences/{workflow_id:path}", dependencies=internal)
@@ -76,6 +78,31 @@ def create_app():
             if task or remaining <= 0 or await request.is_disconnected():
                 return {"task": task}
             await asyncio.sleep(min(remaining, 0.5))
+
+    @app.post("/publish-task/start", dependencies=desktop)
+    def start(body: Start):
+        task = store.reserve_start(body)
+        base = os.environ.get("POSTIZ_INTERNAL_URL", "").rstrip("/")
+        if task is None:
+            raise HTTPException(409, "Desktop no longer eligible")
+        if not base:
+            raise HTTPException(503, "Postiz authorization is unavailable")
+        try:
+            with httpx.Client(timeout=10, trust_env=False) as client:
+                response = client.post(base + "/internal/browser-publishing/authorize-start",
+                                       headers={"Authorization": "Bearer " + internal_token},
+                                       json={key: task[key] for key in ("workflowId", "postId", "organizationId")})
+            if response.status_code in (403, 409):
+                store.deny_start(body)
+                raise HTTPException(response.status_code, "Postiz declined this occurrence")
+            response.raise_for_status()
+            latest = PublishTask.model_validate(response.json())
+        except (httpx.HTTPError, ValueError):
+            raise HTTPException(503, "Postiz authorization is uncertain")
+        granted = store.start(body, latest)
+        if granted is None:
+            raise HTTPException(409, "Target or desktop changed before start")
+        return {"task": granted}
 
     @app.post("/publish-task/result", dependencies=desktop)
     def finish(result: Result):
