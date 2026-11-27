@@ -43,7 +43,13 @@ def installed_services(tmp_path_factory, installations):
     dependencies = [p for p in sys.path if Path(p).name in {"site-packages", "dist-packages"}]
     (cloud_packages / "fixture_dependencies.pth").write_text("\n".join(dependencies) + "\n")
     install_service("gateway", cloud_python, build / "gateway-wheel")
-    return private_bin / "cli-service", cloud_python
+    artifact = os.environ.get("SAU_TEST_DESKTOP_ARTIFACT")
+    if artifact:
+        from desktop_fixture import bootstrapped_worker
+        with bootstrapped_worker(ROOT, build, Path(artifact)) as launcher:
+            yield launcher, cloud_python
+    else:
+        yield private_bin / "cli-service", cloud_python
 
 
 @pytest.fixture
@@ -80,14 +86,15 @@ def installed_gateway(gateway_env, installed_services, tmp_path):
 
 
 @pytest.mark.parametrize(("outcome", "state", "login"), [
-    ("valid", "succeeded", "valid"), ("login", "failed", "login-required"), ("missing", "failed", "unknown")])
+    ("valid", "succeeded", "valid"), ("login", "failed", "login-required"), ("missing", "failed", "unknown"),
+    ("offline", "failed", "unknown")])
 def test_installed_self_check_reports_only_offline_login_evidence(
         installed_gateway, installed_services, harness, tmp_path, outcome, state, login):
     url, cert, client = installed_gateway
     worker, _ = installed_services
     profile_id = WINDOW_ID if outcome != "missing" else "absent"
     harness.site.outcome["tiktok"] = outcome
-    harness.api.queue("/browser/list", payload={"success": True, "data": {"list": [{"id": WINDOW_ID, "name": "Shop"}]}})
+    harness.api.queue("/browser/list", status=503 if outcome == "offline" else 200, payload={"success": True, "data": {"list": [{"id": WINDOW_ID, "name": "Shop"}]}})
     env = {"PATH": os.environ["PATH"], "HOME": str(harness.profile.home), "OFFLINE_OS_PROFILE": str(harness.profile.home),
            "SAU_HOME": str(tmp_path / "private CLI data"), "SAU_GATEWAY_URL": url, "SAU_GATEWAY_CA_FILE": str(cert),
            "SAU_DESKTOP_TOKEN": "fixture-desktop", "BITBROWSER_API_BASE": f"http://127.0.0.1:{harness.api_port}",
@@ -95,17 +102,20 @@ def test_installed_self_check_reports_only_offline_login_evidence(
     result = subprocess.run([worker, "check", "--provider", "bitbrowser", "--platform", "tiktok", "--profile-id", profile_id],
                             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=45)
     assert result.returncode == (0 if state == "succeeded" else 1), (result.stdout, result.stderr)
+    if outcome == "offline":
+        assert "Provider unavailable: bitbrowser" in result.stderr
     record = json.loads(result.stdout)
     assert KEY not in result.stdout
     assert record["task"]["action"] == "check"
     assert record["state"] == state
     receipt = record["receipt"]
     assert receipt["cloudConnected"]
-    assert receipt["profileVisible"] == receipt["cliInvoked"] == (outcome != "missing")
+    assert receipt["profileVisible"] == receipt["cliInvoked"] == (outcome not in ("missing", "offline"))
     assert receipt["platformLogin"] == login
     assert client.get("/internal/occurrences/" + record["workflowId"]).json() == record
     report = client.get("/internal/sessions/" + record["sessionId"]).json()
     assert report["release"] == report["cliRelease"] == "0.1.0"
-    assert (report["capacity"], report["freeSlots"]) == (1, 1)
+    expected = 3 if os.environ.get("SAU_TEST_DESKTOP_ARTIFACT") else 1
+    assert (report["capacity"], report["freeSlots"]) == (expected, expected)
     assert {"platform": "tiktok", "action": "check"} in report["capabilities"]
-    assert harness.site.documents == ([] if outcome == "missing" else [("tiktok", "/tiktokstudio/upload")])
+    assert harness.site.documents == ([] if outcome in ("missing", "offline") else [("tiktok", "/tiktokstudio/upload")])

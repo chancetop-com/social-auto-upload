@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import ssl
+import sys
 
 import httpx
 
@@ -25,6 +26,8 @@ async def launch(args):
             print(json.dumps({"cloudConnected": worker.connected, "receiptConfirmed": False,
                               "cliPaired": worker.paired, "sessionId": worker.session_id}))
             return 1
+        if not any(item["provider"] == args.provider and item["available"] for item in worker.providers):
+            print(f"Provider unavailable: {args.provider}", file=sys.stderr)
         print(json.dumps(record, ensure_ascii=False))
         return 0 if record["state"] == "succeeded" else 1
 
