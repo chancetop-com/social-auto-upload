@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .wakeups import Wakeups
 from .database import Conflict, Missing, Store
 from .models import CheckTarget, CheckTask, Claim, PublishTask, Result, Session, Start
 
@@ -31,7 +32,8 @@ def create_app(stopping=None):
         raise ValueError("Set separate nonempty Gateway desktop and internal tokens")
     desktop, internal = authorized(desktop_token), authorized(internal_token)
     store = Store(os.environ["GATEWAY_DATABASE_URL"])
-    app = FastAPI(title="social-media-web-api", docs_url=None, redoc_url=None, openapi_url=None)
+    wakeups = Wakeups()
+    app = FastAPI(lifespan=wakeups.lifespan, title="social-media-web-api", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(Missing)
     async def missing(request, exc):
@@ -57,17 +59,21 @@ def create_app(stopping=None):
         return store.session(session_id)
 
     @app.post("/session/{session_id}/self-check", dependencies=desktop)
-    def self_check(session_id: UUID, target: CheckTarget):
-        session = store.session(session_id)
+    async def self_check(session_id: UUID, target: CheckTarget):
+        session = await asyncio.to_thread(store.session, session_id)
         if session["mode"] != "self-check":
             raise HTTPException(409, "Use a dedicated self-check session")
         task = CheckTask(**target.model_dump(), action="check", workflowId=f"check-{uuid4()}",
                     requiredCapability=f"{target.platform}.check", contractVersion=1, release=session["release"])
-        return store.enqueue(task, target_session=session_id)
+        record = await asyncio.to_thread(store.enqueue, task, target_session=session_id)
+        await wakeups.publish()
+        return record
 
     @app.post("/internal/occurrences", dependencies=internal)
-    def enqueue(task: CheckTask | PublishTask):
-        return store.enqueue(task)
+    async def enqueue(task: CheckTask | PublishTask):
+        record = await asyncio.to_thread(store.enqueue, task)
+        await wakeups.publish()
+        return record
 
     @app.get("/internal/occurrences/{workflow_id:path}", dependencies=internal)
     def lookup(workflow_id: str):
@@ -75,17 +81,31 @@ def create_app(stopping=None):
 
     @app.post("/publish-task/claim", dependencies=desktop)
     async def claim(body: Claim, request: Request):
-        deadline = asyncio.get_running_loop().time() + body.waitSeconds
-        while not stopping.is_set() and not await request.is_disconnected():
-            task = await asyncio.to_thread(store.claim, body.sessionId)
-            remaining = deadline - asyncio.get_running_loop().time()
-            if task or remaining <= 0:
-                return {"task": task}
-            try:
-                await asyncio.wait_for(stopping.wait(), timeout=min(remaining, 0.5))
-            except asyncio.TimeoutError:
-                pass
-        return {"task": None}
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + body.waitSeconds
+        # FastAPI has consumed the claim body. The next ASGI message signals disconnect.
+        disconnect = asyncio.create_task(request.receive())
+        stop = asyncio.create_task(stopping.wait())
+        try:
+            with wakeups.register() as event:
+                while not stopping.is_set() and not disconnect.done():
+                    event.clear()  # A notification during the query remains set when it returns.
+                    task = await asyncio.to_thread(store.claim, body.sessionId)
+                    remaining = deadline - loop.time()
+                    if task or remaining <= 0:
+                        return {"task": task}
+                    notice = asyncio.create_task(event.wait())
+                    try:
+                        await asyncio.wait((notice, disconnect, stop), timeout=min(remaining, wakeups.recheck),
+                                           return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        notice.cancel()
+                        await asyncio.gather(notice, return_exceptions=True)
+            return {"task": None}
+        finally:
+            disconnect.cancel()
+            stop.cancel()
+            await asyncio.gather(disconnect, stop, return_exceptions=True)
 
     @app.post("/publish-task/start", dependencies=desktop)
     def start(body: Start):
@@ -115,7 +135,9 @@ def create_app(stopping=None):
         return {"task": granted}
 
     @app.post("/publish-task/result", dependencies=desktop)
-    def finish(result: Result):
-        return store.finish(result)
+    async def finish(result: Result):
+        record = await asyncio.to_thread(store.finish, result)
+        await wakeups.publish()
+        return record
 
     return app
