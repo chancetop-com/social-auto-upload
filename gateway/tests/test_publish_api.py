@@ -1,5 +1,6 @@
 """Publish protocol as seen by Postiz and two independent desktops."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
@@ -18,7 +19,7 @@ def video(workflow):
         "organizationId": "org", "bindingId": "binding", "postId": "post", "channelId": "channel",
         "provider": "local-chrome", "profileId": "operator-approved", "caption": "Old caption", "settings": {},
         "media": [{"id": "v", "url": "https://media.example/first.mp4", "role": "video"}],
-        "earliestPublishAt": "2026-11-27T12:00:00Z", "noPublish": False,
+        "earliestPublishAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "noPublish": False,
     }
 
 
@@ -179,9 +180,18 @@ def test_shutdown_drains_existing_work_without_granting_new_starts(postiz, gatew
         assert reply.status_code == 503 and not postiz[0]
         assert gateway.get("/internal/occurrences/shutdown-start", headers=INTERNAL).json()["state"] == "claimed"
 
-def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, gateway, monkeypatch):
-    import time
+@pytest.fixture
+def short_deadline_gateway(gateway_env, monkeypatch):
+    from fastapi.testclient import TestClient
+    from sau_gateway.app import create_app
     monkeypatch.setenv("GATEWAY_RESULT_TIMEOUT_SECONDS", "2")
+    with TestClient(create_app()) as client:
+        yield client
+
+
+def test_progress_result_deadline_and_late_receipt_preserve_evidence(postiz, short_deadline_gateway):
+    import time
+    gateway = short_deadline_gateway
     task = {**video("deadline-review"), "earliestPublishAt": None}
     postiz[1]["task"] = task
     owner = register(gateway)

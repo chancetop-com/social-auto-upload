@@ -75,6 +75,10 @@ def image_fixture():
         return subprocess.run(['docker', *args], env=env, capture_output=True, text=True, check=check).stdout.strip()
 
     args = ['-e', 'GATEWAY_DATABASE_URL', '-e', 'GATEWAY_DESKTOP_TOKEN', '-e', 'GATEWAY_INTERNAL_TOKEN']
+    if os.environ.get('GATEWAY_TEST_IMAGE_REDIS_URL'):
+        env.update(GATEWAY_REDIS_URL=os.environ['GATEWAY_TEST_IMAGE_REDIS_URL'],
+                   GATEWAY_REDIS_CHANNEL='test:social-media-web-api:' + container)
+        args.extend(['-e', 'GATEWAY_REDIS_URL', '-e', 'GATEWAY_REDIS_CHANNEL'])
     with psycopg.connect(admin, autocommit=True) as conn:
         conn.execute(sql.SQL('CREATE ROLE {} LOGIN PASSWORD {}').format(sql.Identifier(owner), sql.Literal(password)))
         try:
