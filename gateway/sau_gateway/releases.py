@@ -157,6 +157,9 @@ def blocked_claim(db, session):
     # An old in-flight long poll must not race the drain. The caller already holds
     # the session row. New work becomes eligible after validation; old claims keep
     # using their original start, lease and result paths.
+    if db.execute("""SELECT 1 FROM desktop_package WHERE sha256=%s AND defect_reason IS NOT NULL""",
+                  (installation["sha256"],)).fetchone():
+        return True
     if installation.get("batchId"):
         ready = db.execute("""SELECT 1 FROM desktop_release_batch b JOIN desktop_release r USING (release_id)
             WHERE b.batch_id=%s AND b.machine_id=%s AND b.phase='ready'
@@ -255,10 +258,12 @@ def register(app, store, desktop, internal):
                         or installed["contract_version"] != release.contractVersion):
                     raise HTTPException(409, "Revision already pinned to another manifest")
                 return details(db, installed["release_id"])
-            present = db.execute("SELECT sha256 FROM desktop_package WHERE sha256=ANY(%s)",
+            present = db.execute("SELECT sha256,defect_reason FROM desktop_package WHERE sha256=ANY(%s)",
                                  (list(release.packages.values()),)).fetchall()
             if set(release.packages.values()) != {row["sha256"] for row in present}:
                 raise HTTPException(422, "Upload every pinned package before registering the release")
+            if any(row["defect_reason"] is not None for row in present):
+                raise HTTPException(409, "Release includes a package with a confirmed defect")
             db.execute("""UPDATE desktop_release_batch SET phase='superseded' WHERE phase=ANY(%s)""", (list(ACTIVE),))
             db.execute("UPDATE desktop_release SET superseded=true WHERE NOT superseded")
             release_id = uuid4()
@@ -314,11 +319,17 @@ def register(app, store, desktop, internal):
             if body.phase == "defect":
                 if not body.reason or not body.reason.strip():
                     raise HTTPException(422, "A package defect requires a reason")
-                db.execute("""UPDATE desktop_release SET pause_reason=coalesce(pause_reason,%s)
-                    WHERE release_id=%s""", (body.reason, body.releaseId))
-                db.execute("""UPDATE desktop_release_batch SET phase='paused'
-                    WHERE release_id=%s AND batch_id<>%s AND phase=ANY(%s)""",
-                    (body.releaseId, body.batchId, list(ACTIVE)))
+                digest = release["packages"][batch["target"]]
+                db.execute("""UPDATE desktop_package SET defect_reason=coalesce(defect_reason,%s) WHERE sha256=%s""",
+                           (body.reason, digest))
+                # A late defect belongs to its original batch. The same bytes can
+                # also have been pinned elsewhere while its report was in flight.
+                db.execute("""UPDATE desktop_release r SET pause_reason=coalesce(pause_reason,%s)
+                    WHERE EXISTS (SELECT 1 FROM jsonb_each_text(r.packages) p WHERE p.value=%s)""",
+                    (body.reason, digest))
+                db.execute("""UPDATE desktop_release_batch b SET phase='paused' FROM desktop_release r
+                    WHERE b.release_id=r.release_id AND r.pause_reason IS NOT NULL
+                    AND b.batch_id<>%s AND b.phase=ANY(%s)""", (body.batchId, list(ACTIVE)))
             if batch["phase"] not in ACTIVE:
                 if batch["phase"] == "ready" and body.phase == "ready":
                     return {"active": False, "confirmed": True}

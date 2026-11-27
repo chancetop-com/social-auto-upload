@@ -169,3 +169,44 @@ def test_pending_drain_withdraws_preparation_as_well_as_publication(gateway):
     offer = {"task": video("future-cache"), "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}
     gateway.post("/internal/preparations", json=offer, headers=INTERNAL).raise_for_status()
     assert post(gateway, "/publish-task/claim", {"sessionId": sid, "waitSeconds": 0, "acceptPreparation": True})["task"] is None
+
+
+def test_confirmed_defect_fences_restarted_workers_by_package_digest(gateway):
+    from test_publish_api import video
+
+    original = artifact(gateway)
+    gateway.post("/internal/releases", headers=INTERNAL, json=original).raise_for_status()
+    node = str(uuid4())
+    old = {"revision": "0" * 40, "sha256": "0" * 64}
+    batch = poll(gateway, node, **old)["assignment"]
+    progress(gateway, node, batch, "defect", reason="Paired CLI cannot start")
+    task = video("do-not-dispatch-to-defective-runtime")
+    gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
+    for revision in (original["revision"], "2" * 40):
+        sid = str(uuid4())
+        report = {"sessionId": sid, "mode": "worker", "release": "0.1.0", "cliRelease": "0.1.0",
+                  "contractVersion": 1, "capacity": 1, "freeSlots": 1,
+                  "capabilities": [{"platform": "tiktok", "action": "upload-video"}],
+                  "providers": [{"provider": "local-chrome", "available": True,
+                                 "profiles": [{"name": "fixture", "profileId": "operator-approved"}]}],
+                  "installation": {"machineId": node, "target": TARGET, "revision": revision, "sha256": batch["sha256"]}}
+        post(gateway, "/session", report)
+        assert post(gateway, "/publish-task/claim", {"sessionId": sid, "waitSeconds": 0})["task"] is None
+    retry = gateway.post("/internal/releases", headers=INTERNAL, json={**original, "revision": "2" * 40})
+    assert retry.status_code == 409
+
+
+def test_late_defect_pauses_a_newer_release_only_when_it_reuses_the_same_bytes(gateway):
+    original = artifact(gateway)
+    first = gateway.post("/internal/releases", headers=INTERNAL, json=original).json()
+    node = str(uuid4())
+    old = {"revision": "0" * 40, "sha256": "0" * 64}
+    validation = poll(gateway, node, **old)["assignment"]
+    second = gateway.post("/internal/releases", headers=INTERNAL, json={**original, "revision": "2" * 40}).json()
+    next_batch = poll(gateway, node, **old)["assignment"]
+    progress(gateway, node, validation, "defect", reason="Paired runtime cannot start")
+    prior = gateway.get("/internal/releases/" + first["releaseId"], headers=INTERNAL).json()
+    now = gateway.get("/internal/releases/" + second["releaseId"], headers=INTERNAL).json()
+    assert prior["batches"][0]["latePhase"] == "defect" and prior["batches"][0]["phase"] == "superseded"
+    assert now["pauseReason"] == "Paired runtime cannot start" and now["batches"][0]["phase"] == "paused"
+    assert not progress(gateway, node, next_batch, "draining")["active"]
