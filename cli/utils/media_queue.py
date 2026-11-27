@@ -11,6 +11,7 @@ import time
 from threading import Thread
 from uuid import uuid4
 
+from utils.budgets import seconds
 from utils.errors import UsageError
 from utils.remote_media import (
     QUEUE_DIRECTORY, TASK_OWNER_FILE, download_item, download_root, item_path, owned_task_stat, remove_task_files,
@@ -172,6 +173,7 @@ def _ensure_worker(launching):
 async def submit(task_id, urls, *, background, priority=False):
     """Persist the complete request and wait until a detached worker acknowledges it."""
     download_concurrency()
+    enqueue_seconds = seconds("SAU_DOWNLOAD_ENQUEUE_SECONDS", 10)
     request_id = uuid4().hex
     async with task_gate(task_id):
         with transaction() as db:
@@ -188,7 +190,7 @@ async def submit(task_id, urls, *, background, priority=False):
             request = Request(request_id, None if background else _try_lease(download_root(), request_id + ".lease"))
 
     process = None
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + enqueue_seconds
     try:
         while True:
             with closing(_connect("requests.sqlite")) as db:

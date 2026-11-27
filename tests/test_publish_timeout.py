@@ -17,6 +17,11 @@ class PublishTimeoutBudgetTests(unittest.TestCase):
     def test_default_budget_is_fifteen_minutes(self):
         self.assertEqual(PUBLISH_TIMEOUT_SECONDS, 15 * 60)
 
+    def test_environment_budget_applies_to_new_uploader_runs(self):
+        with patch.dict("os.environ", {"SAU_BROWSER_PUBLISH_SECONDS": "4.5"}):
+            budget = _DummyUploader().start_publish_budget()
+            self.assertEqual(budget.timeout_seconds, 4.5)
+
     def test_upload_probe_timeout_keeps_its_cause_when_budget_remains(self):
         async def probe():
             raise asyncio.TimeoutError("browser read timed out")

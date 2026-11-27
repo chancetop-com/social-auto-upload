@@ -178,3 +178,24 @@ def test_shutdown_drains_existing_work_without_granting_new_starts(postiz, gatew
                              json={"workflowId": task["workflowId"], "sessionId": session})
         assert reply.status_code == 503 and not postiz[0]
         assert gateway.get("/internal/occurrences/shutdown-start", headers=INTERNAL).json()["state"] == "claimed"
+
+
+def test_preparation_can_download_without_claiming_or_authorizing_publication(gateway):
+    from datetime import datetime, timedelta, timezone
+
+    task = video("scheduled/@series|occurrence")
+    session = register(gateway)
+    offer = {"task": task, "expiresAt": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}
+    publish = {"workflowId": task["workflowId"], "sessionId": session}
+    for _ in range(2):
+        gateway.post("/internal/preparations", json=offer, headers=INTERNAL).raise_for_status()
+    assert claim(gateway, session) is None  # Older desktops never receive maintenance work.
+    modern = {"sessionId": session, "waitSeconds": 0, "acceptPreparation": True}
+    response = gateway.post("/publish-task/claim", json=modern, headers=DESKTOP)
+    assert response.json()["task"] == {"operation": "prepare", "workflowId": task["workflowId"], "task": task}
+    assert gateway.post("/publish-task/claim", json=modern, headers=DESKTOP).json()["task"] is None
+    assert gateway.post("/publish-task/start", json=publish, headers=DESKTOP).status_code == 409
+    assert gateway.get("/internal/occurrences/" + task["workflowId"], headers=INTERNAL).status_code == 404
+    changed = {**task, "media": [{"id": "replacement", "role": "video", "url": "https://media.example/new.mp4"}]}
+    gateway.post("/internal/occurrences", json=changed, headers=INTERNAL).raise_for_status()
+    assert claim(gateway, register(gateway))["task"]["media"] == changed["media"]

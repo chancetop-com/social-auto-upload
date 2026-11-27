@@ -1,5 +1,5 @@
 """Map a Gateway-authorized TikTok occurrence to the paired CLI's public contract."""
-from hashlib import sha256
+from .media import media_task_id
 
 
 PREPARED = "素材已上传，发布前检查已通过；已停止，未点击发布按钮。"
@@ -12,7 +12,7 @@ def video_args(task, target):
     if (len(files) != len(task["media"]) or set(files) not in ({"video"}, {"cover", "video"})
             or any(not url.startswith(("http://", "https://")) for url in files.values())):
         raise ValueError("TikTok video needs one video URL and an optional cover URL")
-    task_id = sha256(task["workflowId"].encode("utf-8")).hexdigest()
+    task_id = media_task_id(task["workflowId"])
     args = ["tiktok", "upload-video", "--file=" + files["video"], "--title=" + task["caption"]]
     if "cover" in files:
         args.append("--thumbnail=" + files["cover"])

@@ -145,3 +145,28 @@ async def test_worker_without_explicit_dev_alias_or_option_support_never_falls_b
     _, _, receipts, calls = await desktop(child, **changes)
     assert calls == []
     assert receipts[0]["receipt"] == {"outcome": "failed", "cliInvoked": False, "exitCode": None}
+
+
+@pytest.mark.asyncio
+async def test_optional_preparation_runs_only_media_enqueue(child):
+    def gateway(request):
+        assert request.url.path == "/session"
+        return httpx.Response(200, json={})
+
+    settings = replace(Settings.from_env({"SAU_DESKTOP_TOKEN": "fixture", "SAU_DEV_CHROME_ALIASES": "alias"}),
+                       cli=(sys.executable, str(child)))
+    root = child.parent
+    (root / "controlled-result").write_text(json.dumps({"code": 0, "stdout": "accepted", "stderr": ""}))
+    workflow = "../scheduled/shop|42"
+    task = {"workflowId": workflow, "provider": "local-chrome", "profileId": "alias", "release": "0.1.0",
+            "contractVersion": 1, "platform": "tiktok", "action": "upload-video", "requiredCapability": "tiktok.upload-video",
+            "media": [{"id": "v", "role": "video", "url": "https://example.test/a.mp4"},
+                      {"id": "c", "role": "cover", "url": "https://example.test/c.jpg"}]}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(gateway)) as client:
+        worker = Worker(settings, client)
+        await worker.report()
+        await worker.finish({"operation": "prepare", "workflowId": workflow, "task": task})
+    [call] = [json.loads(line)["argv"] for line in (root / "calls").read_text().splitlines()]
+    from hashlib import sha256
+    assert call == ["media", "predownload", "--task-id=" + sha256(workflow.encode()).hexdigest(), "--urls",
+                    "https://example.test/a.mp4", "https://example.test/c.jpg"]

@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 class WireModel(BaseModel):
@@ -111,12 +111,18 @@ class PublishTask(Task):
         return self
 
 
+class Preparation(WireModel):
+    task: PublishTask
+    expiresAt: AwareDatetime
+
+
 class Start(WireModel):
     workflowId: Identifier
     sessionId: UUID
 
 
 class Claim(WireModel):
+    acceptPreparation: StrictBool = False
     sessionId: UUID
     waitSeconds: Annotated[int, Field(ge=0, le=30)] = 20
 

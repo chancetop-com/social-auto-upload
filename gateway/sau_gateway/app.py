@@ -9,8 +9,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from .preparation import enqueue_preparation, take_preparation
 from .database import Conflict, Missing, Store
-from .models import CheckTarget, CheckTask, Claim, PublishTask, Result, Session, Start
+from .models import CheckTarget, CheckTask, Claim, Preparation, PublishTask, Result, Session, Start
 
 
 def authorized(token):
@@ -69,6 +70,11 @@ def create_app(stopping=None):
     def enqueue(task: CheckTask | PublishTask):
         return store.enqueue(task)
 
+    @app.post("/internal/preparations", dependencies=internal)
+    def prepare(offer: Preparation):
+        enqueue_preparation(store, offer)
+        return {"accepted": True}
+
     @app.get("/internal/occurrences/{workflow_id:path}", dependencies=internal)
     def lookup(workflow_id: str):
         return store.get(workflow_id)
@@ -78,6 +84,8 @@ def create_app(stopping=None):
         deadline = asyncio.get_running_loop().time() + body.waitSeconds
         while not stopping.is_set() and not await request.is_disconnected():
             task = await asyncio.to_thread(store.claim, body.sessionId)
+            if not task and body.acceptPreparation:
+                task = await asyncio.to_thread(take_preparation, store, body.sessionId)
             remaining = deadline - asyncio.get_running_loop().time()
             if task or remaining <= 0:
                 return {"task": task}

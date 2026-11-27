@@ -11,6 +11,8 @@ from uuid import uuid4
 import httpx
 
 from . import __version__
+from .maintenance import daily_cleanup
+from .media import predownload_args
 from .publish import receipt as publish_receipt, video_args
 from .providers import DEFAULT_BASES, inventory
 
@@ -136,7 +138,8 @@ class Worker:
             })
 
     async def claim(self, wait_seconds=15):
-        response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds})
+        response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds,
+                                                          "acceptPreparation": not self.self_check})
         return response["task"]
 
     def target(self, task):
@@ -192,6 +195,17 @@ class Worker:
 
     async def finish(self, record):
         workflow_id = record["workflowId"]
+        if record.get("operation") == "prepare":
+            task = record["task"]
+            if (self.paired and not self.self_check and self.target(task)
+                    and task.get("workflowId") == workflow_id and task.get("release") == __version__
+                    and task.get("contractVersion") == 1):
+                try:
+                    # This command returns on enqueue. The paired CLI owns its acknowledgement budget.
+                    await asyncio.to_thread(self.command, predownload_args(task), timeout=None)
+                except (KeyError, TypeError, ValueError, OSError):
+                    pass  # Publish will obtain the current manifest on the executing machine.
+            return
         if workflow_id in self.active:
             return
         self.active.add(workflow_id)
@@ -234,6 +248,14 @@ class Worker:
         return await self.finish(record)
 
     async def run(self):
+        maintenance = asyncio.create_task(daily_cleanup(self))
+        try:
+            await self.poll()
+        finally:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
+
+    async def poll(self):
         running = set()
         while True:
             try:
