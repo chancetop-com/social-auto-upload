@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 class WireModel(BaseModel):
@@ -98,6 +98,7 @@ class PublishTask(Task):
     settings: dict
     media: list[Media]
     earliestPublishAt: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")] | None
+    claimDeadlineAt: AwareDatetime | None = None
     noPublish: StrictBool
 
     @model_validator(mode="after")
