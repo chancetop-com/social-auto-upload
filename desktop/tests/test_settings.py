@@ -24,3 +24,17 @@ def test_reinstall_reuses_settings_and_only_prompts_for_a_new_selected_provider(
     assert second["SAU_GATEWAY_URL"] == "https://example.test/gateway"
     assert second["WORKER_MAX_CONCURRENCY"] == "3"
     assert second["BITBROWSER_API_BASE"] == "http://127.0.0.1:4444"
+
+
+def test_explicit_dev_alias_survives_restart_without_a_managed_provider_key(tmp_path):
+    from sau_worker.desktop import settings
+    from sau_worker.worker import Settings
+
+    env = {"SAU_DESKTOP_TOKEN": "fixture-cloud", "SAU_DEV_CHROME_ALIASES": "field-tiktok"}
+    def unexpected_prompt(name):
+        raise AssertionError(f"An explicit Chrome-only test target asked for {name}")
+
+    configure(tmp_path, env, unexpected_prompt)
+    restarted = Settings.from_env(settings(tmp_path, {}))
+    assert list(restarted.dev_aliases) == ["field-tiktok"]
+    assert restarted.providers == {}

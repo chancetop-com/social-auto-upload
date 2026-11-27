@@ -1,7 +1,9 @@
+from datetime import datetime
+from urllib.parse import urlsplit
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 
 class WireModel(BaseModel):
@@ -9,9 +11,9 @@ class WireModel(BaseModel):
 
 
 Identifier = Annotated[str, Field(min_length=1, max_length=512)]
-Provider = Literal["bitbrowser", "adspower"]
+Provider = Literal["bitbrowser", "adspower", "local-chrome"]
 Platform = Literal["rednote", "xiaohongshu", "tiktok", "instagram"]
-Action = Literal["check"]
+Action = Literal["check", "upload-video"]
 
 
 class Capability(WireModel):
@@ -68,6 +70,52 @@ class Task(CheckTarget):
         return self
 
 
+class CheckTask(Task):
+    action: Literal["check"]
+
+
+class Media(WireModel):
+    id: Identifier
+    url: str
+    role: Literal["video", "cover", "image"]
+
+    @field_validator("url")
+    @classmethod
+    def readable_url(cls, value):
+        parts = urlsplit(value)
+        if parts.scheme not in {"http", "https"} or not parts.hostname or any(c.isspace() for c in value):
+            raise ValueError("media must use a desktop-readable HTTP(S) URL")
+        return value
+
+
+class PublishTask(Task):
+    action: Literal["upload-video"]
+    platform: Literal["tiktok"]
+    organizationId: Identifier
+    bindingId: Identifier
+    postId: Identifier
+    channelId: Identifier
+    caption: str
+    settings: dict
+    media: list[Media]
+    earliestPublishAt: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")] | None
+    noPublish: StrictBool
+
+    @model_validator(mode="after")
+    def video_contract(self):
+        roles = sorted(item.role for item in self.media)
+        if roles not in (["video"], ["cover", "video"]):
+            raise ValueError("TikTok video requires one video and an optional cover")
+        if self.earliestPublishAt:
+            datetime.strptime(self.earliestPublishAt, "%Y-%m-%dT%H:%M:%SZ")
+        return self
+
+
+class Start(WireModel):
+    workflowId: Identifier
+    sessionId: UUID
+
+
 class Claim(WireModel):
     sessionId: UUID
     waitSeconds: Annotated[int, Field(ge=0, le=30)] = 20
@@ -87,7 +135,19 @@ class CheckReceipt(WireModel):
         return self
 
 
-class Result(WireModel):
-    workflowId: Identifier
-    sessionId: UUID
-    receipt: CheckReceipt
+class PublishReceipt(WireModel):
+    outcome: Literal["published", "prepared", "failed", "unknown"]
+    cliInvoked: StrictBool
+    exitCode: int | None
+
+    @model_validator(mode="after")
+    def consistent_evidence(self):
+        if not self.cliInvoked and self.exitCode is not None:
+            raise ValueError("exitCode requires a child")
+        if self.outcome in ("published", "prepared") and not (self.cliInvoked and self.exitCode == 0):
+            raise ValueError("successful publishing or preparation requires a successful child")
+        return self
+
+
+class Result(Start):
+    receipt: CheckReceipt | PublishReceipt

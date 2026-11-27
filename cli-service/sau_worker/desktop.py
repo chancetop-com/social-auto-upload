@@ -21,7 +21,7 @@ from .worker import Settings
 
 
 CONFIG_KEYS = {"SAU_GATEWAY_URL", "SAU_GATEWAY_CA_FILE", "SAU_DESKTOP_TOKEN", "WORKER_MAX_CONCURRENCY",
-               "SAU_PROVIDERS", "BITBROWSER_API_BASE", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "ADSPOWER_API_KEY"}
+               "SAU_PROVIDERS", "SAU_DEV_CHROME_ALIASES", "BITBROWSER_API_BASE", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "ADSPOWER_API_KEY"}
 
 
 def settings(state, env):
@@ -32,14 +32,16 @@ def settings(state, env):
 
 def configure(state, env, prompt=getpass):
     values = settings(state, env)
-    providers = values.get("SAU_PROVIDERS")
-    if providers is None:
-        providers = ",".join(name for name in DEFAULT_BASES if values.get(name.upper() + "_API_KEY")) or "bitbrowser"
-    values["SAU_PROVIDERS"] = providers
-    selected = Settings.from_env(values).providers
-    if not selected:
-        raise ValueError("Select bitbrowser, adspower or both in SAU_PROVIDERS")
-    for provider in selected:
+    paired = Settings.from_env(values)
+    if "SAU_PROVIDERS" not in values:
+        if paired.providers or paired.dev_aliases:
+            values["SAU_PROVIDERS"] = ",".join(paired.providers)
+        else:
+            values["SAU_PROVIDERS"] = "bitbrowser"
+    selected = Settings.from_env(values)
+    if not selected.providers and not selected.dev_aliases:
+        raise ValueError("Select a managed provider or an explicit development Chrome alias")
+    for provider in selected.providers:
         key = provider.upper() + "_API_KEY"
         if not values.get(key, "").strip():
             if prompt is getpass and not sys.stdin.isatty():

@@ -11,11 +11,13 @@ from uuid import uuid4
 import httpx
 
 from . import __version__
+from .publish import receipt as publish_receipt, video_args
 from .providers import DEFAULT_BASES, inventory
 
 
 PLATFORMS = ("rednote", "xiaohongshu", "tiktok", "instagram")
 CAPABILITIES = [{"platform": platform, "action": "check"} for platform in PLATFORMS]
+PUBLISH_CAPABILITY = {"platform": "tiktok", "action": "upload-video"}
 DEFAULT_GATEWAY = "https://social-media-web-api.connexup-dev.net"
 
 
@@ -36,6 +38,7 @@ class Settings:
     cli: tuple[str, ...]
     capacity: int
     providers: dict[str, tuple[str, str]] = field(repr=False)
+    dev_aliases: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, env):
@@ -44,7 +47,7 @@ class Settings:
             raise ValueError("SAU_DESKTOP_TOKEN is required")
         cli_path = env.get("SAU_CLI_PATH")
         python = env.get("SAU_CLI_PYTHON", sys.executable)
-        cli = (cli_path,) if cli_path else (python, "-I", "-m", "sau_cli")
+        cli = (cli_path,) if cli_path else (python, "-I", "-X", "utf8", "-m", "sau_cli")
         if not Path(cli[0]).is_absolute():
             raise ValueError("The paired CLI path must be absolute")
         capacity = int(env.get("WORKER_MAX_CONCURRENCY", 1))
@@ -59,7 +62,9 @@ class Settings:
                 raise ValueError("Unknown provider in SAU_PROVIDERS")
             base = endpoint(env.get(name.upper() + "_API_BASE", DEFAULT_BASES[name]), local=True)
             providers[name] = (base, env.get(name.upper() + "_API_KEY", ""))
-        return cls(endpoint(env.get("SAU_GATEWAY_URL", DEFAULT_GATEWAY)), token, cli, capacity, providers)
+        aliases = tuple(dict.fromkeys(alias.strip() for alias in env.get("SAU_DEV_CHROME_ALIASES", "").split(",")
+                                     if alias.strip()))
+        return cls(endpoint(env.get("SAU_GATEWAY_URL", DEFAULT_GATEWAY)), token, cli, capacity, providers, aliases)
 
 
 class Worker:
@@ -83,14 +88,21 @@ class Worker:
                                           headers={"Authorization": "Bearer " + self.settings.token}, timeout=40)
         response.raise_for_status()
         self.connected = True
-        return response.json()
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise httpx.RemoteProtocolError("Gateway returned invalid JSON", request=response.request) from exc
+        if not isinstance(body, dict):
+            raise httpx.RemoteProtocolError("Gateway returned an invalid object", request=response.request)
+        return body
 
     def command(self, args, provider=None, timeout=120):
         env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         for key in ("MLX_API_TOKEN", "SAU_DESKTOP_TOKEN", "GATEWAY_DESKTOP_TOKEN", "GATEWAY_INTERNAL_TOKEN",
                     "GATEWAY_DATABASE_URL", "ADSPOWER_API_KEY", "BITBROWSER_API_KEY", "ADSPOWER_API_BASE", "BITBROWSER_API_BASE"):
             env.pop(key, None)
-        if provider:
+        if provider and provider != "local-chrome":
             base, key = self.settings.providers[provider]
             env.update({provider.upper() + "_API_KEY": key, provider.upper() + "_API_BASE": base})
         return subprocess.run([*self.settings.cli, *args], env=env, stdin=subprocess.DEVNULL, capture_output=True,
@@ -110,23 +122,39 @@ class Worker:
                     inventory(self.client, name, base, key)
                     for name, (base, key) in self.settings.providers.items()
                 ])
+                if self.settings.dev_aliases:
+                    self.providers.append({"provider": "local-chrome", "available": True,
+                                           "profiles": [{"profileId": alias, "name": alias}
+                                                        for alias in self.settings.dev_aliases]})
+            capabilities = CAPABILITIES if self.self_check else [*CAPABILITIES, PUBLISH_CAPABILITY]
             return await self.post("/session", {
                 "sessionId": self.session_id, "mode": "self-check" if self.self_check else "worker",
                 "contractVersion": 1, "release": __version__, "cliRelease": self.cli_release,
                 "capacity": self.settings.capacity,
                 "freeSlots": max(0, self.settings.capacity - len(self.active)),
-                "capabilities": CAPABILITIES if self.paired else [], "providers": self.providers,
+                "capabilities": capabilities if self.paired else [], "providers": self.providers,
             })
 
     async def claim(self, wait_seconds=15):
         response = await self.post("/publish-task/claim", {"sessionId": self.session_id, "waitSeconds": wait_seconds})
         return response["task"]
 
+    def target(self, task):
+        provider, profile_id = task["provider"], task["profileId"]
+        if provider == "local-chrome":
+            if profile_id in self.settings.dev_aliases:
+                return ["--account=" + profile_id, "--local-browser=chrome"]
+            return None
+        if provider in self.settings.providers and self.settings.providers[provider][1]:
+            if any(p["provider"] == provider and p["available"]
+                   and any(profile["profileId"] == profile_id for profile in p["profiles"]) for p in self.providers):
+                return ["--profile-id=" + profile_id]
+        return None
+
     async def execute(self, task):
         provider, platform = task["provider"], task["platform"]
-        profile_id = task["profileId"]
-        visible = any(p["provider"] == provider and p["available"]
-                      and any(profile["profileId"] == profile_id for profile in p["profiles"]) for p in self.providers)
+        target = self.target(task)
+        visible = target is not None
         evidence = {"cloudConnected": True, "cliInvoked": False, "profileVisible": visible,
                     "platformLogin": "unknown", "exitCode": None}
         if (not self.paired or not visible or platform not in PLATFORMS or task["action"] != "check"
@@ -134,7 +162,7 @@ class Worker:
                 or task["release"] != __version__):
             return evidence
         try:
-            proc = await asyncio.to_thread(self.command, [platform, "check", "--profile-id=" + profile_id], provider)
+            proc = await asyncio.to_thread(self.command, [platform, "check", *target], provider)
         except subprocess.TimeoutExpired:
             evidence["cliInvoked"] = True
             return evidence
@@ -147,16 +175,46 @@ class Worker:
             evidence["platformLogin"] = "login-required"
         return evidence
 
+    async def publish(self, task):
+        failed = {"outcome": "failed", "cliInvoked": False, "exitCode": None}
+        target = self.target(task)
+        if (not self.paired or not target or task["contractVersion"] != 1 or task["release"] != __version__
+                or task["platform"] != "tiktok" or task["action"] != "upload-video"
+                or task["requiredCapability"] != "tiktok.upload-video"):
+            return failed
+        try:
+            args = video_args(task, target)
+            # The CLI owns its publish budget and extends it for an intentional earliest-click wait.
+            proc = await asyncio.to_thread(self.command, args, task["provider"], timeout=None)
+        except (KeyError, TypeError, ValueError, OSError):
+            return failed
+        return publish_receipt(proc, no_publish=task["noPublish"])
+
     async def finish(self, record):
         workflow_id = record["workflowId"]
+        if workflow_id in self.active:
+            return
         self.active.add(workflow_id)
         try:
-            # A lost slot-status reply cannot invalidate a committed claim.
-            try:
-                await self.report(discover=False)
-            except httpx.HTTPError:
-                pass
-            receipt = await self.execute(record["task"])
+            claimed = record["task"]
+            if claimed["action"] == "check":
+                try:
+                    await self.report(discover=False)
+                except httpx.HTTPError:
+                    pass
+                receipt = await self.execute(claimed)
+            else:
+                # Only the current start response grants permission to create a child.
+                # A lost response, conflict or restart never execs from the stale claim.
+                await self.report()
+                response = await self.post("/publish-task/start", {"sessionId": self.session_id,
+                                           "workflowId": workflow_id})
+                task = response.get("task")
+                identity = ("workflowId", "postId", "channelId", "organizationId", "bindingId",
+                            "provider", "profileId", "platform", "action")
+                if not isinstance(task, dict) or any(task.get(k) != claimed.get(k) for k in identity):
+                    raise httpx.RemoteProtocolError("Gateway returned an inconsistent start grant")
+                receipt = await self.publish(task)
             return await self.post("/publish-task/result", {"sessionId": self.session_id,
                                    "workflowId": workflow_id, "receipt": receipt})
         finally:

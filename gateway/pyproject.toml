@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "social-media-web-api"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["fastapi>=0.110,<1", "pydantic>=2.7,<3", "psycopg[binary]>=3.2,<4", "uvicorn>=0.27,<1"]
+dependencies = ["fastapi>=0.110,<1", "pydantic>=2.7,<3", "psycopg[binary]>=3.2,<4", "uvicorn>=0.27,<1", "httpx>=0.27,<1"]
 
 [project.scripts]
 social-media-web-api = "sau_gateway.__main__:main"

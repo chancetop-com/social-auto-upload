@@ -20,6 +20,9 @@ To refresh the dependency lock deliberately, export the standalone CLI's pins wi
 
 Set `SAU_DESKTOP_TOKEN` to the fleet's desktop token. Select `SAU_PROVIDERS=bitbrowser`, `adspower`, or `bitbrowser,adspower`. The installer infers selected providers from the supplied keys when this variable is absent and defaults to BitBrowser on a new machine. Set each selected provider's `BITBROWSER_API_KEY` or `ADSPOWER_API_KEY`, or enter the missing key at the local non-echoing prompt. The corresponding `*_API_BASE` variables select a loopback URL. Use `WORKER_MAX_CONCURRENCY` to override the default capacity of one. `SAU_GATEWAY_URL` defaults to `https://social-media-web-api.connexup-dev.net`. An explicit gateway URL, selected providers, local keys and capacity are saved in the private install state and reused across bootstrap. The service environment takes precedence on startup.
 
+For an explicitly authorized development profile, set `SAU_DEV_CHROME_ALIASES` to the exact comma-separated test account aliases used by Postiz. Bootstrap saves the aliases for the next login. A fresh Chrome-only installation can omit managed provider keys. On an existing installation, set `SAU_PROVIDERS` to an empty string to explicitly deselect previously configured managed providers. Set `SAU_DEV_CHROME_ALIASES` to an empty string to retire the aliases.
+
+
 ```sh
 ./desktop/bootstrap.sh "$REVISION" "$SHA256" "$ARTIFACT_DIR" "$INSTALL_ROOT"
 "$INSTALL_ROOT/cli-service" check --provider bitbrowser --profile-id "$WINDOW_ID" --platform tiktok
