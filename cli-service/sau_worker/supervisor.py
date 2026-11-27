@@ -157,10 +157,13 @@ def local_status(root):
     ready = (worker_live and running and enabled and worker.get("claimReady", False)
              and not requested(state, supervisor.get("generation")) and time.time() - worker.get("updatedAt", 0) < 60)
     active = Children(state).count(excluding=worker.get("sessionId") if worker_live else None)
-    return {"root": str(root), "running": running, "enabled": enabled, "claimReady": bool(ready),
+    if worker_live:
+        active += worker.get("active", 0)
+    capacity = worker.get("capacity") if worker_live else None
+    capacity = capacity or int(os.environ.get("WORKER_MAX_CONCURRENCY", 1))
+    return {"root": str(root), "running": running, "enabled": enabled, "claimReady": bool(ready and active < capacity),
             "release": manifest.get("version"), "revision": manifest.get("revision"),
-            "activeCount": active + (worker.get("active", 0) if worker_live else 0),
-            "capacity": worker["capacity"] if worker_live and "capacity" in worker else int(os.environ.get("WORKER_MAX_CONCURRENCY", 1)),
+            "activeCount": active, "capacity": capacity,
             "pid": supervisor.get("pid") if running else None, "workerPid": supervisor.get("workerPid") if worker_live else None,
             "sessionId": worker.get("sessionId") if worker_live else None,
             "lastExit": supervisor.get("lastExit"), "nextAttempt": supervisor.get("nextAttempt") if running else None}

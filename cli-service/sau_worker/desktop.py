@@ -120,6 +120,8 @@ def install(root, revision, sha256, target):
     with lock(state / "install.lock") as acquired:
         if not acquired:
             raise ValueError("Another installer is active")
+        if (state / "uninstalled").exists() and program.exists():
+            raise ValueError("Uninstall is still pending; finish cli-service uninstall before reinstalling")
         marker = program / "package.sha256"
         if program.exists() and (not marker.is_file() or marker.read_text(encoding="ascii") != sha256):
             raise ValueError("Another release occupies this root; use the managed upgrade")
@@ -162,12 +164,18 @@ def main():
             if not acquired:
                 raise ValueError("Another desktop maintenance operation is active")
             if args == ["uninstall"]:
-                (state / "uninstalled").touch()
+                with lock(state / "install.lock") as can_remove:
+                    if not can_remove:
+                        raise ValueError("Another installer is active")
+                    (state / "uninstalled").touch()
+                    drain(root)
+                    native_login(root, remove=True)
+                return 0
             if args == ["disable"]:
                 (state / "disabled").touch()
-            if args[0] in {"stop", "disable", "uninstall", "restart"}:
+            if args[0] in {"stop", "disable", "restart"}:
                 drain(root)
-            if args[0] in {"uninstall", "disable"}:
+            if args == ["disable"]:
                 native_login(root, remove=True)
             if args == ["enable"]:
                 (state / "disabled").unlink(missing_ok=True)

@@ -131,6 +131,9 @@ def test_stop_waits_through_authorized_publish_and_result_then_allows_next_login
     assert api.reports == []
     first = cli("start")
     assert cli("start") == first
+    native = [json.loads(line) for line in (root.parent / "home/commands").read_text().splitlines()]
+    assert ["open", "-g", "-a", "BitBrowser"] in native
+    assert sum(cmd[:2] == ["launchctl", "bootstrap"] for cmd in native) == 1
     wait_for(lambda: api.reports)
     assert not cli("status")["claimReady"] and api.claims == []
     api.ready = True
