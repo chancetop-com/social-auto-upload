@@ -136,12 +136,25 @@ class CheckReceipt(WireModel):
 
 
 class PublishReceipt(WireModel):
-    outcome: Literal["published", "prepared", "failed", "unknown"]
+    outcome: Literal["published", "prepared", "failed", "unknown", "processing"]
     cliInvoked: StrictBool
     exitCode: int | None
 
+    reason: Literal["login_required", "upload_timeout", "pre_submit_failure", "possible_submission", "authorization_declined"] | None = None
+    releaseId: Identifier | None = None
+    url: Annotated[str, Field(max_length=2048)] | None = None
+    publishAttempted: StrictBool | None = None
+
     @model_validator(mode="after")
     def consistent_evidence(self):
+        if self.url:
+            parts = urlsplit(self.url)
+            if parts.scheme not in {"https", "http"} or not parts.hostname or parts.username or parts.password:
+                raise ValueError("Expected a public post URL")
+        if self.outcome == "processing" and (not self.cliInvoked or self.exitCode is not None):
+            raise ValueError("Processing describes a running child")
+        if self.outcome == "failed" and (self.exitCode == 9 or self.publishAttempted):
+            raise ValueError("A possible submission requires review")
         if not self.cliInvoked and self.exitCode is not None:
             raise ValueError("exitCode requires a child")
         if self.outcome in ("published", "prepared") and not (self.cliInvoked and self.exitCode == 0):
