@@ -32,7 +32,21 @@ class ProviderReport(WireModel):
     profiles: list[Profile]
 
 
+ReleaseSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+PackageDigest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+DesktopTarget = Literal["macos-arm64", "macos-x86_64", "windows-x86_64"]
+
+
+class Installation(WireModel):
+    machineId: UUID
+    revision: ReleaseSha
+    sha256: PackageDigest
+    target: DesktopTarget
+    batchId: UUID | None = None
+
+
 class Session(WireModel):
+    installation: Installation | None = None
     mode: Literal["worker", "self-check"] = "worker"
     sessionId: UUID
     cliRelease: Identifier | None = None

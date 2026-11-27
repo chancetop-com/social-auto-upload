@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from . import leases
+from . import leases, releases
 from .wakeups import Wakeups
 from .database import Conflict, Missing, Store
 from .models import CheckTarget, CheckTask, Claim, LeaseCommand, LeaseRelease, PublishTask, Result, Session, Start
@@ -35,6 +35,8 @@ def create_app(stopping=None):
     store = Store(os.environ["GATEWAY_DATABASE_URL"])
     wakeups = Wakeups()
     app = FastAPI(lifespan=wakeups.lifespan, title="social-media-web-api", docs_url=None, redoc_url=None, openapi_url=None)
+
+    releases.register(app, store, desktop, internal)
 
     @app.exception_handler(Missing)
     async def missing(request, exc):

@@ -5,7 +5,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from . import leases
+from . import leases, releases
 from .models import CheckReceipt, PublishReceipt, PublishTask
 
 
@@ -52,11 +52,23 @@ class Store:
 
     def report(self, session):
         with self.connect() as db:
-            return db.execute("""
+            if session.installation:
+                releases.current_lock(db)
+            payload = session.model_dump(mode="json")
+            if not session.installation:
+                payload.pop("installation")
+            result = db.execute("""
                 INSERT INTO desktop_session(session_id, report) VALUES (%s,%s)
                 ON CONFLICT (session_id) DO UPDATE SET report=excluded.report, last_contact_at=clock_timestamp()
+                WHERE desktop_session.report->>'mode'=excluded.report->>'mode'
+                AND (desktop_session.report->'installation') IS NOT DISTINCT FROM (excluded.report->'installation')
                 RETURNING session_id AS "sessionId", last_contact_at AS "lastContactAt"
-            """, (session.sessionId, Jsonb(session.model_dump(mode="json")))).fetchone()
+            """, (session.sessionId, Jsonb(payload))).fetchone()
+            if not result:
+                raise Conflict()
+            if (install := session.installation) and session.mode == "worker":
+                releases.observe(db, install.machineId, install.target, install.revision, install.sha256, session.sessionId)
+            return result
 
     def session(self, session_id):
         with self.connect() as db:
@@ -105,7 +117,7 @@ class Store:
             if row is None:
                 raise Missing()
             report = row["report"]
-            if not report["freeSlots"]:
+            if not report["freeSlots"] or releases.blocked_claim(db, report):
                 return None
             # The session row serializes concurrent polls even if a stale report advertises free slots.
             if leases.occupied_slots(db, session_id) >= report["capacity"]:

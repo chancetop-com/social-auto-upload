@@ -118,3 +118,20 @@ Send the desktop bearer and the original `sessionId`, `workflowId` and `leaseGra
 | `POST /profile-lease/release` | Include `"windowClosed":true` after observing closure for the idle grant. A subsequent claim or completion fences old closure messages. |
 
 Configure `GATEWAY_PROFILE_RENEW_SECONDS` (default 300) and `GATEWAY_PROFILE_LEASE_SECONDS` (default 900). Both are positive integer seconds, with renewal strictly shorter than validity. If the window state cannot be confirmed, the idle grant expires. After expiry, the next eligible session can claim another pending occurrence. Each original claim keeps its claimant, result history and deadline.
+
+## Managed desktop releases
+
+Apply the bundled Gateway migrations, including `038_desktop_releases.sql`. PostgreSQL stores the release, batches, receipts and package contents. Uploads commit atomically after the SHA-256 matches. Downloads stream the immutable package in bounded chunks. Budget database and backup storage for all retained native packages. Both public release operations and package downloads use the existing desktop bearer under `/session/release`.
+
+From the canonical `chancetop-com/social-auto-upload` checkout, prepare `desktop/build.py` ZIP and matching `.sha256` files for each intended OS/CPU from the same revision. The operator command resolves a local branch or commit, defaulting to `main`. Use a current checkout. Point `SAU_RELEASE_GATEWAY_URL` at the internal dev Gateway HTTPS origin or a loopback port-forward to its Service. Supply the internal bearer in `GATEWAY_INTERNAL_TOKEN`. Keep the internal endpoints off the public ingress.
+
+```sh
+python3 desktop/release.py worker --env dev --ref main --artifacts /path/to/packages --watch
+python3 desktop/release.py status --env dev --release-id "$RELEASE_ID" --watch
+```
+
+The first JSON object includes `releaseId`, `revision` and the per-target `packages` digest map. The watch prints changes and exits on online completion, a package defect or supersession. Closing the terminal leaves the Gateway's durable release in place. Use the second command to resume observation. An omitted environment or disabled `uat` or `prod` exits before registration. Repeating a registration with the same pins returns its existing release. A different manifest for the same revision returns HTTP 409.
+
+The supervisor discovers approvals at `POST /session/release/discover`. Fresh installs use the last validated package for their OS/CPU, or take the first validation batch in a new environment. Each grant has its own `batchId`. `POST /session/release/progress` records draining, staging, the completed switch and the new worker's check. Gateway matches the installation UUID, revision, target, digest, observed worker and CLI versions, capabilities and the dedicated check session's successful persisted receipt. The checkout and no-publish commands stay on the desktop. Old publication claims retain their original session and deadline.
+
+`GATEWAY_RELEASE_DISCONNECT_SECONDS` defaults to 300. An online validator keeps its lease while draining. A lost validator's batch expires by database time, allowing another recent installation to take over even if it is the last one. `GATEWAY_RELEASE_ONLINE_SECONDS` defaults to 90. Inspect `batches[].validationDeadline`, `replacementFor`, `latePhase`, `checkWorkflowId`, `nodes[].lastContactAt` and `pauseReason`. `onlineReady` requires at least one online installation and successful validation of every online installation. Offline nodes are evaluated when they return. A confirmed package defect pauses its release. Register a fixed revision to start another batch.
