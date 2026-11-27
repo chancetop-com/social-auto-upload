@@ -62,3 +62,22 @@ def test_busy_crash_keeps_child_occupied_and_force_targets_only_owned_children(t
             registry = Children(tmp_path / name)
             registry.terminate()
             wait_for(lambda: registry.count() == 0)
+
+
+def test_busy_windows_marker_cannot_discard_a_completed_cli_result(tmp_path, monkeypatch):
+    from sau_worker.children import Children
+    (tmp_path / "sau_cli.py").write_text("print('confirmed')\n")
+    package = Path(__file__).resolve().parents[2] / "cli-service"
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, (tmp_path, package)))}
+    children = Children(tmp_path)
+    unlink = Path.unlink
+    def briefly_open(path, *args, **kwargs):
+        if path.suffix == ".lock":
+            raise PermissionError("fixture status reader holds the handle")
+        return unlink(path, *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", briefly_open)
+        with children.launch("session", (sys.executable, "-P"), ["publish"], env) as process:
+            output, _ = process.communicate(timeout=3)
+    assert output.strip() == "confirmed" and process.returncode == 0
+    assert children.count() == 0
