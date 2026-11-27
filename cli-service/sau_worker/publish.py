@@ -1,5 +1,12 @@
 """Settle the original upload using the child exit and the selected platform's evidence."""
+import re
+
 from .platforms import successful_receipt
+
+
+PRE_SUBMIT_TIMEOUT = re.compile(
+    r"(?:TikTok|Instagram|Rednote|小红书) ?发布超时（[0-9]+ 分钟）：尚未点击发布，未发布任何内容。"
+)
 
 
 def receipt(proc, task):
@@ -11,8 +18,9 @@ def receipt(proc, task):
             return {**evidence, **success}
     if attempted:
         return {**evidence, "outcome": "unknown", "reason": "possible_submission", "publishAttempted": True}
-    before_timeout = proc.returncode == 1 and "尚未点击发布" in proc.stderr and "发布超时" in proc.stderr
-    explicit_failure = proc.returncode == 1 and "publish_attempted=false" in proc.stderr.splitlines()
+    diagnostics = proc.stderr.splitlines()
+    before_timeout = proc.returncode == 1 and diagnostics and PRE_SUBMIT_TIMEOUT.fullmatch(diagnostics[-1])
+    explicit_failure = proc.returncode == 1 and diagnostics[-1:] == ["publish_attempted=false"]
     if proc.returncode in (2, 10, 11) or explicit_failure or before_timeout:
         reason = "pre_submit_failure"
         if proc.returncode == 10:

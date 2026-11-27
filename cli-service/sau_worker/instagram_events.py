@@ -3,6 +3,8 @@ import json
 from subprocess import CompletedProcess
 from threading import Thread
 
+from .publish import PRE_SUBMIT_TIMEOUT
+
 
 def bounded_lines(stream):
     # A long line can contain merchant copy or a media payload. Discard it in bounded pieces.
@@ -11,20 +13,21 @@ def bounded_lines(stream):
         if len(line) == limit and not line.endswith("\n"):
             while line and not line.endswith("\n"):
                 line = stream.readline(limit)
+            yield ""  # A discarded final line must also supersede earlier diagnostics.
             continue
         yield line.rstrip("\r\n")
 
 
 def instagram_command(proc, nonce, on_processing):
     marker = "SAU-EVENT " + nonce + " "
-    evidence = set()
+    attempted = False
+    last_diagnostic = ""
 
     def collect_stderr():
+        nonlocal attempted, last_diagnostic
         for line in bounded_lines(proc.stderr):
-            if line in ("publish_attempted=true", "publish_attempted=false"):
-                evidence.add(line)
-            elif "尚未点击发布" in line and "发布超时" in line:
-                evidence.add("发布超时 尚未点击发布")
+            attempted |= line == "publish_attempted=true"
+            last_diagnostic = line if line == "publish_attempted=false" or PRE_SUBMIT_TIMEOUT.fullmatch(line) else ""
 
     stderr_reader = Thread(target=collect_stderr, daemon=True)
     stderr_reader.start()
@@ -49,6 +52,5 @@ def instagram_command(proc, nonce, on_processing):
     finally:
         stderr_reader.join()
     code = proc.wait()
-    if processing and code:
-        evidence.add("publish_attempted=true")
-    return CompletedProcess(proc.args, code, json.dumps(terminal), "\n".join(sorted(evidence)))
+    diagnostic = "publish_attempted=true" if attempted or (processing and code) else last_diagnostic
+    return CompletedProcess(proc.args, code, json.dumps(terminal), diagnostic)

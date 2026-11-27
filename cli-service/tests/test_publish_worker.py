@@ -323,8 +323,9 @@ async def test_optional_preparation_runs_only_media_enqueue(child):
 
 
 @pytest.mark.parametrize(("code", "stderr", "outcome", "reason"), [
-    (1, "TikTok发布超时（15 分钟）：尚未点击发布，结束。", "failed", "upload_timeout"),
+    (1, "TikTok 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
     (1, "Private media URL", "unknown", "possible_submission"),
+    (1, "Unexpected exception mentioning 发布超时 after 尚未点击发布", "unknown", "possible_submission"),
     (1, "Private media URL\npublish_attempted=false", "failed", "pre_submit_failure"),
     (10, "private account label", "failed", "login_required"),
     (9, "private diagnostic", "unknown", "possible_submission"),
@@ -338,3 +339,16 @@ async def test_merchant_safe_receipt_on_failure(child, code, stderr, outcome, re
     assert (receipt["outcome"], receipt["reason"]) == (outcome, reason)
     assert "private" not in json.dumps(receipt).lower()
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("diagnostic,outcome,reason", [
+    ("Instagram 发布超时（15 分钟）：尚未点击发布，未发布任何内容。", "failed", "upload_timeout"),
+    ("publish_attempted=false\nfinal unknown diagnostic", "unknown", "possible_submission"),
+    ("publish_attempted=false\n" + "x" * 16384, "unknown", "possible_submission"),
+])
+async def test_instagram_stream_preserves_only_definitive_terminal_diagnostic(child, diagnostic, outcome, reason):
+    selection = {"platform": "instagram", "requiredCapability": "instagram.upload-video", "settings": {"title": "Title"}}
+    _, _, receipts, _ = await desktop(child, selection=selection, code=1, output="", error=diagnostic)
+    assert receipts[-1]["receipt"]["outcome"] == outcome
+    assert receipts[-1]["receipt"]["reason"] == reason
