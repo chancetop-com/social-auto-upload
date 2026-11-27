@@ -41,3 +41,21 @@ def test_builder_rejects_an_unverified_runtime_before_using_it(tmp_path):
     assert result.returncode != 0
     assert "Runtime SHA-256 mismatch" in result.stderr
     assert not (tmp_path / "out").exists()
+
+
+def test_native_package_records_only_shipped_entrypoints():
+    import csv
+    import io
+    import os
+    artifact = os.environ.get("SAU_TEST_DESKTOP_ARTIFACT")
+    if not artifact:
+        pytest.skip("set SAU_TEST_DESKTOP_ARTIFACT to a native package")
+    with zipfile.ZipFile(artifact) as archive:
+        names = set(archive.namelist())
+        for name in names:
+            if ".dist-info/RECORD" not in name or "/social_auto_upload-" not in name:
+                continue
+            rows = csv.reader(io.StringIO(archive.read(name).decode()))
+            site = name.split("social_auto_upload-")[0]
+            for relative, _, _ in rows:
+                assert site + relative in names

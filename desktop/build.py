@@ -1,5 +1,6 @@
 """Build a matched desktop release from a selected Git revision on its native runner."""
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -124,6 +125,15 @@ def build(args):
         subprocess.run([*install, "--require-hashes", "-r", source / "desktop/requirements.lock"], check=True)
         subprocess.run([*install, "--no-deps", "--no-index", "--find-links", wheels, "social-auto-upload",
                         "social-media-worker"], check=True)
+        for record in packages.glob("*.dist-info/RECORD"):
+            # Generated scripts contain the build path in their shebang and hash. We
+            # invoke only modules, so neither their file nor RECORD row ships.
+            with record.open(encoding="utf-8", newline="") as source_record:
+                shipped = [row for row in csv.reader(source_record)
+                           if row[0].split("/")[0] not in ("bin", "Scripts")
+                           and not row[0].endswith("/uv_cache.json")]
+            with record.open("w", encoding="utf-8", newline="") as destination_record:
+                csv.writer(destination_record, lineterminator="\n").writerows(sorted(shipped))
         for entry in packages.iterdir():
             if entry.name in ("bin", "Scripts", ".lock"):
                 continue  # Generated shell entry points contain paths to this build stage.

@@ -60,6 +60,8 @@ def configure(state, env, prompt=getpass):
     for provider in selected:
         key = provider.upper() + "_API_KEY"
         if not values.get(key, "").strip():
+            if prompt is getpass and not sys.stdin.isatty():
+                raise ValueError(f"Set {key} or run bootstrap from an interactive terminal")
             values[key] = prompt(f"{key}: ").strip()
             if not values[key]:
                 raise ValueError(f"Missing {key}")
@@ -144,7 +146,7 @@ def start(root):
     flags = {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     try:
         with (root / "state/worker.log").open("ab") as log:
-            child = subprocess.Popen([interpreter(root), "-IB", "-m", "sau_worker.desktop", "run", ready],
+            child = subprocess.Popen([interpreter(root), "-IB", "-m", "sau_worker.desktop", "_claim", ready.name],
                                      stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=root, **flags)
         deadline = time.monotonic() + 15
         while not ready.is_file():
@@ -205,8 +207,12 @@ def main():
     apply_settings(root)
     if args == ["start"]:
         return start(root)
-    if args[:1] == ["run"] and len(args) in (1, 2):
-        return run(root, Path(args[1]) if len(args) == 2 else None)
+    if args == ["run"]:
+        return run(root)
+    if len(args) == 2 and args[0] == "_claim":
+        from uuid import UUID
+        nonce = UUID(hex=args[1].removeprefix("starting-"))
+        return run(root, root / "state" / ("starting-" + nonce.hex))
     return worker_main()
 
 
