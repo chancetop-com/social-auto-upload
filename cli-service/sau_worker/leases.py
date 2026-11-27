@@ -17,7 +17,7 @@ async def heartbeat(worker, body, interval):
     while True:
         await asyncio.sleep(interval)
         try:
-            await worker.post("/profile-lease/renew", body)
+            await worker.post("/publish-task/profile-lease/renew", body)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 409:
                 return
@@ -52,13 +52,13 @@ async def command_lease(worker, record):
             local_close_marker.reset(token)
             if not cancelled:
                 try:
-                    completion = await worker.post("/profile-lease/complete", body)
+                    completion = await worker.post("/publish-task/profile-lease/complete", body)
                     if completion["idle"]:
                         if task["provider"] == "local-chrome":
                             closed = marker.is_file()
                         else:
                             closed = await window_closed(worker.client, worker.settings.providers, task)
                         if closed:
-                            await worker.post("/profile-lease/release", {**body, "windowClosed": True})
+                            await worker.post("/publish-task/profile-lease/release", {**body, "windowClosed": True})
                 except httpx.HTTPError:
                     pass  # A lost completion or observation falls back to expiry.

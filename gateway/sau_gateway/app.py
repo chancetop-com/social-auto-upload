@@ -119,6 +119,7 @@ def create_app(stopping=None):
             stop.cancel()
             await asyncio.gather(disconnect, stop, return_exceptions=True)
 
+    @app.post("/publish-task/profile-lease/renew", dependencies=desktop)
     @app.post("/profile-lease/renew", dependencies=desktop)
     def renew(body: LeaseCommand):
         with store.connect() as db:
@@ -134,6 +135,7 @@ def create_app(stopping=None):
                 raise Conflict()
             return {"idle": idle}
 
+    @app.post("/publish-task/profile-lease/complete", dependencies=desktop)
     @app.post("/profile-lease/complete", dependencies=desktop)
     async def complete(body: LeaseCommand):
         status = await asyncio.to_thread(complete_transaction, body)
@@ -146,6 +148,7 @@ def create_app(stopping=None):
                 raise Conflict()
             return {"released": True}
 
+    @app.post("/publish-task/profile-lease/release", dependencies=desktop)
     @app.post("/profile-lease/release", dependencies=desktop)
     async def release(body: LeaseRelease):
         status = await asyncio.to_thread(release_transaction, body)

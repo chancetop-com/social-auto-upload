@@ -114,10 +114,14 @@ class MobileNetwork(httpx.AsyncHTTPTransport):
         self.renewed = asyncio.Event()
 
     async def handle_async_request(self, request):
-        if self.offline and request.url.path == '/profile-lease/renew':
+        # FBR dev publishes only these two path prefixes for desktop traffic.
+        if (request.headers.get("Authorization") == DESKTOP["Authorization"]
+                and request.url.path.split("/")[1] not in ("session", "publish-task")):
+            return httpx.Response(404, request=request)
+        if self.offline and request.url.path == '/publish-task/profile-lease/renew':
             raise httpx.ConnectError('fixture disconnect', request=request)
         response = await super().handle_async_request(request)
-        if request.url.path == '/profile-lease/renew' and response.is_success:
+        if request.url.path == '/publish-task/profile-lease/renew' and response.is_success:
             self.renewed.set()
         return response
 
@@ -165,7 +169,7 @@ async def test_worker_renews_while_waiting_then_only_next_merchant_transfers(pos
                 late = {k: first[k] for k in ('sessionId', 'workflowId', 'leaseGrantId')}
                 for method in ('renew', 'complete', 'release'):
                     event = {**late, 'windowClosed': True} if method == 'release' else late
-                    stale = await asyncio.to_thread(api.post, '/profile-lease/' + method, json=event, headers=DESKTOP)
+                    stale = await asyncio.to_thread(api.post, '/publish-task/profile-lease/' + method, json=event, headers=DESKTOP)
                     assert stale.status_code == 409
                 (tmp_path / 'A.finish').touch()
                 old_result = await job_a

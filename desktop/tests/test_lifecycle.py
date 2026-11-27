@@ -71,7 +71,7 @@ def installation(tmp_path):
             elif self.path == "/publish-task/start":
                 local.starts.append(data)
                 reply = {"task": task}
-            elif self.path in {"/profile-lease/renew", "/profile-lease/complete"}:
+            elif self.path in {"/publish-task/profile-lease/renew", "/publish-task/profile-lease/complete"}:
                 local.leases.append((self.path, data))
                 reply = {"idle": False}
             elif self.path == "/publish-task/result":
@@ -320,10 +320,10 @@ def test_draining_worker_keeps_original_lease_until_its_cli_finishes(installatio
         count = len(api.leases)
         wait_for(lambda: len(api.leases) >= count + 2)
         grant = {"workflowId": "occ", "sessionId": api.claims[0], "leaseGrantId": "fixture-grant"}
-        assert all(path == "/profile-lease/renew" and body == grant for path, body in api.leases)
+        assert all(path == "/publish-task/profile-lease/renew" and body == grant for path, body in api.leases)
         (root / "finish").touch()
         wait_for(lambda: api.results)
-        assert api.leases[-1] == ("/profile-lease/complete", grant) and stop.poll() is None
+        assert api.leases[-1] == ("/publish-task/profile-lease/complete", grant) and stop.poll() is None
     finally:
         (root / "finish").touch()
         api.ack.set()

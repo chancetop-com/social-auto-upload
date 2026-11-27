@@ -113,9 +113,11 @@ Send the desktop bearer and the original `sessionId`, `workflowId` and `leaseGra
 
 | Request | Effect |
 | --- | --- |
-| `POST /profile-lease/renew` | Extend an active command's live grant from PostgreSQL's current time. The worker renews while its CLI is waiting for a scheduled publish. |
-| `POST /profile-lease/complete` | End this command and free its slot and platform. Returns `{"idle":true}` if it was the last member. |
-| `POST /profile-lease/release` | Include `"windowClosed":true` after observing closure for the idle grant. A subsequent claim or completion fences old closure messages. |
+| `POST /publish-task/profile-lease/renew` | Extend an active command's live grant from PostgreSQL's current time. The worker renews while its CLI is waiting for a scheduled publish. |
+| `POST /publish-task/profile-lease/complete` | End this command and free its slot and platform. Returns `{"idle":true}` if it was the last member. |
+| `POST /publish-task/profile-lease/release` | Include `"windowClosed":true` after observing closure for the idle grant. A subsequent claim or completion fences old closure messages. |
+
+The dev ingress exposes the `/session` and `/publish-task` prefixes. Direct Gateway callers can still use the legacy `/profile-lease/{renew,complete,release}` paths with the same desktop bearer and grant identity.
 
 Configure `GATEWAY_PROFILE_RENEW_SECONDS` (default 300) and `GATEWAY_PROFILE_LEASE_SECONDS` (default 900). Both are positive integer seconds, with renewal strictly shorter than validity. If the window state cannot be confirmed, the idle grant expires. After expiry, the next eligible session can claim another pending occurrence. Each original claim keeps its claimant, result history and deadline.
 

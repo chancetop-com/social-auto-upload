@@ -64,7 +64,7 @@ def test_racing_merchants_and_platforms_share_only_with_grant_holder(gateway):
 
 def event(api, record, action, **fields):
     body = {k: record[k] for k in ('workflowId', 'leaseGrantId', 'sessionId')}
-    return api.post('/profile-lease/' + action, headers=DESKTOP, json={**body, **fields})
+    return api.post('/publish-task/profile-lease/' + action, headers=DESKTOP, json={**body, **fields})
 
 
 def test_finishing_commands_releases_only_their_own_platform_and_slot(gateway):
@@ -89,3 +89,16 @@ def test_finishing_commands_releases_only_their_own_platform_and_slot(gateway):
     following = claim(gateway, b)
     assert following['workflowId'] == 'merchant-2'
     assert following['leaseGrantId'] != first['leaseGrantId']
+
+
+def test_public_and_legacy_lease_routes_require_the_desktop_bearer(gateway):
+    # Direct internal callers can finish a grant made before the desktop URL change.
+    a = desktop(gateway)
+    enqueue_video(gateway, "kept-grant")
+    record = claim(gateway, a)
+    body = {key: record[key] for key in ("workflowId", "leaseGrantId", "sessionId")}
+    for action in ("renew", "complete", "release"):
+        payload = {**body, "windowClosed": True} if action == "release" else body
+        for base in ("/publish-task/profile-lease/", "/profile-lease/"):
+            assert gateway.post(base + action, headers=INTERNAL, json=payload).status_code == 401
+        assert gateway.post("/profile-lease/" + action, headers=DESKTOP, json=payload).is_success
