@@ -2,6 +2,7 @@
 set -eu
 umask 077
 scripts=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
+if [ "${0##*/}" = approved.sh ]; then exec /bin/sh "$scripts/bootstrap.sh" --approved "$@"; fi
 root=${1:-"$HOME/Library/Application Support/social-auto-upload"}
 mkdir -p -- "$root/state"
 root=$(cd -- "$root" && pwd -P)
@@ -21,11 +22,6 @@ trap 'exit 1' HUP INT TERM
 if [ ! -f "$root/state/machine-id" ]; then
     /usr/bin/uuidgen | tr A-F a-f > "$stage/id"
     ln "$stage/id" "$root/state/machine-id" || test -f "$root/state/machine-id"
-fi
-if [ "$(/usr/bin/uname -m)" = arm64 ] || [ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null || :)" = 1 ]; then
-    target=macos-arm64
-else
-    target=macos-x86_64
 fi
 req() {
     if [ -n "${SAU_GATEWAY_CA_FILE:-}" ]; then set -- --cacert "$SAU_GATEWAY_CA_FILE" "$@"; fi
@@ -54,8 +50,12 @@ revision=$(cat "$stage/revision")
 digest=$(cat "$stage/sha256")
 req "$base/session/release/packages/$digest" -o "$stage/sau-desktop-$revision-$target.zip"
 if [ -f "$stage/assignment.json" ]; then export SAU_BOOTSTRAP_ASSIGNMENT="$stage/assignment.json"; fi
-rc=0
-"$scripts/bootstrap.sh" "$revision" "$digest" "$stage" "$root" || rc=$?
+# The installer runs in its own subshell with errexit enabled. A conditional
+# invocation of a shell function would disable its failure checks.
+set +e
+install_pinned "$revision" "$digest" "$stage" "$root"
+rc=$?
+set -e
 if [ "$rc" = 65 ] && [ -f "$stage/assignment.json" ]; then
     /usr/bin/perl -MJSON::PP -e '
       sub load_file {local $/; open my $f,"<",$_[0] or die $!; decode_json(<$f>)}

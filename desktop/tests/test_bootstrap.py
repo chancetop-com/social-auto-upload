@@ -28,8 +28,12 @@ def test_pinned_but_unsafe_package_does_not_change_live_install(tmp_path, name, 
         bundle.writestr(info, "outside")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     root = tmp_path / "Selected Install"
-    try_install = subprocess.run(["/bin/sh", DESKTOP / "bootstrap.sh", SHA, digest, tmp_path, root],
-                                 capture_output=True, text=True, env={"HOME": str(tmp_path)})
+    # An exported offline installer must verify the native target without its
+    # approved-discovery companion or a target supplied by the environment.
+    installer = tmp_path / "bootstrap.sh"
+    installer.write_bytes((DESKTOP / "bootstrap.sh").read_bytes())
+    try_install = subprocess.run(["/bin/sh", installer, SHA, digest, tmp_path, root],
+                                 capture_output=True, text=True, env={"HOME": str(tmp_path), "target": "windows-x86_64"})
     assert try_install.returncode != 0
     assert "unsafe package member" in try_install.stderr.lower()
     assert not (root / "program").exists()
