@@ -78,7 +78,7 @@ def dispatch():
     marker = Path(sys.argv.pop(1))
     # Readers can briefly hold the lock while checking capacity.
     while True:
-        with lock(marker) as acquired:
+        with lock(marker, lifetime=True) as acquired:
             if acquired:
                 marker.with_suffix(".ready").touch()
                 if sys.stdin.readline() == "run\n":

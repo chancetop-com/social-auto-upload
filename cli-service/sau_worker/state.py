@@ -35,28 +35,34 @@ def atomic_write(path, value, *, executable=False):
 
 
 @contextmanager
-def lock(path, *, existing=False):
-    # Both primitives release automatically on process death. Leave the inode in place.
-    with path.open("r+b" if existing else "a+b") as stream:
+def lock(path, *, existing=False, lifetime=False):
+    # A non-inheritable raw descriptor can be owned by the OS until this PID
+    # actually exits, including while CPython joins non-daemon cleanup threads.
+    flags = os.O_RDWR if existing else os.O_RDWR | os.O_CREAT
+    fd = os.open(path, flags, 0o600)
+    acquired = False
+    try:
         if os.name == "nt":
             import msvcrt
-            if stream.seek(0, os.SEEK_END) == 0:
-                stream.write(b"\0")
-                stream.flush()
-            stream.seek(0)
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"\0")
+            os.lseek(fd, 0, os.SEEK_SET)
             try:
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
                 acquired = True
             except OSError:
-                acquired = False
+                pass
         else:
             import fcntl
             try:
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 acquired = True
             except BlockingIOError:
-                acquired = False
+                pass
         yield acquired
+    finally:
+        if not lifetime or not acquired:
+            os.close(fd)
 
 
 def read(path):
