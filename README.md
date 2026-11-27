@@ -1,64 +1,16 @@
 # social-auto-upload
 
 ![Python](https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&logoColor=white)
-![License](https://img.shields.io/github/license/dreammis/social-auto-upload)
-![Release](https://img.shields.io/github/v/release/dreammis/social-auto-upload?display_name=tag)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-8-0D9488?logo=github)](./docs/skill-distribution.md)
 
 `social-auto-upload` 是一个面向内容创作者和运营者的多平台发布工具，提供统一 CLI 和供 Codex、OpenClaw、Claude Code 等 Agent 使用的 Skill。
 
 支持七个平台的视频发布，其中六个平台也提供图文发布。文章可用 `sau article` 在本地渲染。
 
-CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。日常变更记录见 [CHANGELOG.md](./CHANGELOG.md)，稳定版本通过 GitHub Release 发布。
+CLI 命令按平台维护在 [cli/sau_commands](./cli/sau_commands)，发布流程位于 [cli/uploader](./cli/uploader)。日常变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
 
 <img src="media/show/tkupload.gif" alt="tiktok show" width="800"/>
-
-## 💎 赞助商
-
-<table width="100%">
- <tr>
-    <td width="25%" align="center" valign="middle">
-      <a href="https://chilltion.com/?ref=1y5k5k">
-        <img src="static/DolOffer.png" alt="DolOffer Sponsor" width="180">
-      </a>
-    </td>
-    <td width="75%" align="left" valign="middle">
-      感谢 <a href="https://doloffer.com/" target="_blank">DolOffer</a> 对本项目的支持！对于做内容矩阵、多平台分发和 AI 自动化运营的创作者来说，ChatGPT、Claude、YouTube Premium、Spotify、Apple Music、Notion、Office 等数字工具往往是长期成本。DolOffer 提供 AI、视频、音乐和效率工具相关的订阅与充值服务，帮助用户更低成本地配置常用数字产品。更多说明可查看 <a href="https://github.com/Doloffer-g/guide" target="_blank">DolOffer Guide</a>。使用优惠码 <code>AI8888</code> 可额外享受 9 折优惠，具体价格和服务规则以官网为准。  
-    </td>
-  </tr>
-  <tr>
-    <td width="25%" align="center" valign="middle">
-      <a href="https://chilltion.com/?ref=1y5k5k">
-        <img src="static/chilltion.png" alt="chilltion Sponsor" width="180">
-      </a>
-    </td>
-    <td width="75%" align="left" valign="middle">
-      轻视AI：一句话生产MG动画，适合知识，科普，讲解，教程，介绍等类型视频的低成本制作，视频矩阵，养号等，成本只有seedance等1%。现在<a href="https://chilltion.com/?ref=1y5k5k">注册</a>送1500积分
-    </td>
-  </tr>
-    <tr>
-        <td width="25%" align="center" valign="middle">
-          <a href="http://t.clawpower.vip/1005">
-            <img src="static/clawpower.png" alt="ClawPower Sponsor" width="180">
-          </a>
-        </td>
-        <td width="75%" align="left" valign="middle">
-          ClawPower 是一家稳定可靠 AI 大模型中转服务商，提供 Claude、GPT、Gemini 60+ 大模型接入。无论是 OpenClaw、Hermes 智能体自动化场景，Claude Code、Codex 编程工具接入，还是公众号、小红书内容创作；都能获得稳定、顺滑、可长期使用的模型服务体验。低至官方价格的 30%，点击<a href="http://t.clawpower.vip/1005">免费领取 5 刀现金</a>体验券
-        </td>
-      </tr>
-  <tr>
-    <td width="25%" align="center" valign="middle">
-      <img src="static/wechat.png" alt="Sponsor Contact" width="150">
-    </td>
-    <td width="75%" align="left" valign="middle">
-      <strong>成为赞助商</strong><br>
-      如果您有意赞助本项目，请扫描左侧微信二维码（添加时请注明来意：<strong>赞助</strong>）。
-    </td>
-  </tr>
-</table>
-
----
-
 
 ## 目录
 
@@ -68,10 +20,8 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 - [🏁 快速开始](#快速开始)
 - [📝 更新日志](./CHANGELOG.md)
 - [📃 详细文档](#详细文档)
-- [🐾 交流与支持](#交流与支持)
 - [🤝 贡献指南](#贡献指南)
 - [📜 许可证](#许可证)
-- [⭐ Star History](#star-history)
 
 ## 💡功能特性
 
@@ -92,10 +42,12 @@ CLI 命令按平台维护在 `sau_commands/`，发布流程位于 `uploader/`。
 
 ### 自己上手使用
 
-普通用户可按以下文档安装和更新：
+从 [chancetop-com/social-auto-upload](https://github.com/chancetop-com/social-auto-upload) 获取源码后，在仓库根目录安装和更新：
 
 - [安装说明](./docs/install.md)
 - [更新说明](./docs/update.md)
+
+独立安装可在仓库根目录执行 `uv build --wheel`，再将 `dist/` 里的 wheel 安装到目标 Python 环境。数据目录和已有配置的查找规则见[安装说明](./docs/install.md#5-配置-confpy)。
 
 基础安装 `uv pip install -e .` 只安装项目依赖，不下载或检查浏览器。七个平台默认使用系统 Chrome 和专用持久化 Profile；Chrome 由用户按 [Google 官方指引](https://www.google.com/chrome/)安装，项目不自动安装/更新。可选完整 Chromium 或 `LOCAL_CHROME_PATH` 指定的兼容 binary，只需准备实际来源。托管动作无需本地 Chrome/Chromium。升级保留已有 `conf.py`，包括 `LOCAL_CHROME_HEADLESS=True`；显式 `--headed` / `--headless` 优先。
 
@@ -152,7 +104,7 @@ uv run patchright install --with-deps chromium
 Skill 目录可从 GitHub 安装到兼容 Agent。安装单个 Skill：
 
 ```bash
-npx skills add dreammis/social-auto-upload --skill xiaohongshu-upload
+npx skills add chancetop-com/social-auto-upload --skill xiaohongshu-upload
 ```
 
 将 `xiaohongshu-upload` 换成总入口或其他平台目录名。各目录对应关系、市场上架方式和状态见 [Skill 分发说明](./docs/skill-distribution.md)。
@@ -301,6 +253,10 @@ sau facebook upload-note --account creator --images videos/demo1.png videos/demo
 sau instagram upload-note --account creator --images videos/demo1.png videos/demo2.png --title "图片轮播" --note "正文"
 ```
 
+#### Facebook 与 Facebook Page 本地 Profile
+
+Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Facebook Page 隔离；登录、检查、视频/图文和作品核验/删除共用来源/headless 配置，旧 JSON 不读写。账号别名允许换号，作品管理仍校验当前用户、原作者、编号和正文；托管环境下 verify/delete 继续走本地。详见 [Facebook CLI](./docs/CLI.md#facebook-cli-子命令)。
+
 Facebook Page 的全部本地动作已接入持久化 Profile：`browser_profiles/<chrome|chromium>/facebook-page/<原始别名>`，与 Facebook 隔离，多个 Page 目标复用同一个登录 Profile。配置优先级与 TikTok 相同，保留代理、定时、作品证据及结果文件；旧 JSON 不再读写。显式目标/历史作品不匹配仍拒绝，verify/delete 在托管环境下仍走本地。本次只做离线与受控 DOM 验证，未登录真实账号、发布或删除作品。
 
 Facebook、Facebook Page 和 Instagram 默认使用系统网络直连。网络环境需要代理时，给对应命令显式添加 `--proxy "代理地址"`，或设置 `SAU_FACEBOOK_PROXY`、`SAU_FACEBOOK_PAGE_PROXY`、`SAU_INSTAGRAM_PROXY`；传 `--proxy ""` 可忽略环境变量并直连。
@@ -324,43 +280,7 @@ sau article render --content-file examples/article.md --theme modern --output ou
 
 ## 📃详细文档
 
-安装、更新和平台参数见仓库内对应文档：[安装说明](./docs/install.md)、[更新说明](./docs/update.md)、[CLI 使用说明](./docs/CLI.md)。产品介绍与社区信息见 [social-auto-upload 文档站](https://sap-doc.nasdaddy.com/)。
-
-## 🐾交流与支持
-
-[☕ Donate as u like](https://www.buymeacoffee.com/hysn2001m) - 如果您觉得这个项目对您有帮助，可以考虑赞助。
-
-如果您也是独立开发者、技术爱好者，对 #技术变现 #AI创业 #跨境电商 #自动化工具 #视频创作 等话题感兴趣，欢迎加入社群交流。
-
-### Creator
-
-<table>
-    <td align="center">
-        <a href="https://sap-doc.nasdaddy.com/">
-            <img src="media/mp.jpg" width="200px" alt="NasDaddy公众号"/>
-            <br />
-            <sub><b>微信公众号</b></sub>
-        </a>
-        <br />
-        <a href="https://github.com/dreammis/social-auto-upload/commits?author=dreammis" title="Code">💻</a>
-        <br />
-        关注公众号，后台回复 `上传` 获取加群方式
-    </td>
-    <td align="center">
-        <a href="https://sap-doc.nasdaddy.com/">
-            <img src="media/QR.png" width="200px" alt="赞赏码/入群引导"/>
-            <br />
-            <sub><b>交流群 (通过公众号获取)</b></sub>
-        </a>
-        <br />
-        <a href="https://sap-doc.nasdaddy.com/" title="Documentation">📖</a>
-        <br />
-        如果您觉得项目有用，可以考虑打赏支持一下
-    </td>
-</table>
-
-
-
+安装、更新和平台参数见仓库内对应文档：[安装说明](./docs/install.md)、[更新说明](./docs/update.md)、[CLI 使用说明](./docs/CLI.md)。
 
 ## 🤝贡献指南
 
@@ -382,25 +302,8 @@ sau article render --content-file examples/article.md --theme modern --output ou
 
 新增或修改平台时，请在同一个 PR 更新 CLI 能力表、对应平台 Skill 和分发目录；缺少 CLI 的平台也要说明实际调用入口。GitHub PR 模板包含逐项检查清单，避免实现完成后漏掉 Skill 发布材料。
 
-## 主要贡献者
-
-<a href="https://github.com/dreammis/social-auto-upload/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=dreammis/social-auto-upload" />
-</a>
-
 ## 📜许可证
 
 仓库主体采用 [MIT License](LICENSE)。纳入版本控制的 Agent Skills 按各自 `SKILL.md` frontmatter 中声明的许可证发布；当前 8 个产品 Skill 为 MIT-0，以便在要求该许可证的平台分发。该范围不改变仓库其余代码的 MIT License。
 
 本项目依赖的第三方组件和运行时工具仍受其各自许可证约束。下游发行或集成本项目时，请同时检查并保留相关第三方组件要求的版权、许可证和 NOTICE 声明。
-
-## ⭐Star-History
-
-> 如果这个项目对您有帮助，请给一个 ⭐ Star 以表示支持！
-
-
-
-
-[![Star History Chart](https://star-history.dera.page/svg?repos=dreammis/social-auto-upload&type=Date)](https://star-history.dera.page/#dreammis/social-auto-upload&Date)
-
-Facebook 全部正式本地动作已迁移到专用持久化 Profile，与 Facebook Page 隔离；登录、检查、视频/图文和作品核验/删除共用来源/headless 配置，旧 JSON 不读写。账号别名允许换号，作品管理仍校验当前用户、原作者、编号和正文；托管环境下 verify/delete 继续走本地。详见 [Facebook CLI](./docs/CLI.md#facebook-cli-子命令)。

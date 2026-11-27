@@ -36,7 +36,7 @@ Skill 不复制共同契约：退出码（含 `11` 请求过于频繁）、部�
 | 渠道 | 上架方式 | 状态与限制 |
 | --- | --- | --- |
 | GitHub 源仓库 | 以公开仓库的 `skills/` 为源；按目录安装 | Skill 源以当前版本的 `skills/` 为准，最近更新见 `git log -- skills/` |
-| GitHub Skills CLI | `gh skill publish skills --tag <version>` | Preview CLI；Release [`v1.0.0-skills.2`](https://github.com/dreammis/social-auto-upload/releases/tag/v1.0.0-skills.2) 已发布，仓库已有 `agent-skills` topic。安装命令：`gh skill install dreammis/social-auto-upload` |
+| GitHub Skills CLI | `gh skill publish skills --tag <version>` | Preview CLI；Release [`v1.0.0-skills.2`](https://github.com/dreammis/social-auto-upload/releases/tag/v1.0.0-skills.2) 已发布，仓库已有 `agent-skills` topic。安装命令：`gh skill install chancetop-com/social-auto-upload` |
 | skills.sh | 从 GitHub 安装，支持按 Skill 名选择 | 以本仓库目录核对支持范围，市场索引可能滞后。 |
 | SkillsMP | 从公开 GitHub 仓库索引 `SKILL.md` | 无独立上传。本仓库创作者页于 2026-10-12 显示已收录 4 个 Skill，源活动显示为 2026-03-25；索引明显落后于当前仓库，尚未确认其余入口收录。见[创作者页](https://skillsmp.com/zh/creators/dreammis/social-auto-upload) |
 | SkillHub.club | 将公开 GitHub 仓库中的 `SKILL.md` 推送到 GitHub，由站点自动索引 | 官方说明支持 GitHub 自动索引；本仓库收录状态待核实，无需重复上传文件。见[站点说明](https://www.skillhub.club/docs) |
@@ -58,8 +58,8 @@ Skill 不复制共同契约：退出码（含 `11` 请求过于频繁）、部�
 从 `skills.sh` CLI 安装总入口或一个平台 Skill：
 
 ```bash
-npx skills add dreammis/social-auto-upload --skill social-auto-upload
-npx skills add dreammis/social-auto-upload --skill xiaohongshu-upload
+npx skills add chancetop-com/social-auto-upload --skill social-auto-upload
+npx skills add chancetop-com/social-auto-upload --skill xiaohongshu-upload
 ```
 
 将 `xiaohongshu-upload` 换成上表中的目录名。此命令用于安装 GitHub 源；不会安装 Python 项目本身，也不会创建 `sau` 命令。CLI 运行环境仍按 [安装说明](./install.md) 配置。`sau skill install` 并不存在，不要在文档或 Skill 中引用。

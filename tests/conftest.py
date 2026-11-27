@@ -1,6 +1,8 @@
 """Keep in-process CLI tests inside a private simulated OS user profile."""
 import pytest
 
+from tests.cli_distribution import install_cli
+
 
 @pytest.fixture(autouse=True)
 def isolated_managed_profile_home(monkeypatch, tmp_path_factory):

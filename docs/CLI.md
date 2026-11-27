@@ -16,7 +16,7 @@
 
 实现说明：
 
-- `sau_cli.py` 负责组装命令和启动执行；`sau_commands/<平台>.py` 各自维护参数、请求数据和执行逻辑，`sau_commands/arguments.py` 维护共用参数规则
+- `cli/sau_cli.py` 负责组装命令和启动执行；`cli/sau_commands/<平台>.py` 各自维护参数、请求数据和执行逻辑，`cli/sau_commands/arguments.py` 维护共用参数规则
 - `sau.exe` 是安装后在 Windows 虚拟环境里自动生成的命令入口，本质上还是调用 `sau_cli.py`
 - 如果需要给 OpenClaw、Codex 等 Agent 使用，可安装仓库 `skills/` 下的总入口或任一平台入口；发布渠道和安装方式见 [Skill 分发说明](./skill-distribution.md)。
 
@@ -132,7 +132,7 @@ sau xiaohongshu upload-video --account creator --file videos/demo.mp4 --title "�
 ## 发布超时预算（全平台）
 
 浏览器发布平台统一与 TikTok 对齐：整条上传/发布流程共用一个 **15 分钟总预算**
-（`uploader/publish_timeout.py` 的 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）。TikTok、
+（`cli/uploader/publish_timeout.py` 的 `PUBLISH_TIMEOUT_SECONDS = 15 * 60`）。TikTok、
 小红书与 Instagram 也使用同一 `PublishTimeoutBudget`，仅保留各自更具体的错误文案。
 
 - 预算覆盖打开发布页、上传素材、填写标题/正文/正文中的 `#话题`、封面、声明、合集、定时设置、点击发布，以及等待平台确认；

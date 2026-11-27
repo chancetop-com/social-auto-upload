@@ -6,7 +6,7 @@ the comment inside the call's span.  Every later platform ticket wires its own
 package in with::
 
     from tests.humanize_gates import assert_clean
-    assert_clean(Path(__file__).resolve().parent.parent / "uploader" / "xhs")
+    assert_clean(Path(__file__).resolve().parent.parent / "cli" / "uploader" / "xhs")
 
 Gate A
     No string constant in a wired package contains ``el.click`` or ``.click()``

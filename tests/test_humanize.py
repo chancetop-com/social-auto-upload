@@ -886,7 +886,7 @@ class PlatformWideGateTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_every_uploader_package_passes_gates_a_to_e(self):
-        root = Path(__file__).resolve().parent.parent / "uploader"
+        root = Path(__file__).resolve().parent.parent / "cli" / "uploader"
         packages = [(name, root / name) for name in WIRED_PLATFORM_PACKAGES]
         packages += [
             (f"meta_uploader/{name}", root / "meta_uploader" / name)

@@ -3,14 +3,12 @@ import json
 import os
 import re
 import shutil
-import site
 import ssl
 import stat
 import subprocess
 import sys
 import threading
 import time
-import venv
 from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -51,25 +49,15 @@ def serve(handler, tls=None):
 
 
 @pytest.fixture(scope='module')
-def installations(tmp_path_factory):
+def installations(tmp_path_factory, install_cli):
     """Independent environments + code installations, sharing only third-party deps."""
     root = tmp_path_factory.mktemp('installations')
     entries = []
     for name in ('a', 'b'):
-        prefix = root / name
-        venv.EnvBuilder(with_pip=False).create(prefix)
-        packages = next(prefix.glob('lib/python*/site-packages'))
-        for directory in ('sau_commands', 'utils', 'uploader'):
-            shutil.copytree(SOURCE / directory, packages / directory,
-                            ignore=shutil.ignore_patterns('__pycache__', 'node_modules'))
-        shutil.copyfile(SOURCE / 'sau_cli.py', packages / 'sau_cli.py')
-        shutil.copyfile(SOURCE / 'conf.example.py', packages / 'conf.py')
-        (packages / 'dependencies.pth').write_text('\n'.join(site.getsitepackages()) + '\n')
-        entry = prefix / 'bin/sau'
+        entry, packages = install_cli(root / f'worker {name}')
         shutil.copyfile(SOURCE / 'tests/fixtures/offline_account.py', packages / 'offline_account.py')
-        entry.write_text(f'#!{prefix}/bin/python\nimport offline_account\nfrom sau_cli import main\n'
-                         'raise SystemExit(main())\n')
-        entry.chmod(0o700)
+        (packages / 'offline_account.pth').write_text(
+            "import os; os.environ.get('OFFLINE_OS_PROFILE') and __import__('offline_account')\n")
         entries.append(entry)
     return entries
 

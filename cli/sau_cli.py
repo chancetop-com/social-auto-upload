@@ -1,0 +1,117 @@
+"""SAU 命令入口；平台参数与执行逻辑位于 sau_commands。"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+from importlib import import_module
+import sys
+from typing import Sequence
+
+from sau_commands import article, media
+from sau_commands.publish_media import publish_media
+from utils.base_social_media import get_supported_social_media
+from sau_commands.browser import (
+    DUAL_CREDENTIALS_MESSAGE,
+    active_mode,
+    credentials_conflict,
+    credentials_conflict_message,
+    resolve_multilogin_target,
+)
+from utils.managed_sharing import managed_command
+from utils.errors import (
+    LoginRequiredError,
+    PublishResultUnknownError,
+    RateLimitedError,
+    UsageError,
+)
+
+
+PLATFORMS = {"article": article, "media": media}
+for name in get_supported_social_media():
+    PLATFORMS[name] = import_module("sau_commands." + name.replace("-", "_"))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """组装平台命令；每个平台维护自己的参数和执行函数。"""
+    parser = argparse.ArgumentParser(prog="sau", description="CLI for social-auto-upload.")
+    platform_parsers = parser.add_subparsers(dest="platform", required=True)
+    for platform in PLATFORMS.values():
+        platform.register(platform_parsers)
+    return parser
+
+
+async def dispatch(args: argparse.Namespace) -> int:
+    """只按平台分发，不在入口重复平台的业务判断。"""
+    # Existing tests build Namespace objects by hand without the new optional
+    # attributes; normalise them here so platform ``run`` functions can read
+    # them unconditionally.
+    if not hasattr(args, "folder_id"):
+        args.folder_id = None
+    if not hasattr(args, "profile_id"):
+        args.profile_id = None
+    if not hasattr(args, "account"):
+        args.account = None
+    if not hasattr(args, "not_before"):
+        args.not_before = None
+
+    if args.platform not in PLATFORMS:
+        raise RuntimeError(f"Unsupported platform: {args.platform}")
+    if args.platform == "media":
+        return await media.run(args)
+    if args.action in {"upload-video", "upload-note"}:
+        async with publish_media(args) as resolved:
+            return await _run_platform(resolved)
+    return await _run_platform(args)
+
+
+async def _run_platform(args):
+    mode = active_mode()
+    if mode is not None and args.action in {"check", "upload-video", "upload-note"} and args.profile_id:
+        profile_id = args.profile_id.strip()
+        if mode == "multilogin":
+            profile_id = resolve_multilogin_target(args).profile_id
+        async with managed_command(args.platform, mode, profile_id, getattr(args, "headless", None)):
+            return await PLATFORMS[args.platform].run(args)
+    return await PLATFORMS[args.platform].run(args)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    try:
+        # Conflict detection lives after argparse and before dispatch so that
+        # ``--help`` / unknown subcommands keep their argparse semantics, while
+        # a dual-credential setup wins over command-level rejections.
+        if args.platform != "media" and credentials_conflict():
+            raise RuntimeError(
+                credentials_conflict_message() or DUAL_CREDENTIALS_MESSAGE
+            )
+        return asyncio.run(dispatch(args))
+    except KeyboardInterrupt:
+        if args.action in {"predownload", "upload-video", "upload-note"}:
+            return 130
+        raise
+    except LoginRequiredError as exc:
+        print(str(exc), file=sys.stderr)
+        # Machine signal: only exit 10 *after* dispatch prints the standalone
+        # token line.  No prefix, no timestamp, no leading text.
+        if getattr(exc, "publish_attempted", False):
+            print("publish_attempted=true", file=sys.stderr)
+        return 10
+    except RateLimitedError as exc:
+        print(str(exc), file=sys.stderr)
+        return 11
+    except UsageError as exc:
+        parser.print_usage(sys.stderr)
+        print(str(exc), file=sys.stderr)
+        return 2
+    except PublishResultUnknownError as exc:
+        print(str(exc), file=sys.stderr)
+        return 9
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

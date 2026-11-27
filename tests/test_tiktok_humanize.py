@@ -34,7 +34,7 @@ from uploader.tk_uploader import main_chrome as tk_main
 from uploader.tk_uploader.main_chrome import TiktokNote, TiktokPublishOptions, TiktokVideo
 from utils.dom import ElementUnusableError
 
-TK_PACKAGE = Path(__file__).resolve().parent.parent / "uploader" / "tk_uploader"
+TK_PACKAGE = Path(__file__).resolve().parent.parent / "cli" / "uploader" / "tk_uploader"
 TK_MAIN_CHROME = TK_PACKAGE / "main_chrome.py"
 
 #: Facts payload ``utils.dom._probe`` expects.  Anything else (visibility,

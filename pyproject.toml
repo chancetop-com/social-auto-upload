@@ -26,10 +26,13 @@ sau = "sau_cli:main"
 package = true
 
 [tool.setuptools]
+package-dir = {"" = "cli"}
 py-modules = ["conf", "sau_cli"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
+where = ["cli"]
+namespaces = false
 include = ["uploader*", "utils*", "sau_commands*"]
 
 [tool.setuptools.package-data]

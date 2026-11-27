@@ -172,6 +172,7 @@ tk_uploader/*.json
 
 # 配置文件
 conf.py
+!cli/conf.py
 
 # 账号文件
 cookies
@@ -184,14 +185,14 @@ cookies
 dist/
 node_modules/
 package-lock.json
-!utils/article_renderer/package-lock.json
+!cli/utils/article_renderer/package-lock.json
 
 # 临时文件夹
 cookiesFile
 uploadFile
 videoFile
 
-/uploader/bilibili_uploader/qrcode.png
+/cli/uploader/bilibili_uploader/qrcode.png
 
 # 本地个人使用的浏览器自动化开发 Skill，不随开源仓库发布
 /skills/browser-automation-dev/

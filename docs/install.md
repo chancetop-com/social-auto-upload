@@ -14,7 +14,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/dreammis/social-auto-upload.git
+git clone git@github.com:chancetop-com/social-auto-upload.git
 cd social-auto-upload
 ```
 
@@ -97,13 +97,17 @@ uv run patchright install --with-deps chromium
 
 ### 5. 配置 conf.py
 
-首次安装且 `conf.py` 不存在时复制示例；升级保留已有配置（包括 `LOCAL_CHROME_HEADLESS=True`）：
+仓库根目录的可编辑安装沿用该目录中的 `conf.py`、浏览器资料和素材。需要自定义设置时，首次安装可复制示例；升级保留已有配置（包括 `LOCAL_CHROME_HEADLESS=True`）：
 
 ```bash
 test -f conf.py || cp conf.example.py conf.py
 ```
 
 Windows 也可以直接手动复制并重命名。
+
+独立 wheel 安装默认将数据保存在用户主目录下的 `.social-auto-upload`。可通过 `SAU_HOME` 指定固定的绝对目录，CLI 会读取该目录中的 `conf.py`。示例中的 `BASE_DIR` 以配置文件所在目录为准。不同版本的桌面程序可指向同一个可写目录。
+
+在仓库根目录执行 `uv build --wheel`，用 `uv pip install --python <目标解释器> <wheel路径>` 安装。安装后可在任意目录执行该环境的 `sau`。暂存后整体迁移的私有运行时使用其最终绝对路径调用 `python -I -m sau_cli`，以免引用生成入口时的解释器路径。
 
 当前通常还会用到这些配置项：
 
@@ -172,8 +176,8 @@ sau article themes
 - 当登录流程生成本地二维码图片时，不要只把图片路径发给用户
 - 这类二维码图片本身就是给用户扫码的，agent 应优先直接展示/发送本地图片给用户扫码
 - 如果环境支持查看本地图片，优先用查看图片能力把二维码展示出来；路径只作为补充信息
-- `uploader/` 是核心实现目录
-- `sau_cli.py` 是当前 CLI 主入口
+- `cli/uploader/` 是核心实现目录
+- `cli/sau_cli.py` 是当前 CLI 主入口
 
 ### Facebook Page 持久化登录
 

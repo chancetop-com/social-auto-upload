@@ -23,6 +23,21 @@ ARTICLE_HTML_EXTENSIONS = {".html", ".htm"}
 ARTICLE_RENDERER_DIR = Path(__file__).with_name("article_renderer")
 
 
+def _renderer_command():
+    node = shutil.which("node")
+    script = ARTICLE_RENDERER_DIR / "render.mjs"
+    if node and (ARTICLE_RENDERER_DIR / "node_modules/baoyu-md").is_dir():
+        return [node, str(script)], ARTICLE_RENDERER_DIR
+
+    # Editable installs upgraded in place still have dependencies at the old path.
+    source = ARTICLE_RENDERER_DIR.parents[1]
+    previous = source.parent / "utils/article_renderer"
+    if node and source.name == "cli" and (previous / "node_modules/baoyu-md").is_dir():
+        # Node resolves imports in an eval module relative to the process directory.
+        return [node, "--input-type=module", "--eval", script.read_text(encoding="utf-8")], previous
+    raise RuntimeError("Markdown 渲染需要 Node.js 22+ 及依赖；请执行 sau article setup")
+
+
 def load_article(content_file: str | Path, theme: str | None = None) -> ArticleDocument:
     """从原稿所在目录解析资源；长正文通过标准输入传递，不进入命令行参数。"""
     path = Path(content_file).expanduser().resolve()
@@ -33,11 +48,9 @@ def load_article(content_file: str | Path, theme: str | None = None) -> ArticleD
         theme = theme or "default"
         if theme not in ARTICLE_THEMES:
             raise ValueError(f"主题必须为: {', '.join(ARTICLE_THEMES)}")
-        node = shutil.which("node")
-        if not node or not (ARTICLE_RENDERER_DIR / "node_modules/baoyu-md").is_dir():
-            raise RuntimeError("Markdown 渲染需要 Node.js 22+ 及依赖；请执行 sau article setup")
+        command, directory = _renderer_command()
         completed = subprocess.run(
-            [node, str(ARTICLE_RENDERER_DIR / "render.mjs")],
+            command, cwd=directory,
             input=json.dumps({"content": source, "theme": theme}, ensure_ascii=False),
             capture_output=True, text=True, encoding="utf-8", timeout=60,
         )
