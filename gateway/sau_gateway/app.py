@@ -120,9 +120,9 @@ def create_app(stopping=None):
     def start(body: Start):
         if stopping.is_set():
             raise HTTPException(503, "Gateway is draining")
-        task = store.reserve_start(body)
+        authorization = store.reserve_start(body)
         base = os.environ.get("POSTIZ_INTERNAL_URL", "").rstrip("/")
-        if task is None:
+        if authorization is None:
             raise HTTPException(409, "Desktop no longer eligible")
         if not base:
             raise HTTPException(503, "Postiz authorization is unavailable")
@@ -130,7 +130,7 @@ def create_app(stopping=None):
             with httpx.Client(timeout=10, trust_env=False) as client:
                 response = client.post(base + "/internal/browser-publishing/authorize-start",
                                        headers={"Authorization": "Bearer " + internal_token},
-                                       json={key: task[key] for key in ("workflowId", "postId", "organizationId")})
+                                       json=authorization)
             if response.status_code in (403, 409):
                 store.deny_start(body)
                 raise HTTPException(response.status_code, "Postiz declined this occurrence")

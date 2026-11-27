@@ -73,7 +73,8 @@ def test_one_start_grants_latest_content_and_settles_original_occurrence(postiz,
     task = video("repeatable/post/one")
     other, owner = register(gateway), register(gateway)
     gateway.post("/internal/occurrences", headers=INTERNAL, json=task).raise_for_status()
-    assert claim(gateway, owner)["task"] == task
+    claimed = claim(gateway, owner)
+    assert claimed["task"] == task
     reply["task"] = {**task, "caption": "Edited caption", "earliestPublishAt": "2026-11-27T13:00:00Z"}
     start = {"workflowId": task["workflowId"], "sessionId": owner}
     assert gateway.post("/publish-task/start", headers=DESKTOP, json={**start, "sessionId": other}).status_code == 409
@@ -82,7 +83,8 @@ def test_one_start_grants_latest_content_and_settles_original_occurrence(postiz,
     assert sorted(r.status_code for r in results) == [200, 409]
     assert next(r.json() for r in results if r.is_success) == {"task": reply["task"]}
     assert requests == [("/api/internal/browser-publishing/authorize-start", "Bearer fixture-internal",
-                         {"workflowId": task["workflowId"], "postId": "post", "organizationId": "org"})]
+                         {"workflowId": task["workflowId"], "postId": "post", "organizationId": "org",
+                          "resultDeadlineAt": claimed["resultDeadlineAt"]})]
     receipt = {"outcome": "published", "cliInvoked": True, "exitCode": 0}
     record = gateway.post("/publish-task/result", headers=DESKTOP, json={**start, "receipt": receipt}).json()
     assert (record["state"], record["receipt"]) == ("succeeded", receipt)
